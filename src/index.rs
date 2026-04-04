@@ -279,7 +279,13 @@ impl Index {
             return Vec::new();
         };
 
-        let mut results = Vec::new();
+        // Pre-lowercase terms as bytes once for all results
+        let lower_terms: Vec<Vec<u8>> = terms.iter()
+            .map(|t| t.bytes().map(|b| b.to_ascii_lowercase()).collect())
+            .collect();
+        let term_refs: Vec<&[u8]> = lower_terms.iter().map(|t| t.as_slice()).collect();
+
+        let mut results = Vec::with_capacity(top_docs.len());
         for (score, doc_address) in top_docs {
             let Ok(doc) = searcher.doc::<TantivyDocument>(doc_address) else {
                 continue;
@@ -298,9 +304,9 @@ impl Index {
                 .get_first(f.content)
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
-            let excerpt = make_snippet(content, terms, 160);
+            let excerpt = make_snippet(content, &term_refs, 160);
 
-            let field_scores = compute_field_scores(&doc, f, terms, weights);
+            let field_scores = compute_field_scores(&doc, f, &term_refs, weights);
 
             results.push(SearchResult {
                 path,
@@ -354,7 +360,7 @@ impl Index {
 
         let mut notes = Vec::new();
         for segment_reader in searcher.segment_readers() {
-            let Ok(store_reader) = segment_reader.get_store_reader(1) else {
+            let Ok(store_reader) = segment_reader.get_store_reader(64) else {
                 continue;
             };
             for doc_id in 0..segment_reader.num_docs() {
@@ -384,7 +390,7 @@ impl Index {
 }
 
 /// Compute per-field scores by counting term matches (exact + fuzzy) against stored values.
-fn compute_field_scores(doc: &TantivyDocument, f: &Fields, terms: &[&str], weights: [f32; 4]) -> FieldScores {
+fn compute_field_scores(doc: &TantivyDocument, f: &Fields, terms: &[&[u8]], weights: [f32; 4]) -> FieldScores {
     let get = |field: Field| -> &str {
         doc.get_first(field).and_then(|v| v.as_str()).unwrap_or("")
     };
@@ -396,17 +402,15 @@ fn compute_field_scores(doc: &TantivyDocument, f: &Fields, terms: &[&str], weigh
         (get(f.content), weights[3]),
     ];
 
-    let lower_terms: Vec<String> = terms.iter().map(|t| t.to_lowercase()).collect();
     let mut scores = [0.0f32; 4];
 
     for (i, &(text, boost)) in fields.iter().enumerate() {
-        let words = word_positions(text);
-        for &(start, end) in &words {
-            let word = text[start..end].to_lowercase();
-            for term in &lower_terms {
-                if word == *term {
+        for (start, end) in WordIter::new(text) {
+            let word = &text.as_bytes()[start..end];
+            for term in terms {
+                if ascii_eq_ignore_case(word, term) {
                     scores[i] += boost;
-                } else if edit_distance_one(&word, term) {
+                } else if edit_distance_one_ci(word, term) {
                     scores[i] += boost * 0.6;
                 }
             }
@@ -422,43 +426,24 @@ fn compute_field_scores(doc: &TantivyDocument, f: &Fields, terms: &[&str], weigh
 }
 
 /// Build a snippet from content with highlighted query terms (supports fuzzy matching).
-fn make_snippet(content: &str, terms: &[&str], max_len: usize) -> String {
+fn make_snippet(content: &str, terms: &[&[u8]], max_len: usize) -> String {
     if content.is_empty() || terms.is_empty() {
         return String::new();
     }
 
-    // Find all word boundaries and their positions
-    let words: Vec<(usize, usize)> = word_positions(content);
-    if words.is_empty() {
-        return String::new();
-    }
+    // Find the first matching word to anchor the window
+    let first_match = WordIter::new(content)
+        .find(|&(start, end)| matches_any_term(&content.as_bytes()[start..end], terms));
 
-    // Find which words match any query term (exact or edit distance 1)
-    let lower_terms: Vec<String> = terms.iter().map(|t| t.to_lowercase()).collect();
-    let mut match_positions: Vec<(usize, usize)> = Vec::new(); // (start, end) of matching words
-    for &(start, end) in &words {
-        let word = content[start..end].to_lowercase();
-        for term in &lower_terms {
-            if word == *term || edit_distance_one(&word, term) {
-                match_positions.push((start, end));
-                break;
-            }
-        }
-    }
-
-    if match_positions.is_empty() {
-        // No matches — return beginning of content
+    let Some((first_start, _)) = first_match else {
         return escape_html(content.truncate_bytes(max_len));
-    }
+    };
 
     // Pick window around the first match
-    let first_match = match_positions[0].0;
-    let window_start = content.floor_char_boundary(first_match.saturating_sub(40));
-    // Align to word boundary (skip past multi-byte whitespace)
+    let window_start = content.floor_char_boundary(first_start.saturating_sub(40));
     let window_start = content[..window_start]
         .rfind(|c: char| c.is_whitespace())
         .map(|p| {
-            // p is the start of a whitespace char — advance past it
             let ch = content[p..].chars().next().unwrap();
             p + ch.len_utf8()
         })
@@ -469,72 +454,90 @@ fn make_snippet(content: &str, terms: &[&str], max_len: usize) -> String {
         .map(|p| window_end + p)
         .unwrap_or(content.len());
 
-    // Build output with <b> tags around matches
-    let mut out = String::new();
+    // Only scan words within the window
+    let mut out = String::with_capacity(window_end - window_start + 64);
     let mut pos = window_start;
-    for &(ms, me) in &match_positions {
-        if ms < window_start || me > window_end {
-            continue;
+    for (ws, we) in WordIter::new(&content[window_start..window_end]) {
+        let abs_start = window_start + ws;
+        let abs_end = window_start + we;
+        if matches_any_term(&content.as_bytes()[abs_start..abs_end], terms) {
+            if abs_start > pos {
+                escape_html_into(&mut out, &content[pos..abs_start]);
+            }
+            out.push_str("<b>");
+            escape_html_into(&mut out, &content[abs_start..abs_end]);
+            out.push_str("</b>");
+            pos = abs_end;
         }
-        if ms > pos {
-            out.push_str(&escape_html(&content[pos..ms]));
-        }
-        out.push_str("<b>");
-        out.push_str(&escape_html(&content[ms..me]));
-        out.push_str("</b>");
-        pos = me;
     }
     if pos < window_end {
-        out.push_str(&escape_html(&content[pos..window_end]));
+        escape_html_into(&mut out, &content[pos..window_end]);
     }
 
     out
 }
 
-fn word_positions(s: &str) -> Vec<(usize, usize)> {
-    let mut words = Vec::new();
-    let mut i = 0;
-    let bytes = s.as_bytes();
-    while i < bytes.len() {
-        if bytes[i].is_ascii_alphanumeric() {
-            let start = i;
-            while i < bytes.len() && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'-' || bytes[i] == b'_') {
-                i += 1;
-            }
-            words.push((start, i));
-        } else {
-            i += 1;
-        }
-    }
-    words
+/// Zero-alloc word boundary iterator over ASCII alphanumeric words.
+struct WordIter<'a> {
+    bytes: &'a [u8],
+    pos: usize,
 }
 
-/// Check if two strings have edit distance exactly 1.
-fn edit_distance_one(a: &str, b: &str) -> bool {
-    let a = a.as_bytes();
-    let b = b.as_bytes();
+impl<'a> WordIter<'a> {
+    fn new(s: &'a str) -> Self {
+        Self { bytes: s.as_bytes(), pos: 0 }
+    }
+}
+
+impl Iterator for WordIter<'_> {
+    type Item = (usize, usize);
+
+    fn next(&mut self) -> Option<(usize, usize)> {
+        while self.pos < self.bytes.len() && !self.bytes[self.pos].is_ascii_alphanumeric() {
+            self.pos += 1;
+        }
+        if self.pos >= self.bytes.len() {
+            return None;
+        }
+        let start = self.pos;
+        while self.pos < self.bytes.len()
+            && (self.bytes[self.pos].is_ascii_alphanumeric()
+                || self.bytes[self.pos] == b'-'
+                || self.bytes[self.pos] == b'_')
+        {
+            self.pos += 1;
+        }
+        Some((start, self.pos))
+    }
+}
+
+/// Case-insensitive ASCII equality (zero alloc).
+fn ascii_eq_ignore_case(a: &[u8], b: &[u8]) -> bool {
+    a.len() == b.len() && a.iter().zip(b).all(|(x, y)| x.to_ascii_lowercase() == y.to_ascii_lowercase())
+}
+
+/// Check if two byte slices have edit distance exactly 1 (case-insensitive ASCII).
+fn edit_distance_one_ci(a: &[u8], b: &[u8]) -> bool {
     let (la, lb) = (a.len(), b.len());
     if la.abs_diff(lb) > 1 {
         return false;
     }
     if la == lb {
-        // Substitution: exactly one position differs
         let mut diffs = 0;
         for i in 0..la {
-            if a[i] != b[i] {
+            if a[i].to_ascii_lowercase() != b[i].to_ascii_lowercase() {
                 diffs += 1;
                 if diffs > 1 { return false; }
             }
         }
         diffs == 1
     } else {
-        // Insertion/deletion
         let (short, long) = if la < lb { (a, b) } else { (b, a) };
         let mut si = 0;
         let mut li = 0;
         let mut diffs = 0;
         while si < short.len() && li < long.len() {
-            if short[si] != long[li] {
+            if short[si].to_ascii_lowercase() != long[li].to_ascii_lowercase() {
                 diffs += 1;
                 if diffs > 1 { return false; }
                 li += 1;
@@ -547,8 +550,23 @@ fn edit_distance_one(a: &str, b: &str) -> bool {
     }
 }
 
+/// Check if a word matches any term (exact or edit distance 1), case-insensitive.
+fn matches_any_term(word: &[u8], terms: &[&[u8]]) -> bool {
+    for term in terms {
+        if ascii_eq_ignore_case(word, term) || edit_distance_one_ci(word, term) {
+            return true;
+        }
+    }
+    false
+}
+
 fn escape_html(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
+    escape_html_into(&mut out, s);
+    out
+}
+
+fn escape_html_into(out: &mut String, s: &str) {
     for ch in s.chars() {
         match ch {
             '&' => out.push_str("&amp;"),
@@ -559,7 +577,6 @@ fn escape_html(s: &str) -> String {
             _ => out.push(ch),
         }
     }
-    out
 }
 
 impl Index {
@@ -618,65 +635,84 @@ mod tests {
 
     #[test]
     fn edit_distance_one_substitution() {
-        assert!(edit_distance_one("cat", "bat"));
+        assert!(edit_distance_one_ci(b"cat", b"bat"));
     }
 
     #[test]
     fn edit_distance_one_insertion() {
-        assert!(edit_distance_one("lunchctl", "launchctl"));
+        assert!(edit_distance_one_ci(b"lunchctl", b"launchctl"));
     }
 
     #[test]
     fn edit_distance_one_deletion() {
-        assert!(edit_distance_one("launchctl", "lunchctl"));
+        assert!(edit_distance_one_ci(b"launchctl", b"lunchctl"));
     }
 
     #[test]
     fn edit_distance_one_same() {
-        assert!(!edit_distance_one("foo", "foo"));
+        assert!(!edit_distance_one_ci(b"foo", b"foo"));
     }
 
     #[test]
     fn edit_distance_one_too_far() {
-        assert!(!edit_distance_one("abc", "xyz"));
+        assert!(!edit_distance_one_ci(b"abc", b"xyz"));
+    }
+
+    #[test]
+    fn edit_distance_one_case_insensitive() {
+        assert!(edit_distance_one_ci(b"Cat", b"bat"));
+        assert!(edit_distance_one_ci(b"FOO", b"fob"));
+    }
+
+    fn term_bytes(strs: &[&str]) -> Vec<Vec<u8>> {
+        strs.iter().map(|s| s.bytes().collect()).collect()
+    }
+
+    fn term_refs(terms: &[Vec<u8>]) -> Vec<&[u8]> {
+        terms.iter().map(|t| t.as_slice()).collect()
     }
 
     #[test]
     fn snippet_exact_match() {
-        let s = make_snippet("the quick brown fox jumps", &["fox"], 160);
+        let t = term_bytes(&["fox"]);
+        let s = make_snippet("the quick brown fox jumps", &term_refs(&t), 160);
         assert!(s.contains("<b>fox</b>"), "got: {s}");
     }
 
     #[test]
     fn snippet_fuzzy_match() {
-        let s = make_snippet("use launchctl to reboot", &["lunchctl"], 160);
+        let t = term_bytes(&["lunchctl"]);
+        let s = make_snippet("use launchctl to reboot", &term_refs(&t), 160);
         assert!(s.contains("<b>launchctl</b>"), "got: {s}");
     }
 
     #[test]
     fn snippet_no_match() {
-        let s = make_snippet("hello world", &["zzz"], 160);
+        let t = term_bytes(&["zzz"]);
+        let s = make_snippet("hello world", &term_refs(&t), 160);
         assert_eq!(s, "hello world");
     }
 
     #[test]
     fn snippet_escapes_html() {
-        let s = make_snippet("a <b>tag</b> here", &["tag"], 160);
+        let t = term_bytes(&["tag"]);
+        let s = make_snippet("a <b>tag</b> here", &term_refs(&t), 160);
         assert!(s.contains("&lt;b&gt;"), "should escape html: {s}");
         assert!(s.contains("<b>tag</b>"), "should highlight match: {s}");
     }
 
     #[test]
     fn snippet_case_insensitive() {
-        let s = make_snippet("Hello World", &["hello"], 160);
+        let t = term_bytes(&["hello"]);
+        let s = make_snippet("Hello World", &term_refs(&t), 160);
         assert!(s.contains("<b>Hello</b>"), "got: {s}");
     }
 
     #[test]
     fn snippet_multibyte_no_panic() {
-        // Emoji are 4 bytes each; window arithmetic must not split them
+        let t = term_bytes(&["hello"]);
         let content = "📖📖📖📖📖📖📖📖📖📖 hello 📖📖📖📖📖";
-        let s = make_snippet(content, &["hello"], 160);
+        let s = make_snippet(content, &term_refs(&t), 160);
         assert!(s.contains("<b>hello</b>"), "got: {s}");
     }
 
@@ -711,10 +747,17 @@ mod tests {
 
     #[test]
     fn snippet_no_match_multibyte() {
+        let t = term_bytes(&["zzz"]);
         let content = "📖 intro text about things";
-        let s = make_snippet(content, &["zzz"], 10);
+        let s = make_snippet(content, &term_refs(&t), 10);
         // Should not panic, just truncate safely
         assert!(!s.is_empty());
+    }
+
+    #[test]
+    fn word_iter_basic() {
+        let words: Vec<_> = WordIter::new("hello world-test foo").collect();
+        assert_eq!(words, vec![(0, 5), (6, 16), (17, 20)]);
     }
 
     #[test]
