@@ -201,7 +201,12 @@ pub fn respond_json(sock: &TcpStream, value: &impl serde::Serialize) -> io::Resu
 }
 
 /// Serialize a value as JSON and write it with a custom status code.
-pub fn respond_json_status(sock: &TcpStream, status: u16, reason: &str, value: &impl serde::Serialize) -> io::Result<()> {
+pub fn respond_json_status(
+    sock: &TcpStream,
+    status: u16,
+    reason: &str,
+    value: &impl serde::Serialize,
+) -> io::Result<()> {
     let json = serde_json::to_string(value).map_err(|e| io::Error::other(e.to_string()))?;
     write_headers(sock, status, reason, "application/json", json.len() as u64)?;
     let mut w: &TcpStream = sock;
@@ -209,7 +214,12 @@ pub fn respond_json_status(sock: &TcpStream, status: u16, reason: &str, value: &
 }
 
 /// Deserialize a JSON request body.
-pub fn parse_body<T: serde::de::DeserializeOwned>(stream: &mut TcpStream, headers: &[httparse::Header<'_>], buf: &[u8], header_len: usize) -> io::Result<T> {
+pub fn parse_body<T: serde::de::DeserializeOwned>(
+    stream: &mut TcpStream,
+    headers: &[httparse::Header<'_>],
+    buf: &[u8],
+    header_len: usize,
+) -> io::Result<T> {
     let body = read_body(stream, headers, buf, header_len)?;
     serde_json::from_slice(&body).map_err(|e| io::Error::other(e.to_string()))
 }
@@ -221,7 +231,12 @@ pub fn serve_file(sock: &TcpStream, path: &Path, len: u64, content_type: &str) -
 }
 
 /// Serve a static file with long-lived cache headers.
-pub fn serve_file_cached(sock: &TcpStream, path: &Path, len: u64, content_type: &str) -> io::Result<()> {
+pub fn serve_file_cached(
+    sock: &TcpStream,
+    path: &Path,
+    len: u64,
+    content_type: &str,
+) -> io::Result<()> {
     let file = File::open(path)?;
     let mut hdr = [0u8; 512];
     let n = {
@@ -254,7 +269,12 @@ pub fn content_length(headers: &[httparse::Header<'_>]) -> usize {
 
 /// Read the request body based on Content-Length header.
 /// Returns (body, unconsumed trailing bytes).
-pub fn read_body(stream: &mut TcpStream, headers: &[httparse::Header<'_>], buf: &[u8], header_len: usize) -> io::Result<Vec<u8>> {
+pub fn read_body(
+    stream: &mut TcpStream,
+    headers: &[httparse::Header<'_>],
+    buf: &[u8],
+    header_len: usize,
+) -> io::Result<Vec<u8>> {
     let cl = content_length(headers);
 
     if cl == 0 {
@@ -341,7 +361,10 @@ mod tests {
 
     #[test]
     fn query_param_decoded() {
-        assert_eq!(query_param("/api?path=hello%20world", "path"), Some("hello world".into()));
+        assert_eq!(
+            query_param("/api?path=hello%20world", "path"),
+            Some("hello world".into())
+        );
     }
 
     #[test]

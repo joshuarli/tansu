@@ -5,8 +5,8 @@ use std::{
     time::Duration,
 };
 
-use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher, Config};
 use crate::util;
+use notify::{Config, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 
 pub enum WatchEvent {
     Modified(PathBuf),

@@ -5,7 +5,7 @@ use std::{
     sync::atomic::{AtomicU64, Ordering::Relaxed},
 };
 
-use criterion::{Criterion, criterion_group, criterion_main, black_box};
+use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use tansu::index::{Index, SearchWeights};
 use tansu::settings::Settings;
 
@@ -68,11 +68,22 @@ fn vault_dir() -> PathBuf {
 fn setup() -> (Index, Settings, PathBuf) {
     let dir = vault_dir();
     let index_dir = dir.join(".tansu/index");
-    assert!(index_dir.exists(), "No index at {}. Run the server first.", index_dir.display());
+    assert!(
+        index_dir.exists(),
+        "No index at {}. Run the server first.",
+        index_dir.display()
+    );
     let settings = Settings::load(&dir);
     let idx = Index::open_or_create(&index_dir).expect("failed to open index");
     // Warm up
-    idx.search("warmup", 20, None, settings.fuzzy_distance, settings.weights(), false);
+    idx.search(
+        "warmup",
+        20,
+        None,
+        settings.fuzzy_distance,
+        settings.weights(),
+        false,
+    );
     (idx, settings, dir)
 }
 
@@ -85,7 +96,10 @@ fn bench_get_all_notes(c: &mut Criterion) {
     let (allocs, bytes, net) = alloc_delta(&snap);
     eprintln!(
         "get_all_notes: {} notes, {} allocs, {} bytes total, {} bytes net",
-        notes.len(), allocs, bytes, net
+        notes.len(),
+        allocs,
+        bytes,
+        net
     );
 
     c.bench_function("get_all_notes", |b| {
@@ -114,7 +128,10 @@ fn bench_index_note(c: &mut Criterion) {
     let (allocs, bytes, net) = alloc_delta(&snap);
     eprintln!(
         "index_note ({} bytes): {} allocs, {} bytes total, {} bytes net",
-        content.len(), allocs, bytes, net
+        content.len(),
+        allocs,
+        bytes,
+        net
     );
 
     let path = &note.path;
@@ -125,7 +142,12 @@ fn bench_index_note(c: &mut Criterion) {
     });
 
     // Realistic workflow: write then immediately search (commit cost lands here)
-    let weights = SearchWeights { title: 10.0, headings: 5.0, tags: 2.0, content: 1.0 };
+    let weights = SearchWeights {
+        title: 10.0,
+        headings: 5.0,
+        tags: 2.0,
+        content: 1.0,
+    };
     c.bench_function("index_note + search (write-read cycle)", |b| {
         b.iter(|| {
             idx.index_note(black_box(path), black_box(&content), black_box(&full));
@@ -157,7 +179,10 @@ fn bench_search(c: &mut Criterion) {
         let (allocs, bytes, net) = alloc_delta(&snap);
         eprintln!(
             "search {label}: {} results, {} allocs, {} bytes total, {} bytes net",
-            results.len(), allocs, bytes, net
+            results.len(),
+            allocs,
+            bytes,
+            net
         );
 
         c.bench_function(&format!("search {label}"), |b| {

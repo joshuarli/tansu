@@ -1,7 +1,7 @@
 use std::{fs, path::Path};
 
-use serde::{Deserialize, Serialize};
 use crate::index::SearchWeights;
+use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default)]
@@ -51,8 +51,8 @@ impl Settings {
 
     pub fn save(&self, dir: &Path) -> std::io::Result<()> {
         let path = dir.join(".tansu/settings.json");
-        let json = serde_json::to_string_pretty(self)
-            .map_err(|e| std::io::Error::other(e.to_string()))?;
+        let json =
+            serde_json::to_string_pretty(self).map_err(|e| std::io::Error::other(e.to_string()))?;
         fs::write(path, json)
     }
 }
@@ -84,7 +84,10 @@ mod tests {
 
     #[test]
     fn round_trip() {
-        let s = Settings { weight_title: 8.0, ..Default::default() };
+        let s = Settings {
+            weight_title: 8.0,
+            ..Default::default()
+        };
         let json = serde_json::to_string(&s).unwrap();
         let s2: Settings = serde_json::from_str(&json).unwrap();
         assert_eq!(s2.weight_title, 8.0);

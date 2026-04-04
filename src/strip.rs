@@ -1,5 +1,4 @@
 /// Strip markdown syntax using pulldown-cmark, returning plain text for indexing.
-
 use pulldown_cmark::{Event, Parser, Tag, TagEnd};
 
 pub fn strip_markdown(markdown: &str) -> String {

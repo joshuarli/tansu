@@ -60,7 +60,7 @@ All source in `web/ts/`, bundled to `web/static/app.js`:
 - **search.ts** -- Search modal (Cmd+K). Debounced search with arrow key navigation. Supports scoped search (Cmd+F searches within current note). "Create note" option at bottom of results.
 - **api.ts** -- Typed fetch wrappers for all API endpoints.
 - **serialize.ts** -- `domToMarkdown`: DOM-to-markdown serializer for the WYSIWYG editor. Handles headings, lists, blockquotes, code blocks, tables, inline formatting, wiki-links, image embeds.
-- **transforms.ts** -- Block-level transforms on Enter: typing `## ` converts to H2, `- ` to UL, `` ``` `` to code block, `---` to HR, etc.
+- **transforms.ts** -- Block-level transforms on Enter: typing `## ` converts to H2, `- ` to UL, ` ``` ` to code block, `---` to HR, etc.
 - **autocomplete.ts** -- Wiki-link autocomplete dropdown. Triggered by `[[` in the editor. Caches note list, filters as you type, completes on Enter/Tab.
 - **markdown.ts** -- Custom markdown-to-HTML renderer. Block parsing (headings, paragraphs, fenced code, lists with task items, blockquotes, callouts, tables, HR) and inline rendering (bold, italic, strikethrough, code, highlights, wiki-links, wiki-images, standard links/images, escaped chars).
 - **wikilinks.ts** -- Click handler delegate for `[[wiki-links]]` rendered by markdown.ts.
@@ -84,25 +84,25 @@ All source in `web/ts/`, bundled to `web/static/app.js`:
 
 ## API surface
 
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/notes` | List all notes (path + title) |
-| GET | `/api/note?path=` | Get note content + mtime |
-| PUT | `/api/note?path=` | Update note (with conflict detection via `expected_mtime`) |
-| POST | `/api/note?path=` | Create new note |
-| DELETE | `/api/note?path=` | Delete note (saves revision first) |
-| POST | `/api/rename` | Rename note + update backlinks |
-| GET | `/api/search?q=&path=` | Full-text search (optional path filter for in-note search) |
-| GET | `/api/backlinks?path=` | Get notes that link to this note |
-| POST | `/api/image` | Upload image (X-Filename header for suggested name) |
-| GET | `/api/revisions?path=` | List revision timestamps |
-| GET | `/api/revision?path=&ts=` | Get revision content |
-| POST | `/api/restore?path=&ts=` | Restore a revision |
-| GET | `/api/state` | Get session state (open tabs) |
-| PUT | `/api/state` | Save session state |
-| GET | `/api/settings` | Get search/index settings |
-| PUT | `/api/settings` | Update settings (excluded_folders change triggers reindex) |
-| GET | `/events` | SSE stream (events: `connected`, `changed`, `deleted`) |
+| Method | Path                      | Description                                                |
+| ------ | ------------------------- | ---------------------------------------------------------- |
+| GET    | `/api/notes`              | List all notes (path + title)                              |
+| GET    | `/api/note?path=`         | Get note content + mtime                                   |
+| PUT    | `/api/note?path=`         | Update note (with conflict detection via `expected_mtime`) |
+| POST   | `/api/note?path=`         | Create new note                                            |
+| DELETE | `/api/note?path=`         | Delete note (saves revision first)                         |
+| POST   | `/api/rename`             | Rename note + update backlinks                             |
+| GET    | `/api/search?q=&path=`    | Full-text search (optional path filter for in-note search) |
+| GET    | `/api/backlinks?path=`    | Get notes that link to this note                           |
+| POST   | `/api/image`              | Upload image (X-Filename header for suggested name)        |
+| GET    | `/api/revisions?path=`    | List revision timestamps                                   |
+| GET    | `/api/revision?path=&ts=` | Get revision content                                       |
+| POST   | `/api/restore?path=&ts=`  | Restore a revision                                         |
+| GET    | `/api/state`              | Get session state (open tabs)                              |
+| PUT    | `/api/state`              | Save session state                                         |
+| GET    | `/api/settings`           | Get search/index settings                                  |
+| PUT    | `/api/settings`           | Update settings (excluded_folders change triggers reindex) |
+| GET    | `/events`                 | SSE stream (events: `connected`, `changed`, `deleted`)     |
 
 Static files are served from `/static/*` and images from `/z-images/*`. All other GET paths serve `index.html` (SPA-style).
 
@@ -124,6 +124,7 @@ The server binary expects `web/index.html` and `web/static/` to be next to the e
 ## Testing
 
 `cargo test` runs 67 unit tests:
+
 - **http.rs**: percent decoding, query param parsing, path normalization, mtime, MIME types
 - **scanner.rs**: heading/tag/wiki-link extraction, normalization, edge cases
 - **strip.rs**: markdown-to-plaintext conversion

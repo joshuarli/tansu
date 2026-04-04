@@ -101,7 +101,11 @@ mod tests {
         fs::write(&note, "world").unwrap();
         save_revision(&tmp, "test.md", &note);
         let revs = list_revisions(&tmp, "test.md");
-        assert_eq!(revs.len(), 2, "two rapid saves should produce two revisions");
+        assert_eq!(
+            revs.len(),
+            2,
+            "two rapid saves should produce two revisions"
+        );
         let _ = fs::remove_dir_all(&tmp);
     }
 

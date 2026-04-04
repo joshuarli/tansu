@@ -1,18 +1,21 @@
 use std::{
     fs,
     path::Path,
-    sync::{Arc, Mutex, RwLock, atomic::{AtomicBool, Ordering}},
+    sync::{
+        Arc, Mutex, RwLock,
+        atomic::{AtomicBool, Ordering},
+    },
 };
 
 use tantivy::{
-    IndexWriter, IndexReader, Index as TantivyIndex, TantivyDocument,
+    Index as TantivyIndex, IndexReader, IndexWriter, TantivyDocument,
     collector::TopDocs,
     query::{BooleanQuery, FuzzyTermQuery, Occur, TermQuery},
     schema::*,
 };
 
-use crate::{http, scanner, strip, util};
 use crate::util::StrExt;
+use crate::{http, scanner, strip, util};
 
 #[derive(Clone)]
 pub struct NoteEntry {
@@ -191,8 +194,13 @@ impl Index {
     /// Two-phase search: exact first, fuzzy fallback if <5 results.
     /// `weights` order: [title, headings, tags, content].
     pub fn search(
-        &self, query: &str, limit: usize, filter_path: Option<&str>,
-        fuzzy_distance: u8, weights: SearchWeights, score_breakdown: bool,
+        &self,
+        query: &str,
+        limit: usize,
+        filter_path: Option<&str>,
+        fuzzy_distance: u8,
+        weights: SearchWeights,
+        score_breakdown: bool,
     ) -> Vec<SearchResult> {
         self.ensure_committed();
         self.reload_if_dirty();
@@ -205,7 +213,14 @@ impl Index {
 
         // Phase 1: exact
         let phase1_query = self.build_query(&terms, false, filter_path, fuzzy_distance, weights);
-        let results = self.execute_search(&searcher, &phase1_query, limit, &terms, weights, score_breakdown);
+        let results = self.execute_search(
+            &searcher,
+            &phase1_query,
+            limit,
+            &terms,
+            weights,
+            score_breakdown,
+        );
 
         if results.len() >= 5 {
             return results;
@@ -213,12 +228,23 @@ impl Index {
 
         // Phase 2: add fuzzy
         let phase2_query = self.build_query(&terms, true, filter_path, fuzzy_distance, weights);
-        self.execute_search(&searcher, &phase2_query, limit, &terms, weights, score_breakdown)
+        self.execute_search(
+            &searcher,
+            &phase2_query,
+            limit,
+            &terms,
+            weights,
+            score_breakdown,
+        )
     }
 
     fn build_query(
-        &self, terms: &[&str], fuzzy: bool, filter_path: Option<&str>,
-        fuzzy_distance: u8, weights: SearchWeights,
+        &self,
+        terms: &[&str],
+        fuzzy: bool,
+        filter_path: Option<&str>,
+        fuzzy_distance: u8,
+        weights: SearchWeights,
     ) -> BooleanQuery {
         let f = &self.inner.fields;
         let search_fields = [
@@ -283,7 +309,8 @@ impl Index {
         };
 
         // Pre-lowercase terms as bytes once for all results
-        let lower_terms: Vec<Vec<u8>> = terms.iter()
+        let lower_terms: Vec<Vec<u8>> = terms
+            .iter()
             .map(|t| t.bytes().map(|b| b.to_ascii_lowercase()).collect())
             .collect();
         let term_refs: Vec<&[u8]> = lower_terms.iter().map(|t| t.as_slice()).collect();
@@ -392,14 +419,17 @@ impl Index {
         *self.inner.notes_cache.lock().unwrap() = Some(notes.clone());
         notes
     }
-
 }
 
 /// Compute per-field scores by counting term matches (exact + fuzzy) against stored values.
-fn compute_field_scores(doc: &TantivyDocument, f: &Fields, terms: &[&[u8]], weights: SearchWeights) -> FieldScores {
-    let get = |field: Field| -> &str {
-        doc.get_first(field).and_then(|v| v.as_str()).unwrap_or("")
-    };
+fn compute_field_scores(
+    doc: &TantivyDocument,
+    f: &Fields,
+    terms: &[&[u8]],
+    weights: SearchWeights,
+) -> FieldScores {
+    let get =
+        |field: Field| -> &str { doc.get_first(field).and_then(|v| v.as_str()).unwrap_or("") };
 
     let fields = [
         (get(f.title), weights.title),
@@ -491,7 +521,10 @@ struct WordIter<'a> {
 
 impl<'a> WordIter<'a> {
     fn new(s: &'a str) -> Self {
-        Self { bytes: s.as_bytes(), pos: 0 }
+        Self {
+            bytes: s.as_bytes(),
+            pos: 0,
+        }
     }
 }
 
@@ -519,7 +552,10 @@ impl Iterator for WordIter<'_> {
 
 /// Case-insensitive ASCII equality (zero alloc).
 fn ascii_eq_ignore_case(a: &[u8], b: &[u8]) -> bool {
-    a.len() == b.len() && a.iter().zip(b).all(|(x, y)| x.to_ascii_lowercase() == y.to_ascii_lowercase())
+    a.len() == b.len()
+        && a.iter()
+            .zip(b)
+            .all(|(x, y)| x.to_ascii_lowercase() == y.to_ascii_lowercase())
 }
 
 /// Check if two byte slices have edit distance exactly 1 (case-insensitive ASCII).
@@ -533,7 +569,9 @@ fn edit_distance_one_ci(a: &[u8], b: &[u8]) -> bool {
         for i in 0..la {
             if a[i].to_ascii_lowercase() != b[i].to_ascii_lowercase() {
                 diffs += 1;
-                if diffs > 1 { return false; }
+                if diffs > 1 {
+                    return false;
+                }
             }
         }
         diffs == 1
@@ -545,7 +583,9 @@ fn edit_distance_one_ci(a: &[u8], b: &[u8]) -> bool {
         while si < short.len() && li < long.len() {
             if short[si].to_ascii_lowercase() != long[li].to_ascii_lowercase() {
                 diffs += 1;
-                if diffs > 1 { return false; }
+                if diffs > 1 {
+                    return false;
+                }
                 li += 1;
             } else {
                 si += 1;
@@ -592,7 +632,9 @@ impl Index {
         walk_and_index(root, root, self, excluded_folders);
         self.commit();
         fn walk_and_index(root: &Path, dir: &Path, idx: &Index, excluded: &[String]) {
-            let Ok(entries) = fs::read_dir(dir) else { return };
+            let Ok(entries) = fs::read_dir(dir) else {
+                return;
+            };
             for entry in entries.filter_map(|e| e.ok()) {
                 let path = entry.path();
                 let name = entry.file_name();
@@ -790,12 +832,16 @@ mod tests {
 
         // Search also triggers commit
         idx.index_note("test3.md", "unique findme word", &tmp);
-        let w = SearchWeights { title: 10.0, headings: 5.0, tags: 2.0, content: 1.0 };
+        let w = SearchWeights {
+            title: 10.0,
+            headings: 5.0,
+            tags: 2.0,
+            content: 1.0,
+        };
         let results = idx.search("findme", 10, None, 0, w, false);
         assert!(!results.is_empty());
 
         let _ = fs::remove_dir_all(&dir);
         let _ = fs::remove_file(&tmp);
     }
-
 }

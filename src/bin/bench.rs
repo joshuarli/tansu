@@ -12,7 +12,10 @@ fn main() {
     let index_dir = dir.join(".tansu/index");
 
     if !index_dir.exists() {
-        eprintln!("No index at {}. Run the server first to create it.", index_dir.display());
+        eprintln!(
+            "No index at {}. Run the server first to create it.",
+            index_dir.display()
+        );
         std::process::exit(1);
     }
 
@@ -22,7 +25,11 @@ fn main() {
     let limit = settings.result_limit;
 
     println!("vault: {} ({} notes)", dir.display(), count_md_files(&dir));
-    println!("index: {} ({})", index_dir.display(), human_size(&index_dir));
+    println!(
+        "index: {} ({})",
+        index_dir.display(),
+        human_size(&index_dir)
+    );
     println!("settings: weights={weights:?} fuzzy={fuzzy} limit={limit}");
     println!();
 
@@ -76,7 +83,10 @@ fn main() {
     // 6. get_backlinks for a common stem
     let notes = idx.get_all_notes();
     if let Some(note) = notes.first() {
-        let stem = Path::new(&note.path).file_stem().and_then(|s| s.to_str()).unwrap_or(&note.path);
+        let stem = Path::new(&note.path)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or(&note.path);
         let label = format!("get_backlinks '{stem}'");
         bench(&label, 100, || {
             let r = idx.get_backlinks(stem);
@@ -85,9 +95,7 @@ fn main() {
     }
 
     // 7. Index a single note (add_doc + commit)
-    let sample_note = notes.iter().find(|n| {
-        dir.join(&n.path).is_file()
-    });
+    let sample_note = notes.iter().find(|n| dir.join(&n.path).is_file());
     if let Some(note) = sample_note {
         let full = dir.join(&note.path);
         let content = fs::read_to_string(&full).unwrap_or_default();
@@ -138,7 +146,9 @@ fn count_md_files(dir: &Path) -> usize {
     let mut count = 0;
     walk(dir, &mut count);
     fn walk(dir: &Path, count: &mut usize) {
-        let Ok(entries) = fs::read_dir(dir) else { return };
+        let Ok(entries) = fs::read_dir(dir) else {
+            return;
+        };
         for entry in entries.filter_map(|e| e.ok()) {
             let path = entry.path();
             let name = entry.file_name();

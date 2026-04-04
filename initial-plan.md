@@ -103,56 +103,61 @@ Self-event filtering: `Arc<Mutex<HashSet<PathBuf>>>` of recently-written paths, 
 
 ## Tantivy Schema
 
-| Field | Type | Stored | Notes |
-|-------|------|--------|-------|
-| path | STRING | yes | unique key, relative path |
-| title | TEXT | yes | first H1 or filename stem |
-| content | TEXT | yes (fieldnorms) | stripped via pulldown-cmark (plain text), for search |
-| headings | TEXT | yes | all headings space-separated |
-| tags | TEXT | yes | extracted #tag tokens |
-| mtime | u64 | yes (fast) | unix seconds |
-| links_to | TEXT | yes | space-separated normalized link targets |
+| Field    | Type   | Stored           | Notes                                                |
+| -------- | ------ | ---------------- | ---------------------------------------------------- |
+| path     | STRING | yes              | unique key, relative path                            |
+| title    | TEXT   | yes              | first H1 or filename stem                            |
+| content  | TEXT   | yes (fieldnorms) | stripped via pulldown-cmark (plain text), for search |
+| headings | TEXT   | yes              | all headings space-separated                         |
+| tags     | TEXT   | yes              | extracted #tag tokens                                |
+| mtime    | u64    | yes (fast)       | unix seconds                                         |
+| links_to | TEXT   | yes              | space-separated normalized link targets              |
 
 Backlinks: search `links_to:"target-name"` to find all notes linking to a given note.
 
 ### Search Strategy (two-phase, from ferrisearch)
+
 1. **Phase 1**: exact + prefix matching across all fields. If >= 5 results, return immediately.
 2. **Phase 2**: if < 5 results, retry with fuzzy matching on content field (distance ~0.2).
-Field boosts: title 10, headings 5, tags 2, content 1.
+   Field boosts: title 10, headings 5, tags 2, content 1.
 
 ### Tag Recognition
+
 Simple word-boundary rule: `#word` where `#` is preceded by whitespace or start-of-line, and the tag is `[a-zA-Z0-9_-]+`. No hierarchical tags (no `/`). Heading lines (`# `, `## `) are excluded by the scanner since those are parsed as headings first.
 
 ### Content Stripping
+
 Use pulldown-cmark to walk the AST and emit only text events (stripping all markdown syntax: headings markers, emphasis, link URLs, code fences, etc.). The resulting plain text is indexed in the `content` field.
 
 ### Atomic Writes
+
 Write `{path}.tmp` in the same directory as the target, then `fs::rename`. Same-filesystem guarantee.
 
 ## API
 
-| Method | Path | Purpose |
-|--------|------|---------|
-| GET | `/` | Serve index.html |
-| GET | `/static/*` | Static assets |
-| GET | `/z-images/*` | Image files |
-| GET | `/api/search?q=` | Full-text search |
-| GET | `/api/note?path=` | Read note `{content, mtime}` |
-| PUT | `/api/note?path=` | Write note `{content, expected_mtime}` -> `{mtime}` or 409 |
-| POST | `/api/note?path=` | Create new note |
-| DELETE | `/api/note?path=` | Delete note |
-| POST | `/api/rename` | Rename note `{old_path, new_path}`. Renames file, updates all wiki-links in other notes, re-indexes. |
-| GET | `/api/notes` | All notes `[{path, title}]` for autocomplete |
-| GET | `/api/backlinks?path=` | Notes linking to this path |
-| POST | `/api/image` | Save webp bytes to z-images, return `{filename}` |
-| GET | `/api/revisions?path=` | List revision timestamps |
-| GET | `/api/revision?path=&ts=` | Get revision content |
-| POST | `/api/restore?path=&ts=` | Restore revision |
-| GET | `/events` | SSE stream for file change notifications |
+| Method | Path                      | Purpose                                                                                              |
+| ------ | ------------------------- | ---------------------------------------------------------------------------------------------------- |
+| GET    | `/`                       | Serve index.html                                                                                     |
+| GET    | `/static/*`               | Static assets                                                                                        |
+| GET    | `/z-images/*`             | Image files                                                                                          |
+| GET    | `/api/search?q=`          | Full-text search                                                                                     |
+| GET    | `/api/note?path=`         | Read note `{content, mtime}`                                                                         |
+| PUT    | `/api/note?path=`         | Write note `{content, expected_mtime}` -> `{mtime}` or 409                                           |
+| POST   | `/api/note?path=`         | Create new note                                                                                      |
+| DELETE | `/api/note?path=`         | Delete note                                                                                          |
+| POST   | `/api/rename`             | Rename note `{old_path, new_path}`. Renames file, updates all wiki-links in other notes, re-indexes. |
+| GET    | `/api/notes`              | All notes `[{path, title}]` for autocomplete                                                         |
+| GET    | `/api/backlinks?path=`    | Notes linking to this path                                                                           |
+| POST   | `/api/image`              | Save webp bytes to z-images, return `{filename}`                                                     |
+| GET    | `/api/revisions?path=`    | List revision timestamps                                                                             |
+| GET    | `/api/revision?path=&ts=` | Get revision content                                                                                 |
+| POST   | `/api/restore?path=&ts=`  | Restore revision                                                                                     |
+| GET    | `/events`                 | SSE stream for file change notifications                                                             |
 
 ## Frontend
 
 ### Navigation
+
 - **No sidebar**. Search modal (Cmd+K) is the sole entry point.
 - **Tabs**: horizontal tab bar at top. Multiple notes open simultaneously.
   - Cmd+W close, Cmd+Shift+]/[ switch tabs
@@ -161,11 +166,13 @@ Write `{path}.tmp` in the same directory as the target, then `fs::rename`. Same-
 - **Empty state**: blank page with centered hint "Press Cmd+K to search".
 
 ### Editor
+
 Two modes with a toggle button:
 
 **WYSIWYG mode** (default) — contenteditable, adapted from vitrine2:
+
 - **Canonical format**: markdown string. Load: `marked.parse()` -> innerHTML. Save: DOM walk -> markdown.
-- **Block transforms**: `## ` -> H2, `- ` -> UL, `> ` -> blockquote, ``` -> code block, `---` -> HR
+- **Block transforms**: `## ` -> H2, `- ` -> UL, `> ` -> blockquote, ```-> code block,`---` -> HR
 - **Inline**: Cmd+B bold, Cmd+I italic, backtick for code
 - **Wiki-links**: typing `[[` shows autocomplete dropdown from `/api/notes`. Rendered as `<a class="wiki-link">`. Click opens in tab.
 - **Images**: `![[file.webp]]` rendered as `<img src="/z-images/file.webp">`. Paste handler: OffscreenCanvas -> webp blob -> POST /api/image -> insert markup.
@@ -177,34 +184,44 @@ Two modes with a toggle button:
 **Source mode** — plain textarea showing raw markdown. Escape hatch for complex formatting. Switching back to WYSIWYG re-parses the markdown.
 
 **Common to both modes:**
+
 - **Save**: Cmd+S, PUT with expected_mtime. On 409: warn, offer reload or force-save.
 - **Rename**: right-click tab -> rename. POST /api/rename updates file + all wiki-links.
 
 ### SSE + External Changes
+
 When a file changes on disk while the note is open:
+
 - **Clean tab**: reload content silently.
 - **Dirty tab**: attempt line-based 3-way merge. Base = most recent revision from `.tansu/revisions/` (fetched via `/api/revision`), theirs = new disk content (fetched via `/api/note`), ours = current editor content. If merge succeeds, update editor silently with merged result. If conflicts, show banner: "File changed externally — conflicts detected" with options to keep local, take remote, or view both.
 
 ### Delete
+
 Right-click tab -> Delete (with confirmation). Server saves a final revision before removing the file. Recoverable from `.tansu/revisions/`.
 
 ### Wiki-link Resolution
+
 `[[my note]]` resolves to a `.md` file by normalizing (lowercase, spaces to hyphens) and searching:
+
 1. Same directory as the linking note
 2. Walk up parent directories
 3. Search entire vault
-First match wins. If no match, render as a red "create note" link.
+   First match wins. If no match, render as a red "create note" link.
 
 ### Image Upload
+
 Client converts clipboard to webp via OffscreenCanvas (same as obsidian-webp-paste). Suggests filename: `{NoteName} {YYYYMMDDHHMMSS}.webp`. Server saves to `z-images/`, appending `-1`, `-2` etc. on collision.
 
 ### Backlinks
+
 Below editor: collapsible "Backlinks" section listing notes that link to the current note.
 
 ### Revision History
+
 Button in toolbar opens revision list (timestamps with relative dates). Click to view content. "Restore" button creates a new revision of current state, then overwrites.
 
 ### Styling
+
 - Light mode only, subdued minimalist
 - White/near-white bg, `#24292f` text, `#d0d7de` borders
 - System font stack, monospace for code
@@ -236,6 +253,7 @@ Button in toolbar opens revision list (timestamps with relative dates). Click to
 ## Rename Flow (Server-Side)
 
 `POST /api/rename` with `{old_path, new_path}`:
+
 1. Rename the file on disk
 2. Save a revision of the old path
 3. Search tantivy `links_to` field for the old note's stem

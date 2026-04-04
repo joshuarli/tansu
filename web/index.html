@@ -1,35 +1,49 @@
 <!doctype html>
 <html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>tansu</title>
-<link rel="icon" href="data:,">
-<link rel="stylesheet" href="/static/style.css">
-</head>
-<body>
-<div id="app">
-  <div id="notification" class="notification hidden"></div>
-  <div id="tab-bar"></div>
-  <div id="editor-area">
-    <div id="empty-state">Press <kbd>Cmd+K</kbd> to search &middot; <kbd>Cmd+P</kbd> for commands</div>
-  </div>
-  <div id="search-overlay" class="hidden">
-    <div id="search-modal">
-      <input id="search-input" type="text" placeholder="Search notes..." autocomplete="off" spellcheck="false">
-      <div id="search-results"></div>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>tansu</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="/static/style.css" />
+  </head>
+  <body>
+    <div id="app">
+      <div id="notification" class="notification hidden"></div>
+      <div id="tab-bar"></div>
+      <div id="editor-area">
+        <div id="empty-state">
+          Press <kbd>Cmd+K</kbd> to search &middot; <kbd>Cmd+P</kbd> for commands
+        </div>
+      </div>
+      <div id="search-overlay" class="hidden">
+        <div id="search-modal">
+          <input
+            id="search-input"
+            type="text"
+            placeholder="Search notes..."
+            autocomplete="off"
+            spellcheck="false"
+          />
+          <div id="search-results"></div>
+        </div>
+      </div>
+      <div id="settings-overlay" class="hidden">
+        <div id="settings-panel"></div>
+      </div>
+      <div id="palette-overlay" class="hidden">
+        <div id="palette-modal">
+          <input
+            id="palette-input"
+            type="text"
+            placeholder="Type a command..."
+            autocomplete="off"
+            spellcheck="false"
+          />
+          <div id="palette-list"></div>
+        </div>
+      </div>
     </div>
-  </div>
-  <div id="settings-overlay" class="hidden">
-    <div id="settings-panel"></div>
-  </div>
-  <div id="palette-overlay" class="hidden">
-    <div id="palette-modal">
-      <input id="palette-input" type="text" placeholder="Type a command..." autocomplete="off" spellcheck="false">
-      <div id="palette-list"></div>
-    </div>
-  </div>
-</div>
-<script type="module" src="/static/app.js"></script>
-</body>
+    <script type="module" src="/static/app.js"></script>
+  </body>
 </html>

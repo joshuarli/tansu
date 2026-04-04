@@ -29,5 +29,11 @@ bench:
 bench-quick:
 	cargo run --bin bench -- $(NOTES_DIR)
 
+setup:
+	prek install --install-hooks
+
+pc:
+	prek run --all-files
+
 clean:
 	rm -rf $(NOTES_DIR)/.tansu/index

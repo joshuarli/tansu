@@ -1,7 +1,6 @@
 use std::{
     collections::HashSet,
-    env,
-    fs,
+    env, fs,
     io::{self, Read, Write},
     net::{TcpListener, TcpStream},
     path::{Path, PathBuf},
@@ -13,9 +12,9 @@ use serde::{Deserialize, Serialize};
 
 use tansu::http::*;
 use tansu::index::Index;
+use tansu::revisions;
 use tansu::settings::Settings;
 use tansu::watcher::{self, WatchEvent};
-use tansu::revisions;
 
 #[derive(Serialize)]
 struct NoteResponse<'a> {
@@ -173,8 +172,12 @@ impl Server {
                 let n = match stream.read(&mut buf[pos..]) {
                     Ok(0) => return Ok(()),
                     Ok(n) => n,
-                    Err(e) if e.kind() == io::ErrorKind::WouldBlock
-                           || e.kind() == io::ErrorKind::TimedOut => return Ok(()),
+                    Err(e)
+                        if e.kind() == io::ErrorKind::WouldBlock
+                            || e.kind() == io::ErrorKind::TimedOut =>
+                    {
+                        return Ok(());
+                    }
                     Err(e) => return Err(e),
                 };
                 pos += n;
@@ -188,12 +191,19 @@ impl Server {
 
                         let start = Instant::now();
                         let result = self.dispatch(
-                            &mut stream, &method, &path_raw,
-                            &req.headers, &buf[..pos], header_len,
+                            &mut stream,
+                            &method,
+                            &path_raw,
+                            &req.headers,
+                            &buf[..pos],
+                            header_len,
                         );
                         if !self.quiet {
                             let elapsed = start.elapsed();
-                            eprintln!("\t{method} {path_raw} ({:.1}ms)", elapsed.as_secs_f64() * 1000.0);
+                            eprintln!(
+                                "\t{method} {path_raw} ({:.1}ms)",
+                                elapsed.as_secs_f64() * 1000.0
+                            );
                         }
                         result?;
 
@@ -224,8 +234,13 @@ impl Server {
     }
 
     fn dispatch(
-        &mut self, stream: &mut TcpStream, method: &str, path_raw: &str,
-        headers: &[httparse::Header<'_>], raw_buf: &[u8], header_len: usize,
+        &mut self,
+        stream: &mut TcpStream,
+        method: &str,
+        path_raw: &str,
+        headers: &[httparse::Header<'_>],
+        raw_buf: &[u8],
+        header_len: usize,
     ) -> io::Result<()> {
         let path = path_raw.split('?').next().unwrap_or("/");
         let mut fp = PathBuf::new();
@@ -269,14 +284,24 @@ impl Server {
     }
 
     fn dispatch_api(
-        &mut self, stream: &mut TcpStream, method: &str, path: &str, path_raw: &str,
-        headers: &[httparse::Header<'_>], raw_buf: &[u8], header_len: usize,
+        &mut self,
+        stream: &mut TcpStream,
+        method: &str,
+        path: &str,
+        path_raw: &str,
+        headers: &[httparse::Header<'_>],
+        raw_buf: &[u8],
+        header_len: usize,
     ) -> io::Result<()> {
         match (method, path) {
             ("GET", "/api/search") => self.api_search(stream, path_raw),
             ("GET", "/api/note") => self.api_get_note(stream, path_raw),
-            ("PUT", "/api/note") => self.api_put_note(stream, path_raw, headers, raw_buf, header_len),
-            ("POST", "/api/note") => self.api_create_note(stream, path_raw, headers, raw_buf, header_len),
+            ("PUT", "/api/note") => {
+                self.api_put_note(stream, path_raw, headers, raw_buf, header_len)
+            }
+            ("POST", "/api/note") => {
+                self.api_create_note(stream, path_raw, headers, raw_buf, header_len)
+            }
             ("DELETE", "/api/note") => self.api_delete_note(stream, path_raw),
             ("POST", "/api/rename") => self.api_rename(stream, headers, raw_buf, header_len),
             ("GET", "/api/notes") => self.api_list_notes(stream),
@@ -297,7 +322,9 @@ impl Server {
         let exe = env::current_exe().unwrap_or_default();
         let exe_dir = exe.parent().unwrap_or(Path::new("."));
         for candidate in [exe_dir.join("web/static"), PathBuf::from("web/static")] {
-            if candidate.is_dir() { return candidate; }
+            if candidate.is_dir() {
+                return candidate;
+            }
         }
         PathBuf::from("web/static")
     }
@@ -305,7 +332,10 @@ impl Server {
     fn serve_index(&mut self, sock: &TcpStream) -> io::Result<()> {
         let exe = env::current_exe().unwrap_or_default();
         let exe_dir = exe.parent().unwrap_or(Path::new("."));
-        for candidate in [exe_dir.join("web/index.html"), PathBuf::from("web/index.html")] {
+        for candidate in [
+            exe_dir.join("web/index.html"),
+            PathBuf::from("web/index.html"),
+        ] {
             if candidate.is_file() {
                 let meta = fs::metadata(&candidate)?;
                 return serve_file(sock, &candidate, meta.len(), "text/html; charset=utf-8");
@@ -343,18 +373,28 @@ impl Server {
         let filter_path = query_param(path_raw, "path");
         let s = &self.settings;
         let results = self.index.search(
-            &q, s.result_limit, filter_path.as_deref(),
-            s.fuzzy_distance, s.weights(), s.show_score_breakdown,
+            &q,
+            s.result_limit,
+            filter_path.as_deref(),
+            s.fuzzy_distance,
+            s.weights(),
+            s.show_score_breakdown,
         );
-        let hits: Vec<SearchHit> = results.iter().map(|r| SearchHit {
-            path: &r.path, title: &r.title, excerpt: &r.excerpt, score: r.score,
-            field_scores: FieldScoresJson {
-                title: r.field_scores.title,
-                headings: r.field_scores.headings,
-                tags: r.field_scores.tags,
-                content: r.field_scores.content,
-            },
-        }).collect();
+        let hits: Vec<SearchHit> = results
+            .iter()
+            .map(|r| SearchHit {
+                path: &r.path,
+                title: &r.title,
+                excerpt: &r.excerpt,
+                score: r.score,
+                field_scores: FieldScoresJson {
+                    title: r.field_scores.title,
+                    headings: r.field_scores.headings,
+                    tags: r.field_scores.tags,
+                    content: r.field_scores.content,
+                },
+            })
+            .collect();
         respond_json(sock, &hits)
     }
 
@@ -371,12 +411,22 @@ impl Server {
         }
         let content = fs::read_to_string(&full)?;
         let mtime = mtime_secs(&full);
-        respond_json(sock, &NoteResponse { content: &content, mtime })
+        respond_json(
+            sock,
+            &NoteResponse {
+                content: &content,
+                mtime,
+            },
+        )
     }
 
     fn api_put_note(
-        &mut self, stream: &mut TcpStream, path_raw: &str,
-        headers: &[httparse::Header<'_>], raw_buf: &[u8], header_len: usize,
+        &mut self,
+        stream: &mut TcpStream,
+        path_raw: &str,
+        headers: &[httparse::Header<'_>],
+        raw_buf: &[u8],
+        header_len: usize,
     ) -> io::Result<()> {
         let Some(rel) = query_param(path_raw, "path") else {
             return write_error(stream, 400, "missing path param");
@@ -391,21 +441,37 @@ impl Server {
 
         if req.expected_mtime != 0 && current_mtime != req.expected_mtime {
             let current_content = fs::read_to_string(&full).unwrap_or_default();
-            return respond_json_status(stream, 409, "Conflict", &ConflictResponse {
-                conflict: true, content: &current_content, mtime: current_mtime,
-            });
+            return respond_json_status(
+                stream,
+                409,
+                "Conflict",
+                &ConflictResponse {
+                    conflict: true,
+                    content: &current_content,
+                    mtime: current_mtime,
+                },
+            );
         }
 
         revisions::save_revision(&self.dir, &rel, &full);
         self.atomic_write(&full, req.content.as_bytes())?;
         self.index.index_note(&rel, &req.content, &full);
 
-        respond_json(stream, &MtimeResponse { mtime: mtime_secs(&full) })
+        respond_json(
+            stream,
+            &MtimeResponse {
+                mtime: mtime_secs(&full),
+            },
+        )
     }
 
     fn api_create_note(
-        &mut self, stream: &mut TcpStream, path_raw: &str,
-        headers: &[httparse::Header<'_>], raw_buf: &[u8], header_len: usize,
+        &mut self,
+        stream: &mut TcpStream,
+        path_raw: &str,
+        headers: &[httparse::Header<'_>],
+        raw_buf: &[u8],
+        header_len: usize,
     ) -> io::Result<()> {
         let Some(rel) = query_param(path_raw, "path") else {
             return write_error(stream, 400, "missing path param");
@@ -426,15 +492,22 @@ impl Server {
         let content = if body.is_empty() {
             String::new()
         } else {
-            let req: CreateNoteRequest = serde_json::from_slice(&body)
-                .map_err(|e| io::Error::other(e.to_string()))?;
+            let req: CreateNoteRequest =
+                serde_json::from_slice(&body).map_err(|e| io::Error::other(e.to_string()))?;
             req.content
         };
 
         self.atomic_write(&full, content.as_bytes())?;
         self.index.index_note(&rel, &content, &full);
 
-        respond_json_status(stream, 201, "Created", &MtimeResponse { mtime: mtime_secs(&full) })
+        respond_json_status(
+            stream,
+            201,
+            "Created",
+            &MtimeResponse {
+                mtime: mtime_secs(&full),
+            },
+        )
     }
 
     fn api_delete_note(&mut self, sock: &TcpStream, path_raw: &str) -> io::Result<()> {
@@ -455,8 +528,11 @@ impl Server {
     }
 
     fn api_rename(
-        &mut self, stream: &mut TcpStream,
-        headers: &[httparse::Header<'_>], raw_buf: &[u8], header_len: usize,
+        &mut self,
+        stream: &mut TcpStream,
+        headers: &[httparse::Header<'_>],
+        raw_buf: &[u8],
+        header_len: usize,
     ) -> io::Result<()> {
         let req: RenameRequest = parse_body(stream, headers, raw_buf, header_len)?;
 
@@ -487,8 +563,14 @@ impl Server {
             self.index.index_note(&req.new_path, &content, &new_full);
         }
 
-        let old_stem = Path::new(&req.old_path).file_stem().and_then(|s| s.to_str()).unwrap_or(&req.old_path);
-        let new_stem = Path::new(&req.new_path).file_stem().and_then(|s| s.to_str()).unwrap_or(&req.new_path);
+        let old_stem = Path::new(&req.old_path)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or(&req.old_path);
+        let new_stem = Path::new(&req.new_path)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or(&req.new_path);
 
         // Commit now so get_backlinks sees the updated index
         self.index.commit();
@@ -498,10 +580,8 @@ impl Server {
         for note_path in &referencing {
             let note_full = self.dir.join(note_path);
             if let Ok(content) = fs::read_to_string(&note_full) {
-                let new_content = content.replace(
-                    &format!("[[{old_stem}]]"),
-                    &format!("[[{new_stem}]]"),
-                );
+                let new_content =
+                    content.replace(&format!("[[{old_stem}]]"), &format!("[[{new_stem}]]"));
                 if new_content != content {
                     revisions::save_revision(&self.dir, note_path, &note_full);
                     if let Err(e) = self.atomic_write(&note_full, new_content.as_bytes()) {
@@ -523,9 +603,13 @@ impl Server {
 
     fn api_list_notes(&self, sock: &TcpStream) -> io::Result<()> {
         let notes = self.index.get_all_notes();
-        let entries: Vec<NoteListEntry> = notes.iter().map(|n| {
-            NoteListEntry { path: &n.path, title: &n.title }
-        }).collect();
+        let entries: Vec<NoteListEntry> = notes
+            .iter()
+            .map(|n| NoteListEntry {
+                path: &n.path,
+                title: &n.title,
+            })
+            .collect();
         respond_json(sock, &entries)
     }
 
@@ -533,21 +617,28 @@ impl Server {
         let Some(rel) = query_param(path_raw, "path") else {
             return write_error(sock, 400, "missing path param");
         };
-        let stem = Path::new(&rel).file_stem().and_then(|s| s.to_str()).unwrap_or(&rel);
+        let stem = Path::new(&rel)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or(&rel);
         let links = self.index.get_backlinks(stem);
         respond_json(sock, &links)
     }
 
     fn api_upload_image(
-        &mut self, stream: &mut TcpStream,
-        headers: &[httparse::Header<'_>], raw_buf: &[u8], header_len: usize,
+        &mut self,
+        stream: &mut TcpStream,
+        headers: &[httparse::Header<'_>],
+        raw_buf: &[u8],
+        header_len: usize,
     ) -> io::Result<()> {
         let body = read_body(stream, headers, raw_buf, header_len)?;
         if body.is_empty() {
             return write_error(stream, 400, "empty body");
         }
 
-        let suggested = headers.iter()
+        let suggested = headers
+            .iter()
             .find(|h| h.name.eq_ignore_ascii_case("X-Filename"))
             .and_then(|h| std::str::from_utf8(h.value).ok())
             .unwrap_or("image.webp");
@@ -559,8 +650,14 @@ impl Server {
         let mut dest = images_dir.join(&filename);
         let mut counter = 1u32;
         while dest.exists() {
-            let stem = Path::new(suggested).file_stem().and_then(|s| s.to_str()).unwrap_or("image");
-            let ext = Path::new(suggested).extension().and_then(|s| s.to_str()).unwrap_or("webp");
+            let stem = Path::new(suggested)
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("image");
+            let ext = Path::new(suggested)
+                .extension()
+                .and_then(|s| s.to_str())
+                .unwrap_or("webp");
             filename = format!("{stem}-{counter}.{ext}");
             dest = images_dir.join(&filename);
             counter += 1;
@@ -568,7 +665,14 @@ impl Server {
 
         fs::write(&dest, &body)?;
 
-        respond_json_status(stream, 201, "Created", &FilenameResponse { filename: &filename })
+        respond_json_status(
+            stream,
+            201,
+            "Created",
+            &FilenameResponse {
+                filename: &filename,
+            },
+        )
     }
 
     fn api_list_revisions(&self, sock: &TcpStream, path_raw: &str) -> io::Result<()> {
@@ -603,13 +707,16 @@ impl Server {
     }
 
     fn api_put_state(
-        &self, stream: &mut TcpStream,
-        headers: &[httparse::Header<'_>], raw_buf: &[u8], header_len: usize,
+        &self,
+        stream: &mut TcpStream,
+        headers: &[httparse::Header<'_>],
+        raw_buf: &[u8],
+        header_len: usize,
     ) -> io::Result<()> {
         let body = read_body(stream, headers, raw_buf, header_len)?;
         // Validate it's valid JSON
-        let _: serde_json::Value = serde_json::from_slice(&body)
-            .map_err(|e| io::Error::other(e.to_string()))?;
+        let _: serde_json::Value =
+            serde_json::from_slice(&body).map_err(|e| io::Error::other(e.to_string()))?;
         let path = self.dir.join(".tansu/state.json");
         fs::write(&path, &body)?;
         respond_json(stream, &OkResponse { ok: true })
@@ -620,8 +727,11 @@ impl Server {
     }
 
     fn api_put_settings(
-        &mut self, stream: &mut TcpStream,
-        headers: &[httparse::Header<'_>], raw_buf: &[u8], header_len: usize,
+        &mut self,
+        stream: &mut TcpStream,
+        headers: &[httparse::Header<'_>],
+        raw_buf: &[u8],
+        header_len: usize,
     ) -> io::Result<()> {
         let new_settings: Settings = parse_body(stream, headers, raw_buf, header_len)?;
         let needs_reindex = new_settings.excluded_folders != self.settings.excluded_folders;
@@ -660,7 +770,12 @@ impl Server {
         self.atomic_write(&full, rev_content.as_bytes())?;
         self.index.index_note(&rel, &rev_content, &full);
 
-        respond_json(sock, &MtimeResponse { mtime: mtime_secs(&full) })
+        respond_json(
+            sock,
+            &MtimeResponse {
+                mtime: mtime_secs(&full),
+            },
+        )
     }
 }
 
@@ -714,8 +829,8 @@ fn main() {
 
     let index_dir = dir.join(".tansu/index");
     fs::create_dir_all(&index_dir).unwrap_or_else(|e| die(&format!("create index dir: {e}")));
-    let index = Index::open_or_create(&index_dir)
-        .unwrap_or_else(|e| die(&format!("open index: {e}")));
+    let index =
+        Index::open_or_create(&index_dir).unwrap_or_else(|e| die(&format!("open index: {e}")));
 
     let index_clone = index.clone();
     let dir_clone = dir.clone();
@@ -736,7 +851,12 @@ fn main() {
     eprintln!("\ttansu serving {} on http://{addr}", dir.display());
 
     let mut srv = Server {
-        dir, quiet, index, settings, watch_rx, self_writes,
+        dir,
+        quiet,
+        index,
+        settings,
+        watch_rx,
+        self_writes,
         sse_client: Arc::new(Mutex::new(None)),
     };
 
@@ -744,11 +864,15 @@ fn main() {
         match stream {
             Ok(s) => {
                 if let Err(e) = srv.handle(s) {
-                    if !quiet { eprintln!("error: {e}"); }
+                    if !quiet {
+                        eprintln!("error: {e}");
+                    }
                 }
             }
             Err(e) => {
-                if !quiet { eprintln!("accept error: {e}"); }
+                if !quiet {
+                    eprintln!("accept error: {e}");
+                }
             }
         }
     }
