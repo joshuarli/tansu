@@ -190,7 +190,7 @@ impl Index {
     /// `weights` order: [title, headings, tags, content].
     pub fn search(
         &self, query: &str, limit: usize, filter_path: Option<&str>,
-        fuzzy_distance: u8, weights: [f32; 4],
+        fuzzy_distance: u8, weights: [f32; 4], score_breakdown: bool,
     ) -> Vec<SearchResult> {
         self.ensure_committed();
         self.reload_if_dirty();
@@ -203,7 +203,7 @@ impl Index {
 
         // Phase 1: exact
         let phase1_query = self.build_query(&terms, false, filter_path, fuzzy_distance, weights);
-        let results = self.execute_search(&searcher, &phase1_query, limit, &terms, weights);
+        let results = self.execute_search(&searcher, &phase1_query, limit, &terms, weights, score_breakdown);
 
         if results.len() >= 5 {
             return results;
@@ -211,7 +211,7 @@ impl Index {
 
         // Phase 2: add fuzzy
         let phase2_query = self.build_query(&terms, true, filter_path, fuzzy_distance, weights);
-        self.execute_search(&searcher, &phase2_query, limit, &terms, weights)
+        self.execute_search(&searcher, &phase2_query, limit, &terms, weights, score_breakdown)
     }
 
     fn build_query(
@@ -273,6 +273,7 @@ impl Index {
         limit: usize,
         terms: &[&str],
         weights: [f32; 4],
+        score_breakdown: bool,
     ) -> Vec<SearchResult> {
         let f = &self.inner.fields;
         let Ok(top_docs) = searcher.search(query, &TopDocs::with_limit(limit)) else {
@@ -306,7 +307,11 @@ impl Index {
                 .unwrap_or("");
             let excerpt = make_snippet(content, &term_refs, 160);
 
-            let field_scores = compute_field_scores(&doc, f, &term_refs, weights);
+            let field_scores = if score_breakdown {
+                compute_field_scores(&doc, f, &term_refs, weights)
+            } else {
+                FieldScores::default()
+            };
 
             results.push(SearchResult {
                 path,
@@ -791,7 +796,7 @@ mod tests {
 
         // Search also triggers commit
         idx.index_note("test3.md", "unique findme word", &tmp);
-        let results = idx.search("findme", 10, None, 0, [10.0, 5.0, 2.0, 1.0]);
+        let results = idx.search("findme", 10, None, 0, [10.0, 5.0, 2.0, 1.0], false);
         assert!(!results.is_empty());
 
         let _ = fs::remove_dir_all(&dir);

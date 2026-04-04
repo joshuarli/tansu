@@ -74,7 +74,7 @@ fn setup() -> (Index, Settings, PathBuf) {
     // Warm up
     idx.search("warmup", 20, None, settings.fuzzy_distance, [
         settings.weight_title, settings.weight_headings, settings.weight_tags, settings.weight_content,
-    ]);
+    ], false);
     (idx, settings, dir)
 }
 
@@ -130,7 +130,7 @@ fn bench_index_note(c: &mut Criterion) {
     c.bench_function("index_note + search (write-read cycle)", |b| {
         b.iter(|| {
             idx.index_note(black_box(path), black_box(&content), black_box(&full));
-            let r = idx.search(black_box("the"), 20, None, 1, weights);
+            let r = idx.search(black_box("the"), 20, None, 1, weights, false);
             black_box(r.len());
         });
     });
@@ -154,7 +154,7 @@ fn bench_search(c: &mut Criterion) {
     for (label, q) in queries {
         // Alloc report
         let snap = alloc_snapshot();
-        let results = idx.search(q, limit, None, fuzzy, weights);
+        let results = idx.search(q, limit, None, fuzzy, weights, false);
         let (allocs, bytes, net) = alloc_delta(&snap);
         eprintln!(
             "search {label}: {} results, {} allocs, {} bytes total, {} bytes net",
@@ -163,7 +163,7 @@ fn bench_search(c: &mut Criterion) {
 
         c.bench_function(&format!("search {label}"), |b| {
             b.iter(|| {
-                let r = idx.search(black_box(q), limit, None, fuzzy, weights);
+                let r = idx.search(black_box(q), limit, None, fuzzy, weights, false);
                 black_box(r.len());
             });
         });

@@ -352,6 +352,7 @@ impl Server {
             &q, s.result_limit, filter_path.as_deref(),
             s.fuzzy_distance,
             [s.weight_title, s.weight_headings, s.weight_tags, s.weight_content],
+            s.show_score_breakdown,
         );
         let hits: Vec<SearchHit> = results.iter().map(|r| SearchHit {
             path: &r.path, title: &r.title, excerpt: &r.excerpt, score: r.score,
