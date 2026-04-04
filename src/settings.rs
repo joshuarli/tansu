@@ -1,51 +1,46 @@
 use std::{fs, path::Path};
 
 use serde::{Deserialize, Serialize};
+use crate::index::SearchWeights;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Settings {
-    #[serde(default = "default_weight_title")]
     pub weight_title: f32,
-    #[serde(default = "default_weight_headings")]
     pub weight_headings: f32,
-    #[serde(default = "default_weight_tags")]
     pub weight_tags: f32,
-    #[serde(default = "default_weight_content")]
     pub weight_content: f32,
-    #[serde(default = "default_fuzzy_distance")]
     pub fuzzy_distance: u8,
-    #[serde(default = "default_result_limit")]
     pub result_limit: usize,
-    #[serde(default = "default_show_score_breakdown")]
     pub show_score_breakdown: bool,
-    #[serde(default)]
     pub excluded_folders: Vec<String>,
 }
-
-fn default_weight_title() -> f32 { 10.0 }
-fn default_weight_headings() -> f32 { 5.0 }
-fn default_weight_tags() -> f32 { 2.0 }
-fn default_weight_content() -> f32 { 1.0 }
-fn default_fuzzy_distance() -> u8 { 1 }
-fn default_result_limit() -> usize { 20 }
-fn default_show_score_breakdown() -> bool { true }
 
 impl Default for Settings {
     fn default() -> Self {
         Self {
-            weight_title: default_weight_title(),
-            weight_headings: default_weight_headings(),
-            weight_tags: default_weight_tags(),
-            weight_content: default_weight_content(),
-            fuzzy_distance: default_fuzzy_distance(),
-            result_limit: default_result_limit(),
-            show_score_breakdown: default_show_score_breakdown(),
+            weight_title: 10.0,
+            weight_headings: 5.0,
+            weight_tags: 2.0,
+            weight_content: 1.0,
+            fuzzy_distance: 1,
+            result_limit: 20,
+            show_score_breakdown: true,
             excluded_folders: Vec::new(),
         }
     }
 }
 
 impl Settings {
+    pub fn weights(&self) -> SearchWeights {
+        SearchWeights {
+            title: self.weight_title,
+            headings: self.weight_headings,
+            tags: self.weight_tags,
+            content: self.weight_content,
+        }
+    }
+
     pub fn load(dir: &Path) -> Self {
         let path = dir.join(".tansu/settings.json");
         match fs::read_to_string(&path) {

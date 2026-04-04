@@ -6,6 +6,7 @@ use std::{
 };
 
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher, Config};
+use crate::util;
 
 pub enum WatchEvent {
     Modified(PathBuf),
@@ -27,12 +28,7 @@ pub fn start_watcher(
             let Ok(event) = res else { return };
 
             for path in &event.paths {
-                // Only watch .md files
-                let is_md = path
-                    .extension()
-                    .and_then(|e| e.to_str())
-                    .is_some_and(|ext| ext.eq_ignore_ascii_case("md"));
-                if !is_md {
+                if !util::is_markdown(path) {
                     continue;
                 }
 

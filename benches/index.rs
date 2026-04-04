@@ -6,7 +6,7 @@ use std::{
 };
 
 use criterion::{Criterion, criterion_group, criterion_main, black_box};
-use tansu::index::Index;
+use tansu::index::{Index, SearchWeights};
 use tansu::settings::Settings;
 
 struct CountingAlloc;
@@ -72,9 +72,7 @@ fn setup() -> (Index, Settings, PathBuf) {
     let settings = Settings::load(&dir);
     let idx = Index::open_or_create(&index_dir).expect("failed to open index");
     // Warm up
-    idx.search("warmup", 20, None, settings.fuzzy_distance, [
-        settings.weight_title, settings.weight_headings, settings.weight_tags, settings.weight_content,
-    ], false);
+    idx.search("warmup", 20, None, settings.fuzzy_distance, settings.weights(), false);
     (idx, settings, dir)
 }
 
@@ -102,23 +100,24 @@ fn bench_index_note(c: &mut Criterion) {
     let (idx, _, dir) = setup();
     let notes = idx.get_all_notes();
 
-    let sample = notes.iter().find(|(p, _)| dir.join(p).is_file());
-    let Some((path, _)) = sample else {
+    let sample = notes.iter().find(|n| dir.join(&n.path).is_file());
+    let Some(note) = sample else {
         eprintln!("no sample note found, skipping index_note bench");
         return;
     };
-    let full = dir.join(path);
+    let full = dir.join(&note.path);
     let content = fs::read_to_string(&full).unwrap_or_default();
 
     // Alloc report
     let snap = alloc_snapshot();
-    idx.index_note(path, &content, &full);
+    idx.index_note(&note.path, &content, &full);
     let (allocs, bytes, net) = alloc_delta(&snap);
     eprintln!(
         "index_note ({} bytes): {} allocs, {} bytes total, {} bytes net",
         content.len(), allocs, bytes, net
     );
 
+    let path = &note.path;
     c.bench_function(&format!("index_note ({} bytes)", content.len()), |b| {
         b.iter(|| {
             idx.index_note(black_box(path), black_box(&content), black_box(&full));
@@ -126,7 +125,7 @@ fn bench_index_note(c: &mut Criterion) {
     });
 
     // Realistic workflow: write then immediately search (commit cost lands here)
-    let weights = [10.0, 5.0, 2.0, 1.0];
+    let weights = SearchWeights { title: 10.0, headings: 5.0, tags: 2.0, content: 1.0 };
     c.bench_function("index_note + search (write-read cycle)", |b| {
         b.iter(|| {
             idx.index_note(black_box(path), black_box(&content), black_box(&full));
@@ -138,7 +137,7 @@ fn bench_index_note(c: &mut Criterion) {
 
 fn bench_search(c: &mut Criterion) {
     let (idx, settings, _) = setup();
-    let weights = [settings.weight_title, settings.weight_headings, settings.weight_tags, settings.weight_content];
+    let weights = settings.weights();
     let fuzzy = settings.fuzzy_distance;
     let limit = settings.result_limit;
 

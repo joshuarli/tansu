@@ -1,3 +1,11 @@
+use std::path::Path;
+
+pub fn is_markdown(path: &Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("md"))
+}
+
 /// Extension trait for safe string truncation at character boundaries.
 ///
 /// Both methods avoid the "byte index is not a char boundary" panic that

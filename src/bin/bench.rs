@@ -17,7 +17,7 @@ fn main() {
     }
 
     let settings = Settings::load(&dir);
-    let weights = [settings.weight_title, settings.weight_headings, settings.weight_tags, settings.weight_content];
+    let weights = settings.weights();
     let fuzzy = settings.fuzzy_distance;
     let limit = settings.result_limit;
 
@@ -75,8 +75,8 @@ fn main() {
 
     // 6. get_backlinks for a common stem
     let notes = idx.get_all_notes();
-    if let Some((path, _)) = notes.first() {
-        let stem = Path::new(path).file_stem().and_then(|s| s.to_str()).unwrap_or(path);
+    if let Some(note) = notes.first() {
+        let stem = Path::new(&note.path).file_stem().and_then(|s| s.to_str()).unwrap_or(&note.path);
         let label = format!("get_backlinks '{stem}'");
         bench(&label, 100, || {
             let r = idx.get_backlinks(stem);
@@ -85,17 +85,16 @@ fn main() {
     }
 
     // 7. Index a single note (add_doc + commit)
-    let sample_note = notes.iter().find(|(p, _)| {
-        let full = dir.join(p);
-        full.is_file()
+    let sample_note = notes.iter().find(|n| {
+        dir.join(&n.path).is_file()
     });
-    if let Some((path, _)) = sample_note {
-        let full = dir.join(path);
+    if let Some(note) = sample_note {
+        let full = dir.join(&note.path);
         let content = fs::read_to_string(&full).unwrap_or_default();
         let content_len = content.len();
         let label = format!("index_note ({content_len} bytes)");
         bench(&label, 20, || {
-            idx.index_note(path, &content, &full);
+            idx.index_note(&note.path, &content, &full);
         });
     }
 

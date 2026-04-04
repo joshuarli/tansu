@@ -11,10 +11,14 @@ use tantivy::{
     schema::*,
 };
 
-use crate::http;
-use crate::scanner;
-use crate::strip;
+use crate::{http, scanner, strip, util};
 use crate::util::StrExt;
+
+#[derive(Clone)]
+pub struct NoteEntry {
+    pub path: String,
+    pub title: String,
+}
 
 pub struct SearchResult {
     pub path: String,
@@ -22,6 +26,14 @@ pub struct SearchResult {
     pub excerpt: String,
     pub score: f32,
     pub field_scores: FieldScores,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct SearchWeights {
+    pub title: f32,
+    pub headings: f32,
+    pub tags: f32,
+    pub content: f32,
 }
 
 #[derive(Default)]
@@ -53,7 +65,7 @@ struct IndexInner {
     fields: Fields,
     dirty: AtomicBool,
     uncommitted: AtomicBool,
-    notes_cache: Mutex<Option<Vec<(String, String)>>>,
+    notes_cache: Mutex<Option<Vec<NoteEntry>>>,
 }
 
 impl Index {
@@ -167,11 +179,6 @@ impl Index {
         *self.inner.notes_cache.lock().unwrap() = None;
     }
 
-    /// Alias for index_note (all writes are now deferred).
-    pub fn index_note_deferred(&self, rel_path: &str, content: &str, full_path: &Path) {
-        self.index_note(rel_path, content, full_path);
-    }
-
     pub fn remove_note(&self, rel_path: &str) {
         let writer = self.inner.writer.write().unwrap();
         let path_term = tantivy::Term::from_field_text(self.inner.fields.path, rel_path);
@@ -181,16 +188,11 @@ impl Index {
         *self.inner.notes_cache.lock().unwrap() = None;
     }
 
-    /// Alias for remove_note (all writes are now deferred).
-    pub fn remove_note_deferred(&self, rel_path: &str) {
-        self.remove_note(rel_path);
-    }
-
     /// Two-phase search: exact first, fuzzy fallback if <5 results.
     /// `weights` order: [title, headings, tags, content].
     pub fn search(
         &self, query: &str, limit: usize, filter_path: Option<&str>,
-        fuzzy_distance: u8, weights: [f32; 4], score_breakdown: bool,
+        fuzzy_distance: u8, weights: SearchWeights, score_breakdown: bool,
     ) -> Vec<SearchResult> {
         self.ensure_committed();
         self.reload_if_dirty();
@@ -216,14 +218,14 @@ impl Index {
 
     fn build_query(
         &self, terms: &[&str], fuzzy: bool, filter_path: Option<&str>,
-        fuzzy_distance: u8, weights: [f32; 4],
+        fuzzy_distance: u8, weights: SearchWeights,
     ) -> BooleanQuery {
         let f = &self.inner.fields;
         let search_fields = [
-            (f.title, weights[0]),
-            (f.headings, weights[1]),
-            (f.tags, weights[2]),
-            (f.content, weights[3]),
+            (f.title, weights.title),
+            (f.headings, weights.headings),
+            (f.tags, weights.tags),
+            (f.content, weights.content),
         ];
 
         let mut term_queries: Vec<(Occur, Box<dyn tantivy::query::Query>)> = Vec::new();
@@ -272,7 +274,7 @@ impl Index {
         query: &BooleanQuery,
         limit: usize,
         terms: &[&str],
-        weights: [f32; 4],
+        weights: SearchWeights,
         score_breakdown: bool,
     ) -> Vec<SearchResult> {
         let f = &self.inner.fields;
@@ -348,11 +350,10 @@ impl Index {
             .collect()
     }
 
-    pub fn get_all_notes(&self) -> Vec<(String, String)> {
+    pub fn get_all_notes(&self) -> Vec<NoteEntry> {
         self.ensure_committed();
         self.reload_if_dirty();
 
-        // Return cached result if available
         {
             let cache = self.inner.notes_cache.lock().unwrap();
             if let Some(ref notes) = *cache {
@@ -383,7 +384,7 @@ impl Index {
                     .unwrap_or("")
                     .to_string();
                 if !path.is_empty() {
-                    notes.push((path, title));
+                    notes.push(NoteEntry { path, title });
                 }
             }
         }
@@ -395,16 +396,16 @@ impl Index {
 }
 
 /// Compute per-field scores by counting term matches (exact + fuzzy) against stored values.
-fn compute_field_scores(doc: &TantivyDocument, f: &Fields, terms: &[&[u8]], weights: [f32; 4]) -> FieldScores {
+fn compute_field_scores(doc: &TantivyDocument, f: &Fields, terms: &[&[u8]], weights: SearchWeights) -> FieldScores {
     let get = |field: Field| -> &str {
         doc.get_first(field).and_then(|v| v.as_str()).unwrap_or("")
     };
 
     let fields = [
-        (get(f.title), weights[0]),
-        (get(f.headings), weights[1]),
-        (get(f.tags), weights[2]),
-        (get(f.content), weights[3]),
+        (get(f.title), weights.title),
+        (get(f.headings), weights.headings),
+        (get(f.tags), weights.tags),
+        (get(f.content), weights.content),
     ];
 
     let mut scores = [0.0f32; 4];
@@ -611,14 +612,7 @@ impl Index {
                     continue;
                 }
 
-                if !path.is_file() {
-                    continue;
-                }
-                let is_md = path
-                    .extension()
-                    .and_then(|e| e.to_str())
-                    .is_some_and(|ext| ext.eq_ignore_ascii_case("md"));
-                if !is_md {
+                if !path.is_file() || !util::is_markdown(&path) {
                     continue;
                 }
 
@@ -782,7 +776,7 @@ mod tests {
         // get_all_notes triggers ensure_committed + returns the note
         let notes = idx.get_all_notes();
         assert_eq!(notes.len(), 1);
-        assert_eq!(notes[0].0, "test.md");
+        assert_eq!(notes[0].path, "test.md");
         assert!(!idx.inner.uncommitted.load(Ordering::Acquire));
 
         // Second call returns cached result
@@ -796,7 +790,8 @@ mod tests {
 
         // Search also triggers commit
         idx.index_note("test3.md", "unique findme word", &tmp);
-        let results = idx.search("findme", 10, None, 0, [10.0, 5.0, 2.0, 1.0], false);
+        let w = SearchWeights { title: 10.0, headings: 5.0, tags: 2.0, content: 1.0 };
+        let results = idx.search("findme", 10, None, 0, w, false);
         assert!(!results.is_empty());
 
         let _ = fs::remove_dir_all(&dir);

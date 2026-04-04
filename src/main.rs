@@ -53,7 +53,7 @@ struct FieldScoresJson {
 }
 
 #[derive(Serialize)]
-struct NoteEntry<'a> {
+struct NoteListEntry<'a> {
     path: &'a str,
     title: &'a str,
 }
@@ -105,7 +105,6 @@ struct Server {
     watch_rx: mpsc::Receiver<WatchEvent>,
     self_writes: Arc<Mutex<HashSet<PathBuf>>>,
     sse_client: Arc<Mutex<Option<TcpStream>>>,
-    fp: PathBuf,
 }
 
 impl Server {
@@ -118,14 +117,14 @@ impl Server {
                     if let Ok(content) = fs::read_to_string(&path) {
                         let rel = path.strip_prefix(&self.dir).unwrap_or(&path);
                         let rel_str = rel.to_string_lossy();
-                        self.index.index_note_deferred(&rel_str, &content, &path);
+                        self.index.index_note(&rel_str, &content, &path);
                         self.broadcast_sse("changed", &rel_str);
                     }
                 }
                 WatchEvent::Removed(path) => {
                     let rel = path.strip_prefix(&self.dir).unwrap_or(&path);
                     let rel_str = rel.to_string_lossy();
-                    self.index.remove_note_deferred(&rel_str);
+                    self.index.remove_note(&rel_str);
                     self.broadcast_sse("deleted", &rel_str);
                 }
             }
@@ -235,6 +234,7 @@ impl Server {
         headers: &[httparse::Header<'_>], raw_buf: &[u8], header_len: usize,
     ) -> io::Result<()> {
         let path = path_raw.split('?').next().unwrap_or("/");
+        let mut fp = PathBuf::new();
 
         if path.starts_with("/api/") {
             return self.dispatch_api(stream, method, path, path_raw, headers, raw_buf, header_len);
@@ -250,11 +250,11 @@ impl Server {
 
         if path.starts_with("/z-images/") {
             let decoded = percent_decode(path);
-            if !normalize_into(&self.dir, &decoded, &mut self.fp) {
+            if !normalize_into(&self.dir, &decoded, &mut fp) {
                 return write_error(stream, 403, "Forbidden");
             }
-            return match fs::metadata(&self.fp) {
-                Ok(m) if m.is_file() => serve_file_cached(stream, &self.fp, m.len(), mime(&self.fp)),
+            return match fs::metadata(&fp) {
+                Ok(m) if m.is_file() => serve_file_cached(stream, &fp, m.len(), mime(&fp)),
                 _ => write_error(stream, 404, "Not Found"),
             };
         }
@@ -262,11 +262,11 @@ impl Server {
         if path.starts_with("/static/") {
             let decoded = percent_decode(path);
             let static_dir = self.static_dir();
-            if !normalize_into(&static_dir, &decoded.replacen("/static/", "/", 1), &mut self.fp) {
+            if !normalize_into(&static_dir, &decoded.replacen("/static/", "/", 1), &mut fp) {
                 return write_error(stream, 403, "Forbidden");
             }
-            return match fs::metadata(&self.fp) {
-                Ok(m) if m.is_file() => serve_file_cached(stream, &self.fp, m.len(), mime(&self.fp)),
+            return match fs::metadata(&fp) {
+                Ok(m) if m.is_file() => serve_file_cached(stream, &fp, m.len(), mime(&fp)),
                 _ => write_error(stream, 404, "Not Found"),
             };
         }
@@ -350,9 +350,7 @@ impl Server {
         let s = &self.settings;
         let results = self.index.search(
             &q, s.result_limit, filter_path.as_deref(),
-            s.fuzzy_distance,
-            [s.weight_title, s.weight_headings, s.weight_tags, s.weight_content],
-            s.show_score_breakdown,
+            s.fuzzy_distance, s.weights(), s.show_score_breakdown,
         );
         let hits: Vec<SearchHit> = results.iter().map(|r| SearchHit {
             path: &r.path, title: &r.title, excerpt: &r.excerpt, score: r.score,
@@ -490,9 +488,9 @@ impl Server {
         self.mark_self_write(&new_full);
         fs::rename(&old_full, &new_full)?;
 
-        self.index.remove_note_deferred(&req.old_path);
+        self.index.remove_note(&req.old_path);
         if let Ok(content) = fs::read_to_string(&new_full) {
-            self.index.index_note_deferred(&req.new_path, &content, &new_full);
+            self.index.index_note(&req.new_path, &content, &new_full);
         }
 
         let old_stem = Path::new(&req.old_path).file_stem().and_then(|s| s.to_str()).unwrap_or(&req.old_path);
@@ -512,8 +510,11 @@ impl Server {
                 );
                 if new_content != content {
                     revisions::save_revision(&self.dir, note_path, &note_full);
-                    let _ = self.atomic_write(&note_full, new_content.as_bytes());
-                    self.index.index_note_deferred(note_path, &new_content, &note_full);
+                    if let Err(e) = self.atomic_write(&note_full, new_content.as_bytes()) {
+                        eprintln!("rename: failed to update {}: {e}", note_full.display());
+                        continue;
+                    }
+                    self.index.index_note(note_path, &new_content, &note_full);
                     updated.push(note_path.clone());
                 }
             }
@@ -528,8 +529,8 @@ impl Server {
 
     fn api_list_notes(&self, sock: &TcpStream) -> io::Result<()> {
         let notes = self.index.get_all_notes();
-        let entries: Vec<NoteEntry> = notes.iter().map(|(path, title)| {
-            NoteEntry { path, title }
+        let entries: Vec<NoteListEntry> = notes.iter().map(|n| {
+            NoteListEntry { path: &n.path, title: &n.title }
         }).collect();
         respond_json(sock, &entries)
     }
@@ -743,7 +744,6 @@ fn main() {
     let mut srv = Server {
         dir, quiet, index, settings, watch_rx, self_writes,
         sse_client: Arc::new(Mutex::new(None)),
-        fp: PathBuf::new(),
     };
 
     for stream in listener.incoming() {
