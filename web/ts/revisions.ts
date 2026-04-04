@@ -3,33 +3,46 @@ import { computeDiff, renderDiff } from "./diff.ts";
 import { emit } from "./events.ts";
 import { relativeTime } from "./util.ts";
 
-let panelEl: HTMLElement | null = null;
+let hostEl: HTMLElement | null = null;
 let currentPath: string | null = null;
-let getCurrentContent: (() => string) | null = null;
+let getContent: (() => string) | null = null;
+let onHide: (() => void) | null = null;
 
-export function toggleRevisions(path: string, getContent?: () => string) {
-  if (panelEl && currentPath === path) {
+interface RevisionsOpts {
+  path: string;
+  host: HTMLElement;
+  getCurrentContent: () => string;
+  onHide: () => void;
+}
+
+export function toggleRevisions(opts: RevisionsOpts) {
+  if (hostEl && currentPath === opts.path) {
     hideRevisions();
     return;
   }
-  if (getContent) getCurrentContent = getContent;
-  showRevisions(path);
+  getContent = opts.getCurrentContent;
+  onHide = opts.onHide;
+  showRevisions(opts.path, opts.host);
 }
 
 export function hideRevisions() {
-  if (panelEl) {
-    panelEl.remove();
-    panelEl = null;
+  if (hostEl) {
+    hostEl.innerHTML = "";
+    hostEl = null;
     currentPath = null;
+    if (onHide) onHide();
   }
 }
 
-async function showRevisions(path: string) {
+export function isRevisionsOpen(): boolean {
+  return hostEl !== null;
+}
+
+async function showRevisions(path: string, host: HTMLElement) {
   hideRevisions();
   currentPath = path;
-
-  const panel = document.createElement("div");
-  panel.className = "revisions-panel";
+  hostEl = host;
+  host.innerHTML = "";
 
   const header = document.createElement("div");
   header.className = "revisions-header";
@@ -39,16 +52,13 @@ async function showRevisions(path: string) {
   closeBtn.style.cursor = "pointer";
   closeBtn.onclick = hideRevisions;
   header.appendChild(closeBtn);
-  panel.appendChild(header);
+  host.appendChild(header);
 
   const loading = document.createElement("div");
   loading.textContent = "Loading...";
   loading.style.fontSize = "13px";
   loading.style.color = "#57606a";
-  panel.appendChild(loading);
-
-  document.body.appendChild(panel);
-  panelEl = panel;
+  host.appendChild(loading);
 
   try {
     const timestamps = await listRevisions(path);
@@ -59,7 +69,7 @@ async function showRevisions(path: string) {
       empty.textContent = "No revisions yet.";
       empty.style.fontSize = "13px";
       empty.style.color = "#57606a";
-      panel.appendChild(empty);
+      host.appendChild(empty);
       return;
     }
 
@@ -86,16 +96,17 @@ async function showRevisions(path: string) {
       item.append(time, restore);
       item.onclick = async () => {
         const revContent = await getRevision(path, ts);
-        const preview = panel.querySelector(".revision-preview");
+        const preview = host.querySelector(".revision-preview");
         if (preview) preview.remove();
-        const current = getCurrentContent ? getCurrentContent() : "";
-        const hunks = computeDiff(revContent, current);
+        const current = getContent ? getContent() : "";
+        // Diff from current → revision: shows what restoring would change
+        const hunks = computeDiff(current, revContent);
         const diffEl = renderDiff(hunks);
         diffEl.classList.add("revision-preview");
-        panel.appendChild(diffEl);
+        host.appendChild(diffEl);
       };
 
-      panel.appendChild(item);
+      host.appendChild(item);
     }
   } catch {
     loading.textContent = "Failed to load revisions.";

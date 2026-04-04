@@ -15,7 +15,7 @@ lint-ts:
 	bun run oxlint web/ts/
 
 ts: lint-ts
-	bun run oxfmt --check web/ts/
+	bun run oxfmt web/ts/
 	bunx tsc --noEmit --pretty false
 	bun build web/ts/main.ts --outfile web/static/app.js --target browser --format esm
 

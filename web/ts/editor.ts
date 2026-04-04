@@ -10,7 +10,7 @@ import { on } from "./events.ts";
 import { handleImagePaste } from "./image-paste.ts";
 import { checkInlineTransform } from "./inline-transforms.ts";
 import { renderMarkdown } from "./markdown.ts";
-import { toggleRevisions, hideRevisions } from "./revisions.ts";
+import { toggleRevisions, hideRevisions, isRevisionsOpen } from "./revisions.ts";
 import { domToMarkdown } from "./serialize.ts";
 import { markDirty, markClean, getActiveTab } from "./tabs.ts";
 import { checkBlockInputTransform, handleBlockTransform } from "./transforms.ts";
@@ -20,6 +20,7 @@ let container: HTMLElement | null = null;
 let contentEl: HTMLElement | null = null;
 let sourceEl: HTMLTextAreaElement | null = null;
 let backlinksEl: HTMLElement | null = null;
+let revisionsEl: HTMLElement | null = null;
 let isSourceMode = false;
 let currentPath: string | null = null;
 
@@ -61,7 +62,23 @@ export function showEditor(path: string, content: string) {
   const revBtn = document.createElement("button");
   revBtn.textContent = "Revisions";
   revBtn.onclick = () => {
-    if (currentPath) toggleRevisions(currentPath, getCurrentContent);
+    if (currentPath && revisionsEl) {
+      toggleRevisions({
+        path: currentPath,
+        host: revisionsEl,
+        getCurrentContent: getCurrentContent,
+        onHide: () => {
+          if (revisionsEl) revisionsEl.style.display = "none";
+          if (isSourceMode && sourceEl) sourceEl.style.display = "";
+          else if (contentEl) contentEl.style.display = "";
+        },
+      });
+      if (isRevisionsOpen()) {
+        if (contentEl) contentEl.style.display = "none";
+        if (sourceEl) sourceEl.style.display = "none";
+        if (revisionsEl) revisionsEl.style.display = "";
+      }
+    }
   };
 
   toolbar.append(sourceBtn, revBtn);
@@ -77,6 +94,11 @@ export function showEditor(path: string, content: string) {
   sourceEl.className = "editor-source";
   sourceEl.style.display = "none";
   container.appendChild(sourceEl);
+
+  revisionsEl = document.createElement("div");
+  revisionsEl.className = "revisions-container";
+  revisionsEl.style.display = "none";
+  container.appendChild(revisionsEl);
 
   backlinksEl = document.createElement("div");
   backlinksEl.className = "backlinks";
@@ -105,6 +127,7 @@ export function hideEditor() {
   }
   contentEl = null;
   sourceEl = null;
+  revisionsEl = null;
   const emptyState = document.getElementById("empty-state");
   if (emptyState) emptyState.style.display = "flex";
 }
@@ -184,6 +207,7 @@ function loadContent(markdown: string) {
 
 function toggleSourceMode() {
   if (!contentEl || !sourceEl) return;
+  hideRevisions();
 
   if (isSourceMode) {
     const md = sourceEl.value;

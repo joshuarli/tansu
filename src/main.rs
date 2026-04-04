@@ -453,6 +453,17 @@ impl Server {
             );
         }
 
+        // Skip revision + write if content hasn't changed
+        let current_content = fs::read_to_string(&full).unwrap_or_default();
+        if current_content == req.content {
+            return respond_json(
+                stream,
+                &MtimeResponse {
+                    mtime: current_mtime,
+                },
+            );
+        }
+
         revisions::save_revision(&self.dir, &rel, &full);
         self.atomic_write(&full, req.content.as_bytes())?;
         self.index.index_note(&rel, &req.content, &full);

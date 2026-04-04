@@ -119,6 +119,8 @@ body {
   max-width: 800px;
   padding: 40px 20px;
   flex: 1;
+  display: flex;
+  flex-direction: column;
 }
 
 .editor-toolbar {
@@ -163,6 +165,7 @@ body {
 
 .editor-source {
   width: 100%;
+  flex: 1;
   min-height: 300px;
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -170,7 +173,7 @@ body {
   font-family: var(--mono);
   font-size: 14px;
   line-height: 1.6;
-  resize: vertical;
+  resize: none;
   color: var(--fg);
   background: var(--bg);
 }
@@ -504,22 +507,10 @@ body {
   text-decoration: underline;
 }
 
-/* Revisions panel */
-.revisions-panel {
-  position: fixed;
-  right: 0;
-  top: 37px;
-  bottom: 0;
-  width: 300px;
-  background: var(--bg);
-  border-left: 1px solid var(--border);
+/* Revisions (inline in editor-container) */
+.revisions-container {
+  flex: 1;
   overflow-y: auto;
-  z-index: 50;
-  padding: 16px;
-}
-
-.revisions-panel.hidden {
-  display: none;
 }
 
 .revisions-header {
