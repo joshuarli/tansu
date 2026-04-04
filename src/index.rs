@@ -206,7 +206,12 @@ impl Index {
         self.reload_if_dirty();
         let searcher = self.inner.reader.searcher();
 
-        let terms: Vec<&str> = query.split_whitespace().collect();
+        // Split on non-alphanumeric chars to match tantivy's default tokenizer,
+        // so "jpeg-xl" and "some_function" match indexed tokens
+        let terms: Vec<&str> = query
+            .split(|c: char| !c.is_alphanumeric())
+            .filter(|s| !s.is_empty())
+            .collect();
         if terms.is_empty() {
             return Vec::new();
         }
@@ -539,11 +544,7 @@ impl Iterator for WordIter<'_> {
             return None;
         }
         let start = self.pos;
-        while self.pos < self.bytes.len()
-            && (self.bytes[self.pos].is_ascii_alphanumeric()
-                || self.bytes[self.pos] == b'-'
-                || self.bytes[self.pos] == b'_')
-        {
+        while self.pos < self.bytes.len() && self.bytes[self.pos].is_ascii_alphanumeric() {
             self.pos += 1;
         }
         Some((start, self.pos))
@@ -798,7 +799,8 @@ mod tests {
     #[test]
     fn word_iter_basic() {
         let words: Vec<_> = WordIter::new("hello world-test foo").collect();
-        assert_eq!(words, vec![(0, 5), (6, 16), (17, 20)]);
+        // Hyphens and underscores split words, matching tantivy's tokenizer
+        assert_eq!(words, vec![(0, 5), (6, 11), (12, 16), (17, 20)]);
     }
 
     #[test]
@@ -840,6 +842,40 @@ mod tests {
         };
         let results = idx.search("findme", 10, None, 0, w, false);
         assert!(!results.is_empty());
+
+        let _ = fs::remove_dir_all(&dir);
+        let _ = fs::remove_file(&tmp);
+    }
+
+    #[test]
+    fn search_hyphenated_and_underscored() {
+        let dir =
+            std::env::temp_dir().join(format!("tansu_test_hyphen_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let idx = Index::open_or_create(&dir).unwrap();
+        let tmp = std::env::temp_dir().join("tansu_test_hyphen_note.md");
+        fs::write(&tmp, "JPEG-XL support and some_function call").unwrap();
+        idx.index_note("test.md", "JPEG-XL support and some_function call", &tmp);
+
+        let w = SearchWeights {
+            title: 10.0,
+            headings: 5.0,
+            tags: 2.0,
+            content: 1.0,
+        };
+
+        // "jpeg-xl" should find the document (hyphen treated as separator)
+        let r = idx.search("jpeg-xl", 10, None, 0, w, false);
+        assert!(!r.is_empty(), "jpeg-xl should match JPEG-XL");
+
+        // "JPEG-XL" should also work (case insensitive)
+        let r = idx.search("JPEG-XL", 10, None, 0, w, false);
+        assert!(!r.is_empty(), "JPEG-XL should match");
+
+        // "some_function" should find the document (underscore treated as separator)
+        let r = idx.search("some_function", 10, None, 0, w, false);
+        assert!(!r.is_empty(), "some_function should match");
 
         let _ = fs::remove_dir_all(&dir);
         let _ = fs::remove_file(&tmp);
