@@ -12,7 +12,7 @@ check:
 
 dev:
 	bun build web/ts/main.ts --outfile web/static/app.js --watch &
-	cargo run -- $(NOTES_DIR) --port 3000
+	cargo run --bin tansu -- $(NOTES_DIR) --port 3000
 
 NOTES_DIR ?= ~/notes
 

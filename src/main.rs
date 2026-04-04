@@ -159,16 +159,11 @@ impl Server {
     }
 
     fn handle(&mut self, mut stream: TcpStream) -> io::Result<()> {
-        use std::time::Duration;
-
         let mut buf = [0u8; 8192];
         let mut pos = 0usize;
 
         loop {
             self.drain_watch_events();
-
-            // Keep-alive timeout: wait up to 10s for the next request
-            stream.set_read_timeout(Some(Duration::from_secs(10)))?;
 
             // Read until we have complete headers
             loop {
@@ -191,9 +186,6 @@ impl Server {
                         let method = req.method.unwrap_or("").to_string();
                         let path_raw = req.path.unwrap_or("/").to_string();
 
-                        // Disable timeout for dispatch (body reads, sendfile, etc.)
-                        stream.set_read_timeout(None)?;
-
                         let start = Instant::now();
                         let result = self.dispatch(
                             &mut stream, &method, &path_raw,
@@ -211,16 +203,18 @@ impl Server {
                             return Ok(());
                         }
 
-                        // Carry over any bytes past this request's body
+                        // Carry over any pipelined bytes past this request
                         let body_len = content_length(&req.headers);
                         let consumed = header_len + body_len;
                         if consumed < pos {
                             buf.copy_within(consumed..pos, 0);
                             pos -= consumed;
                         } else {
-                            pos = 0;
+                            // No pipelined data — return to accept loop so other
+                            // connections aren't starved (single-threaded server)
+                            return Ok(());
                         }
-                        break; // back to outer loop for next request
+                        break; // handle the pipelined request
                     }
                     Ok(httparse::Status::Partial) => continue,
                     Err(_) => return write_error(&stream, 400, "Bad Request"),

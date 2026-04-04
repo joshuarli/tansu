@@ -156,7 +156,7 @@ pub fn write_headers(
              Content-Type: {ct}\r\n\
              Content-Length: {cl}\r\n\
              Cache-Control: no-store\r\n\
-             Connection: keep-alive\r\n\
+             Connection: close\r\n\
              \r\n"
         )?;
         c.position() as usize
@@ -175,7 +175,7 @@ pub fn write_error(mut sock: &TcpStream, code: u16, msg: &str) -> io::Result<()>
              Content-Type: text/plain\r\n\
              Content-Length: {body_len}\r\n\
              Cache-Control: no-store\r\n\
-             Connection: keep-alive\r\n\
+             Connection: close\r\n\
              \r\n\
              {code} {msg}"
         )?;
@@ -232,7 +232,7 @@ pub fn serve_file_cached(sock: &TcpStream, path: &Path, len: u64, content_type: 
              Content-Type: {content_type}\r\n\
              Content-Length: {len}\r\n\
              Cache-Control: public, max-age=3600\r\n\
-             Connection: keep-alive\r\n\
+             Connection: close\r\n\
              \r\n"
         )?;
         c.position() as usize
