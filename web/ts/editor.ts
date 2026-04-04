@@ -1,14 +1,14 @@
-import { saveNote, getBacklinks, uploadImage } from './api.ts';
+import { saveNote } from './api.ts';
 import { markDirty, markClean, getActiveTab, openTab } from './tabs.ts';
 import { toggleRevisions, hideRevisions } from './revisions.ts';
 import { on } from './events.ts';
-import { stemFromPath } from './util.ts';
-import { merge3 } from './merge.ts';
 import { domToMarkdown } from './serialize.ts';
 import { handleBlockTransform } from './transforms.ts';
 import { checkWikiLinkTrigger, hideAutocomplete, invalidateNoteCache as _invalidateNoteCache } from './autocomplete.ts';
 import { renderMarkdown } from './markdown.ts';
-
+import { showConflictBanner, handleReloadConflict } from './conflict.ts';
+import { handleImagePaste } from './image-paste.ts';
+import { loadBacklinks } from './backlinks.ts';
 
 let editorArea: HTMLElement;
 let container: HTMLElement | null = null;
@@ -36,7 +36,6 @@ export function showEditor(path: string, content: string) {
   isSourceMode = false;
   hideRevisions();
   hideAutocomplete();
-
 
   const emptyState = document.getElementById('empty-state');
   editorArea.innerHTML = '';
@@ -81,7 +80,7 @@ export function showEditor(path: string, content: string) {
 
   loadContent(content);
   setupEditorEvents();
-  loadBacklinks(path);
+  loadBacklinks(backlinksEl, path);
 }
 
 export function hideEditor() {
@@ -115,7 +114,9 @@ export async function saveCurrentNote() {
   const result = await saveNote(currentPath, content, tab.mtime);
 
   if (result.conflict) {
-    showConflictBanner(result.content ?? '', result.mtime);
+    if (container) {
+      showConflictBanner(container, currentPath, result.content ?? '', result.mtime, loadContent, getCurrentContent);
+    }
     return;
   }
 
@@ -132,55 +133,9 @@ export function reloadFromDisk(content: string, mtime: number) {
     return;
   }
 
-  // Dirty tab: attempt 3-way merge
-  const base = tab.content;
-  const ours = getCurrentContent();
-  const theirs = content;
-
-  const merged = merge3(base, ours, theirs);
-  if (merged !== null) {
-    loadContent(merged);
-    tab.content = content;
-    tab.mtime = mtime;
-    return;
+  if (container) {
+    handleReloadConflict(tab, container, currentPath, content, mtime, loadContent, getCurrentContent);
   }
-
-  showConflictBanner(content, mtime);
-}
-
-function showConflictBanner(diskContent: string, diskMtime: number) {
-  if (!container) return;
-
-  container.querySelector('.conflict-banner')?.remove();
-
-  const banner = document.createElement('div');
-  banner.className = 'conflict-banner';
-
-  const msg = document.createElement('span');
-  msg.textContent = 'File changed externally \u2014 conflicts detected.';
-
-  const keepBtn = document.createElement('button');
-  keepBtn.textContent = 'Keep mine';
-  keepBtn.onclick = () => {
-    banner.remove();
-    if (currentPath) {
-      const content = getCurrentContent();
-      saveNote(currentPath, content, 0).then(r => {
-        if (currentPath) markClean(currentPath, content, r.mtime);
-      });
-    }
-  };
-
-  const takeBtn = document.createElement('button');
-  takeBtn.textContent = 'Take theirs';
-  takeBtn.onclick = () => {
-    banner.remove();
-    loadContent(diskContent);
-    if (currentPath) markClean(currentPath, diskContent, diskMtime);
-  };
-
-  banner.append(msg, keepBtn, takeBtn);
-  container.insertBefore(banner, container.firstChild);
 }
 
 function loadContent(markdown: string) {
@@ -190,7 +145,6 @@ function loadContent(markdown: string) {
     contentEl.innerHTML = renderMarkdown(markdown);
   }
 }
-
 
 function toggleSourceMode() {
   if (!contentEl || !sourceEl) return;
@@ -257,7 +211,7 @@ function setupEditorEvents() {
 
     const imageItem = Array.from(clipData.items).find(item => item.type.startsWith('image/'));
     if (imageItem) {
-      handleImagePaste(imageItem);
+      handleImagePaste(imageItem, currentPath);
       return;
     }
 
@@ -281,69 +235,5 @@ function wrapInline(marker: string) {
   const text = range.toString();
   if (text) {
     document.execCommand('insertText', false, `${marker}${text}${marker}`);
-  }
-}
-
-async function handleImagePaste(item: DataTransferItem) {
-  const file = item.getAsFile();
-  if (!file) return;
-
-  const bitmap = await createImageBitmap(file);
-  const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
-  const ctx = canvas.getContext('2d')!;
-  ctx.drawImage(bitmap, 0, 0);
-  const blob = await canvas.convertToBlob({ type: 'image/webp', quality: 0.85 });
-  bitmap.close();
-
-  const now = new Date();
-  const ts = now.getFullYear().toString()
-    + String(now.getMonth() + 1).padStart(2, '0')
-    + String(now.getDate()).padStart(2, '0')
-    + String(now.getHours()).padStart(2, '0')
-    + String(now.getMinutes()).padStart(2, '0')
-    + String(now.getSeconds()).padStart(2, '0');
-
-  const noteName = currentPath ? stemFromPath(currentPath) : 'image';
-  const filename = `${noteName} ${ts}.webp`;
-
-  try {
-    const savedName = await uploadImage(blob, filename);
-    document.execCommand('insertText', false, `![[${savedName}]]`);
-    if (currentPath) markDirty(currentPath);
-  } catch (e) {
-    console.error('Image upload failed:', e);
-  }
-}
-
-async function loadBacklinks(path: string) {
-  if (!backlinksEl) return;
-  try {
-    const links = await getBacklinks(path);
-    if (links.length === 0) {
-      backlinksEl.style.display = 'none';
-      return;
-    }
-
-    backlinksEl.style.display = '';
-    backlinksEl.innerHTML = '';
-
-    const header = document.createElement('div');
-    header.className = 'backlinks-header';
-    header.textContent = `${links.length} backlink${links.length > 1 ? 's' : ''}`;
-    backlinksEl.appendChild(header);
-
-    const list = document.createElement('div');
-    list.className = 'backlinks-list';
-    for (const linkPath of links) {
-      const item = document.createElement('div');
-      item.className = 'backlink-item';
-      item.textContent = stemFromPath(linkPath);
-      item.onclick = () => openTab(linkPath);
-      list.appendChild(item);
-    }
-    backlinksEl.appendChild(list);
-  } catch (e) {
-    console.warn('Failed to load backlinks:', e);
-    backlinksEl.style.display = 'none';
   }
 }
