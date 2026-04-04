@@ -31,9 +31,9 @@ export interface Palette {
 }
 
 export function createPalette(): Palette {
-  const overlay = document.getElementById('palette-overlay')!;
-  const input = document.getElementById('palette-input')! as HTMLInputElement;
-  const listEl = document.getElementById('palette-list')!;
+  const overlay = document.getElementById("palette-overlay")!;
+  const input = document.getElementById("palette-input")! as HTMLInputElement;
+  const listEl = document.getElementById("palette-list")!;
 
   let isOpen = false;
   let selectedIndex = 0;
@@ -42,30 +42,30 @@ export function createPalette(): Palette {
   function getFiltered(): Command[] {
     const q = input.value.trim().toLowerCase();
     if (!q) return commands;
-    return commands.filter(c => c.label.toLowerCase().includes(q));
+    return commands.filter((c) => c.label.toLowerCase().includes(q));
   }
 
   function updateSelection() {
     const items = listEl.children;
     for (let i = 0; i < items.length; i++) {
-      items[i]!.classList.toggle('selected', i === selectedIndex);
+      items[i]!.classList.toggle("selected", i === selectedIndex);
     }
-    items[selectedIndex]?.scrollIntoView({ block: 'nearest' });
+    items[selectedIndex]?.scrollIntoView({ block: "nearest" });
   }
 
   function renderList() {
     const filtered = getFiltered();
-    listEl.innerHTML = '';
+    listEl.innerHTML = "";
     filtered.forEach((cmd, i) => {
-      const el = document.createElement('div');
-      el.className = 'palette-item' + (i === selectedIndex ? ' selected' : '');
+      const el = document.createElement("div");
+      el.className = "palette-item" + (i === selectedIndex ? " selected" : "");
 
-      const label = document.createElement('span');
-      label.className = 'palette-label';
+      const label = document.createElement("span");
+      label.className = "palette-label";
       label.textContent = cmd.label;
 
-      const shortcut = document.createElement('span');
-      shortcut.className = 'palette-shortcut';
+      const shortcut = document.createElement("span");
+      shortcut.className = "palette-shortcut";
       shortcut.textContent = cmd.shortcut;
 
       el.append(label, shortcut);
@@ -79,8 +79,8 @@ export function createPalette(): Palette {
 
   function open() {
     isOpen = true;
-    overlay.classList.remove('hidden');
-    input.value = '';
+    overlay.classList.remove("hidden");
+    input.value = "";
     selectedIndex = 0;
     renderList();
     input.focus();
@@ -88,7 +88,7 @@ export function createPalette(): Palette {
 
   function close() {
     isOpen = false;
-    overlay.classList.add('hidden');
+    overlay.classList.add("hidden");
     input.blur();
   }
 
@@ -97,35 +97,36 @@ export function createPalette(): Palette {
     else open();
   }
 
-  input.addEventListener('input', () => {
+  input.addEventListener("input", () => {
     selectedIndex = 0;
     renderList();
   });
 
-  input.addEventListener('keydown', (e) => {
+  input.addEventListener("keydown", (e) => {
     const filtered = getFiltered();
-    if (e.key === 'ArrowDown') {
+    if (e.key === "ArrowDown") {
       e.preventDefault();
       selectedIndex = (selectedIndex + 1) % Math.max(filtered.length, 1);
       updateSelection();
-    } else if (e.key === 'ArrowUp') {
+    } else if (e.key === "ArrowUp") {
       e.preventDefault();
-      selectedIndex = (selectedIndex - 1 + Math.max(filtered.length, 1)) % Math.max(filtered.length, 1);
+      selectedIndex =
+        (selectedIndex - 1 + Math.max(filtered.length, 1)) % Math.max(filtered.length, 1);
       updateSelection();
-    } else if (e.key === 'Enter') {
+    } else if (e.key === "Enter") {
       e.preventDefault();
       const cmd = filtered[selectedIndex];
       if (cmd) {
         close();
         cmd.action();
       }
-    } else if (e.key === 'Escape') {
+    } else if (e.key === "Escape") {
       e.preventDefault();
       close();
     }
   });
 
-  overlay.addEventListener('click', (e) => {
+  overlay.addEventListener("click", (e) => {
     if (e.target === overlay) close();
   });
 
@@ -134,7 +135,9 @@ export function createPalette(): Palette {
     open,
     close,
     isOpen: () => isOpen,
-    registerCommands(cmds: Command[]) { commands = cmds; },
+    registerCommands(cmds: Command[]) {
+      commands = cmds;
+    },
     getCommands: () => commands,
   };
 }

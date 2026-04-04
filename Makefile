@@ -1,6 +1,7 @@
 build: check build-ts build-rs
 
 build-ts:
+	bun run oxfmt --check web/ts/
 	bun build web/ts/main.ts --outfile web/static/app.js --minify
 
 build-rs:
@@ -9,6 +10,12 @@ build-rs:
 check:
 	bunx tsc
 	cargo check
+
+lint-ts:
+	bun run oxlint web/ts/
+
+fmt-ts:
+	bun run oxfmt web/ts/
 
 dev:
 	bun build web/ts/main.ts --outfile web/static/app.js --watch &

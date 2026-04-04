@@ -16,17 +16,17 @@ const enum Hl {
 }
 
 const hlClass: (string | null)[] = [
-  null,        // Normal
-  'hl-kw',     // Keyword
-  'hl-type',   // Type
-  'hl-str',    // String
-  'hl-cmt',    // Comment
-  'hl-num',    // Number
-  'hl-brk',    // Bracket
-  'hl-op',     // Operator
-  'hl-fn',     // Function
-  'hl-const',  // Constant
-  'hl-macro',  // Macro
+  null, // Normal
+  "hl-kw", // Keyword
+  "hl-type", // Type
+  "hl-str", // String
+  "hl-cmt", // Comment
+  "hl-num", // Number
+  "hl-brk", // Bracket
+  "hl-op", // Operator
+  "hl-fn", // Function
+  "hl-const", // Constant
+  "hl-macro", // Macro
 ];
 
 const enum State {
@@ -53,24 +53,39 @@ interface Rules {
 }
 
 function isSep(c: number): boolean {
-  return (c <= 0x20) || // whitespace/control
-    c === 0x2C || c === 0x2E || // , .
-    c === 0x28 || c === 0x29 || // ( )
-    c === 0x2B || c === 0x2D || // + -
-    c === 0x2F || c === 0x2A || // / *
-    c === 0x3D || c === 0x7E || // = ~
-    c === 0x25 || c === 0x3C || // % <
-    c === 0x3E || c === 0x5B || // > [
-    c === 0x5D || c === 0x7B || // ] {
-    c === 0x7D || c === 0x3B || // } ;
-    c === 0x3A || c === 0x26 || // : &
-    c === 0x7C || c === 0x21 || // | !
-    c === 0x5E || c === 0x40 || // ^ @
-    c === 0x23 || c === 0x3F;   // # ?
+  return (
+    c <= 0x20 || // whitespace/control
+    c === 0x2c ||
+    c === 0x2e || // , .
+    c === 0x28 ||
+    c === 0x29 || // ( )
+    c === 0x2b ||
+    c === 0x2d || // + -
+    c === 0x2f ||
+    c === 0x2a || // / *
+    c === 0x3d ||
+    c === 0x7e || // = ~
+    c === 0x25 ||
+    c === 0x3c || // % <
+    c === 0x3e ||
+    c === 0x5b || // > [
+    c === 0x5d ||
+    c === 0x7b || // ] {
+    c === 0x7d ||
+    c === 0x3b || // } ;
+    c === 0x3a ||
+    c === 0x26 || // : &
+    c === 0x7c ||
+    c === 0x21 || // | !
+    c === 0x5e ||
+    c === 0x40 || // ^ @
+    c === 0x23 ||
+    c === 0x3f
+  ); // # ?
 }
 
 function isAlpha(c: number): boolean {
-  return (c >= 0x41 && c <= 0x5A) || (c >= 0x61 && c <= 0x7A) || c === 0x5F;
+  return (c >= 0x41 && c <= 0x5a) || (c >= 0x61 && c <= 0x7a) || c === 0x5f;
 }
 
 function isAlnum(c: number): boolean {
@@ -82,7 +97,7 @@ function isDigit(c: number): boolean {
 }
 
 function isUpper(c: number): boolean {
-  return c >= 0x41 && c <= 0x5A;
+  return c >= 0x41 && c <= 0x5a;
 }
 
 function startsWith(src: string, needle: string, pos: number): boolean {
@@ -96,7 +111,8 @@ function startsWith(src: string, needle: string, pos: number): boolean {
 // Binary search on sorted keyword list
 function kwSearch(src: string, start: number, end: number, words: string[]): boolean {
   const len = end - start;
-  let lo = 0, hi = words.length - 1;
+  let lo = 0,
+    hi = words.length - 1;
   while (lo <= hi) {
     const mid = (lo + hi) >>> 1;
     const w = words[mid]!;
@@ -140,7 +156,8 @@ function buildHl(src: string, st: HlState, rules: Rules): Uint8Array {
   } else if (st.state === State.MultiLineString) {
     const [, close] = rules.strings[st.stringIdx]!;
     while (i < len) {
-      if (src.charCodeAt(i) === 0x5C && i + 1 < len) { // backslash
+      if (src.charCodeAt(i) === 0x5c && i + 1 < len) {
+        // backslash
         hl[i] = Hl.String;
         hl[i + 1] = Hl.String;
         i += 2;
@@ -202,7 +219,8 @@ function buildHl(src: string, st: HlState, rules: Rules): Uint8Array {
         i += open.length;
         let found = false;
         while (i < len) {
-          if (src.charCodeAt(i) === 0x5C && i + 1 < len) { // backslash escape
+          if (src.charCodeAt(i) === 0x5c && i + 1 < len) {
+            // backslash escape
             i += 2;
             continue;
           }
@@ -232,13 +250,16 @@ function buildHl(src: string, st: HlState, rules: Rules): Uint8Array {
     const c = src.charCodeAt(i);
 
     // Numbers
-    if (rules.highlightNumbers && prevSep &&
-        (isDigit(c) || (c === 0x2E && i + 1 < len && isDigit(src.charCodeAt(i + 1))))) {
+    if (
+      rules.highlightNumbers &&
+      prevSep &&
+      (isDigit(c) || (c === 0x2e && i + 1 < len && isDigit(src.charCodeAt(i + 1))))
+    ) {
       const start = i;
       i++;
       while (i < len) {
         const d = src.charCodeAt(i);
-        if (isAlnum(d) || d === 0x5F || d === 0x2E) i++;
+        if (isAlnum(d) || d === 0x5f || d === 0x2e) i++;
         else break;
       }
       hl.fill(Hl.Number, start, i);
@@ -251,25 +272,32 @@ function buildHl(src: string, st: HlState, rules: Rules): Uint8Array {
       const start = i;
       i++;
       while (i < len && isAlnum(src.charCodeAt(i))) i++;
-      const ident = kwSearch(src, start, i, rules.keywords) ? Hl.Keyword
-        : kwSearch(src, start, i, rules.types) ? Hl.Type
-        : null;
+      const ident = kwSearch(src, start, i, rules.keywords)
+        ? Hl.Keyword
+        : kwSearch(src, start, i, rules.types)
+          ? Hl.Type
+          : null;
       if (ident !== null) {
         hl.fill(ident, start, i);
         prevSep = false;
         continue;
       }
       // Bang macros (Rust)
-      if (rules.highlightBangMacros && i < len &&
-          src.charCodeAt(i) === 0x21 && // !
-          (i + 1 >= len || src.charCodeAt(i + 1) !== 0x3D)) { // not !=
+      if (
+        rules.highlightBangMacros &&
+        i < len &&
+        src.charCodeAt(i) === 0x21 && // !
+        (i + 1 >= len || src.charCodeAt(i + 1) !== 0x3d)
+      ) {
+        // not !=
         hl.fill(Hl.Macro, start, i + 1);
         i++;
         prevSep = true;
         continue;
       }
       // Function calls
-      if (rules.highlightFnCalls && i < len && src.charCodeAt(i) === 0x28) { // (
+      if (rules.highlightFnCalls && i < len && src.charCodeAt(i) === 0x28) {
+        // (
         hl.fill(Hl.Function, start, i);
         prevSep = true;
         continue;
@@ -281,7 +309,10 @@ function buildHl(src: string, st: HlState, rules: Rules): Uint8Array {
         for (let j = start; j < i; j++) {
           const b = src.charCodeAt(j);
           if (isUpper(b)) hasLetter = true;
-          else if (!isDigit(b) && b !== 0x5F) { allUpper = false; break; }
+          else if (!isDigit(b) && b !== 0x5f) {
+            allUpper = false;
+            break;
+          }
         }
         if (allUpper && hasLetter) hl.fill(Hl.Constant, start, i);
       }
@@ -304,7 +335,7 @@ function buildHl(src: string, st: HlState, rules: Rules): Uint8Array {
     if (matched) continue;
 
     // Brackets
-    if (c === 0x28 || c === 0x29 || c === 0x5B || c === 0x5D || c === 0x7B || c === 0x7D) {
+    if (c === 0x28 || c === 0x29 || c === 0x5b || c === 0x5d || c === 0x7b || c === 0x7d) {
       hl[i] = Hl.Bracket;
     }
 
@@ -317,24 +348,24 @@ function buildHl(src: string, st: HlState, rules: Rules): Uint8Array {
 }
 
 function applyHlHtml(src: string, hl: Uint8Array): string {
-  let out = '';
+  let out = "";
   let cur = Hl.Normal;
   for (let i = 0; i < src.length; i++) {
     const h: Hl = i < hl.length ? hl[i]! : Hl.Normal;
     if (h !== cur) {
-      if (cur !== Hl.Normal) out += '</span>';
+      if (cur !== Hl.Normal) out += "</span>";
       const cls = hlClass[h];
       if (cls) out += `<span class="${cls}">`;
       cur = h;
     }
     const c = src.charCodeAt(i);
-    if (c === 0x26) out += '&amp;';
-    else if (c === 0x3C) out += '&lt;';
-    else if (c === 0x3E) out += '&gt;';
-    else if (c === 0x22) out += '&quot;';
+    if (c === 0x26) out += "&amp;";
+    else if (c === 0x3c) out += "&lt;";
+    else if (c === 0x3e) out += "&gt;";
+    else if (c === 0x22) out += "&quot;";
     else out += src[i];
   }
-  if (cur !== Hl.Normal) out += '</span>';
+  if (cur !== Hl.Normal) out += "</span>";
   return out;
 }
 
@@ -343,25 +374,25 @@ export function highlightCode(code: string, lang: string): string {
   const rules = rulesForLang(lang);
   if (!rules) return escapeHtmlSimple(code);
 
-  const lines = code.split('\n');
+  const lines = code.split("\n");
   const st: HlState = { state: State.Normal, stringIdx: 0 };
   const parts: string[] = [];
   for (let i = 0; i < lines.length; i++) {
-    if (i > 0) parts.push('\n');
+    if (i > 0) parts.push("\n");
     const hl = buildHl(lines[i]!, st, rules);
     parts.push(applyHlHtml(lines[i]!, hl));
   }
-  return parts.join('');
+  return parts.join("");
 }
 
 function escapeHtmlSimple(s: string): string {
-  let out = '';
+  let out = "";
   for (let i = 0; i < s.length; i++) {
     const c = s.charCodeAt(i);
-    if (c === 0x26) out += '&amp;';
-    else if (c === 0x3C) out += '&lt;';
-    else if (c === 0x3E) out += '&gt;';
-    else if (c === 0x22) out += '&quot;';
+    if (c === 0x26) out += "&amp;";
+    else if (c === 0x3c) out += "&lt;";
+    else if (c === 0x3e) out += "&gt;";
+    else if (c === 0x22) out += "&quot;";
     else out += s[i];
   }
   return out;
@@ -370,151 +401,492 @@ function escapeHtmlSimple(s: string): string {
 // Language definitions (keywords sorted for binary search)
 
 const RUST: Rules = {
-  lineComment: '//',
-  blockComment: ['/*', '*/'],
-  strings: [['"', '"', false], ["'", "'", false]],
+  lineComment: "//",
+  blockComment: ["/*", "*/"],
+  strings: [
+    ['"', '"', false],
+    ["'", "'", false],
+  ],
   keywords: [
-    'as', 'async', 'await', 'break', 'const', 'continue', 'crate', 'dyn', 'else', 'enum',
-    'extern', 'fn', 'for', 'if', 'impl', 'in', 'let', 'loop', 'match', 'mod', 'move', 'mut',
-    'pub', 'ref', 'return', 'self', 'static', 'struct', 'super', 'trait', 'type', 'unsafe',
-    'use', 'where', 'while', 'yield',
+    "as",
+    "async",
+    "await",
+    "break",
+    "const",
+    "continue",
+    "crate",
+    "dyn",
+    "else",
+    "enum",
+    "extern",
+    "fn",
+    "for",
+    "if",
+    "impl",
+    "in",
+    "let",
+    "loop",
+    "match",
+    "mod",
+    "move",
+    "mut",
+    "pub",
+    "ref",
+    "return",
+    "self",
+    "static",
+    "struct",
+    "super",
+    "trait",
+    "type",
+    "unsafe",
+    "use",
+    "where",
+    "while",
+    "yield",
   ],
   types: [
-    'Box', 'Err', 'None', 'Ok', 'Option', 'Result', 'Self', 'Some', 'String', 'Vec', 'bool',
-    'char', 'f32', 'f64', 'false', 'i128', 'i16', 'i32', 'i64', 'i8', 'isize', 'str', 'true',
-    'u128', 'u16', 'u32', 'u64', 'u8', 'usize',
+    "Box",
+    "Err",
+    "None",
+    "Ok",
+    "Option",
+    "Result",
+    "Self",
+    "Some",
+    "String",
+    "Vec",
+    "bool",
+    "char",
+    "f32",
+    "f64",
+    "false",
+    "i128",
+    "i16",
+    "i32",
+    "i64",
+    "i8",
+    "isize",
+    "str",
+    "true",
+    "u128",
+    "u16",
+    "u32",
+    "u64",
+    "u8",
+    "usize",
   ],
-  operators: ['&&', '->', '!=', '==', '<=', '>=', '=>', '||'],
+  operators: ["&&", "->", "!=", "==", "<=", ">=", "=>", "||"],
   highlightNumbers: true,
   highlightFnCalls: true,
   highlightBangMacros: true,
 };
 
 const PYTHON: Rules = {
-  lineComment: '#',
-  blockComment: ['', ''],
-  strings: [['"""', '"""', true], ["'''", "'''", true], ['"', '"', false], ["'", "'", false]],
+  lineComment: "#",
+  blockComment: ["", ""],
+  strings: [
+    ['"""', '"""', true],
+    ["'''", "'''", true],
+    ['"', '"', false],
+    ["'", "'", false],
+  ],
   keywords: [
-    'and', 'as', 'assert', 'async', 'await', 'break', 'class', 'continue', 'def', 'del',
-    'elif', 'else', 'except', 'finally', 'for', 'from', 'global', 'if', 'import', 'in', 'is',
-    'lambda', 'nonlocal', 'not', 'or', 'pass', 'raise', 'return', 'try', 'while', 'with',
-    'yield',
+    "and",
+    "as",
+    "assert",
+    "async",
+    "await",
+    "break",
+    "class",
+    "continue",
+    "def",
+    "del",
+    "elif",
+    "else",
+    "except",
+    "finally",
+    "for",
+    "from",
+    "global",
+    "if",
+    "import",
+    "in",
+    "is",
+    "lambda",
+    "nonlocal",
+    "not",
+    "or",
+    "pass",
+    "raise",
+    "return",
+    "try",
+    "while",
+    "with",
+    "yield",
   ],
   types: [
-    'False', 'None', 'True', 'bool', 'bytes', 'dict', 'float', 'int', 'list', 'self', 'set',
-    'str', 'tuple',
+    "False",
+    "None",
+    "True",
+    "bool",
+    "bytes",
+    "dict",
+    "float",
+    "int",
+    "list",
+    "self",
+    "set",
+    "str",
+    "tuple",
   ],
-  operators: ['!=', '==', '<=', '>='],
+  operators: ["!=", "==", "<=", ">="],
   highlightNumbers: true,
   highlightFnCalls: true,
   highlightBangMacros: false,
 };
 
 const GO: Rules = {
-  lineComment: '//',
-  blockComment: ['/*', '*/'],
-  strings: [['`', '`', true], ['"', '"', false], ["'", "'", false]],
+  lineComment: "//",
+  blockComment: ["/*", "*/"],
+  strings: [
+    ["`", "`", true],
+    ['"', '"', false],
+    ["'", "'", false],
+  ],
   keywords: [
-    'break', 'case', 'chan', 'const', 'continue', 'default', 'defer', 'else', 'fallthrough',
-    'for', 'func', 'go', 'goto', 'if', 'import', 'interface', 'map', 'package', 'range',
-    'return', 'select', 'struct', 'switch', 'type', 'var',
+    "break",
+    "case",
+    "chan",
+    "const",
+    "continue",
+    "default",
+    "defer",
+    "else",
+    "fallthrough",
+    "for",
+    "func",
+    "go",
+    "goto",
+    "if",
+    "import",
+    "interface",
+    "map",
+    "package",
+    "range",
+    "return",
+    "select",
+    "struct",
+    "switch",
+    "type",
+    "var",
   ],
   types: [
-    'bool', 'byte', 'complex128', 'complex64', 'error', 'false', 'float32', 'float64',
-    'int', 'int16', 'int32', 'int64', 'int8', 'iota', 'nil', 'rune', 'string', 'true',
-    'uint', 'uint16', 'uint32', 'uint64', 'uint8', 'uintptr',
+    "bool",
+    "byte",
+    "complex128",
+    "complex64",
+    "error",
+    "false",
+    "float32",
+    "float64",
+    "int",
+    "int16",
+    "int32",
+    "int64",
+    "int8",
+    "iota",
+    "nil",
+    "rune",
+    "string",
+    "true",
+    "uint",
+    "uint16",
+    "uint32",
+    "uint64",
+    "uint8",
+    "uintptr",
   ],
-  operators: ['&&', ':=', '!=', '==', '<=', '>=', '||'],
+  operators: ["&&", ":=", "!=", "==", "<=", ">=", "||"],
   highlightNumbers: true,
   highlightFnCalls: true,
   highlightBangMacros: false,
 };
 
 const TS: Rules = {
-  lineComment: '//',
-  blockComment: ['/*', '*/'],
-  strings: [['`', '`', true], ['"', '"', false], ["'", "'", false]],
+  lineComment: "//",
+  blockComment: ["/*", "*/"],
+  strings: [
+    ["`", "`", true],
+    ['"', '"', false],
+    ["'", "'", false],
+  ],
   keywords: [
-    'abstract', 'as', 'async', 'await', 'break', 'case', 'catch', 'class', 'const', 'continue',
-    'debugger', 'default', 'delete', 'do', 'else', 'enum', 'export', 'extends', 'finally',
-    'for', 'from', 'function', 'if', 'implements', 'import', 'in', 'instanceof', 'interface',
-    'let', 'new', 'of', 'package', 'private', 'protected', 'public', 'return', 'static',
-    'super', 'switch', 'this', 'throw', 'try', 'typeof', 'var', 'void', 'while', 'with',
-    'yield',
+    "abstract",
+    "as",
+    "async",
+    "await",
+    "break",
+    "case",
+    "catch",
+    "class",
+    "const",
+    "continue",
+    "debugger",
+    "default",
+    "delete",
+    "do",
+    "else",
+    "enum",
+    "export",
+    "extends",
+    "finally",
+    "for",
+    "from",
+    "function",
+    "if",
+    "implements",
+    "import",
+    "in",
+    "instanceof",
+    "interface",
+    "let",
+    "new",
+    "of",
+    "package",
+    "private",
+    "protected",
+    "public",
+    "return",
+    "static",
+    "super",
+    "switch",
+    "this",
+    "throw",
+    "try",
+    "typeof",
+    "var",
+    "void",
+    "while",
+    "with",
+    "yield",
   ],
   types: [
-    'Array', 'Map', 'Promise', 'Set', 'any', 'bigint', 'boolean', 'false', 'never', 'null',
-    'number', 'object', 'string', 'symbol', 'true', 'undefined', 'unknown', 'void',
+    "Array",
+    "Map",
+    "Promise",
+    "Set",
+    "any",
+    "bigint",
+    "boolean",
+    "false",
+    "never",
+    "null",
+    "number",
+    "object",
+    "string",
+    "symbol",
+    "true",
+    "undefined",
+    "unknown",
+    "void",
   ],
-  operators: ['&&', '!==', '===', '!=', '==', '<=', '>=', '=>', '||'],
+  operators: ["&&", "!==", "===", "!=", "==", "<=", ">=", "=>", "||"],
   highlightNumbers: true,
   highlightFnCalls: true,
   highlightBangMacros: false,
 };
 
 const JS: Rules = {
-  lineComment: '//',
-  blockComment: ['/*', '*/'],
-  strings: [['`', '`', true], ['"', '"', false], ["'", "'", false]],
+  lineComment: "//",
+  blockComment: ["/*", "*/"],
+  strings: [
+    ["`", "`", true],
+    ['"', '"', false],
+    ["'", "'", false],
+  ],
   keywords: [
-    'async', 'await', 'break', 'case', 'catch', 'class', 'const', 'continue', 'debugger',
-    'default', 'delete', 'do', 'else', 'export', 'extends', 'finally', 'for', 'from',
-    'function', 'if', 'import', 'in', 'instanceof', 'let', 'new', 'of', 'return', 'static',
-    'super', 'switch', 'this', 'throw', 'try', 'typeof', 'var', 'void', 'while', 'with',
-    'yield',
+    "async",
+    "await",
+    "break",
+    "case",
+    "catch",
+    "class",
+    "const",
+    "continue",
+    "debugger",
+    "default",
+    "delete",
+    "do",
+    "else",
+    "export",
+    "extends",
+    "finally",
+    "for",
+    "from",
+    "function",
+    "if",
+    "import",
+    "in",
+    "instanceof",
+    "let",
+    "new",
+    "of",
+    "return",
+    "static",
+    "super",
+    "switch",
+    "this",
+    "throw",
+    "try",
+    "typeof",
+    "var",
+    "void",
+    "while",
+    "with",
+    "yield",
   ],
   types: [
-    'Array', 'Boolean', 'Infinity', 'Map', 'NaN', 'Number', 'Object', 'Promise', 'Set',
-    'String', 'false', 'null', 'true', 'undefined',
+    "Array",
+    "Boolean",
+    "Infinity",
+    "Map",
+    "NaN",
+    "Number",
+    "Object",
+    "Promise",
+    "Set",
+    "String",
+    "false",
+    "null",
+    "true",
+    "undefined",
   ],
-  operators: ['&&', '!==', '===', '!=', '==', '<=', '>=', '=>', '||'],
+  operators: ["&&", "!==", "===", "!=", "==", "<=", ">=", "=>", "||"],
   highlightNumbers: true,
   highlightFnCalls: true,
   highlightBangMacros: false,
 };
 
 const BASH: Rules = {
-  lineComment: '#',
-  blockComment: ['', ''],
-  strings: [['"', '"', false], ["'", "'", false]],
-  keywords: [
-    'break', 'case', 'continue', 'declare', 'do', 'done', 'elif', 'else', 'esac', 'eval',
-    'exec', 'exit', 'export', 'fi', 'for', 'function', 'if', 'in', 'local', 'readonly',
-    'return', 'set', 'shift', 'source', 'then', 'trap', 'unset', 'while',
+  lineComment: "#",
+  blockComment: ["", ""],
+  strings: [
+    ['"', '"', false],
+    ["'", "'", false],
   ],
-  types: ['false', 'true'],
-  operators: ['&&', '||'],
+  keywords: [
+    "break",
+    "case",
+    "continue",
+    "declare",
+    "do",
+    "done",
+    "elif",
+    "else",
+    "esac",
+    "eval",
+    "exec",
+    "exit",
+    "export",
+    "fi",
+    "for",
+    "function",
+    "if",
+    "in",
+    "local",
+    "readonly",
+    "return",
+    "set",
+    "shift",
+    "source",
+    "then",
+    "trap",
+    "unset",
+    "while",
+  ],
+  types: ["false", "true"],
+  operators: ["&&", "||"],
   highlightNumbers: true,
   highlightFnCalls: false,
   highlightBangMacros: false,
 };
 
 const C: Rules = {
-  lineComment: '//',
-  blockComment: ['/*', '*/'],
-  strings: [['"', '"', false], ["'", "'", false]],
+  lineComment: "//",
+  blockComment: ["/*", "*/"],
+  strings: [
+    ['"', '"', false],
+    ["'", "'", false],
+  ],
   keywords: [
-    'auto', 'break', 'case', 'const', 'continue', 'default', 'do', 'else', 'enum', 'extern',
-    'for', 'goto', 'if', 'inline', 'register', 'restrict', 'return', 'sizeof', 'static',
-    'struct', 'switch', 'typedef', 'union', 'volatile', 'while',
+    "auto",
+    "break",
+    "case",
+    "const",
+    "continue",
+    "default",
+    "do",
+    "else",
+    "enum",
+    "extern",
+    "for",
+    "goto",
+    "if",
+    "inline",
+    "register",
+    "restrict",
+    "return",
+    "sizeof",
+    "static",
+    "struct",
+    "switch",
+    "typedef",
+    "union",
+    "volatile",
+    "while",
   ],
   types: [
-    'NULL', 'bool', 'char', 'double', 'false', 'float', 'int', 'int16_t', 'int32_t', 'int64_t',
-    'int8_t', 'long', 'short', 'signed', 'size_t', 'true', 'uint16_t', 'uint32_t', 'uint64_t',
-    'uint8_t', 'unsigned', 'void',
+    "NULL",
+    "bool",
+    "char",
+    "double",
+    "false",
+    "float",
+    "int",
+    "int16_t",
+    "int32_t",
+    "int64_t",
+    "int8_t",
+    "long",
+    "short",
+    "signed",
+    "size_t",
+    "true",
+    "uint16_t",
+    "uint32_t",
+    "uint64_t",
+    "uint8_t",
+    "unsigned",
+    "void",
   ],
-  operators: ['&&', '->', '!=', '==', '<=', '>=', '||'],
+  operators: ["&&", "->", "!=", "==", "<=", ">=", "||"],
   highlightNumbers: true,
   highlightFnCalls: true,
   highlightBangMacros: false,
 };
 
 const TOML: Rules = {
-  lineComment: '#',
-  blockComment: ['', ''],
-  strings: [['"""', '"""', true], ["'''", "'''", true], ['"', '"', false], ["'", "'", false]],
+  lineComment: "#",
+  blockComment: ["", ""],
+  strings: [
+    ['"""', '"""', true],
+    ["'''", "'''", true],
+    ['"', '"', false],
+    ["'", "'", false],
+  ],
   keywords: [],
-  types: ['false', 'true'],
+  types: ["false", "true"],
   operators: [],
   highlightNumbers: true,
   highlightFnCalls: false,
@@ -522,11 +894,11 @@ const TOML: Rules = {
 };
 
 const JSON_RULES: Rules = {
-  lineComment: '',
-  blockComment: ['', ''],
+  lineComment: "",
+  blockComment: ["", ""],
   strings: [['"', '"', false]],
   keywords: [],
-  types: ['false', 'null', 'true'],
+  types: ["false", "null", "true"],
   operators: [],
   highlightNumbers: true,
   highlightFnCalls: false,
@@ -534,11 +906,14 @@ const JSON_RULES: Rules = {
 };
 
 const YAML: Rules = {
-  lineComment: '#',
-  blockComment: ['', ''],
-  strings: [['"', '"', false], ["'", "'", false]],
+  lineComment: "#",
+  blockComment: ["", ""],
+  strings: [
+    ['"', '"', false],
+    ["'", "'", false],
+  ],
   keywords: [],
-  types: ['false', 'null', 'true', 'yes', 'no'],
+  types: ["false", "null", "true", "yes", "no"],
   operators: [],
   highlightNumbers: true,
   highlightFnCalls: false,
@@ -547,16 +922,44 @@ const YAML: Rules = {
 
 function rulesForLang(tag: string): Rules | null {
   switch (tag.toLowerCase()) {
-    case 'rust': case 'rs': return RUST;
-    case 'python': case 'py': return PYTHON;
-    case 'go': case 'golang': return GO;
-    case 'typescript': case 'ts': return TS;
-    case 'javascript': case 'js': case 'jsx': case 'tsx': return JS;
-    case 'bash': case 'sh': case 'shell': case 'zsh': return BASH;
-    case 'c': case 'cpp': case 'c++': case 'h': case 'cc': case 'cxx': return C;
-    case 'toml': return TOML;
-    case 'json': case 'jsonc': return JSON_RULES;
-    case 'yaml': case 'yml': return YAML;
-    default: return null;
+    case "rust":
+    case "rs":
+      return RUST;
+    case "python":
+    case "py":
+      return PYTHON;
+    case "go":
+    case "golang":
+      return GO;
+    case "typescript":
+    case "ts":
+      return TS;
+    case "javascript":
+    case "js":
+    case "jsx":
+    case "tsx":
+      return JS;
+    case "bash":
+    case "sh":
+    case "shell":
+    case "zsh":
+      return BASH;
+    case "c":
+    case "cpp":
+    case "c++":
+    case "h":
+    case "cc":
+    case "cxx":
+      return C;
+    case "toml":
+      return TOML;
+    case "json":
+    case "jsonc":
+      return JSON_RULES;
+    case "yaml":
+    case "yml":
+      return YAML;
+    default:
+      return null;
   }
 }

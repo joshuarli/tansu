@@ -1,13 +1,16 @@
 /// Shared test utilities: DOM setup via happy-dom, assertions, fetch mocking.
 
-import { Window } from 'happy-dom';
+import { Window } from "happy-dom";
 
 export function assert(cond: boolean, msg: string) {
   if (!cond) throw new Error(`FAIL: ${msg}`);
 }
 
 export function assertEqual<T>(actual: T, expected: T, msg: string) {
-  if (actual !== expected) throw new Error(`FAIL: ${msg}: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`);
+  if (actual !== expected)
+    throw new Error(
+      `FAIL: ${msg}: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`,
+    );
 }
 
 export function assertContains(hay: string, needle: string, msg: string) {
@@ -20,13 +23,21 @@ export function assertNotContains(hay: string, needle: string, msg: string) {
 
 export function assertThrows(fn: () => void, msg: string) {
   let threw = false;
-  try { fn(); } catch { threw = true; }
+  try {
+    fn();
+  } catch {
+    threw = true;
+  }
   assert(threw, `${msg}: expected to throw`);
 }
 
 export async function assertRejects(fn: () => Promise<unknown>, msg: string) {
   let threw = false;
-  try { await fn(); } catch { threw = true; }
+  try {
+    await fn();
+  } catch {
+    threw = true;
+  }
   assert(threw, `${msg}: expected to reject`);
 }
 
@@ -59,20 +70,33 @@ const TANSU_HTML = `<!doctype html>
 /// Install happy-dom globals so modules that call document.getElementById at
 /// import time will work. Returns a cleanup function.
 export function setupDOM(): () => void {
-  const win = new Window({ url: 'http://localhost:3000' });
+  const win = new Window({ url: "http://localhost:3000" });
   win.document.write(TANSU_HTML);
 
   // Patch globals
   const originals: Record<string, unknown> = {};
   // Ensure Window has error constructors that happy-dom's internals need
-  (win as Record<string, unknown>)['SyntaxError'] = SyntaxError;
-  (win as Record<string, unknown>)['TypeError'] = TypeError;
-  (win as Record<string, unknown>)['DOMException'] = DOMException;
+  (win as Record<string, unknown>)["SyntaxError"] = SyntaxError;
+  (win as Record<string, unknown>)["TypeError"] = TypeError;
+  (win as Record<string, unknown>)["DOMException"] = DOMException;
 
-  const globals = ['window', 'document', 'HTMLElement', 'Node', 'EventSource',
-    'HTMLInputElement', 'HTMLTextAreaElement', 'HTMLSelectElement',
-    'CustomEvent', 'MouseEvent', 'KeyboardEvent', 'Event',
-    'OffscreenCanvas', 'Range', 'NodeFilter'] as const;
+  const globals = [
+    "window",
+    "document",
+    "HTMLElement",
+    "Node",
+    "EventSource",
+    "HTMLInputElement",
+    "HTMLTextAreaElement",
+    "HTMLSelectElement",
+    "CustomEvent",
+    "MouseEvent",
+    "KeyboardEvent",
+    "Event",
+    "OffscreenCanvas",
+    "Range",
+    "NodeFilter",
+  ] as const;
 
   for (const key of globals) {
     originals[key] = (globalThis as Record<string, unknown>)[key];
@@ -80,16 +104,16 @@ export function setupDOM(): () => void {
   }
 
   // navigator, location, alert, confirm, prompt
-  originals['navigator'] = (globalThis as Record<string, unknown>)['navigator'];
-  (globalThis as Record<string, unknown>)['navigator'] = win.navigator;
-  originals['location'] = (globalThis as Record<string, unknown>)['location'];
-  (globalThis as Record<string, unknown>)['location'] = win.location;
-  originals['alert'] = (globalThis as Record<string, unknown>)['alert'];
-  (globalThis as Record<string, unknown>)['alert'] = () => {};
-  originals['confirm'] = (globalThis as Record<string, unknown>)['confirm'];
-  (globalThis as Record<string, unknown>)['confirm'] = () => true;
-  originals['prompt'] = (globalThis as Record<string, unknown>)['prompt'];
-  (globalThis as Record<string, unknown>)['prompt'] = () => 'test';
+  originals["navigator"] = (globalThis as Record<string, unknown>)["navigator"];
+  (globalThis as Record<string, unknown>)["navigator"] = win.navigator;
+  originals["location"] = (globalThis as Record<string, unknown>)["location"];
+  (globalThis as Record<string, unknown>)["location"] = win.location;
+  originals["alert"] = (globalThis as Record<string, unknown>)["alert"];
+  (globalThis as Record<string, unknown>)["alert"] = () => {};
+  originals["confirm"] = (globalThis as Record<string, unknown>)["confirm"];
+  (globalThis as Record<string, unknown>)["confirm"] = () => true;
+  originals["prompt"] = (globalThis as Record<string, unknown>)["prompt"];
+  (globalThis as Record<string, unknown>)["prompt"] = () => "test";
 
   return () => {
     for (const [key, val] of Object.entries(originals)) {
@@ -101,21 +125,25 @@ export function setupDOM(): () => void {
 
 /// Mock fetch: returns a function to set up responses, and installs a global fetch mock.
 export function mockFetch(): MockFetch {
-  const handlers: Array<{ match: (url: string, init?: RequestInit) => boolean; respond: () => Response }> = [];
+  const handlers: Array<{
+    match: (url: string, init?: RequestInit) => boolean;
+    respond: () => Response;
+  }> = [];
   const origFetch = globalThis.fetch;
 
   const mock: MockFetch = {
     on(method: string, urlPattern: string | RegExp, body: unknown, status = 200) {
       handlers.push({
         match: (url, init) => {
-          const m = (init?.method ?? 'GET').toUpperCase() === method.toUpperCase();
-          if (typeof urlPattern === 'string') return m && url.includes(urlPattern);
+          const m = (init?.method ?? "GET").toUpperCase() === method.toUpperCase();
+          if (typeof urlPattern === "string") return m && url.includes(urlPattern);
           return m && urlPattern.test(url);
         },
-        respond: () => new Response(JSON.stringify(body), {
-          status,
-          headers: { 'Content-Type': 'application/json' },
-        }),
+        respond: () =>
+          new Response(JSON.stringify(body), {
+            status,
+            headers: { "Content-Type": "application/json" },
+          }),
       });
       return mock;
     },
@@ -125,12 +153,13 @@ export function mockFetch(): MockFetch {
   };
 
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-    const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+    const url =
+      typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
     // Later handlers take precedence (search in reverse)
     for (let i = handlers.length - 1; i >= 0; i--) {
       if (handlers[i]!.match(url, init)) return handlers[i]!.respond();
     }
-    return new Response('not found', { status: 404 });
+    return new Response("not found", { status: 404 });
   }) as typeof fetch;
 
   return mock;

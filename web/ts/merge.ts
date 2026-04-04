@@ -2,9 +2,9 @@
 /// Returns the merged result, or null if there are conflicts.
 
 export function merge3(base: string, ours: string, theirs: string): string | null {
-  const baseLines = base.split('\n');
-  const ourLines = ours.split('\n');
-  const theirLines = theirs.split('\n');
+  const baseLines = base.split("\n");
+  const ourLines = ours.split("\n");
+  const theirLines = theirs.split("\n");
 
   const ourEdits = computeEdits(baseLines, ourLines);
   const theirEdits = computeEdits(baseLines, theirLines);
@@ -51,7 +51,7 @@ export function merge3(base: string, ours: string, theirs: string): string | nul
     }
   }
 
-  return result.join('\n');
+  return result.join("\n");
 }
 
 function arrEq(a: string[], b: string[]): boolean {
@@ -91,9 +91,12 @@ function computeEdits(base: string[], modified: string[]): EditSet {
 function processRegion(
   replacements: Map<number, string[]>,
   insertions: Map<number, string[]>,
-  _base: string[], modified: string[],
-  bStart: number, bEnd: number,
-  mStart: number, mEnd: number,
+  _base: string[],
+  modified: string[],
+  bStart: number,
+  bEnd: number,
+  mStart: number,
+  mEnd: number,
 ) {
   const bCount = bEnd - bStart;
   const mCount = mEnd - mStart;
@@ -128,7 +131,9 @@ function lcs(base: string[], modified: string[]): [number, number][] {
   const n = base.length;
   const m = modified.length;
 
-  const table: number[][] = Array.from({ length: n + 1 }, () => new Array<number>(m + 1).fill(0));
+  const table: number[][] = Array.from({ length: n + 1 }, () =>
+    Array.from<number>({ length: m + 1 }).fill(0),
+  );
   for (let i = 1; i <= n; i++) {
     for (let j = 1; j <= m; j++) {
       if (base[i - 1] === modified[j - 1]) {
@@ -145,7 +150,8 @@ function lcs(base: string[], modified: string[]): [number, number][] {
   while (i > 0 && j > 0) {
     if (base[i - 1] === modified[j - 1]) {
       matches.push([i - 1, j - 1]);
-      i--; j--;
+      i--;
+      j--;
     } else if (table[i - 1]![j]! >= table[i]![j - 1]!) {
       i--;
     } else {

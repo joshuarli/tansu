@@ -1,14 +1,18 @@
-import { saveNote } from './api.ts';
-import { markDirty, markClean, getActiveTab, openTab } from './tabs.ts';
-import { toggleRevisions, hideRevisions } from './revisions.ts';
-import { on } from './events.ts';
-import { domToMarkdown } from './serialize.ts';
-import { handleBlockTransform } from './transforms.ts';
-import { checkWikiLinkTrigger, hideAutocomplete, invalidateNoteCache as _invalidateNoteCache } from './autocomplete.ts';
-import { renderMarkdown } from './markdown.ts';
-import { showConflictBanner, handleReloadConflict } from './conflict.ts';
-import { handleImagePaste } from './image-paste.ts';
-import { loadBacklinks } from './backlinks.ts';
+import { saveNote } from "./api.ts";
+import {
+  checkWikiLinkTrigger,
+  hideAutocomplete,
+  invalidateNoteCache as _invalidateNoteCache,
+} from "./autocomplete.ts";
+import { loadBacklinks } from "./backlinks.ts";
+import { showConflictBanner, handleReloadConflict } from "./conflict.ts";
+import { on } from "./events.ts";
+import { handleImagePaste } from "./image-paste.ts";
+import { renderMarkdown } from "./markdown.ts";
+import { toggleRevisions, hideRevisions } from "./revisions.ts";
+import { domToMarkdown } from "./serialize.ts";
+import { markDirty, markClean, getActiveTab } from "./tabs.ts";
+import { handleBlockTransform } from "./transforms.ts";
 
 let editorArea: HTMLElement;
 let container: HTMLElement | null = null;
@@ -21,9 +25,9 @@ let currentPath: string | null = null;
 export { _invalidateNoteCache as invalidateNoteCache };
 
 export function initEditor() {
-  editorArea = document.getElementById('editor-area')!;
+  editorArea = document.getElementById("editor-area")!;
 
-  on<{ content: string; mtime: number }>('revision:restore', ({ content, mtime }) => {
+  on<{ content: string; mtime: number }>("revision:restore", ({ content, mtime }) => {
     if (currentPath) {
       loadContent(content);
       markClean(currentPath, content, mtime);
@@ -37,43 +41,45 @@ export function showEditor(path: string, content: string) {
   hideRevisions();
   hideAutocomplete();
 
-  const emptyState = document.getElementById('empty-state');
-  editorArea.innerHTML = '';
+  const emptyState = document.getElementById("empty-state");
+  editorArea.innerHTML = "";
   if (emptyState) editorArea.appendChild(emptyState);
-  emptyState!.style.display = 'none';
+  emptyState!.style.display = "none";
 
-  container = document.createElement('div');
-  container.className = 'editor-container';
+  container = document.createElement("div");
+  container.className = "editor-container";
 
-  const toolbar = document.createElement('div');
-  toolbar.className = 'editor-toolbar';
+  const toolbar = document.createElement("div");
+  toolbar.className = "editor-toolbar";
 
-  const sourceBtn = document.createElement('button');
-  sourceBtn.textContent = 'Source';
-  sourceBtn.title = 'Toggle source mode';
+  const sourceBtn = document.createElement("button");
+  sourceBtn.textContent = "Source";
+  sourceBtn.title = "Toggle source mode";
   sourceBtn.onclick = () => toggleSourceMode();
 
-  const revBtn = document.createElement('button');
-  revBtn.textContent = 'Revisions';
-  revBtn.onclick = () => { if (currentPath) toggleRevisions(currentPath); };
+  const revBtn = document.createElement("button");
+  revBtn.textContent = "Revisions";
+  revBtn.onclick = () => {
+    if (currentPath) toggleRevisions(currentPath);
+  };
 
   toolbar.append(sourceBtn, revBtn);
   container.appendChild(toolbar);
 
-  contentEl = document.createElement('div');
-  contentEl.className = 'editor-content';
-  contentEl.contentEditable = 'true';
+  contentEl = document.createElement("div");
+  contentEl.className = "editor-content";
+  contentEl.contentEditable = "true";
   contentEl.spellcheck = true;
   container.appendChild(contentEl);
 
-  sourceEl = document.createElement('textarea');
-  sourceEl.className = 'editor-source';
-  sourceEl.style.display = 'none';
+  sourceEl = document.createElement("textarea");
+  sourceEl.className = "editor-source";
+  sourceEl.style.display = "none";
   container.appendChild(sourceEl);
 
-  backlinksEl = document.createElement('div');
-  backlinksEl.className = 'backlinks';
-  backlinksEl.style.display = 'none';
+  backlinksEl = document.createElement("div");
+  backlinksEl.className = "backlinks";
+  backlinksEl.style.display = "none";
 
   editorArea.appendChild(container);
   editorArea.appendChild(backlinksEl);
@@ -88,12 +94,18 @@ export function hideEditor() {
   hideRevisions();
   hideAutocomplete();
 
-  if (container) { container.remove(); container = null; }
-  if (backlinksEl) { backlinksEl.remove(); backlinksEl = null; }
+  if (container) {
+    container.remove();
+    container = null;
+  }
+  if (backlinksEl) {
+    backlinksEl.remove();
+    backlinksEl = null;
+  }
   contentEl = null;
   sourceEl = null;
-  const emptyState = document.getElementById('empty-state');
-  if (emptyState) emptyState.style.display = 'flex';
+  const emptyState = document.getElementById("empty-state");
+  if (emptyState) emptyState.style.display = "flex";
 }
 
 export function getCurrentContent(): string {
@@ -103,7 +115,7 @@ export function getCurrentContent(): string {
   if (contentEl) {
     return domToMarkdown(contentEl);
   }
-  return '';
+  return "";
 }
 
 export async function saveCurrentNote() {
@@ -115,7 +127,14 @@ export async function saveCurrentNote() {
 
   if (result.conflict) {
     if (container) {
-      showConflictBanner(container, currentPath, result.content ?? '', result.mtime, loadContent, getCurrentContent);
+      showConflictBanner(
+        container,
+        currentPath,
+        result.content ?? "",
+        result.mtime,
+        loadContent,
+        getCurrentContent,
+      );
     }
     return;
   }
@@ -134,7 +153,15 @@ export function reloadFromDisk(content: string, mtime: number) {
   }
 
   if (container) {
-    handleReloadConflict(tab, container, currentPath, content, mtime, loadContent, getCurrentContent);
+    handleReloadConflict(
+      tab,
+      container,
+      currentPath,
+      content,
+      mtime,
+      loadContent,
+      getCurrentContent,
+    );
   }
 }
 
@@ -152,76 +179,76 @@ function toggleSourceMode() {
   if (isSourceMode) {
     const md = sourceEl.value;
     contentEl.innerHTML = renderMarkdown(md);
-    contentEl.style.display = '';
-    sourceEl.style.display = 'none';
+    contentEl.style.display = "";
+    sourceEl.style.display = "none";
     isSourceMode = false;
   } else {
     const md = domToMarkdown(contentEl);
     sourceEl.value = md;
-    contentEl.style.display = 'none';
-    sourceEl.style.display = '';
+    contentEl.style.display = "none";
+    sourceEl.style.display = "";
     isSourceMode = true;
   }
 
-  container?.querySelector('.editor-toolbar button')?.classList.toggle('active', isSourceMode);
+  container?.querySelector(".editor-toolbar button")?.classList.toggle("active", isSourceMode);
 }
 
 function setupEditorEvents() {
   if (!contentEl || !sourceEl) return;
 
-  contentEl.addEventListener('input', () => {
+  contentEl.addEventListener("input", () => {
     if (currentPath) markDirty(currentPath);
     if (contentEl) checkWikiLinkTrigger(contentEl, currentPath);
   });
 
-  sourceEl.addEventListener('input', () => {
+  sourceEl.addEventListener("input", () => {
     if (currentPath) markDirty(currentPath);
   });
 
-  contentEl.addEventListener('keydown', (e) => {
+  contentEl.addEventListener("keydown", (e) => {
     const meta = e.metaKey || e.ctrlKey;
 
-    if (meta && e.key === 's') {
+    if (meta && e.key === "s") {
       e.preventDefault();
       saveCurrentNote();
       return;
     }
 
-    if (meta && e.key === 'b') {
+    if (meta && e.key === "b") {
       e.preventDefault();
-      wrapInline('**');
+      wrapInline("**");
       return;
     }
 
-    if (meta && e.key === 'i') {
+    if (meta && e.key === "i") {
       e.preventDefault();
-      wrapInline('*');
+      wrapInline("*");
       return;
     }
 
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if (e.key === "Enter" && !e.shiftKey) {
       handleBlockTransform(e, contentEl!, currentPath);
     }
   });
 
-  contentEl.addEventListener('paste', (e) => {
+  contentEl.addEventListener("paste", (e) => {
     e.preventDefault();
     const clipData = e.clipboardData;
     if (!clipData) return;
 
-    const imageItem = Array.from(clipData.items).find(item => item.type.startsWith('image/'));
+    const imageItem = Array.from(clipData.items).find((item) => item.type.startsWith("image/"));
     if (imageItem) {
       handleImagePaste(imageItem, currentPath);
       return;
     }
 
-    const text = clipData.getData('text/plain');
-    document.execCommand('insertText', false, text);
+    const text = clipData.getData("text/plain");
+    document.execCommand("insertText", false, text);
   });
 
-  sourceEl.addEventListener('keydown', (e) => {
+  sourceEl.addEventListener("keydown", (e) => {
     const meta = e.metaKey || e.ctrlKey;
-    if (meta && e.key === 's') {
+    if (meta && e.key === "s") {
       e.preventDefault();
       saveCurrentNote();
     }
@@ -234,6 +261,6 @@ function wrapInline(marker: string) {
   const range = sel.getRangeAt(0);
   const text = range.toString();
   if (text) {
-    document.execCommand('insertText', false, `${marker}${text}${marker}`);
+    document.execCommand("insertText", false, `${marker}${text}${marker}`);
   }
 }

@@ -1,0 +1,14 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "env": {
+    "browser": true
+  },
+  "categories": {
+    "suspicious": "warn",
+    "perf": "warn"
+  },
+  "rules": {
+    "unicorn/prefer-add-event-listener": "off",
+    "no-await-in-loop": "off"
+  }
+}

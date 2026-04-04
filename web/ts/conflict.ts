@@ -1,7 +1,7 @@
-import { saveNote } from './api.ts';
-import { markClean } from './tabs.ts';
-import { merge3 } from './merge.ts';
-import type { Tab } from './tabs.ts';
+import { saveNote } from "./api.ts";
+import { merge3 } from "./merge.ts";
+import { markClean } from "./tabs.ts";
+import type { Tab } from "./tabs.ts";
 
 /// Show a conflict banner when disk and editor content diverge.
 export function showConflictBanner(
@@ -12,26 +12,26 @@ export function showConflictBanner(
   loadContent: (md: string) => void,
   getCurrentContent: () => string,
 ) {
-  container.querySelector('.conflict-banner')?.remove();
+  container.querySelector(".conflict-banner")?.remove();
 
-  const banner = document.createElement('div');
-  banner.className = 'conflict-banner';
+  const banner = document.createElement("div");
+  banner.className = "conflict-banner";
 
-  const msg = document.createElement('span');
-  msg.textContent = 'File changed externally \u2014 conflicts detected.';
+  const msg = document.createElement("span");
+  msg.textContent = "File changed externally \u2014 conflicts detected.";
 
-  const keepBtn = document.createElement('button');
-  keepBtn.textContent = 'Keep mine';
+  const keepBtn = document.createElement("button");
+  keepBtn.textContent = "Keep mine";
   keepBtn.onclick = () => {
     banner.remove();
     const content = getCurrentContent();
-    saveNote(currentPath, content, 0).then(r => {
+    saveNote(currentPath, content, 0).then((r) => {
       markClean(currentPath, content, r.mtime);
     });
   };
 
-  const takeBtn = document.createElement('button');
-  takeBtn.textContent = 'Take theirs';
+  const takeBtn = document.createElement("button");
+  takeBtn.textContent = "Take theirs";
   takeBtn.onclick = () => {
     banner.remove();
     loadContent(diskContent);
@@ -64,5 +64,12 @@ export function handleReloadConflict(
     return;
   }
 
-  showConflictBanner(container, currentPath, diskContent, diskMtime, loadContent, getCurrentContent);
+  showConflictBanner(
+    container,
+    currentPath,
+    diskContent,
+    diskMtime,
+    loadContent,
+    getCurrentContent,
+  );
 }
