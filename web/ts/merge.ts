@@ -6,58 +6,128 @@ export function merge3(base: string, ours: string, theirs: string): string | nul
   const ourLines = ours.split('\n');
   const theirLines = theirs.split('\n');
 
-  const ourDiff = diff(baseLines, ourLines);
-  const theirDiff = diff(baseLines, theirLines);
+  const ourEdits = computeEdits(baseLines, ourLines);
+  const theirEdits = computeEdits(baseLines, theirLines);
 
   const result: string[] = [];
-  let bi = 0;
-  let oi = 0;
-  let ti = 0;
 
-  while (bi < baseLines.length || oi < ourLines.length || ti < theirLines.length) {
-    const ourOp = ourDiff[bi] ?? 'delete';
-    const theirOp = theirDiff[bi] ?? 'delete';
-
-    if (ourOp === 'keep' && theirOp === 'keep') {
-      result.push(baseLines[bi]!);
-      bi++; oi++; ti++;
-    } else if (ourOp === 'keep' && theirOp === 'delete') {
-      bi++; oi++;
-    } else if (ourOp === 'delete' && theirOp === 'keep') {
-      bi++; ti++;
-    } else if (ourOp === 'delete' && theirOp === 'delete') {
-      bi++;
-    } else if (ourOp === 'replace' && theirOp === 'keep') {
-      if (oi < ourLines.length) { result.push(ourLines[oi]!); oi++; }
-      bi++; ti++;
-    } else if (ourOp === 'keep' && theirOp === 'replace') {
-      if (ti < theirLines.length) { result.push(theirLines[ti]!); ti++; }
-      bi++; oi++;
-    } else if (ourOp === 'replace' && theirOp === 'replace') {
-      if (oi < ourLines.length && ti < theirLines.length && ourLines[oi] === theirLines[ti]) {
-        result.push(ourLines[oi]!);
-        oi++; ti++; bi++;
+  for (let bi = 0; bi <= baseLines.length; bi++) {
+    // First, handle insertions before this base position
+    const ourIns = ourEdits.insertions.get(bi);
+    const theirIns = theirEdits.insertions.get(bi);
+    if (ourIns && theirIns) {
+      if (arrEq(ourIns, theirIns)) {
+        for (const l of ourIns) result.push(l);
       } else {
-        return null; // conflict
+        return null;
       }
+    } else if (ourIns) {
+      for (const l of ourIns) result.push(l);
+    } else if (theirIns) {
+      for (const l of theirIns) result.push(l);
+    }
+
+    // Then, handle the base line itself (skip for the sentinel position after end)
+    if (bi >= baseLines.length) break;
+
+    const ourRep = ourEdits.replacements.get(bi);
+    const theirRep = theirEdits.replacements.get(bi);
+    const hasOur = ourRep !== undefined;
+    const hasTheir = theirRep !== undefined;
+
+    if (!hasOur && !hasTheir) {
+      result.push(baseLines[bi]!);
+    } else if (hasOur && !hasTheir) {
+      if (ourRep!.length > 0) result.push(ourRep![0]!);
+      // length 0 = deletion
+    } else if (!hasOur && hasTheir) {
+      if (theirRep!.length > 0) result.push(theirRep![0]!);
     } else {
-      return null; // delete vs replace conflict
+      if (arrEq(ourRep!, theirRep!)) {
+        if (ourRep!.length > 0) result.push(ourRep![0]!);
+      } else {
+        return null;
+      }
     }
   }
-
-  while (oi < ourLines.length) { result.push(ourLines[oi]!); oi++; }
-  while (ti < theirLines.length) { result.push(theirLines[ti]!); ti++; }
 
   return result.join('\n');
 }
 
-type DiffOp = 'keep' | 'delete' | 'replace';
+function arrEq(a: string[], b: string[]): boolean {
+  return a.length === b.length && a.every((l, i) => l === b[i]);
+}
 
-function diff(base: string[], modified: string[]): DiffOp[] {
+interface EditSet {
+  // Replacements: base line index → replacement (single line or empty for deletion)
+  replacements: Map<number, string[]>;
+  // Insertions: position index → lines inserted before that base position
+  // Position baseLines.length = appended after end
+  insertions: Map<number, string[]>;
+}
+
+/// Compute edits from base to modified using LCS as anchors.
+function computeEdits(base: string[], modified: string[]): EditSet {
+  const replacements = new Map<number, string[]>();
+  const insertions = new Map<number, string[]>();
+  const matches = lcs(base, modified);
+
+  let bi = 0;
+  let mi = 0;
+
+  for (const [anchorB, anchorM] of matches) {
+    // Region before this anchor: base[bi..anchorB) and modified[mi..anchorM)
+    processRegion(replacements, insertions, base, modified, bi, anchorB, mi, anchorM);
+    bi = anchorB + 1;
+    mi = anchorM + 1;
+  }
+
+  // Region after last anchor
+  processRegion(replacements, insertions, base, modified, bi, base.length, mi, modified.length);
+
+  return { replacements, insertions };
+}
+
+function processRegion(
+  replacements: Map<number, string[]>,
+  insertions: Map<number, string[]>,
+  _base: string[], modified: string[],
+  bStart: number, bEnd: number,
+  mStart: number, mEnd: number,
+) {
+  const bCount = bEnd - bStart;
+  const mCount = mEnd - mStart;
+
+  if (bCount === 0 && mCount === 0) return;
+
+  if (bCount === 0) {
+    // Pure insertion before bStart
+    insertions.set(bStart, modified.slice(mStart, mEnd));
+    return;
+  }
+
+  // Replace base lines 1:1 with modified lines where possible
+  const paired = Math.min(bCount, mCount);
+  for (let i = 0; i < paired; i++) {
+    replacements.set(bStart + i, [modified[mStart + i]!]);
+  }
+
+  // Extra base lines are deletions
+  for (let i = paired; i < bCount; i++) {
+    replacements.set(bStart + i, []);
+  }
+
+  // Extra modified lines are insertions after the last paired base line
+  if (mCount > paired) {
+    insertions.set(bStart + paired, modified.slice(mStart + paired, mEnd));
+  }
+}
+
+/// Compute LCS and return matching pairs [baseIndex, modifiedIndex].
+function lcs(base: string[], modified: string[]): [number, number][] {
   const n = base.length;
   const m = modified.length;
 
-  // LCS table
   const table: number[][] = Array.from({ length: n + 1 }, () => new Array<number>(m + 1).fill(0));
   for (let i = 1; i <= n; i++) {
     for (let j = 1; j <= m; j++) {
@@ -69,20 +139,19 @@ function diff(base: string[], modified: string[]): DiffOp[] {
     }
   }
 
-  const ops: DiffOp[] = new Array<DiffOp>(n).fill('delete');
+  const matches: [number, number][] = [];
   let i = n;
   let j = m;
   while (i > 0 && j > 0) {
     if (base[i - 1] === modified[j - 1]) {
-      ops[i - 1] = 'keep';
+      matches.push([i - 1, j - 1]);
       i--; j--;
     } else if (table[i - 1]![j]! >= table[i]![j - 1]!) {
-      ops[i - 1] = 'replace';
       i--;
     } else {
       j--;
     }
   }
-
-  return ops;
+  matches.reverse();
+  return matches;
 }
