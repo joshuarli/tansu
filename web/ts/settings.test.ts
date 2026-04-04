@@ -8,7 +8,8 @@ mock.on('GET', '/api/settings', {
 });
 mock.on('PUT', '/api/settings', {});
 
-const { toggleSettings, openSettings, closeSettings, isSettingsOpen } = await import('./settings.ts');
+const { createSettings } = await import('./settings.ts');
+const { toggle: toggleSettings, open: openSettings, close: closeSettings, isOpen: isSettingsOpen } = createSettings();
 
 // Initially closed
 assertEqual(isSettingsOpen(), false, 'initially closed');

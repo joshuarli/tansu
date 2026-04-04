@@ -15,7 +15,11 @@ mock.on('GET', '/api/search', [
     field_scores: { title: 1, headings: 0.5, tags: 0, content: 0 } },
 ]);
 
-const { toggleSearch, openSearch, closeSearch, isSearchOpen } = await import('./search.ts');
+const { createSearch } = await import('./search.ts');
+const { toggle: toggleSearch, open: openSearch, close: closeSearch, isOpen: isSearchOpen } = createSearch({
+  openTab: async () => {},
+  invalidateNoteCache: () => {},
+});
 
 // Initially closed
 assertEqual(isSearchOpen(), false, 'initially closed');

@@ -1,6 +1,6 @@
-import { toggleSearch, openSearch, closeSearch, isSearchOpen } from './search.ts';
-import { toggleSettings, closeSettings, isSettingsOpen } from './settings.ts';
-import { togglePalette, closePalette, isPaletteOpen, registerCommands } from './palette.ts';
+import { createSearch } from './search.ts';
+import { createSettings } from './settings.ts';
+import { createPalette } from './palette.ts';
 import {
   closeActiveTab, nextTab, prevTab,
   getActiveTab, openTab, updateTabPath, updateTabContent, restoreSession,
@@ -13,8 +13,11 @@ import { registerWikiLinkClickHandler } from './wikilinks.ts';
 import { renameNote, getNote, listNotes } from './api.ts';
 import { stemFromPath } from './util.ts';
 
-// Initialize editor
+// Initialize modules
 initEditor();
+const palette = createPalette();
+const settings = createSettings();
+const search = createSearch({ openTab, invalidateNoteCache });
 
 // Wiki-link click handler
 registerWikiLinkClickHandler(async (target: string) => {
@@ -50,20 +53,20 @@ on<Tab | null>('tab:change', (tab) => {
 });
 
 // Register command palette commands
-registerCommands([
-  { label: 'Search notes', shortcut: '\u2318K', action: () => openSearch() },
+palette.registerCommands([
+  { label: 'Search notes', shortcut: '\u2318K', action: () => search.open() },
   { label: 'Search in current note', shortcut: '\u2318F', action: () => {
     const tab = getActiveTab();
-    if (tab) openSearch(tab.path);
-    else openSearch();
+    if (tab) search.open(tab.path);
+    else search.open();
   }},
-  { label: 'Global search', shortcut: '\u21e7\u2318F', action: () => openSearch() },
+  { label: 'Global search', shortcut: '\u21e7\u2318F', action: () => search.open() },
   { label: 'New note', shortcut: '\u2318T', action: () => createNewNote() },
   { label: 'Save', shortcut: '\u2318S', action: () => saveCurrentNote() },
   { label: 'Close tab', shortcut: '\u2318W', action: () => closeActiveTab() },
   { label: 'Next tab', shortcut: '\u21e7\u2318]', action: () => nextTab() },
   { label: 'Previous tab', shortcut: '\u21e7\u2318[', action: () => prevTab() },
-  { label: 'Settings', shortcut: '\u21e7\u2318S', action: () => toggleSettings() },
+  { label: 'Settings', shortcut: '\u21e7\u2318S', action: () => settings.toggle() },
 ]);
 
 // Global keyboard shortcuts
@@ -72,34 +75,34 @@ document.addEventListener('keydown', (e) => {
 
   if (meta && e.key === 'p') {
     e.preventDefault();
-    togglePalette();
+    palette.toggle();
     return;
   }
 
   if (meta && e.key === 'k') {
     e.preventDefault();
-    toggleSearch();
+    search.toggle();
     return;
   }
 
   if (meta && e.shiftKey && e.key === 'f') {
     e.preventDefault();
-    openSearch();
+    search.open();
     return;
   }
 
   if (meta && !e.shiftKey && e.key === 'f') {
     e.preventDefault();
     const tab = getActiveTab();
-    if (tab) openSearch(tab.path);
-    else openSearch();
+    if (tab) search.open(tab.path);
+    else search.open();
     return;
   }
 
   // Cmd+Shift+S: settings
   if (meta && e.shiftKey && e.key === 's') {
     e.preventDefault();
-    toggleSettings();
+    settings.toggle();
     return;
   }
 
@@ -118,9 +121,9 @@ document.addEventListener('keydown', (e) => {
   }
 
   if (e.key === 'Escape') {
-    if (isPaletteOpen()) { e.preventDefault(); closePalette(); return; }
-    if (isSettingsOpen()) { e.preventDefault(); closeSettings(); return; }
-    if (isSearchOpen()) { e.preventDefault(); closeSearch(); return; }
+    if (palette.isOpen()) { e.preventDefault(); palette.close(); return; }
+    if (settings.isOpen()) { e.preventDefault(); settings.close(); return; }
+    if (search.isOpen()) { e.preventDefault(); search.close(); return; }
   }
 
   if (meta && e.key === 'w') {

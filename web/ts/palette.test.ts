@@ -1,7 +1,8 @@
 import { setupDOM, assertEqual, assert } from './test-helper.ts';
 const cleanup = setupDOM();
 
-const { registerCommands, togglePalette, openPalette, closePalette, isPaletteOpen } = await import('./palette.ts');
+const { createPalette } = await import('./palette.ts');
+const { toggle: togglePalette, open: openPalette, close: closePalette, isOpen: isPaletteOpen, registerCommands } = createPalette();
 
 // Initially closed
 assertEqual(isPaletteOpen(), false, 'initially closed');

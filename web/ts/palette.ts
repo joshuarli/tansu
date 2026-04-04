@@ -1,112 +1,123 @@
-const overlay = document.getElementById('palette-overlay')!;
-const input = document.getElementById('palette-input')! as HTMLInputElement;
-const listEl = document.getElementById('palette-list')!;
-
-let isOpen = false;
-let selectedIndex = 0;
-
-interface Command {
+export interface Command {
   label: string;
   shortcut: string;
   action: () => void;
 }
 
-let commands: Command[] = [];
-
-export function registerCommands(cmds: Command[]) {
-  commands = cmds;
+export interface Palette {
+  toggle(): void;
+  open(): void;
+  close(): void;
+  isOpen(): boolean;
+  registerCommands(cmds: Command[]): void;
+  getCommands(): Command[];
 }
 
-export function togglePalette() {
-  if (isOpen) closePalette();
-  else openPalette();
-}
+export function createPalette(): Palette {
+  const overlay = document.getElementById('palette-overlay')!;
+  const input = document.getElementById('palette-input')! as HTMLInputElement;
+  const listEl = document.getElementById('palette-list')!;
 
-export function openPalette() {
-  isOpen = true;
-  overlay.classList.remove('hidden');
-  input.value = '';
-  selectedIndex = 0;
-  renderList();
-  input.focus();
-}
+  let isOpen = false;
+  let selectedIndex = 0;
+  let commands: Command[] = [];
 
-export function closePalette() {
-  isOpen = false;
-  overlay.classList.add('hidden');
-  input.blur();
-}
+  function getFiltered(): Command[] {
+    const q = input.value.trim().toLowerCase();
+    if (!q) return commands;
+    return commands.filter(c => c.label.toLowerCase().includes(q));
+  }
 
-export function isPaletteOpen(): boolean {
-  return isOpen;
-}
-
-input.addEventListener('input', () => {
-  selectedIndex = 0;
-  renderList();
-});
-
-input.addEventListener('keydown', (e) => {
-  const filtered = getFiltered();
-  if (e.key === 'ArrowDown') {
-    e.preventDefault();
-    selectedIndex = (selectedIndex + 1) % Math.max(filtered.length, 1);
-    updateSelection();
-  } else if (e.key === 'ArrowUp') {
-    e.preventDefault();
-    selectedIndex = (selectedIndex - 1 + Math.max(filtered.length, 1)) % Math.max(filtered.length, 1);
-    updateSelection();
-  } else if (e.key === 'Enter') {
-    e.preventDefault();
-    const cmd = filtered[selectedIndex];
-    if (cmd) {
-      closePalette();
-      cmd.action();
+  function updateSelection() {
+    const items = listEl.children;
+    for (let i = 0; i < items.length; i++) {
+      items[i]!.classList.toggle('selected', i === selectedIndex);
     }
-  } else if (e.key === 'Escape') {
-    e.preventDefault();
-    closePalette();
+    items[selectedIndex]?.scrollIntoView({ block: 'nearest' });
   }
-});
 
-overlay.addEventListener('click', (e) => {
-  if (e.target === overlay) closePalette();
-});
+  function renderList() {
+    const filtered = getFiltered();
+    listEl.innerHTML = '';
+    filtered.forEach((cmd, i) => {
+      const el = document.createElement('div');
+      el.className = 'palette-item' + (i === selectedIndex ? ' selected' : '');
 
-function getFiltered(): Command[] {
-  const q = input.value.trim().toLowerCase();
-  if (!q) return commands;
-  return commands.filter(c => c.label.toLowerCase().includes(q));
-}
+      const label = document.createElement('span');
+      label.className = 'palette-label';
+      label.textContent = cmd.label;
 
-function renderList() {
-  const filtered = getFiltered();
-  listEl.innerHTML = '';
-  filtered.forEach((cmd, i) => {
-    const el = document.createElement('div');
-    el.className = 'palette-item' + (i === selectedIndex ? ' selected' : '');
+      const shortcut = document.createElement('span');
+      shortcut.className = 'palette-shortcut';
+      shortcut.textContent = cmd.shortcut;
 
-    const label = document.createElement('span');
-    label.className = 'palette-label';
-    label.textContent = cmd.label;
+      el.append(label, shortcut);
+      el.onclick = () => {
+        close();
+        cmd.action();
+      };
+      listEl.appendChild(el);
+    });
+  }
 
-    const shortcut = document.createElement('span');
-    shortcut.className = 'palette-shortcut';
-    shortcut.textContent = cmd.shortcut;
+  function open() {
+    isOpen = true;
+    overlay.classList.remove('hidden');
+    input.value = '';
+    selectedIndex = 0;
+    renderList();
+    input.focus();
+  }
 
-    el.append(label, shortcut);
-    el.onclick = () => {
-      closePalette();
-      cmd.action();
-    };
-    listEl.appendChild(el);
+  function close() {
+    isOpen = false;
+    overlay.classList.add('hidden');
+    input.blur();
+  }
+
+  function toggle() {
+    if (isOpen) close();
+    else open();
+  }
+
+  input.addEventListener('input', () => {
+    selectedIndex = 0;
+    renderList();
   });
-}
 
-function updateSelection() {
-  const items = listEl.children;
-  for (let i = 0; i < items.length; i++) {
-    items[i]!.classList.toggle('selected', i === selectedIndex);
-  }
-  items[selectedIndex]?.scrollIntoView({ block: 'nearest' });
+  input.addEventListener('keydown', (e) => {
+    const filtered = getFiltered();
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      selectedIndex = (selectedIndex + 1) % Math.max(filtered.length, 1);
+      updateSelection();
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      selectedIndex = (selectedIndex - 1 + Math.max(filtered.length, 1)) % Math.max(filtered.length, 1);
+      updateSelection();
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      const cmd = filtered[selectedIndex];
+      if (cmd) {
+        close();
+        cmd.action();
+      }
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      close();
+    }
+  });
+
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay) close();
+  });
+
+  return {
+    toggle,
+    open,
+    close,
+    isOpen: () => isOpen,
+    registerCommands(cmds: Command[]) { commands = cmds; },
+    getCommands: () => commands,
+  };
 }
