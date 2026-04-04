@@ -156,7 +156,7 @@ pub fn write_headers(
              Content-Type: {ct}\r\n\
              Content-Length: {cl}\r\n\
              Cache-Control: no-store\r\n\
-             Connection: close\r\n\
+             Connection: keep-alive\r\n\
              \r\n"
         )?;
         c.position() as usize
@@ -175,7 +175,7 @@ pub fn write_error(mut sock: &TcpStream, code: u16, msg: &str) -> io::Result<()>
              Content-Type: text/plain\r\n\
              Content-Length: {body_len}\r\n\
              Cache-Control: no-store\r\n\
-             Connection: close\r\n\
+             Connection: keep-alive\r\n\
              \r\n\
              {code} {msg}"
         )?;
@@ -220,14 +220,20 @@ pub fn serve_file(sock: &TcpStream, path: &Path, len: u64, content_type: &str) -
     send_file(&file, sock, len)
 }
 
-/// Read the request body based on Content-Length header.
-pub fn read_body(stream: &mut TcpStream, headers: &[httparse::Header<'_>], buf: &[u8], header_len: usize) -> io::Result<Vec<u8>> {
-    let cl: usize = headers
+/// Get Content-Length from headers.
+pub fn content_length(headers: &[httparse::Header<'_>]) -> usize {
+    headers
         .iter()
         .find(|h| h.name.eq_ignore_ascii_case("Content-Length"))
         .and_then(|h| std::str::from_utf8(h.value).ok())
         .and_then(|v| v.parse().ok())
-        .unwrap_or(0);
+        .unwrap_or(0)
+}
+
+/// Read the request body based on Content-Length header.
+/// Returns (body, unconsumed trailing bytes).
+pub fn read_body(stream: &mut TcpStream, headers: &[httparse::Header<'_>], buf: &[u8], header_len: usize) -> io::Result<Vec<u8>> {
+    let cl = content_length(headers);
 
     if cl == 0 {
         return Ok(Vec::new());
@@ -237,7 +243,6 @@ pub fn read_body(stream: &mut TcpStream, headers: &[httparse::Header<'_>], buf: 
     }
 
     let mut body = Vec::with_capacity(cl);
-    // Bytes already read past the header
     let already = &buf[header_len..];
     let already_len = already.len().min(cl);
     body.extend_from_slice(&already[..already_len]);

@@ -163,42 +163,72 @@ impl Server {
     }
 
     fn handle(&mut self, mut stream: TcpStream) -> io::Result<()> {
-        self.drain_watch_events();
+        use std::time::Duration;
 
         let mut buf = [0u8; 8192];
         let mut pos = 0usize;
 
         loop {
-            if pos == buf.len() {
-                return write_error(&stream, 431, "Request Header Fields Too Large");
-            }
-            let n = stream.read(&mut buf[pos..])?;
-            if n == 0 {
-                return Ok(());
-            }
-            pos += n;
-            let mut hdrs = [httparse::EMPTY_HEADER; 32];
-            let mut req = httparse::Request::new(&mut hdrs);
-            match req.parse(&buf[..pos]) {
-                Ok(httparse::Status::Complete(header_len)) => {
-                    let method = req.method.unwrap_or("").to_string();
-                    let path_raw = req.path.unwrap_or("/").to_string();
-                    let start = Instant::now();
+            self.drain_watch_events();
 
-                    let result = self.dispatch(
-                        &mut stream, &method, &path_raw,
-                        &req.headers, &buf[..pos], header_len,
-                    );
+            // Keep-alive timeout: wait up to 10s for the next request
+            stream.set_read_timeout(Some(Duration::from_secs(10)))?;
 
-                    if !self.quiet {
-                        let elapsed = start.elapsed();
-                        eprintln!("\t{method} {path_raw} ({:.1}ms)", elapsed.as_secs_f64() * 1000.0);
-                    }
-
-                    return result;
+            // Read until we have complete headers
+            loop {
+                if pos == buf.len() {
+                    return write_error(&stream, 431, "Request Header Fields Too Large");
                 }
-                Ok(httparse::Status::Partial) => continue,
-                Err(_) => return write_error(&stream, 400, "Bad Request"),
+                let n = match stream.read(&mut buf[pos..]) {
+                    Ok(0) => return Ok(()),
+                    Ok(n) => n,
+                    Err(e) if e.kind() == io::ErrorKind::WouldBlock
+                           || e.kind() == io::ErrorKind::TimedOut => return Ok(()),
+                    Err(e) => return Err(e),
+                };
+                pos += n;
+
+                let mut hdrs = [httparse::EMPTY_HEADER; 32];
+                let mut req = httparse::Request::new(&mut hdrs);
+                match req.parse(&buf[..pos]) {
+                    Ok(httparse::Status::Complete(header_len)) => {
+                        let method = req.method.unwrap_or("").to_string();
+                        let path_raw = req.path.unwrap_or("/").to_string();
+
+                        // Disable timeout for dispatch (body reads, sendfile, etc.)
+                        stream.set_read_timeout(None)?;
+
+                        let start = Instant::now();
+                        let result = self.dispatch(
+                            &mut stream, &method, &path_raw,
+                            &req.headers, &buf[..pos], header_len,
+                        );
+                        if !self.quiet {
+                            let elapsed = start.elapsed();
+                            eprintln!("\t{method} {path_raw} ({:.1}ms)", elapsed.as_secs_f64() * 1000.0);
+                        }
+                        result?;
+
+                        // SSE is a long-lived connection — don't loop
+                        let route = path_raw.split('?').next().unwrap_or("/");
+                        if route == "/events" {
+                            return Ok(());
+                        }
+
+                        // Carry over any bytes past this request's body
+                        let body_len = content_length(&req.headers);
+                        let consumed = header_len + body_len;
+                        if consumed < pos {
+                            buf.copy_within(consumed..pos, 0);
+                            pos -= consumed;
+                        } else {
+                            pos = 0;
+                        }
+                        break; // back to outer loop for next request
+                    }
+                    Ok(httparse::Status::Partial) => continue,
+                    Err(_) => return write_error(&stream, 400, "Bad Request"),
+                }
             }
         }
     }
