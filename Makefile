@@ -14,11 +14,12 @@ check:
 lint-ts:
 	bun run oxlint web/ts/
 
-fmt-ts:
-	bun run oxfmt web/ts/
+ts: lint-ts
+	bun run oxfmt --check web/ts/
+	bunx tsc --noEmit --pretty false
+	bun build web/ts/main.ts --outfile web/static/app.js --target browser --format esm
 
-dev:
-	bun build web/ts/main.ts --outfile web/static/app.js --watch &
+dev: ts
 	cargo run --bin tansu -- $(NOTES_DIR) --port 3000
 
 NOTES_DIR ?= ~/notes

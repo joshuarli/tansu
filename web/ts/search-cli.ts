@@ -1,3 +1,5 @@
+export {};
+
 const q = process.argv[2];
 if (!q) {
   console.error("usage: bun run web/ts/search-cli.ts <query>");

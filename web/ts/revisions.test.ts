@@ -9,13 +9,8 @@ mock.on("POST", "/api/restore", { mtime: 5000 });
 const { toggleRevisions, hideRevisions } = await import("./revisions.ts");
 const { on, clearAll } = await import("./events.ts");
 
-// Track restore calls
-let _restoredContent: string | null = null;
-let _restoredMtime = 0;
-on<{ content: string; mtime: number }>("revision:restore", ({ content, mtime }) => {
-  _restoredContent = content;
-  _restoredMtime = mtime;
-});
+// Track restore calls via event bus
+on("revision:restore", () => {});
 
 // Show revisions
 toggleRevisions("test.md");

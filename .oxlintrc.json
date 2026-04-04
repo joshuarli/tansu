@@ -9,6 +9,7 @@
   },
   "rules": {
     "unicorn/prefer-add-event-listener": "off",
+    "unicorn/require-module-specifiers": "off",
     "no-await-in-loop": "off"
   }
 }

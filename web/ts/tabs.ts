@@ -2,14 +2,7 @@
 
 import { deleteNote } from "./api.ts";
 import { on } from "./events.ts";
-import {
-  getTabs,
-  getActiveIndex,
-  getActiveTab,
-  switchTab,
-  closeTab,
-  createNewNote,
-} from "./tab-state.ts";
+import { getTabs, getActiveIndex, switchTab, closeTab, createNewNote } from "./tab-state.ts";
 
 export {
   type Tab,

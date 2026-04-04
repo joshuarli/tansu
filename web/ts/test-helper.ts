@@ -76,9 +76,9 @@ export function setupDOM(): () => void {
   // Patch globals
   const originals: Record<string, unknown> = {};
   // Ensure Window has error constructors that happy-dom's internals need
-  (win as Record<string, unknown>)["SyntaxError"] = SyntaxError;
-  (win as Record<string, unknown>)["TypeError"] = TypeError;
-  (win as Record<string, unknown>)["DOMException"] = DOMException;
+  (win as unknown as Record<string, unknown>)["SyntaxError"] = SyntaxError;
+  (win as unknown as Record<string, unknown>)["TypeError"] = TypeError;
+  (win as unknown as Record<string, unknown>)["DOMException"] = DOMException;
 
   const globals = [
     "window",
@@ -100,7 +100,7 @@ export function setupDOM(): () => void {
 
   for (const key of globals) {
     originals[key] = (globalThis as Record<string, unknown>)[key];
-    (globalThis as Record<string, unknown>)[key] = (win as Record<string, unknown>)[key];
+    (globalThis as Record<string, unknown>)[key] = (win as unknown as Record<string, unknown>)[key];
   }
 
   // navigator, location, alert, confirm, prompt
