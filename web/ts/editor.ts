@@ -127,11 +127,19 @@ export async function saveCurrentNote() {
   const result = await saveNote(currentPath, content, tab.mtime);
 
   if (result.conflict) {
+    const diskContent = result.content ?? "";
+    // False conflict: mtime drifted but content unchanged (Spotlight, iCloud, etc.)
+    if (diskContent === content || diskContent === tab.content) {
+      const retry = await saveNote(currentPath, content, 0);
+      markClean(currentPath, content, retry.mtime);
+      return;
+    }
+    // Real conflict: disk content genuinely differs
     if (container) {
       showConflictBanner(
         container,
         currentPath,
-        result.content ?? "",
+        diskContent,
         result.mtime,
         loadContent,
         getCurrentContent,
