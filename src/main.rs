@@ -17,6 +17,7 @@ mod revisions;
 mod scanner;
 mod settings;
 mod strip;
+mod util;
 mod watcher;
 
 use http::*;

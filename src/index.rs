@@ -14,6 +14,7 @@ use tantivy::{
 use crate::http;
 use crate::scanner;
 use crate::strip;
+use crate::util::StrExt;
 
 pub struct SearchResult {
     pub path: String,
@@ -394,20 +395,18 @@ fn make_snippet(content: &str, terms: &[&str], max_len: usize) -> String {
 
     if match_positions.is_empty() {
         // No matches — return beginning of content
-        let end = content.len().min(max_len);
-        let snip = &content[..end];
-        return escape_html(snip);
+        return escape_html(content.truncate_bytes(max_len));
     }
 
     // Pick window around the first match
     let first_match = match_positions[0].0;
-    let window_start = first_match.saturating_sub(40);
+    let window_start = content.floor_char_boundary(first_match.saturating_sub(40));
     // Align to word boundary
     let window_start = content[..window_start]
         .rfind(|c: char| c.is_whitespace())
         .map(|p| p + 1)
         .unwrap_or(0);
-    let window_end = (window_start + max_len).min(content.len());
+    let window_end = content.floor_char_boundary((window_start + max_len).min(content.len()));
     let window_end = content[window_end..]
         .find(|c: char| c.is_whitespace())
         .map(|p| window_end + p)
@@ -615,4 +614,21 @@ mod tests {
         let s = make_snippet("Hello World", &["hello"], 160);
         assert!(s.contains("<b>Hello</b>"), "got: {s}");
     }
+
+    #[test]
+    fn snippet_multibyte_no_panic() {
+        // Emoji are 4 bytes each; window arithmetic must not split them
+        let content = "📖📖📖📖📖📖📖📖📖📖 hello 📖📖📖📖📖";
+        let s = make_snippet(content, &["hello"], 160);
+        assert!(s.contains("<b>hello</b>"), "got: {s}");
+    }
+
+    #[test]
+    fn snippet_no_match_multibyte() {
+        let content = "📖 intro text about things";
+        let s = make_snippet(content, &["zzz"], 10);
+        // Should not panic, just truncate safely
+        assert!(!s.is_empty());
+    }
+
 }
