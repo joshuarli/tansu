@@ -6,8 +6,8 @@ import { merge3 } from './merge.ts';
 import { domToMarkdown } from './serialize.ts';
 import { handleBlockTransform } from './transforms.ts';
 import { checkWikiLinkTrigger, hideAutocomplete, invalidateNoteCache as _invalidateNoteCache } from './autocomplete.ts';
+import { renderMarkdown } from './markdown.ts';
 
-declare const marked: { parse: (md: string) => string };
 declare const hljs: { highlightElement: (el: HTMLElement) => void };
 
 let editorArea: HTMLElement;
@@ -187,7 +187,7 @@ function loadContent(markdown: string) {
   if (isSourceMode && sourceEl) {
     sourceEl.value = markdown;
   } else if (contentEl) {
-    contentEl.innerHTML = marked.parse(markdown);
+    contentEl.innerHTML = renderMarkdown(markdown);
     highlightCodeBlocks();
   }
 }
@@ -204,7 +204,7 @@ function toggleSourceMode() {
 
   if (isSourceMode) {
     const md = sourceEl.value;
-    contentEl.innerHTML = marked.parse(md);
+    contentEl.innerHTML = renderMarkdown(md);
     highlightCodeBlocks();
     contentEl.style.display = '';
     sourceEl.style.display = 'none';

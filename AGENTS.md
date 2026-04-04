@@ -8,7 +8,7 @@ Tansu is a local-first note-taking app (Obsidian alternative). Notes are plain m
 
 **Rust server** (no async runtime): raw TCP accept loop using `httparse` for HTTP parsing, `tantivy` for full-text search, `notify` for filesystem watching, `pulldown-cmark` for markdown stripping. All request/response types use `serde` JSON serialization.
 
-**Frontend**: vanilla TypeScript compiled and bundled with `bun build`. WYSIWYG editing via `contenteditable` with a source-mode toggle. `marked.js` renders markdown to HTML (with custom extensions for wiki-links, image embeds, and `==highlights==`). `highlight.js` for code block syntax highlighting. No framework, no CSS framework.
+**Frontend**: vanilla TypeScript compiled and bundled with `bun build`. WYSIWYG editing via `contenteditable` with a source-mode toggle. Custom markdown renderer (`markdown.ts`) converts markdown to HTML — no external markdown library. `highlight.js` for code block syntax highlighting. No framework, no CSS framework.
 
 **SSE live reload**: single EventSource connection at `/events`. Server holds one SSE client at a time. File watcher events trigger `changed`/`deleted` SSE messages to the browser, which reloads or merges content.
 
@@ -57,7 +57,8 @@ All source in `web/ts/`, bundled to `web/static/app.js`:
 - **serialize.ts** -- `domToMarkdown`: DOM-to-markdown serializer for the WYSIWYG editor. Handles headings, lists, blockquotes, code blocks, tables, inline formatting, wiki-links, image embeds.
 - **transforms.ts** -- Block-level transforms on Enter: typing `## ` converts to H2, `- ` to UL, `` ``` `` to code block, `---` to HR, etc.
 - **autocomplete.ts** -- Wiki-link autocomplete dropdown. Triggered by `[[` in the editor. Caches note list, filters as you type, completes on Enter/Tab.
-- **wikilinks.ts** -- `marked.js` extensions: `[[wiki-links]]`, `![[image embeds]]`, `==highlights==`, `~~strikethrough~~`, task lists (`- [ ]`/`- [x]`), and `> [!type]` callouts (Obsidian-style, rendered as colored boxes).
+- **markdown.ts** -- Custom markdown-to-HTML renderer. Block parsing (headings, paragraphs, fenced code, lists with task items, blockquotes, callouts, tables, HR) and inline rendering (bold, italic, strikethrough, code, highlights, wiki-links, wiki-images, standard links/images, escaped chars).
+- **wikilinks.ts** -- Click handler delegate for `[[wiki-links]]` rendered by markdown.ts.
 - **merge.ts** -- Line-based 3-way merge (LCS diff). Returns merged string or null on conflict.
 - **revisions.ts** -- Revisions side panel. Lists timestamps, preview on click, restore with confirmation.
 - **util.ts** -- `debounce`, `escapeHtml`, `relativeTime`, `stemFromPath`.

@@ -4,7 +4,7 @@ import {
   getActiveTab, openTab, updateTabPath, updateTabContent, restoreSession,
 } from './tabs.ts';
 import { initEditor, showEditor, hideEditor, saveCurrentNote, reloadFromDisk, invalidateNoteCache } from './editor.ts';
-import { registerWikiLinkExtension } from './wikilinks.ts';
+import { registerWikiLinkClickHandler } from './wikilinks.ts';
 import { renameNote, getNote, listNotes } from './api.ts';
 import { stemFromPath } from './util.ts';
 import type { Tab } from './tabs.ts';
@@ -12,8 +12,8 @@ import type { Tab } from './tabs.ts';
 // Initialize editor
 initEditor();
 
-// Register wiki-link extension for marked.js
-registerWikiLinkExtension(async (target: string) => {
+// Wiki-link click handler
+registerWikiLinkClickHandler(async (target: string) => {
   // Resolve wiki-link: find matching note
   const notes = await listNotes();
   const normalized = target.toLowerCase().replace(/\s+/g, '-');
