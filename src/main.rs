@@ -251,6 +251,8 @@ impl Server {
             ("GET", "/api/revisions") => self.api_list_revisions(stream, path_raw),
             ("GET", "/api/revision") => self.api_get_revision(stream, path_raw),
             ("POST", "/api/restore") => self.api_restore_revision(stream, path_raw),
+            ("GET", "/api/state") => self.api_get_state(stream),
+            ("PUT", "/api/state") => self.api_put_state(stream, headers, raw_buf, header_len),
             _ => write_error(stream, 404, "Not Found"),
         }
     }
@@ -529,6 +531,27 @@ impl Server {
             Some(content) => respond_json(sock, &ContentResponse { content: &content }),
             None => write_error(sock, 404, "revision not found"),
         }
+    }
+
+    fn api_get_state(&self, sock: &TcpStream) -> io::Result<()> {
+        let path = self.dir.join(".tansu/state.json");
+        match fs::read_to_string(&path) {
+            Ok(json) => write_body(sock, "application/json", json.as_bytes()),
+            Err(_) => write_json(sock, "{}"),
+        }
+    }
+
+    fn api_put_state(
+        &self, stream: &mut TcpStream,
+        headers: &[httparse::Header<'_>], raw_buf: &[u8], header_len: usize,
+    ) -> io::Result<()> {
+        let body = read_body(stream, headers, raw_buf, header_len)?;
+        // Validate it's valid JSON
+        let _: serde_json::Value = serde_json::from_slice(&body)
+            .map_err(|e| io::Error::other(e.to_string()))?;
+        let path = self.dir.join(".tansu/state.json");
+        fs::write(&path, &body)?;
+        respond_json(stream, &OkResponse { ok: true })
     }
 
     fn api_restore_revision(&mut self, sock: &TcpStream, path_raw: &str) -> io::Result<()> {

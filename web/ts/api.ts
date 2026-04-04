@@ -113,3 +113,22 @@ export async function restoreRevision(path: string, ts: number): Promise<{ mtime
   if (!res.ok) throw new Error(`restore failed: ${res.status}`);
   return res.json() as Promise<{ mtime: number }>;
 }
+
+export interface SessionState {
+  tabs?: string[];
+  active?: number;
+}
+
+export async function getState(): Promise<SessionState> {
+  const res = await fetch('/api/state');
+  if (!res.ok) return {};
+  return res.json() as Promise<SessionState>;
+}
+
+export async function saveState(state: SessionState): Promise<void> {
+  await fetch('/api/state', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(state),
+  });
+}

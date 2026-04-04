@@ -1,7 +1,7 @@
 import { toggleSearch, closeSearch, isSearchOpen } from './search.ts';
 import {
   setOnTabChange, setOnTabClose, closeActiveTab, nextTab, prevTab,
-  getActiveTab, openTab, updateTabPath, updateTabContent,
+  getActiveTab, openTab, updateTabPath, updateTabContent, restoreSession,
 } from './tabs.ts';
 import { initEditor, showEditor, hideEditor, saveCurrentNote, reloadFromDisk, invalidateNoteCache } from './editor.ts';
 import { registerWikiLinkExtension } from './wikilinks.ts';
@@ -153,3 +153,4 @@ function connectSSE() {
 }
 
 connectSSE();
+restoreSession();

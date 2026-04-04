@@ -1,4 +1,4 @@
-import { getNote, deleteNote } from './api.ts';
+import { getNote, deleteNote, saveState, getState } from './api.ts';
 import type { Note } from './api.ts';
 
 export interface Tab {
@@ -17,6 +17,10 @@ let onTabClose: ((tab: Tab) => void) | null = null;
 const tabBar = document.getElementById('tab-bar')!;
 const editorArea = document.getElementById('editor-area')!;
 const emptyState = document.getElementById('empty-state')!;
+
+function persistState() {
+  saveState({ tabs: tabs.map(t => t.path), active: activeIndex });
+}
 
 export function setOnTabChange(fn: (tab: Tab | null) => void) {
   onTabChange = fn;
@@ -58,6 +62,7 @@ export async function openTab(path: string): Promise<Tab> {
   };
   tabs.push(tab);
   switchTab(tabs.length - 1);
+  persistState();
   return tab;
 }
 
@@ -66,6 +71,7 @@ export function switchTab(index: number) {
   activeIndex = index;
   render();
   onTabChange?.(tabs[activeIndex] ?? null);
+  persistState();
 }
 
 export function closeTab(index: number) {
@@ -87,6 +93,7 @@ export function closeTab(index: number) {
 
   render();
   onTabChange?.(tabs[activeIndex] ?? null);
+  persistState();
 }
 
 export function closeActiveTab() {
@@ -135,6 +142,7 @@ export function updateTabPath(oldPath: string, newPath: string) {
     tab.path = newPath;
     tab.title = titleFromContent(tab.content, newPath);
     render();
+    persistState();
   }
 }
 
@@ -151,6 +159,28 @@ export async function deleteActiveTab() {
   }
   render();
   onTabChange?.(tabs[activeIndex] ?? null);
+  persistState();
+}
+
+export async function restoreSession() {
+  const state = await getState();
+  if (!state.tabs?.length) return;
+  for (const path of state.tabs) {
+    try {
+      const note = await getNote(path);
+      const title = titleFromContent(note.content, path);
+      tabs.push({ path, title, dirty: false, content: note.content, mtime: note.mtime });
+    } catch {
+      // Note was deleted since last session — skip it
+    }
+  }
+  if (tabs.length > 0) {
+    const idx = typeof state.active === 'number' && state.active >= 0 && state.active < tabs.length
+      ? state.active : 0;
+    activeIndex = idx;
+    render();
+    onTabChange?.(tabs[activeIndex] ?? null);
+  }
 }
 
 function titleFromContent(content: string, path: string): string {
