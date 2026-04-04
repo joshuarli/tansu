@@ -52,7 +52,7 @@ export async function openTab(path: string): Promise<Tab> {
 
   // Load note
   const note = await getNote(path);
-  const title = titleFromContent(note.content, path);
+  const title = titleFromPath(path);
   const tab: Tab = {
     path,
     title,
@@ -122,7 +122,7 @@ export function markClean(path: string, content: string, mtime: number) {
     tab.dirty = false;
     tab.content = content;
     tab.mtime = mtime;
-    tab.title = titleFromContent(content, path);
+    tab.title = titleFromPath(path);
     render();
   }
 }
@@ -132,7 +132,7 @@ export function updateTabContent(path: string, content: string, mtime: number) {
   if (tab) {
     tab.content = content;
     tab.mtime = mtime;
-    tab.title = titleFromContent(content, path);
+    tab.title = titleFromPath(path);
   }
 }
 
@@ -140,7 +140,7 @@ export function updateTabPath(oldPath: string, newPath: string) {
   const tab = tabs.find(t => t.path === oldPath);
   if (tab) {
     tab.path = newPath;
-    tab.title = titleFromContent(tab.content, newPath);
+    tab.title = titleFromPath(newPath);
     render();
     persistState();
   }
@@ -168,7 +168,7 @@ export async function restoreSession() {
   for (const path of state.tabs) {
     try {
       const note = await getNote(path);
-      const title = titleFromContent(note.content, path);
+      const title = titleFromPath(path);
       tabs.push({ path, title, dirty: false, content: note.content, mtime: note.mtime });
     } catch {
       // Note was deleted since last session — skip it
@@ -183,10 +183,7 @@ export async function restoreSession() {
   }
 }
 
-function titleFromContent(content: string, path: string): string {
-  // First H1, or filename stem
-  const match = content.match(/^#\s+(.+)$/m);
-  if (match?.[1]) return match[1];
+function titleFromPath(path: string): string {
   const name = path.split('/').pop() ?? path;
   return name.replace(/\.md$/i, '');
 }
