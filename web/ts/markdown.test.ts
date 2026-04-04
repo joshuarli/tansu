@@ -68,7 +68,8 @@ assertContains(img, 'alt="alt"', 'image alt');
 // Fenced code block
 const code = renderMarkdown('```js\nconst x = 1;\n```');
 assertContains(code, '<pre><code class="language-js">', 'code block lang');
-assertContains(code, 'const x = 1;', 'code block content');
+assertContains(code, 'const', 'code block has keyword');
+assertContains(code, 'hl-kw', 'code block has highlight class');
 
 // Code block without language
 const codeNoLang = renderMarkdown('```\nhello\n```');
