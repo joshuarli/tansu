@@ -111,11 +111,14 @@ fn extract_wiki_links(line: &str, links: &mut Vec<String>) {
     }
 }
 
-/// Normalize a wiki-link target: lowercase, strip .md extension.
+/// Normalize a wiki-link target: extract filename stem, lowercase, strip .md extension.
+/// [[sub/My Note.md]] → "my note", [[UPPER]] → "upper"
 pub fn normalize_link(link: &str) -> String {
     let link = link.trim();
-    let link = link.strip_suffix(".md").unwrap_or(link);
-    link.to_lowercase()
+    // Extract filename portion (after last /)
+    let filename = link.rsplit('/').next().unwrap_or(link);
+    let filename = filename.strip_suffix(".md").unwrap_or(filename);
+    filename.to_lowercase()
 }
 
 #[cfg(test)]
@@ -164,7 +167,8 @@ mod tests {
     #[test]
     fn scan_extracts_wiki_links() {
         let r = scan("See [[other note]] and [[sub/page]].");
-        assert_eq!(r.links, vec!["other note", "sub/page"]);
+        // [[sub/page]] extracts stem "page" for backlink matching
+        assert_eq!(r.links, vec!["other note", "page"]);
     }
 
     #[test]
@@ -213,5 +217,31 @@ mod tests {
     fn scan_tag_underscore() {
         let r = scan("#my_tag");
         assert_eq!(r.tags, vec!["my_tag"]);
+    }
+
+    #[test]
+    fn normalize_link_strips_path() {
+        assert_eq!(normalize_link("sub/My Note"), "my note");
+    }
+
+    #[test]
+    fn normalize_link_strips_path_and_extension() {
+        assert_eq!(normalize_link("folder/deep/Note.md"), "note");
+    }
+
+    #[test]
+    fn normalize_link_simple() {
+        assert_eq!(normalize_link("Hello World"), "hello world");
+    }
+
+    #[test]
+    fn normalize_link_trims_whitespace() {
+        assert_eq!(normalize_link("  spaced  "), "spaced");
+    }
+
+    #[test]
+    fn scan_subdirectory_link_extracts_stem() {
+        let r = scan("See [[folder/my note]].");
+        assert_eq!(r.links, vec!["my note"]);
     }
 }

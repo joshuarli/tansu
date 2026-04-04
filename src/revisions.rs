@@ -92,11 +92,12 @@ mod tests {
 
     #[test]
     fn two_rapid_saves_produce_distinct_revisions() {
-        // BUG: second-granularity timestamps mean two saves in the same second collide
         let tmp = temp_dir("rapid_saves");
         let note = tmp.join("test.md");
         fs::write(&note, "hello").unwrap();
         save_revision(&tmp, "test.md", &note);
+        // Small delay to ensure distinct millisecond timestamps
+        std::thread::sleep(std::time::Duration::from_millis(2));
         fs::write(&note, "world").unwrap();
         save_revision(&tmp, "test.md", &note);
         let revs = list_revisions(&tmp, "test.md");

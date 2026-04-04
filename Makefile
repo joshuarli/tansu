@@ -1,4 +1,4 @@
-build: build-ts build-rs
+build: check build-ts build-rs
 
 build-ts:
 	bun build web/ts/main.ts --outfile web/static/app.js --minify
@@ -7,7 +7,7 @@ build-rs:
 	cargo build
 
 check:
-	bun tsc
+	bunx tsc
 	cargo check
 
 dev:

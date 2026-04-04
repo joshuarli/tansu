@@ -2,6 +2,7 @@ import { searchNotes, createNote } from './api.ts';
 import type { SearchResult } from './api.ts';
 import { debounce, escapeHtml } from './util.ts';
 import { openTab } from './tabs.ts';
+import { invalidateNoteCache } from './editor.ts';
 
 const overlay = document.getElementById('search-overlay')!;
 const input = document.getElementById('search-input')! as HTMLInputElement;
@@ -140,6 +141,7 @@ async function selectItem() {
     closeSearch();
     try {
       await createNote(path);
+      invalidateNoteCache();
       await openTab(path);
     } catch (e) {
       console.error('Failed to create note:', e);

@@ -12,6 +12,7 @@ use tantivy::{
     snippet::SnippetGenerator,
 };
 
+use crate::http;
 use crate::scanner;
 use crate::strip;
 
@@ -38,7 +39,6 @@ pub struct Index {
 }
 
 struct IndexInner {
-    index: TantivyIndex,
     writer: RwLock<IndexWriter>,
     reader: IndexReader,
     fields: Fields,
@@ -76,7 +76,6 @@ impl Index {
 
         Ok(Index {
             inner: Arc::new(IndexInner {
-                index,
                 writer: RwLock::new(writer),
                 reader,
                 fields: Fields {
@@ -92,58 +91,12 @@ impl Index {
         })
     }
 
-    pub fn index_note(&self, rel_path: &str, content: &str, full_path: &Path) {
+    /// Build and add a document to the writer (does not commit).
+    fn add_doc(&self, rel_path: &str, content: &str, full_path: &Path) {
         let f = &self.inner.fields;
         let scan = scanner::scan(content);
         let stripped = strip::strip_markdown(content);
-
-        let mtime = fs::metadata(full_path)
-            .ok()
-            .and_then(|m| m.modified().ok())
-            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
-
-        let title = if scan.title.is_empty() {
-            Path::new(rel_path)
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .unwrap_or(rel_path)
-                .to_string()
-        } else {
-            scan.title
-        };
-
-        // Delete existing doc with same path
-        let mut writer = self.inner.writer.write().unwrap();
-        let path_term = tantivy::Term::from_field_text(f.path, rel_path);
-        writer.delete_term(path_term);
-
-        let mut doc = TantivyDocument::new();
-        doc.add_text(f.path, rel_path);
-        doc.add_text(f.title, &title);
-        doc.add_text(f.content, &stripped);
-        doc.add_text(f.headings, &scan.headings.join(" "));
-        doc.add_text(f.tags, &scan.tags.join(" "));
-        doc.add_u64(f.mtime, mtime);
-        doc.add_text(f.links_to, &scan.links.join(" "));
-
-        let _ = writer.add_document(doc);
-        let _ = writer.commit();
-    }
-
-    /// Index a note without committing — caller must call `commit()` afterwards.
-    fn index_note_no_commit(&self, rel_path: &str, content: &str, full_path: &Path) {
-        let f = &self.inner.fields;
-        let scan = scanner::scan(content);
-        let stripped = strip::strip_markdown(content);
-
-        let mtime = fs::metadata(full_path)
-            .ok()
-            .and_then(|m| m.modified().ok())
-            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
+        let mtime = http::mtime_secs(full_path);
 
         let title = if scan.title.is_empty() {
             Path::new(rel_path)
@@ -171,9 +124,15 @@ impl Index {
         let _ = writer.add_document(doc);
     }
 
-    pub fn commit(&self) {
+    fn commit(&self) {
         let mut writer = self.inner.writer.write().unwrap();
         let _ = writer.commit();
+    }
+
+    /// Index a single note and commit immediately.
+    pub fn index_note(&self, rel_path: &str, content: &str, full_path: &Path) {
+        self.add_doc(rel_path, content, full_path);
+        self.commit();
     }
 
     pub fn remove_note(&self, rel_path: &str) {
@@ -183,7 +142,7 @@ impl Index {
         let _ = writer.commit();
     }
 
-    /// Two-phase search: exact+prefix first, fuzzy fallback if <5 results.
+    /// Two-phase search: exact first, fuzzy fallback if <5 results.
     pub fn search(&self, query: &str, limit: usize) -> Vec<SearchResult> {
         let _ = self.inner.reader.reload();
         let searcher = self.inner.reader.searcher();
@@ -193,7 +152,7 @@ impl Index {
             return Vec::new();
         }
 
-        // Phase 1: exact + prefix
+        // Phase 1: exact
         let phase1_query = self.build_query(&terms, false);
         let results = self.execute_search(&searcher, &phase1_query, limit);
 
@@ -224,16 +183,11 @@ impl Index {
             for &(field, boost) in &search_fields {
                 let term = tantivy::Term::from_field_text(field, &word_lower);
 
-                // Exact match
                 let exact = TermQuery::new(term.clone(), IndexRecordOption::WithFreqs);
                 field_queries.push((
                     Occur::Should,
                     Box::new(tantivy::query::BoostQuery::new(Box::new(exact), boost)),
                 ));
-
-                // Prefix match (slightly lower boost)
-                // tantivy doesn't have a simple prefix query, so we use a regex or fuzzy with distance 0
-                // For simplicity, we'll rely on the tokenizer and exact matching
 
                 if fuzzy && field == f.content {
                     let fuzzy_q = FuzzyTermQuery::new(term, 1, true);
@@ -265,7 +219,6 @@ impl Index {
             return Vec::new();
         };
 
-        // Snippet generator for excerpts
         let snippet_gen = SnippetGenerator::create(searcher, query, f.content).ok();
 
         let mut results = Vec::new();
@@ -368,12 +321,10 @@ impl Index {
                 let name = entry.file_name();
                 let name_str = name.to_string_lossy();
 
-                // Skip hidden dirs and .tansu
                 if path.is_dir() {
                     if name_str.starts_with('.') {
                         continue;
                     }
-                    // Skip z-images
                     if name_str == "z-images" {
                         continue;
                     }
@@ -395,7 +346,7 @@ impl Index {
                 if let Ok(content) = fs::read_to_string(&path) {
                     let rel = path.strip_prefix(root).unwrap_or(&path);
                     let rel_str = rel.to_string_lossy();
-                    idx.index_note_no_commit(&rel_str, &content, &path);
+                    idx.add_doc(&rel_str, &content, &path);
                 }
             }
         }

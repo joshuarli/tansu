@@ -971,6 +971,7 @@ dependencies = [
  "httparse",
  "notify",
  "pulldown-cmark",
+ "serde",
  "serde_json",
  "tantivy",
 ]
