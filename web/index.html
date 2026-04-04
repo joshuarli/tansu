@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>tansu</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="/static/vendor/highlight.css">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div id="app">
+  <div id="tab-bar"></div>
+  <div id="editor-area">
+    <div id="empty-state">Press <kbd>Cmd+K</kbd> to search</div>
+  </div>
+  <div id="search-overlay" class="hidden">
+    <div id="search-modal">
+      <input id="search-input" type="text" placeholder="Search notes..." autocomplete="off" spellcheck="false">
+      <div id="search-results"></div>
+    </div>
+  </div>
+</div>
+<script src="/static/vendor/marked.min.js"></script>
+<script src="/static/vendor/highlight.min.js"></script>
+<script type="module" src="/static/app.js"></script>
+</body>
+</html>
