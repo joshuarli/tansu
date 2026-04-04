@@ -3,7 +3,7 @@ import {
   setOnTabChange, setOnTabClose, closeActiveTab, nextTab, prevTab,
   getActiveTab, openTab, updateTabPath, updateTabContent,
 } from './tabs.ts';
-import { initEditor, showEditor, hideEditor, saveCurrentNote, reloadFromDisk } from './editor.ts';
+import { initEditor, showEditor, hideEditor, saveCurrentNote, reloadFromDisk, invalidateNoteCache } from './editor.ts';
 import { registerWikiLinkExtension } from './wikilinks.ts';
 import { renameNote, getNote, listNotes } from './api.ts';
 import { stemFromPath } from './util.ts';
@@ -31,6 +31,7 @@ registerWikiLinkExtension(async (target: string) => {
     const path = `${target}.md`;
     const { createNote } = await import('./api.ts');
     await createNote(path);
+    invalidateNoteCache();
     await openTab(path);
   }
 });
@@ -98,6 +99,7 @@ window.addEventListener('tansu:rename', async (e: Event) => {
 
   try {
     const result = await renameNote(oldPath, newPath);
+    invalidateNoteCache();
     updateTabPath(oldPath, newPath);
 
     // Reload any other open tabs that were updated
@@ -135,7 +137,7 @@ function connectSSE() {
 
   es.addEventListener('deleted', (e) => {
     const path = e.data;
-    // If the deleted note is open, show a message
+    invalidateNoteCache();
     const active = getActiveTab();
     if (active && active.path === path) {
       alert(`"${stemFromPath(path)}" was deleted externally.`);

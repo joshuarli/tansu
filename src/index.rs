@@ -132,6 +132,50 @@ impl Index {
         let _ = writer.commit();
     }
 
+    /// Index a note without committing — caller must call `commit()` afterwards.
+    fn index_note_no_commit(&self, rel_path: &str, content: &str, full_path: &Path) {
+        let f = &self.inner.fields;
+        let scan = scanner::scan(content);
+        let stripped = strip::strip_markdown(content);
+
+        let mtime = fs::metadata(full_path)
+            .ok()
+            .and_then(|m| m.modified().ok())
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+
+        let title = if scan.title.is_empty() {
+            Path::new(rel_path)
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or(rel_path)
+                .to_string()
+        } else {
+            scan.title
+        };
+
+        let writer = self.inner.writer.write().unwrap();
+        let path_term = tantivy::Term::from_field_text(f.path, rel_path);
+        writer.delete_term(path_term);
+
+        let mut doc = TantivyDocument::new();
+        doc.add_text(f.path, rel_path);
+        doc.add_text(f.title, &title);
+        doc.add_text(f.content, &stripped);
+        doc.add_text(f.headings, &scan.headings.join(" "));
+        doc.add_text(f.tags, &scan.tags.join(" "));
+        doc.add_u64(f.mtime, mtime);
+        doc.add_text(f.links_to, &scan.links.join(" "));
+
+        let _ = writer.add_document(doc);
+    }
+
+    pub fn commit(&self) {
+        let mut writer = self.inner.writer.write().unwrap();
+        let _ = writer.commit();
+    }
+
     pub fn remove_note(&self, rel_path: &str) {
         let mut writer = self.inner.writer.write().unwrap();
         let path_term = tantivy::Term::from_field_text(self.inner.fields.path, rel_path);
@@ -143,7 +187,6 @@ impl Index {
     pub fn search(&self, query: &str, limit: usize) -> Vec<SearchResult> {
         let _ = self.inner.reader.reload();
         let searcher = self.inner.reader.searcher();
-        let f = &self.inner.fields;
 
         let terms: Vec<&str> = query.split_whitespace().collect();
         if terms.is_empty() {
@@ -313,10 +356,11 @@ impl Index {
         notes
     }
 
-    /// Full reindex: walk directory, index all .md files.
+    /// Full reindex: walk directory, index all .md files. Single commit at end.
     pub fn full_reindex(&self, root: &Path) {
         let start = std::time::Instant::now();
         walk_and_index(root, root, self);
+        self.commit();
         fn walk_and_index(root: &Path, dir: &Path, idx: &Index) {
             let Ok(entries) = fs::read_dir(dir) else { return };
             for entry in entries.filter_map(|e| e.ok()) {
@@ -351,7 +395,7 @@ impl Index {
                 if let Ok(content) = fs::read_to_string(&path) {
                     let rel = path.strip_prefix(root).unwrap_or(&path);
                     let rel_str = rel.to_string_lossy();
-                    idx.index_note(&rel_str, &content, &path);
+                    idx.index_note_no_commit(&rel_str, &content, &path);
                 }
             }
         }

@@ -963,13 +963,15 @@ impl Server {
         write_json(sock, &self.buf)
     }
 
-    /// Write content atomically: write to .tmp file, then rename.
+    /// Write content atomically: write to .tmp sibling, then rename.
     fn atomic_write(&self, path: &Path, content: &[u8]) -> io::Result<()> {
-        let tmp = path.with_extension("tmp");
+        // Mark as self-write BEFORE writing so watcher ignores the event
+        self.self_writes.lock().unwrap().insert(path.to_path_buf());
+        let mut tmp = path.as_os_str().to_owned();
+        tmp.push(".tmp");
+        let tmp = PathBuf::from(tmp);
         fs::write(&tmp, content)?;
         fs::rename(&tmp, path)?;
-        // Mark as self-write so watcher ignores
-        self.self_writes.lock().unwrap().insert(path.to_path_buf());
         Ok(())
     }
 }

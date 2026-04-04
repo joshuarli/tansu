@@ -378,10 +378,54 @@ function handleBlockTransform(e: KeyboardEvent) {
         const heading = document.createElement(`h${level}`);
         heading.textContent = match[2] ?? '';
         block.replaceWith(heading);
-        // Create new paragraph
         const p = document.createElement('p');
         p.innerHTML = '<br>';
         heading.after(p);
+        setCursorStart(p);
+        if (currentPath) markDirty(currentPath);
+        return;
+      }
+    }
+
+    if (type === 'ul') {
+      const match = text.match(/^[-*]\s(.*)$/);
+      if (match) {
+        e.preventDefault();
+        const ul = document.createElement('ul');
+        const li = document.createElement('li');
+        li.textContent = match[1] ?? '';
+        ul.appendChild(li);
+        block.replaceWith(ul);
+        setCursorStart(li);
+        if (currentPath) markDirty(currentPath);
+        return;
+      }
+    }
+
+    if (type === 'ol') {
+      const match = text.match(/^\d+\.\s(.*)$/);
+      if (match) {
+        e.preventDefault();
+        const ol = document.createElement('ol');
+        const li = document.createElement('li');
+        li.textContent = match[1] ?? '';
+        ol.appendChild(li);
+        block.replaceWith(ol);
+        setCursorStart(li);
+        if (currentPath) markDirty(currentPath);
+        return;
+      }
+    }
+
+    if (type === 'blockquote') {
+      const match = text.match(/^>\s(.*)$/);
+      if (match) {
+        e.preventDefault();
+        const bq = document.createElement('blockquote');
+        const p = document.createElement('p');
+        p.textContent = match[1] ?? '';
+        bq.appendChild(p);
+        block.replaceWith(bq);
         setCursorStart(p);
         if (currentPath) markDirty(currentPath);
         return;
@@ -592,6 +636,10 @@ function hideAutocomplete() {
     autocompleteEl.remove();
     autocompleteEl = null;
   }
+}
+
+export function invalidateNoteCache() {
+  allNotes = null;
 }
 
 async function loadBacklinks(path: string) {

@@ -24,11 +24,11 @@ pub fn scan(content: &str) -> ScanResult {
                     title = text.to_string();
                 }
                 headings.push(text.to_string());
+                // Don't scan heading lines for tags (# is ambiguous)
+                // But still scan for wiki-links
+                extract_wiki_links(trimmed, &mut links);
+                continue;
             }
-            // Don't scan heading lines for tags (# is ambiguous)
-            // But still scan for wiki-links
-            extract_wiki_links(trimmed, &mut links);
-            continue;
         }
 
         // Scan line for tags and wiki-links
@@ -116,4 +116,102 @@ pub fn normalize_link(link: &str) -> String {
     let link = link.trim();
     let link = link.strip_suffix(".md").unwrap_or(link);
     link.to_lowercase()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn scan_extracts_h1_title() {
+        let r = scan("# My Title\n\nSome text");
+        assert_eq!(r.title, "My Title");
+    }
+
+    #[test]
+    fn scan_extracts_multiple_headings() {
+        let r = scan("# Title\n## Section\n### Sub");
+        assert_eq!(r.headings, vec!["Title", "Section", "Sub"]);
+    }
+
+    #[test]
+    fn scan_no_title_without_h1() {
+        let r = scan("## Not a title\n\nJust text");
+        assert_eq!(r.title, "");
+        assert_eq!(r.headings, vec!["Not a title"]);
+    }
+
+    #[test]
+    fn scan_extracts_tags() {
+        let r = scan("Some text #rust and #web-dev here");
+        assert_eq!(r.tags, vec!["rust", "web-dev"]);
+    }
+
+    #[test]
+    fn scan_tag_must_follow_whitespace() {
+        let r = scan("email@#notag but #real-tag");
+        // #notag should not be extracted because @ precedes it
+        assert_eq!(r.tags, vec!["real-tag"]);
+    }
+
+    #[test]
+    fn scan_tags_not_extracted_from_headings() {
+        let r = scan("# Heading with #tag\n\n#body-tag here");
+        // Heading lines skip tag extraction to avoid # ambiguity
+        assert_eq!(r.tags, vec!["body-tag"]);
+    }
+
+    #[test]
+    fn scan_extracts_wiki_links() {
+        let r = scan("See [[other note]] and [[sub/page]].");
+        assert_eq!(r.links, vec!["other note", "sub/page"]);
+    }
+
+    #[test]
+    fn scan_wiki_link_with_display_text() {
+        let r = scan("See [[target|display text]].");
+        assert_eq!(r.links, vec!["target"]);
+    }
+
+    #[test]
+    fn scan_skips_image_embeds() {
+        let r = scan("Text ![[image.webp]] and [[real link]].");
+        assert_eq!(r.links, vec!["real link"]);
+    }
+
+    #[test]
+    fn scan_normalizes_links() {
+        let r = scan("[[My Note.md]] and [[UPPER]]");
+        assert_eq!(r.links, vec!["my note", "upper"]);
+    }
+
+    #[test]
+    fn scan_wiki_links_in_headings() {
+        let r = scan("# Title with [[link]]");
+        assert_eq!(r.links, vec!["link"]);
+    }
+
+    #[test]
+    fn scan_multiple_links_per_line() {
+        let r = scan("See [[a]], [[b]], and [[c]].");
+        assert_eq!(r.links, vec!["a", "b", "c"]);
+    }
+
+    #[test]
+    fn scan_unclosed_bracket_ignored() {
+        let r = scan("Some [[unclosed bracket text");
+        assert!(r.links.is_empty());
+    }
+
+    #[test]
+    fn scan_empty_brackets_ignored() {
+        let r = scan("Empty [[]] brackets");
+        assert!(r.links.is_empty());
+    }
+
+    #[test]
+    fn scan_tag_underscore() {
+        let r = scan("#my_tag");
+        assert_eq!(r.tags, vec!["my_tag"]);
+    }
 }
