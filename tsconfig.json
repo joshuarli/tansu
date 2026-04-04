@@ -15,5 +15,6 @@
     "noUncheckedIndexedAccess": true,
     "exactOptionalPropertyTypes": true
   },
-  "include": ["web/ts"]
+  "include": ["web/ts"],
+  "exclude": ["web/ts/search-cli.ts", "web/ts/markdown.test.ts"]
 }

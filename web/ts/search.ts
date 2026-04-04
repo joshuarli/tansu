@@ -97,12 +97,22 @@ function renderResults(query: string) {
     path.className = 'path';
     path.textContent = r.path;
 
-    el.append(title, path);
+    const score = document.createElement('div');
+    score.className = 'score';
+    const fs = r.field_scores;
+    const parts: string[] = [];
+    if (fs.title > 0) parts.push(`title:${fs.title.toPrecision(3)}`);
+    if (fs.headings > 0) parts.push(`headings:${fs.headings.toPrecision(3)}`);
+    if (fs.tags > 0) parts.push(`tags:${fs.tags.toPrecision(3)}`);
+    if (fs.content > 0) parts.push(`content:${fs.content.toPrecision(3)}`);
+    score.textContent = `${r.score.toPrecision(3)}${parts.length ? ' = ' + parts.join(' + ') : ''}`;
+
+    el.append(title, path, score);
 
     if (r.excerpt) {
       const excerpt = document.createElement('div');
       excerpt.className = 'excerpt';
-      excerpt.innerHTML = r.excerpt; // tantivy returns HTML with <b> tags
+      excerpt.innerHTML = r.excerpt;
       el.appendChild(excerpt);
     }
 

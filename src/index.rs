@@ -20,6 +20,15 @@ pub struct SearchResult {
     pub title: String,
     pub excerpt: String,
     pub score: f32,
+    pub field_scores: FieldScores,
+}
+
+#[derive(Default)]
+pub struct FieldScores {
+    pub title: f32,
+    pub headings: f32,
+    pub tags: f32,
+    pub content: f32,
 }
 
 struct Fields {
@@ -243,11 +252,15 @@ impl Index {
                 .unwrap_or("");
             let excerpt = make_snippet(content, terms, 160);
 
+            // Per-field score breakdown: count term matches per field
+            let field_scores = compute_field_scores(&doc, f, terms);
+
             results.push(SearchResult {
                 path,
                 title,
                 excerpt,
                 score,
+                field_scores,
             });
         }
         results
@@ -308,6 +321,44 @@ impl Index {
         notes
     }
 
+}
+
+/// Compute per-field scores by counting term matches (exact + fuzzy) against stored values.
+fn compute_field_scores(doc: &TantivyDocument, f: &Fields, terms: &[&str]) -> FieldScores {
+    let get = |field: Field| -> &str {
+        doc.get_first(field).and_then(|v| v.as_str()).unwrap_or("")
+    };
+
+    let fields = [
+        (get(f.title), 10.0f32),
+        (get(f.headings), 5.0),
+        (get(f.tags), 2.0),
+        (get(f.content), 1.0),
+    ];
+
+    let lower_terms: Vec<String> = terms.iter().map(|t| t.to_lowercase()).collect();
+    let mut scores = [0.0f32; 4];
+
+    for (i, &(text, boost)) in fields.iter().enumerate() {
+        let words = word_positions(text);
+        for &(start, end) in &words {
+            let word = text[start..end].to_lowercase();
+            for term in &lower_terms {
+                if word == *term {
+                    scores[i] += boost;
+                } else if edit_distance_one(&word, term) {
+                    scores[i] += boost * 0.6;
+                }
+            }
+        }
+    }
+
+    FieldScores {
+        title: scores[0],
+        headings: scores[1],
+        tags: scores[2],
+        content: scores[3],
+    }
 }
 
 /// Build a snippet from content with highlighted query terms (supports fuzzy matching).

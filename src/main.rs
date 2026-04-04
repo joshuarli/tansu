@@ -46,6 +46,15 @@ struct SearchHit<'a> {
     title: &'a str,
     excerpt: &'a str,
     score: f32,
+    field_scores: FieldScoresJson,
+}
+
+#[derive(Serialize)]
+struct FieldScoresJson {
+    title: f32,
+    headings: f32,
+    tags: f32,
+    content: f32,
 }
 
 #[derive(Serialize)]
@@ -304,6 +313,12 @@ impl Server {
         let results = self.index.search(&q, 20, filter_path.as_deref());
         let hits: Vec<SearchHit> = results.iter().map(|r| SearchHit {
             path: &r.path, title: &r.title, excerpt: &r.excerpt, score: r.score,
+            field_scores: FieldScoresJson {
+                title: r.field_scores.title,
+                headings: r.field_scores.headings,
+                tags: r.field_scores.tags,
+                content: r.field_scores.content,
+            },
         }).collect();
         respond_json(sock, &hits)
     }

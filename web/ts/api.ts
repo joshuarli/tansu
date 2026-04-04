@@ -3,11 +3,19 @@ export interface Note {
   mtime: number;
 }
 
+export interface FieldScores {
+  title: number;
+  headings: number;
+  tags: number;
+  content: number;
+}
+
 export interface SearchResult {
   path: string;
   title: string;
   excerpt: string;
   score: number;
+  field_scores: FieldScores;
 }
 
 export interface NoteEntry {

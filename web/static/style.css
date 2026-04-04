@@ -253,6 +253,7 @@ body {
 .search-result:hover, .search-result.selected { background: var(--bg-subtle); }
 .search-result .title { font-weight: 500; font-size: 14px; }
 .search-result .path { font-size: 12px; color: var(--fg-muted); }
+.search-result .score { font-size: 11px; color: var(--fg-muted); font-family: var(--mono); margin-top: 1px; }
 .search-result .excerpt { font-size: 13px; color: var(--fg-muted); margin-top: 2px; }
 .search-result .excerpt b { background: rgba(255,220,0,0.4); border-radius: 2px; font-weight: normal; }
 
