@@ -93,7 +93,7 @@ function inlineToMd(el: HTMLElement): string {
   let md = "";
   for (const node of el.childNodes) {
     if (node.nodeType === Node.TEXT_NODE) {
-      md += node.textContent ?? "";
+      md += (node.textContent ?? "").replace(/\u200B/g, "");
     } else if (node.nodeType === Node.ELEMENT_NODE) {
       const child = node as HTMLElement;
       const childTag = child.tagName;

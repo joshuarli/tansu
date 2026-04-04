@@ -8,11 +8,12 @@ import { loadBacklinks } from "./backlinks.ts";
 import { showConflictBanner, handleReloadConflict } from "./conflict.ts";
 import { on } from "./events.ts";
 import { handleImagePaste } from "./image-paste.ts";
+import { checkInlineTransform } from "./inline-transforms.ts";
 import { renderMarkdown } from "./markdown.ts";
 import { toggleRevisions, hideRevisions } from "./revisions.ts";
 import { domToMarkdown } from "./serialize.ts";
 import { markDirty, markClean, getActiveTab } from "./tabs.ts";
-import { handleBlockTransform } from "./transforms.ts";
+import { checkBlockInputTransform, handleBlockTransform } from "./transforms.ts";
 
 let editorArea: HTMLElement;
 let container: HTMLElement | null = null;
@@ -198,6 +199,8 @@ function setupEditorEvents() {
 
   contentEl.addEventListener("input", () => {
     if (currentPath) markDirty(currentPath);
+    if (contentEl && checkBlockInputTransform(contentEl)) return;
+    checkInlineTransform();
     if (contentEl) checkWikiLinkTrigger(contentEl, currentPath);
   });
 
@@ -216,13 +219,13 @@ function setupEditorEvents() {
 
     if (meta && e.key === "b") {
       e.preventDefault();
-      wrapInline("**");
+      document.execCommand("bold");
       return;
     }
 
     if (meta && e.key === "i") {
       e.preventDefault();
-      wrapInline("*");
+      document.execCommand("italic");
       return;
     }
 
@@ -253,14 +256,4 @@ function setupEditorEvents() {
       saveCurrentNote();
     }
   });
-}
-
-function wrapInline(marker: string) {
-  const sel = window.getSelection();
-  if (!sel || sel.rangeCount === 0) return;
-  const range = sel.getRangeAt(0);
-  const text = range.toString();
-  if (text) {
-    document.execCommand("insertText", false, `${marker}${text}${marker}`);
-  }
 }
