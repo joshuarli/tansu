@@ -1,6 +1,6 @@
 import { createSearch } from './search.ts';
 import { createSettings } from './settings.ts';
-import { createPalette } from './palette.ts';
+import { createPalette, matchesKey } from './palette.ts';
 import {
   closeActiveTab, nextTab, prevTab,
   getActiveTab, openTab, updateTabPath, updateTabContent, restoreSession,
@@ -52,96 +52,47 @@ on<Tab | null>('tab:change', (tab) => {
   }
 });
 
-// Register command palette commands
+// Register command palette commands (keys field drives the global keydown handler)
 palette.registerCommands([
-  { label: 'Search notes', shortcut: '\u2318K', action: () => search.open() },
-  { label: 'Search in current note', shortcut: '\u2318F', action: () => {
+  { label: 'Search notes',          shortcut: '\u2318K',    keys: { key: 'k', meta: true },              action: () => search.toggle() },
+  { label: 'Search in current note', shortcut: '\u2318F',   keys: { key: 'f', meta: true },              action: () => {
     const tab = getActiveTab();
     if (tab) search.open(tab.path);
     else search.open();
   }},
-  { label: 'Global search', shortcut: '\u21e7\u2318F', action: () => search.open() },
-  { label: 'New note', shortcut: '\u2318T', action: () => createNewNote() },
-  { label: 'Save', shortcut: '\u2318S', action: () => saveCurrentNote() },
-  { label: 'Close tab', shortcut: '\u2318W', action: () => closeActiveTab() },
-  { label: 'Next tab', shortcut: '\u21e7\u2318]', action: () => nextTab() },
-  { label: 'Previous tab', shortcut: '\u21e7\u2318[', action: () => prevTab() },
-  { label: 'Settings', shortcut: '\u21e7\u2318S', action: () => settings.toggle() },
+  { label: 'Global search',         shortcut: '\u21e7\u2318F', keys: { key: 'f', meta: true, shift: true }, action: () => search.open() },
+  { label: 'New note',              shortcut: '\u2318T',    keys: { key: 't', meta: true },              action: () => createNewNote() },
+  { label: 'Save',                  shortcut: '\u2318S',    keys: { key: 's', meta: true },              action: () => saveCurrentNote() },
+  { label: 'Close tab',             shortcut: '\u2318W',    keys: { key: 'w', meta: true },              action: () => closeActiveTab() },
+  { label: 'Next tab',              shortcut: '\u21e7\u2318]', keys: { key: ']', meta: true, shift: true }, action: () => nextTab() },
+  { label: 'Previous tab',          shortcut: '\u21e7\u2318[', keys: { key: '[', meta: true, shift: true }, action: () => prevTab() },
+  { label: 'Settings',              shortcut: '\u21e7\u2318S', keys: { key: 's', meta: true, shift: true }, action: () => settings.toggle() },
 ]);
 
-// Global keyboard shortcuts
+// Global keyboard shortcuts — driven by command palette registry
 document.addEventListener('keydown', (e) => {
-  const meta = e.metaKey || e.ctrlKey;
+  // Escape: dismiss overlays in priority order
+  if (e.key === 'Escape') {
+    if (palette.isOpen()) { e.preventDefault(); palette.close(); return; }
+    if (settings.isOpen()) { e.preventDefault(); settings.close(); return; }
+    if (search.isOpen()) { e.preventDefault(); search.close(); return; }
+    return;
+  }
 
-  if (meta && e.key === 'p') {
+  // Cmd+P: palette toggle (not shown in palette itself)
+  if ((e.metaKey || e.ctrlKey) && e.key === 'p') {
     e.preventDefault();
     palette.toggle();
     return;
   }
 
-  if (meta && e.key === 'k') {
-    e.preventDefault();
-    search.toggle();
-    return;
-  }
-
-  if (meta && e.shiftKey && e.key === 'f') {
-    e.preventDefault();
-    search.open();
-    return;
-  }
-
-  if (meta && !e.shiftKey && e.key === 'f') {
-    e.preventDefault();
-    const tab = getActiveTab();
-    if (tab) search.open(tab.path);
-    else search.open();
-    return;
-  }
-
-  // Cmd+Shift+S: settings
-  if (meta && e.shiftKey && e.key === 's') {
-    e.preventDefault();
-    settings.toggle();
-    return;
-  }
-
-  // Cmd+S: save
-  if (meta && !e.shiftKey && e.key === 's') {
-    e.preventDefault();
-    saveCurrentNote();
-    return;
-  }
-
-  // Cmd+T: new note
-  if (meta && e.key === 't') {
-    e.preventDefault();
-    createNewNote();
-    return;
-  }
-
-  if (e.key === 'Escape') {
-    if (palette.isOpen()) { e.preventDefault(); palette.close(); return; }
-    if (settings.isOpen()) { e.preventDefault(); settings.close(); return; }
-    if (search.isOpen()) { e.preventDefault(); search.close(); return; }
-  }
-
-  if (meta && e.key === 'w') {
-    e.preventDefault();
-    closeActiveTab();
-    return;
-  }
-
-  if (meta && e.shiftKey && e.key === ']') {
-    e.preventDefault();
-    nextTab();
-    return;
-  }
-
-  if (meta && e.shiftKey && e.key === '[') {
-    e.preventDefault();
-    prevTab();
-    return;
+  // Match registered commands (shift bindings checked first to avoid shadowing)
+  for (const cmd of palette.getCommands()) {
+    if (cmd.keys && matchesKey(e, cmd.keys)) {
+      e.preventDefault();
+      cmd.action();
+      return;
+    }
   }
 });
 
