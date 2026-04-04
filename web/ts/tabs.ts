@@ -66,9 +66,20 @@ export async function openTab(path: string): Promise<Tab> {
   return tab;
 }
 
-export function switchTab(index: number) {
+export async function switchTab(index: number) {
   if (index < 0 || index >= tabs.length) return;
   activeIndex = index;
+  const tab = tabs[activeIndex];
+  // Lazy-load if not yet fetched
+  if (tab && tab.mtime === 0 && !tab.dirty) {
+    try {
+      const note = await getNote(tab.path);
+      tab.content = note.content;
+      tab.mtime = note.mtime;
+    } catch {
+      // Note may have been deleted — keep empty content
+    }
+  }
   render();
   onTabChange?.(tabs[activeIndex] ?? null);
   persistState();
@@ -112,18 +123,34 @@ export function markDirty(path: string) {
   const tab = tabs.find(t => t.path === path);
   if (tab && !tab.dirty) {
     tab.dirty = true;
-    render();
+    updateTabDirtyState(tabs.indexOf(tab));
   }
 }
 
 export function markClean(path: string, content: string, mtime: number) {
   const tab = tabs.find(t => t.path === path);
   if (tab) {
+    const wasDirty = tab.dirty;
     tab.dirty = false;
     tab.content = content;
     tab.mtime = mtime;
     tab.title = titleFromPath(path);
-    render();
+    if (wasDirty) updateTabDirtyState(tabs.indexOf(tab));
+  }
+}
+
+function updateTabDirtyState(index: number) {
+  const tabEl = tabBar.children[index] as HTMLElement | undefined;
+  if (!tabEl) return;
+  const existing = tabEl.querySelector('.dirty');
+  const tab = tabs[index];
+  if (tab?.dirty && !existing) {
+    const dot = document.createElement('span');
+    dot.className = 'dirty';
+    dot.textContent = '\u25cf';
+    tabEl.insertBefore(dot, tabEl.firstChild);
+  } else if (!tab?.dirty && existing) {
+    existing.remove();
   }
 }
 
@@ -177,19 +204,28 @@ export async function createNewNote() {
 export async function restoreSession() {
   const state = await getState();
   if (!state.tabs?.length) return;
-  for (const path of state.tabs) {
-    try {
-      const note = await getNote(path);
-      const title = titleFromPath(path);
-      tabs.push({ path, title, dirty: false, content: note.content, mtime: note.mtime });
-    } catch {
-      // Note was deleted since last session — skip it
+
+  const activeIdx = typeof state.active === 'number' && state.active >= 0 && state.active < state.tabs.length
+    ? state.active : 0;
+
+  // Load active tab first, add placeholders for the rest
+  for (let i = 0; i < state.tabs.length; i++) {
+    const path = state.tabs[i]!;
+    if (i === activeIdx) {
+      try {
+        const note = await getNote(path);
+        tabs.push({ path, title: titleFromPath(path), dirty: false, content: note.content, mtime: note.mtime });
+      } catch {
+        tabs.push({ path, title: titleFromPath(path), dirty: false, content: '', mtime: 0 });
+      }
+    } else {
+      // Placeholder — content loaded on switch
+      tabs.push({ path, title: titleFromPath(path), dirty: false, content: '', mtime: 0 });
     }
   }
+
   if (tabs.length > 0) {
-    const idx = typeof state.active === 'number' && state.active >= 0 && state.active < tabs.length
-      ? state.active : 0;
-    activeIndex = idx;
+    activeIndex = activeIdx;
     render();
     onTabChange?.(tabs[activeIndex] ?? null);
   }

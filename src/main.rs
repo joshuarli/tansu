@@ -118,23 +118,28 @@ struct Server {
 
 impl Server {
     fn drain_watch_events(&mut self) {
+        let mut had_events = false;
         while let Ok(event) = self.watch_rx.try_recv() {
+            had_events = true;
             match event {
                 WatchEvent::Modified(path) | WatchEvent::Created(path) => {
                     if let Ok(content) = fs::read_to_string(&path) {
                         let rel = path.strip_prefix(&self.dir).unwrap_or(&path);
                         let rel_str = rel.to_string_lossy();
-                        self.index.index_note(&rel_str, &content, &path);
+                        self.index.index_note_deferred(&rel_str, &content, &path);
                         self.broadcast_sse("changed", &rel_str);
                     }
                 }
                 WatchEvent::Removed(path) => {
                     let rel = path.strip_prefix(&self.dir).unwrap_or(&path);
                     let rel_str = rel.to_string_lossy();
-                    self.index.remove_note(&rel_str);
+                    self.index.remove_note_deferred(&rel_str);
                     self.broadcast_sse("deleted", &rel_str);
                 }
             }
+        }
+        if had_events {
+            self.index.commit();
         }
     }
 
@@ -257,7 +262,7 @@ impl Server {
                 return write_error(stream, 403, "Forbidden");
             }
             return match fs::metadata(&self.fp) {
-                Ok(m) if m.is_file() => serve_file(stream, &self.fp, m.len(), mime(&self.fp)),
+                Ok(m) if m.is_file() => serve_file_cached(stream, &self.fp, m.len(), mime(&self.fp)),
                 _ => write_error(stream, 404, "Not Found"),
             };
         }
@@ -269,7 +274,7 @@ impl Server {
                 return write_error(stream, 403, "Forbidden");
             }
             return match fs::metadata(&self.fp) {
-                Ok(m) if m.is_file() => serve_file(stream, &self.fp, m.len(), mime(&self.fp)),
+                Ok(m) if m.is_file() => serve_file_cached(stream, &self.fp, m.len(), mime(&self.fp)),
                 _ => write_error(stream, 404, "Not Found"),
             };
         }
@@ -492,13 +497,16 @@ impl Server {
         self.mark_self_write(&new_full);
         fs::rename(&old_full, &new_full)?;
 
-        self.index.remove_note(&req.old_path);
+        self.index.remove_note_deferred(&req.old_path);
         if let Ok(content) = fs::read_to_string(&new_full) {
-            self.index.index_note(&req.new_path, &content, &new_full);
+            self.index.index_note_deferred(&req.new_path, &content, &new_full);
         }
 
         let old_stem = Path::new(&req.old_path).file_stem().and_then(|s| s.to_str()).unwrap_or(&req.old_path);
         let new_stem = Path::new(&req.new_path).file_stem().and_then(|s| s.to_str()).unwrap_or(&req.new_path);
+
+        // Commit now so get_backlinks sees the updated index
+        self.index.commit();
 
         let mut updated = Vec::new();
         let referencing = self.index.get_backlinks(old_stem);
@@ -512,10 +520,14 @@ impl Server {
                 if new_content != content {
                     revisions::save_revision(&self.dir, note_path, &note_full);
                     let _ = self.atomic_write(&note_full, new_content.as_bytes());
-                    self.index.index_note(note_path, &new_content, &note_full);
+                    self.index.index_note_deferred(note_path, &new_content, &note_full);
                     updated.push(note_path.clone());
                 }
             }
+        }
+        // Single commit for all backlink updates
+        if !updated.is_empty() {
+            self.index.commit();
         }
 
         respond_json(stream, &RenameResponse { updated })

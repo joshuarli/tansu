@@ -220,6 +220,28 @@ pub fn serve_file(sock: &TcpStream, path: &Path, len: u64, content_type: &str) -
     send_file(&file, sock, len)
 }
 
+/// Serve a static file with long-lived cache headers.
+pub fn serve_file_cached(sock: &TcpStream, path: &Path, len: u64, content_type: &str) -> io::Result<()> {
+    let file = File::open(path)?;
+    let mut hdr = [0u8; 512];
+    let n = {
+        let mut c = io::Cursor::new(&mut hdr[..]);
+        write!(
+            c,
+            "HTTP/1.1 200 OK\r\n\
+             Content-Type: {content_type}\r\n\
+             Content-Length: {len}\r\n\
+             Cache-Control: public, max-age=3600\r\n\
+             Connection: keep-alive\r\n\
+             \r\n"
+        )?;
+        c.position() as usize
+    };
+    let mut w: &TcpStream = sock;
+    w.write_all(&hdr[..n])?;
+    send_file(&file, sock, len)
+}
+
 /// Get Content-Length from headers.
 pub fn content_length(headers: &[httparse::Header<'_>]) -> usize {
     headers

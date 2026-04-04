@@ -1,7 +1,7 @@
 use std::{
     fs,
     path::Path,
-    sync::{Arc, RwLock},
+    sync::{Arc, RwLock, atomic::{AtomicBool, Ordering}},
 };
 
 use tantivy::{
@@ -51,6 +51,7 @@ struct IndexInner {
     writer: RwLock<IndexWriter>,
     reader: IndexReader,
     fields: Fields,
+    dirty: AtomicBool,
 }
 
 impl Index {
@@ -96,6 +97,7 @@ impl Index {
                     mtime,
                     links_to,
                 },
+                dirty: AtomicBool::new(true),
             }),
         })
     }
@@ -129,9 +131,17 @@ impl Index {
         let _ = writer.add_document(doc);
     }
 
-    fn commit(&self) {
+    pub fn commit(&self) {
         let mut writer = self.inner.writer.write().unwrap();
         let _ = writer.commit();
+        self.inner.dirty.store(true, Ordering::Release);
+    }
+
+    /// Reload the reader only if the index has been committed to since last reload.
+    fn reload_if_dirty(&self) {
+        if self.inner.dirty.swap(false, Ordering::AcqRel) {
+            let _ = self.inner.reader.reload();
+        }
     }
 
     /// Index a single note and commit immediately.
@@ -140,11 +150,23 @@ impl Index {
         self.commit();
     }
 
+    /// Index a single note without committing. Call `commit()` separately.
+    pub fn index_note_deferred(&self, rel_path: &str, content: &str, full_path: &Path) {
+        self.add_doc(rel_path, content, full_path);
+    }
+
     pub fn remove_note(&self, rel_path: &str) {
         let mut writer = self.inner.writer.write().unwrap();
         let path_term = tantivy::Term::from_field_text(self.inner.fields.path, rel_path);
         writer.delete_term(path_term);
         let _ = writer.commit();
+        self.inner.dirty.store(true, Ordering::Release);
+    }
+
+    pub fn remove_note_deferred(&self, rel_path: &str) {
+        let writer = self.inner.writer.write().unwrap();
+        let path_term = tantivy::Term::from_field_text(self.inner.fields.path, rel_path);
+        writer.delete_term(path_term);
     }
 
     /// Two-phase search: exact first, fuzzy fallback if <5 results.
@@ -153,7 +175,7 @@ impl Index {
         &self, query: &str, limit: usize, filter_path: Option<&str>,
         fuzzy_distance: u8, weights: [f32; 4],
     ) -> Vec<SearchResult> {
-        let _ = self.inner.reader.reload();
+        self.reload_if_dirty();
         let searcher = self.inner.reader.searcher();
 
         let terms: Vec<&str> = query.split_whitespace().collect();
@@ -274,7 +296,7 @@ impl Index {
     }
 
     pub fn get_backlinks(&self, target_stem: &str) -> Vec<String> {
-        let _ = self.inner.reader.reload();
+        self.reload_if_dirty();
         let searcher = self.inner.reader.searcher();
         let f = &self.inner.fields;
 
@@ -297,7 +319,7 @@ impl Index {
     }
 
     pub fn get_all_notes(&self) -> Vec<(String, String)> {
-        let _ = self.inner.reader.reload();
+        self.reload_if_dirty();
         let searcher = self.inner.reader.searcher();
         let f = &self.inner.fields;
 
@@ -621,6 +643,35 @@ mod tests {
         let content = "📖📖📖📖📖📖📖📖📖📖 hello 📖📖📖📖📖";
         let s = make_snippet(content, &["hello"], 160);
         assert!(s.contains("<b>hello</b>"), "got: {s}");
+    }
+
+    #[test]
+    fn reload_if_dirty_skips_when_clean() {
+        let dir = std::env::temp_dir().join(format!("tansu_test_dirty_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let idx = Index::open_or_create(&dir).unwrap();
+
+        // After creation, dirty flag is true (initial state)
+        assert!(idx.inner.dirty.load(Ordering::Acquire));
+
+        // First reload clears the flag
+        idx.reload_if_dirty();
+        assert!(!idx.inner.dirty.load(Ordering::Acquire));
+
+        // Second reload is a no-op (flag stays false)
+        idx.reload_if_dirty();
+        assert!(!idx.inner.dirty.load(Ordering::Acquire));
+
+        // Commit sets it back to true
+        idx.commit();
+        assert!(idx.inner.dirty.load(Ordering::Acquire));
+
+        // Reload clears it again
+        idx.reload_if_dirty();
+        assert!(!idx.inner.dirty.load(Ordering::Acquire));
+
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]

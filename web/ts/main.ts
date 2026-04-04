@@ -157,13 +157,13 @@ window.addEventListener('tansu:rename', async (e: Event) => {
     invalidateNoteCache();
     updateTabPath(oldPath, newPath);
 
-    // Reload any other open tabs that were updated
-    for (const updated of result.updated) {
+    // Reload any other open tabs that were updated (in parallel)
+    await Promise.all(result.updated.map(async (updated) => {
       try {
         const note = await getNote(updated);
         updateTabContent(updated, note.content, note.mtime);
       } catch {}
-    }
+    }));
 
     // Refresh current editor if it was the renamed tab
     const active = getActiveTab();
@@ -186,11 +186,14 @@ function showNotification(msg: string, type: 'error' | 'info' = 'error') {
   notifTimer = setTimeout(() => { notif.className = 'notification hidden'; }, 5000);
 }
 
-// SSE: connect for live reload
+// SSE: connect for live reload with exponential backoff
+let sseBackoff = 1000;
+
 function connectSSE() {
   const es = new EventSource('/events');
 
   es.addEventListener('connected', () => {
+    sseBackoff = 1000;
     notif.className = 'notification hidden';
   });
 
@@ -217,8 +220,9 @@ function connectSSE() {
 
   es.onerror = () => {
     es.close();
-    showNotification('Live reload disconnected — retrying...');
-    setTimeout(connectSSE, 3000);
+    showNotification(`Live reload disconnected — retrying in ${Math.round(sseBackoff / 1000)}s...`);
+    setTimeout(connectSSE, sseBackoff);
+    sseBackoff = Math.min(sseBackoff * 2, 30000);
   };
 }
 
