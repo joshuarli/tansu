@@ -61,7 +61,7 @@ export function showEditor(path: string, content: string) {
   const revBtn = document.createElement("button");
   revBtn.textContent = "Revisions";
   revBtn.onclick = () => {
-    if (currentPath) toggleRevisions(currentPath);
+    if (currentPath) toggleRevisions(currentPath, getCurrentContent);
   };
 
   toolbar.append(sourceBtn, revBtn);

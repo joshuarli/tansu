@@ -551,6 +551,60 @@ body {
   float: right;
 }
 
+/* Diff view */
+.diff-view {
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.5;
+  max-height: 400px;
+  overflow: auto;
+  margin-top: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.diff-hunk {
+  border-bottom: 1px solid var(--border);
+}
+
+.diff-hunk:last-child {
+  border-bottom: none;
+}
+
+.diff-hunk-header {
+  background: #ddf4ff;
+  color: #0550ae;
+  padding: 4px 8px;
+  font-size: 11px;
+}
+
+.diff-line {
+  padding: 0 8px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.diff-prefix {
+  display: inline-block;
+  width: 16px;
+  user-select: none;
+  color: var(--fg-muted);
+}
+
+.diff-add {
+  background: #dafbe1;
+  color: #1a7f37;
+}
+
+.diff-del {
+  background: #ffebe9;
+  color: #cf222e;
+}
+
+.diff-ctx {
+  color: var(--fg-muted);
+}
+
 /* Autocomplete dropdown for wiki-links */
 .autocomplete {
   position: absolute;

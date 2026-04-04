@@ -1,15 +1,18 @@
 import { listRevisions, getRevision, restoreRevision } from "./api.ts";
+import { computeDiff, renderDiff } from "./diff.ts";
 import { emit } from "./events.ts";
 import { relativeTime } from "./util.ts";
 
 let panelEl: HTMLElement | null = null;
 let currentPath: string | null = null;
+let getCurrentContent: (() => string) | null = null;
 
-export function toggleRevisions(path: string) {
+export function toggleRevisions(path: string, getContent?: () => string) {
   if (panelEl && currentPath === path) {
     hideRevisions();
     return;
   }
+  if (getContent) getCurrentContent = getContent;
   showRevisions(path);
 }
 
@@ -82,16 +85,14 @@ async function showRevisions(path: string) {
 
       item.append(time, restore);
       item.onclick = async () => {
-        const content = await getRevision(path, ts);
-        // Preview: show content in a temporary read-only view
+        const revContent = await getRevision(path, ts);
         const preview = panel.querySelector(".revision-preview");
         if (preview) preview.remove();
-        const pre = document.createElement("pre");
-        pre.className = "revision-preview";
-        pre.style.cssText =
-          "font-size:12px;max-height:300px;overflow:auto;background:#f6f8fa;padding:8px;border-radius:6px;margin-top:8px;white-space:pre-wrap;word-break:break-word;";
-        pre.textContent = content;
-        panel.appendChild(pre);
+        const current = getCurrentContent ? getCurrentContent() : "";
+        const hunks = computeDiff(revContent, current);
+        const diffEl = renderDiff(hunks);
+        diffEl.classList.add("revision-preview");
+        panel.appendChild(diffEl);
       };
 
       panel.appendChild(item);
