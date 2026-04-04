@@ -175,9 +175,24 @@ window.addEventListener('tansu:rename', async (e: Event) => {
   }
 });
 
+// Notification pill
+const notif = document.getElementById('notification')!;
+let notifTimer: ReturnType<typeof setTimeout> | null = null;
+
+function showNotification(msg: string, type: 'error' | 'info' = 'error') {
+  notif.textContent = msg;
+  notif.className = `notification ${type}`;
+  if (notifTimer) clearTimeout(notifTimer);
+  notifTimer = setTimeout(() => { notif.className = 'notification hidden'; }, 5000);
+}
+
 // SSE: connect for live reload
 function connectSSE() {
   const es = new EventSource('/events');
+
+  es.addEventListener('connected', () => {
+    notif.className = 'notification hidden';
+  });
 
   es.addEventListener('changed', async (e) => {
     const path = e.data;
@@ -202,7 +217,7 @@ function connectSSE() {
 
   es.onerror = () => {
     es.close();
-    // Retry after 3 seconds
+    showNotification('Live reload disconnected — retrying...');
     setTimeout(connectSSE, 3000);
   };
 }

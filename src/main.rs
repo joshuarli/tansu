@@ -295,9 +295,13 @@ impl Server {
 
     fn handle_sse(&self, stream: &mut TcpStream) -> io::Result<()> {
         let mut guard = self.sse_client.lock().unwrap();
-        if guard.is_some() {
-            drop(guard);
-            return write_error(stream, 409, "Conflict: another client is connected");
+        // If an existing client is held, probe it with a comment line.
+        // If the write fails, the old connection is dead — replace it.
+        if let Some(ref mut old) = *guard {
+            if old.write_all(b": ping\n\n").is_ok() {
+                drop(guard);
+                return write_error(stream, 409, "Conflict: another client is connected");
+            }
         }
         let header = "HTTP/1.1 200 OK\r\n\
                       Content-Type: text/event-stream\r\n\

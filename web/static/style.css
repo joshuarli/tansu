@@ -540,3 +540,18 @@ body {
 
 .palette-item:hover, .palette-item.selected { background: var(--bg-subtle); }
 .palette-shortcut { font-size: 12px; color: var(--fg-muted); font-family: var(--mono); }
+
+/* Notification pill */
+.notification {
+  position: fixed;
+  top: 8px;
+  right: 12px;
+  z-index: 400;
+  font-size: 12px;
+  padding: 4px 12px;
+  border-radius: 12px;
+  pointer-events: none;
+}
+.notification.hidden { display: none; }
+.notification.error { background: var(--danger); color: white; }
+.notification.info { background: var(--fg-muted); color: white; }
