@@ -1,8 +1,10 @@
 import { toggleSearch, openSearch, closeSearch, isSearchOpen } from './search.ts';
 import { toggleSettings, closeSettings, isSettingsOpen } from './settings.ts';
+import { togglePalette, closePalette, isPaletteOpen, registerCommands } from './palette.ts';
 import {
   setOnTabChange, setOnTabClose, closeActiveTab, nextTab, prevTab,
   getActiveTab, openTab, updateTabPath, updateTabContent, restoreSession,
+  createNewNote,
 } from './tabs.ts';
 import { initEditor, showEditor, hideEditor, saveCurrentNote, reloadFromDisk, invalidateNoteCache } from './editor.ts';
 import { registerWikiLinkClickHandler } from './wikilinks.ts';
@@ -50,9 +52,32 @@ setOnTabClose((_tab: Tab) => {
   // Nothing special needed
 });
 
+// Register command palette commands
+registerCommands([
+  { label: 'Search notes', shortcut: '\u2318K', action: () => openSearch() },
+  { label: 'Search in current note', shortcut: '\u2318F', action: () => {
+    const tab = getActiveTab();
+    if (tab) openSearch(tab.path);
+    else openSearch();
+  }},
+  { label: 'Global search', shortcut: '\u21e7\u2318F', action: () => openSearch() },
+  { label: 'New note', shortcut: '\u2318T', action: () => createNewNote() },
+  { label: 'Save', shortcut: '\u2318S', action: () => saveCurrentNote() },
+  { label: 'Close tab', shortcut: '\u2318W', action: () => closeActiveTab() },
+  { label: 'Next tab', shortcut: '\u21e7\u2318]', action: () => nextTab() },
+  { label: 'Previous tab', shortcut: '\u21e7\u2318[', action: () => prevTab() },
+  { label: 'Settings', shortcut: '\u21e7\u2318S', action: () => toggleSettings() },
+]);
+
 // Global keyboard shortcuts
 document.addEventListener('keydown', (e) => {
   const meta = e.metaKey || e.ctrlKey;
+
+  if (meta && e.key === 'p') {
+    e.preventDefault();
+    togglePalette();
+    return;
+  }
 
   if (meta && e.key === 'k') {
     e.preventDefault();
@@ -60,14 +85,12 @@ document.addEventListener('keydown', (e) => {
     return;
   }
 
-  // Shift+Cmd+F: global search
   if (meta && e.shiftKey && e.key === 'f') {
     e.preventDefault();
     openSearch();
     return;
   }
 
-  // Cmd+F: search in current note
   if (meta && !e.shiftKey && e.key === 'f') {
     e.preventDefault();
     const tab = getActiveTab();
@@ -76,23 +99,31 @@ document.addEventListener('keydown', (e) => {
     return;
   }
 
-  // Cmd+, opens settings
-  if (meta && e.key === ',') {
+  // Cmd+Shift+S: settings
+  if (meta && e.shiftKey && e.key === 's') {
     e.preventDefault();
     toggleSettings();
     return;
   }
 
-  if (e.key === 'Escape' && isSettingsOpen()) {
+  // Cmd+S: save
+  if (meta && !e.shiftKey && e.key === 's') {
     e.preventDefault();
-    closeSettings();
+    saveCurrentNote();
     return;
   }
 
-  if (e.key === 'Escape' && isSearchOpen()) {
+  // Cmd+T: new note
+  if (meta && e.key === 't') {
     e.preventDefault();
-    closeSearch();
+    createNewNote();
     return;
+  }
+
+  if (e.key === 'Escape') {
+    if (isPaletteOpen()) { e.preventDefault(); closePalette(); return; }
+    if (isSettingsOpen()) { e.preventDefault(); closeSettings(); return; }
+    if (isSearchOpen()) { e.preventDefault(); closeSearch(); return; }
   }
 
   if (meta && e.key === 'w') {
@@ -110,12 +141,6 @@ document.addEventListener('keydown', (e) => {
   if (meta && e.shiftKey && e.key === '[') {
     e.preventDefault();
     prevTab();
-    return;
-  }
-
-  if (meta && e.key === 's') {
-    e.preventDefault();
-    saveCurrentNote();
     return;
   }
 });

@@ -12,7 +12,7 @@
 <div id="app">
   <div id="tab-bar"></div>
   <div id="editor-area">
-    <div id="empty-state">Press <kbd>Cmd+K</kbd> to search</div>
+    <div id="empty-state">Press <kbd>Cmd+K</kbd> to search &middot; <kbd>Cmd+P</kbd> for commands</div>
   </div>
   <div id="search-overlay" class="hidden">
     <div id="search-modal">
@@ -22,6 +22,12 @@
   </div>
   <div id="settings-overlay" class="hidden">
     <div id="settings-panel"></div>
+  </div>
+  <div id="palette-overlay" class="hidden">
+    <div id="palette-modal">
+      <input id="palette-input" type="text" placeholder="Type a command..." autocomplete="off" spellcheck="false">
+      <div id="palette-list"></div>
+    </div>
   </div>
 </div>
 <script src="/static/vendor/highlight.min.js"></script>

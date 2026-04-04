@@ -1,4 +1,4 @@
-import { getNote, deleteNote, saveState, getState } from './api.ts';
+import { getNote, deleteNote, createNote, saveState, getState } from './api.ts';
 import type { Note } from './api.ts';
 
 export interface Tab {
@@ -162,6 +162,18 @@ export async function deleteActiveTab() {
   persistState();
 }
 
+export async function createNewNote() {
+  const name = prompt('New note name:');
+  if (!name) return;
+  const path = name.endsWith('.md') ? name : `${name}.md`;
+  try {
+    await createNote(path);
+    await openTab(path);
+  } catch (e) {
+    console.error('Failed to create note:', e);
+  }
+}
+
 export async function restoreSession() {
   const state = await getState();
   if (!state.tabs?.length) return;
@@ -282,4 +294,11 @@ function render() {
 
     tabBar.appendChild(el);
   });
+
+  const addBtn = document.createElement('div');
+  addBtn.className = 'tab tab-new';
+  addBtn.textContent = '+';
+  addBtn.title = 'New note (Cmd+T)';
+  addBtn.onclick = () => createNewNote();
+  tabBar.appendChild(addBtn);
 }

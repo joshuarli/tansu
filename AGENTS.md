@@ -63,7 +63,8 @@ All source in `web/ts/`, bundled to `web/static/app.js`:
 - **wikilinks.ts** -- Click handler delegate for `[[wiki-links]]` rendered by markdown.ts.
 - **merge.ts** -- Line-based 3-way merge (LCS diff). Returns merged string or null on conflict.
 - **revisions.ts** -- Revisions side panel. Lists timestamps, preview on click, restore with confirmation.
-- **settings.ts** -- Settings modal (Cmd+,). Sliders for search weights, dropdown for fuzzy distance, checkbox for score breakdown, text input for excluded folders. Saves to server via PUT `/api/settings`.
+- **palette.ts** -- Command palette modal (Cmd+P). Filterable list of all commands with shortcut hints. `registerCommands()` called from main.ts.
+- **settings.ts** -- Settings modal (Cmd+Shift+S). Sliders for search weights, dropdown for fuzzy distance, checkbox for score breakdown, text input for excluded folders. Saves to server via PUT `/api/settings`.
 - **util.ts** -- `debounce`, `escapeHtml`, `relativeTime`, `stemFromPath`.
 
 ## Key conventions
