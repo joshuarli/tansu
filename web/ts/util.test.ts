@@ -18,17 +18,19 @@ assertEqual(stemFromPath('UPPER.MD'), 'UPPER', 'stem case insensitive extension'
 assertEqual(stemFromPath('no-extension'), 'no-extension', 'stem no extension');
 assertEqual(stemFromPath('dots.in.name.md'), 'dots.in.name', 'stem dots in name');
 
-// relativeTime
-const now = Date.now();
-assertEqual(relativeTime(now), 'just now', 'time just now');
-assertEqual(relativeTime(now - 30_000), 'just now', 'time 30s ago');
-assertEqual(relativeTime(now - 120_000), '2m ago', 'time 2m ago');
-assertEqual(relativeTime(now - 3600_000), '1h ago', 'time 1h ago');
-assertEqual(relativeTime(now - 7200_000), '2h ago', 'time 2h ago');
-assertEqual(relativeTime(now - 86400_000), '1d ago', 'time 1d ago');
+// relativeTime (deterministic with explicit `now`)
+const now = 1_700_000_000_000;
+assertEqual(relativeTime(now, now), 'just now', 'time just now');
+assertEqual(relativeTime(now - 30_000, now), 'just now', 'time 30s ago');
+assertEqual(relativeTime(now - 120_000, now), '2m ago', 'time 2m ago');
+assertEqual(relativeTime(now - 3600_000, now), '1h ago', 'time 1h ago');
+assertEqual(relativeTime(now - 7200_000, now), '2h ago', 'time 2h ago');
+assertEqual(relativeTime(now - 86400_000, now), '1d ago', 'time 1d ago');
 // >7 days returns locale date string — just check it's not "Xd ago"
-const weekAgo = relativeTime(now - 700_000_000);
+const weekAgo = relativeTime(now - 700_000_000, now);
 assertEqual(weekAgo.includes('d ago'), false, 'time >7d uses date');
+// Still works without explicit now (backwards compat)
+assertEqual(typeof relativeTime(Date.now()), 'string', 'default now works');
 
 // debounce
 let callCount = 0;

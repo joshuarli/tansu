@@ -341,7 +341,8 @@ async function loadBacklinks(path: string) {
       list.appendChild(item);
     }
     backlinksEl.appendChild(list);
-  } catch {
+  } catch (e) {
+    console.warn('Failed to load backlinks:', e);
     backlinksEl.style.display = 'none';
   }
 }

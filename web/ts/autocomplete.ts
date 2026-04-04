@@ -51,7 +51,8 @@ async function showAutocomplete(query: string, textNode: Text, triggerIdx: numbe
   if (!allNotes) {
     try {
       allNotes = await listNotes();
-    } catch {
+    } catch (e) {
+      console.warn('Failed to load notes for autocomplete:', e);
       return;
     }
   }

@@ -162,7 +162,7 @@ window.addEventListener('tansu:rename', async (e: Event) => {
       try {
         const note = await getNote(updated);
         updateTabContent(updated, note.content, note.mtime);
-      } catch {}
+      } catch (e) { console.warn('Failed to reload tab after rename:', e); }
     }));
 
     // Refresh current editor if it was the renamed tab
@@ -204,7 +204,7 @@ function connectSSE() {
       try {
         const note = await getNote(path);
         reloadFromDisk(note.content, note.mtime);
-      } catch {}
+      } catch (e) { console.warn('Failed to reload note from disk:', e); }
     }
   });
 

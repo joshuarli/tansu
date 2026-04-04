@@ -76,8 +76,8 @@ export async function switchTab(index: number) {
       const note = await getNote(tab.path);
       tab.content = note.content;
       tab.mtime = note.mtime;
-    } catch {
-      // Note may have been deleted — keep empty content
+    } catch (e) {
+      console.warn('Failed to load tab content (note may be deleted):', e);
     }
   }
   render();
@@ -215,7 +215,8 @@ export async function restoreSession() {
       try {
         const note = await getNote(path);
         tabs.push({ path, title: titleFromPath(path), dirty: false, content: note.content, mtime: note.mtime });
-      } catch {
+      } catch (e) {
+        console.warn('Failed to load note for session restore:', e);
         tabs.push({ path, title: titleFromPath(path), dirty: false, content: '', mtime: 0 });
       }
     } else {

@@ -15,7 +15,7 @@ let scopePath: string | null = null;
 let showScoreBreakdown = true;
 
 // Load setting once at startup, refresh on each open
-getSettings().then(s => { showScoreBreakdown = s.show_score_breakdown; }).catch(() => {});
+getSettings().then(s => { showScoreBreakdown = s.show_score_breakdown; }).catch((e) => { console.warn('Failed to load settings:', e); });
 
 export function toggleSearch() {
   if (isOpen) closeSearch();
@@ -32,7 +32,7 @@ export function openSearch(filterPath?: string) {
   results = [];
   selectedIndex = 0;
   input.focus();
-  getSettings().then(s => { showScoreBreakdown = s.show_score_breakdown; }).catch(() => {});
+  getSettings().then(s => { showScoreBreakdown = s.show_score_breakdown; }).catch((e) => { console.warn('Failed to load settings:', e); });
 }
 
 export function closeSearch() {
@@ -54,7 +54,8 @@ const doSearch = debounce(async () => {
   }
   try {
     results = await searchNotes(q, scopePath ?? undefined);
-  } catch {
+  } catch (e) {
+    console.warn('Search failed:', e);
     results = [];
   }
   selectedIndex = 0;

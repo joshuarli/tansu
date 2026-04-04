@@ -16,7 +16,8 @@ export async function openSettings() {
   overlay.classList.remove('hidden');
   try {
     current = await getSettings();
-  } catch {
+  } catch (e) {
+    console.warn('Failed to load settings, using defaults:', e);
     current = {
       weight_title: 10, weight_headings: 5, weight_tags: 2, weight_content: 1,
       fuzzy_distance: 1, result_limit: 20, show_score_breakdown: true, excluded_folders: [],
