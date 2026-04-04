@@ -30,6 +30,7 @@ All paths are relative to the notes directory passed as a CLI argument.
     index/                 # tantivy search index files
     revisions/<stem>/      # per-note revision history
       <timestamp_ms>.md    # snapshot of note content before each save
+    settings.json          # search/index settings (weights, fuzzy distance, excluded folders)
     state.json             # session state (open tabs, active tab index)
 ```
 
@@ -43,6 +44,7 @@ All source in `src/`:
 - **scanner.rs** -- Single-pass extraction of `#headings`, `#tags`, and `[[wiki-links]]` from raw markdown. Returns `ScanResult { title, headings, tags, links }`. Normalizes link targets (lowercase, strip path/extension).
 - **strip.rs** -- `strip_markdown`: uses `pulldown-cmark` to convert markdown to plain text for search indexing. Skips code blocks.
 - **revisions.rs** -- `save_revision` (copies current file content to `.tansu/revisions/<stem>/<timestamp_ms>.md`), `list_revisions` (sorted descending), `get_revision`.
+- **settings.rs** -- `Settings` struct for search configuration, persisted to `.tansu/settings.json`. Fields: weight_title/headings/tags/content (f32), fuzzy_distance (u8), result_limit (usize), show_score_breakdown (bool), excluded_folders (Vec<String>). All fields have serde defaults. Changing `excluded_folders` triggers a full reindex.
 - **watcher.rs** -- `start_watcher`: sets up `notify::RecommendedWatcher`, filters to `.md` files only, ignores `.tansu/` directory, checks `self_writes` set to filter out server's own writes.
 
 ## Frontend structure
@@ -61,6 +63,7 @@ All source in `web/ts/`, bundled to `web/static/app.js`:
 - **wikilinks.ts** -- Click handler delegate for `[[wiki-links]]` rendered by markdown.ts.
 - **merge.ts** -- Line-based 3-way merge (LCS diff). Returns merged string or null on conflict.
 - **revisions.ts** -- Revisions side panel. Lists timestamps, preview on click, restore with confirmation.
+- **settings.ts** -- Settings modal (Cmd+,). Sliders for search weights, dropdown for fuzzy distance, checkbox for score breakdown, text input for excluded folders. Saves to server via PUT `/api/settings`.
 - **util.ts** -- `debounce`, `escapeHtml`, `relativeTime`, `stemFromPath`.
 
 ## Key conventions
@@ -93,6 +96,8 @@ All source in `web/ts/`, bundled to `web/static/app.js`:
 | POST | `/api/restore?path=&ts=` | Restore a revision |
 | GET | `/api/state` | Get session state (open tabs) |
 | PUT | `/api/state` | Save session state |
+| GET | `/api/settings` | Get search/index settings |
+| PUT | `/api/settings` | Update settings (excluded_folders change triggers reindex) |
 | GET | `/events` | SSE stream (events: `connected`, `changed`, `deleted`) |
 
 Static files are served from `/static/*` and images from `/z-images/*`. All other GET paths serve `index.html` (SPA-style).

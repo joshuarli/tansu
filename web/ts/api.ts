@@ -142,3 +142,29 @@ export async function saveState(state: SessionState): Promise<void> {
     body: JSON.stringify(state),
   });
 }
+
+export interface Settings {
+  weight_title: number;
+  weight_headings: number;
+  weight_tags: number;
+  weight_content: number;
+  fuzzy_distance: number;
+  result_limit: number;
+  show_score_breakdown: boolean;
+  excluded_folders: string[];
+}
+
+export async function getSettings(): Promise<Settings> {
+  const res = await fetch('/api/settings');
+  if (!res.ok) throw new Error(`settings failed: ${res.status}`);
+  return res.json() as Promise<Settings>;
+}
+
+export async function saveSettings(settings: Settings): Promise<void> {
+  const res = await fetch('/api/settings', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(settings),
+  });
+  if (!res.ok) throw new Error(`save settings failed: ${res.status}`);
+}

@@ -1,4 +1,4 @@
-import { searchNotes, createNote } from './api.ts';
+import { searchNotes, createNote, getSettings } from './api.ts';
 import type { SearchResult } from './api.ts';
 import { debounce, escapeHtml } from './util.ts';
 import { openTab } from './tabs.ts';
@@ -12,6 +12,10 @@ let results: SearchResult[] = [];
 let selectedIndex = 0;
 let isOpen = false;
 let scopePath: string | null = null;
+let showScoreBreakdown = true;
+
+// Load setting once at startup, refresh on each open
+getSettings().then(s => { showScoreBreakdown = s.show_score_breakdown; }).catch(() => {});
 
 export function toggleSearch() {
   if (isOpen) closeSearch();
@@ -28,6 +32,7 @@ export function openSearch(filterPath?: string) {
   results = [];
   selectedIndex = 0;
   input.focus();
+  getSettings().then(s => { showScoreBreakdown = s.show_score_breakdown; }).catch(() => {});
 }
 
 export function closeSearch() {
@@ -97,17 +102,20 @@ function renderResults(query: string) {
     path.className = 'path';
     path.textContent = r.path;
 
-    const score = document.createElement('div');
-    score.className = 'score';
-    const fs = r.field_scores;
-    const parts: string[] = [];
-    if (fs.title > 0) parts.push(`title:${fs.title.toPrecision(3)}`);
-    if (fs.headings > 0) parts.push(`headings:${fs.headings.toPrecision(3)}`);
-    if (fs.tags > 0) parts.push(`tags:${fs.tags.toPrecision(3)}`);
-    if (fs.content > 0) parts.push(`content:${fs.content.toPrecision(3)}`);
-    score.textContent = `${r.score.toPrecision(3)}${parts.length ? ' = ' + parts.join(' + ') : ''}`;
+    el.append(title, path);
 
-    el.append(title, path, score);
+    if (showScoreBreakdown) {
+      const score = document.createElement('div');
+      score.className = 'score';
+      const fs = r.field_scores;
+      const parts: string[] = [];
+      if (fs.title > 0) parts.push(`title:${fs.title.toPrecision(3)}`);
+      if (fs.headings > 0) parts.push(`headings:${fs.headings.toPrecision(3)}`);
+      if (fs.tags > 0) parts.push(`tags:${fs.tags.toPrecision(3)}`);
+      if (fs.content > 0) parts.push(`content:${fs.content.toPrecision(3)}`);
+      score.textContent = `${r.score.toPrecision(3)}${parts.length ? ' = ' + parts.join(' + ') : ''}`;
+      el.appendChild(score);
+    }
 
     if (r.excerpt) {
       const excerpt = document.createElement('div');

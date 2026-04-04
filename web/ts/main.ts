@@ -1,4 +1,5 @@
 import { toggleSearch, openSearch, closeSearch, isSearchOpen } from './search.ts';
+import { toggleSettings, closeSettings, isSettingsOpen } from './settings.ts';
 import {
   setOnTabChange, setOnTabClose, closeActiveTab, nextTab, prevTab,
   getActiveTab, openTab, updateTabPath, updateTabContent, restoreSession,
@@ -72,6 +73,19 @@ document.addEventListener('keydown', (e) => {
     const tab = getActiveTab();
     if (tab) openSearch(tab.path);
     else openSearch();
+    return;
+  }
+
+  // Cmd+, opens settings
+  if (meta && e.key === ',') {
+    e.preventDefault();
+    toggleSettings();
+    return;
+  }
+
+  if (e.key === 'Escape' && isSettingsOpen()) {
+    e.preventDefault();
+    closeSettings();
     return;
   }
 

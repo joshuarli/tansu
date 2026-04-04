@@ -15,11 +15,13 @@ mod http;
 mod index;
 mod revisions;
 mod scanner;
+mod settings;
 mod strip;
 mod watcher;
 
 use http::*;
 use index::Index;
+use settings::Settings;
 use watcher::WatchEvent;
 
 #[derive(Serialize)]
@@ -106,6 +108,7 @@ struct Server {
     dir: PathBuf,
     quiet: bool,
     index: Index,
+    settings: Settings,
     watch_rx: mpsc::Receiver<WatchEvent>,
     self_writes: Arc<Mutex<HashSet<PathBuf>>>,
     sse_client: Arc<Mutex<Option<TcpStream>>>,
@@ -262,6 +265,8 @@ impl Server {
             ("POST", "/api/restore") => self.api_restore_revision(stream, path_raw),
             ("GET", "/api/state") => self.api_get_state(stream),
             ("PUT", "/api/state") => self.api_put_state(stream, headers, raw_buf, header_len),
+            ("GET", "/api/settings") => self.api_get_settings(stream),
+            ("PUT", "/api/settings") => self.api_put_settings(stream, headers, raw_buf, header_len),
             _ => write_error(stream, 404, "Not Found"),
         }
     }
@@ -310,7 +315,12 @@ impl Server {
             return write_json(sock, "[]");
         }
         let filter_path = query_param(path_raw, "path");
-        let results = self.index.search(&q, 20, filter_path.as_deref());
+        let s = &self.settings;
+        let results = self.index.search(
+            &q, s.result_limit, filter_path.as_deref(),
+            s.fuzzy_distance,
+            [s.weight_title, s.weight_headings, s.weight_tags, s.weight_content],
+        );
         let hits: Vec<SearchHit> = results.iter().map(|r| SearchHit {
             path: &r.path, title: &r.title, excerpt: &r.excerpt, score: r.score,
             field_scores: FieldScoresJson {
@@ -570,6 +580,29 @@ impl Server {
         respond_json(stream, &OkResponse { ok: true })
     }
 
+    fn api_get_settings(&self, sock: &TcpStream) -> io::Result<()> {
+        respond_json(sock, &self.settings)
+    }
+
+    fn api_put_settings(
+        &mut self, stream: &mut TcpStream,
+        headers: &[httparse::Header<'_>], raw_buf: &[u8], header_len: usize,
+    ) -> io::Result<()> {
+        let new_settings: Settings = parse_body(stream, headers, raw_buf, header_len)?;
+        let needs_reindex = new_settings.excluded_folders != self.settings.excluded_folders;
+        new_settings.save(&self.dir)?;
+        self.settings = new_settings;
+        if needs_reindex {
+            let index = self.index.clone();
+            let dir = self.dir.clone();
+            let excluded = self.settings.excluded_folders.clone();
+            std::thread::spawn(move || {
+                index.full_reindex(&dir, &excluded);
+            });
+        }
+        respond_json(stream, &OkResponse { ok: true })
+    }
+
     fn api_restore_revision(&mut self, sock: &TcpStream, path_raw: &str) -> io::Result<()> {
         let Some(rel) = query_param(path_raw, "path") else {
             return write_error(sock, 400, "missing path param");
@@ -642,6 +675,8 @@ fn main() {
         Err(e) => die(&format!("{dir}: {e}")),
     };
 
+    let settings = Settings::load(&dir);
+
     let index_dir = dir.join(".tansu/index");
     fs::create_dir_all(&index_dir).unwrap_or_else(|e| die(&format!("create index dir: {e}")));
     let index = Index::open_or_create(&index_dir)
@@ -649,8 +684,9 @@ fn main() {
 
     let index_clone = index.clone();
     let dir_clone = dir.clone();
+    let excluded = settings.excluded_folders.clone();
     std::thread::spawn(move || {
-        index_clone.full_reindex(&dir_clone);
+        index_clone.full_reindex(&dir_clone, &excluded);
     });
 
     let self_writes = Arc::new(Mutex::new(HashSet::<PathBuf>::new()));
@@ -665,7 +701,7 @@ fn main() {
     eprintln!("\ttansu serving {} on http://{addr}", dir.display());
 
     let mut srv = Server {
-        dir, quiet, index, watch_rx, self_writes,
+        dir, quiet, index, settings, watch_rx, self_writes,
         sse_client: Arc::new(Mutex::new(None)),
         fp: PathBuf::new(),
     };

@@ -147,8 +147,11 @@ impl Index {
     }
 
     /// Two-phase search: exact first, fuzzy fallback if <5 results.
-    /// If `filter_path` is Some, only return results from that document.
-    pub fn search(&self, query: &str, limit: usize, filter_path: Option<&str>) -> Vec<SearchResult> {
+    /// `weights` order: [title, headings, tags, content].
+    pub fn search(
+        &self, query: &str, limit: usize, filter_path: Option<&str>,
+        fuzzy_distance: u8, weights: [f32; 4],
+    ) -> Vec<SearchResult> {
         let _ = self.inner.reader.reload();
         let searcher = self.inner.reader.searcher();
 
@@ -158,25 +161,28 @@ impl Index {
         }
 
         // Phase 1: exact
-        let phase1_query = self.build_query(&terms, false, filter_path);
-        let results = self.execute_search(&searcher, &phase1_query, limit, &terms);
+        let phase1_query = self.build_query(&terms, false, filter_path, fuzzy_distance, weights);
+        let results = self.execute_search(&searcher, &phase1_query, limit, &terms, weights);
 
         if results.len() >= 5 {
             return results;
         }
 
         // Phase 2: add fuzzy
-        let phase2_query = self.build_query(&terms, true, filter_path);
-        self.execute_search(&searcher, &phase2_query, limit, &terms)
+        let phase2_query = self.build_query(&terms, true, filter_path, fuzzy_distance, weights);
+        self.execute_search(&searcher, &phase2_query, limit, &terms, weights)
     }
 
-    fn build_query(&self, terms: &[&str], fuzzy: bool, filter_path: Option<&str>) -> BooleanQuery {
+    fn build_query(
+        &self, terms: &[&str], fuzzy: bool, filter_path: Option<&str>,
+        fuzzy_distance: u8, weights: [f32; 4],
+    ) -> BooleanQuery {
         let f = &self.inner.fields;
         let search_fields = [
-            (f.title, 10.0),
-            (f.headings, 5.0),
-            (f.tags, 2.0),
-            (f.content, 1.0),
+            (f.title, weights[0]),
+            (f.headings, weights[1]),
+            (f.tags, weights[2]),
+            (f.content, weights[3]),
         ];
 
         let mut term_queries: Vec<(Occur, Box<dyn tantivy::query::Query>)> = Vec::new();
@@ -194,8 +200,8 @@ impl Index {
                     Box::new(tantivy::query::BoostQuery::new(Box::new(exact), boost)),
                 ));
 
-                if fuzzy && field == f.content {
-                    let fuzzy_q = FuzzyTermQuery::new(term, 1, true);
+                if fuzzy && fuzzy_distance > 0 && field == f.content {
+                    let fuzzy_q = FuzzyTermQuery::new(term, fuzzy_distance, true);
                     field_queries.push((
                         Occur::Should,
                         Box::new(tantivy::query::BoostQuery::new(
@@ -225,6 +231,7 @@ impl Index {
         query: &BooleanQuery,
         limit: usize,
         terms: &[&str],
+        weights: [f32; 4],
     ) -> Vec<SearchResult> {
         let f = &self.inner.fields;
         let Ok(top_docs) = searcher.search(query, &TopDocs::with_limit(limit)) else {
@@ -252,8 +259,7 @@ impl Index {
                 .unwrap_or("");
             let excerpt = make_snippet(content, terms, 160);
 
-            // Per-field score breakdown: count term matches per field
-            let field_scores = compute_field_scores(&doc, f, terms);
+            let field_scores = compute_field_scores(&doc, f, terms, weights);
 
             results.push(SearchResult {
                 path,
@@ -324,16 +330,16 @@ impl Index {
 }
 
 /// Compute per-field scores by counting term matches (exact + fuzzy) against stored values.
-fn compute_field_scores(doc: &TantivyDocument, f: &Fields, terms: &[&str]) -> FieldScores {
+fn compute_field_scores(doc: &TantivyDocument, f: &Fields, terms: &[&str], weights: [f32; 4]) -> FieldScores {
     let get = |field: Field| -> &str {
         doc.get_first(field).and_then(|v| v.as_str()).unwrap_or("")
     };
 
     let fields = [
-        (get(f.title), 10.0f32),
-        (get(f.headings), 5.0),
-        (get(f.tags), 2.0),
-        (get(f.content), 1.0),
+        (get(f.title), weights[0]),
+        (get(f.headings), weights[1]),
+        (get(f.tags), weights[2]),
+        (get(f.content), weights[3]),
     ];
 
     let lower_terms: Vec<String> = terms.iter().map(|t| t.to_lowercase()).collect();
@@ -502,11 +508,11 @@ fn escape_html(s: &str) -> String {
 
 impl Index {
     /// Full reindex: walk directory, index all .md files. Single commit at end.
-    pub fn full_reindex(&self, root: &Path) {
+    pub fn full_reindex(&self, root: &Path, excluded_folders: &[String]) {
         let start = std::time::Instant::now();
-        walk_and_index(root, root, self);
+        walk_and_index(root, root, self, excluded_folders);
         self.commit();
-        fn walk_and_index(root: &Path, dir: &Path, idx: &Index) {
+        fn walk_and_index(root: &Path, dir: &Path, idx: &Index, excluded: &[String]) {
             let Ok(entries) = fs::read_dir(dir) else { return };
             for entry in entries.filter_map(|e| e.ok()) {
                 let path = entry.path();
@@ -520,7 +526,10 @@ impl Index {
                     if name_str == "z-images" {
                         continue;
                     }
-                    walk_and_index(root, &path, idx);
+                    if excluded.iter().any(|ex| name_str == *ex) {
+                        continue;
+                    }
+                    walk_and_index(root, &path, idx, excluded);
                     continue;
                 }
 
