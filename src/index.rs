@@ -423,10 +423,14 @@ fn make_snippet(content: &str, terms: &[&str], max_len: usize) -> String {
     // Pick window around the first match
     let first_match = match_positions[0].0;
     let window_start = content.floor_char_boundary(first_match.saturating_sub(40));
-    // Align to word boundary
+    // Align to word boundary (skip past multi-byte whitespace)
     let window_start = content[..window_start]
         .rfind(|c: char| c.is_whitespace())
-        .map(|p| p + 1)
+        .map(|p| {
+            // p is the start of a whitespace char — advance past it
+            let ch = content[p..].chars().next().unwrap();
+            p + ch.len_utf8()
+        })
         .unwrap_or(0);
     let window_end = content.floor_char_boundary((window_start + max_len).min(content.len()));
     let window_end = content[window_end..]

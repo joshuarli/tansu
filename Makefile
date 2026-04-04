@@ -16,5 +16,8 @@ dev:
 
 NOTES_DIR ?= ~/notes
 
+bench:
+	cargo run --bin bench -- $(NOTES_DIR)
+
 clean:
 	rm -rf $(NOTES_DIR)/.tansu/index
