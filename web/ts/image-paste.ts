@@ -1,6 +1,6 @@
 import { uploadImage } from "./api.ts";
 import { markDirty } from "./tabs.ts";
-import { stemFromPath } from "./util.ts";
+import { escapeHtml, stemFromPath } from "./util.ts";
 
 /// Handle pasted image: convert to webp, upload, insert wiki-link.
 export async function handleImagePaste(item: DataTransferItem, currentPath: string | null) {
@@ -28,7 +28,9 @@ export async function handleImagePaste(item: DataTransferItem, currentPath: stri
 
   try {
     const savedName = await uploadImage(blob, filename);
-    document.execCommand("insertText", false, `![[${savedName}]]`);
+    const src = `/z-images/${encodeURIComponent(savedName)}`;
+    const html = `<img src="${escapeHtml(src)}" alt="${escapeHtml(savedName)}" data-wiki-image="${escapeHtml(savedName)}" loading="lazy">`;
+    document.execCommand("insertHTML", false, html);
     if (currentPath) markDirty(currentPath);
   } catch (e) {
     console.error("Image upload failed:", e);
