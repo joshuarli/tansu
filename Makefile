@@ -12,4 +12,9 @@ check:
 
 dev:
 	bun build web/ts/main.ts --outfile web/static/app.js --watch &
-	cargo run -- ~/notes --port 3000
+	cargo run -- $(NOTES_DIR) --port 3000
+
+NOTES_DIR ?= ~/notes
+
+clean:
+	rm -rf $(NOTES_DIR)/.tansu/index

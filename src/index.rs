@@ -9,7 +9,6 @@ use tantivy::{
     collector::TopDocs,
     query::{BooleanQuery, FuzzyTermQuery, Occur, TermQuery},
     schema::*,
-    snippet::SnippetGenerator,
 };
 
 use crate::http;
@@ -151,15 +150,15 @@ impl Index {
 
         // Phase 1: exact
         let phase1_query = self.build_query(&terms, false, filter_path);
-        let results = self.execute_search(&searcher, &phase1_query, limit);
+        let results = self.execute_search(&searcher, &phase1_query, limit, &terms);
 
-        if results.len() >= 5 || filter_path.is_some() {
+        if results.len() >= 5 {
             return results;
         }
 
         // Phase 2: add fuzzy
         let phase2_query = self.build_query(&terms, true, filter_path);
-        self.execute_search(&searcher, &phase2_query, limit)
+        self.execute_search(&searcher, &phase2_query, limit, &terms)
     }
 
     fn build_query(&self, terms: &[&str], fuzzy: bool, filter_path: Option<&str>) -> BooleanQuery {
@@ -216,13 +215,12 @@ impl Index {
         searcher: &tantivy::Searcher,
         query: &BooleanQuery,
         limit: usize,
+        terms: &[&str],
     ) -> Vec<SearchResult> {
         let f = &self.inner.fields;
         let Ok(top_docs) = searcher.search(query, &TopDocs::with_limit(limit)) else {
             return Vec::new();
         };
-
-        let snippet_gen = SnippetGenerator::create(searcher, query, f.content).ok();
 
         let mut results = Vec::new();
         for (score, doc_address) in top_docs {
@@ -239,13 +237,11 @@ impl Index {
                 .and_then(|v| v.as_str())
                 .unwrap_or("")
                 .to_string();
-            let excerpt = snippet_gen
-                .as_ref()
-                .map(|sg| {
-                    let snippet = sg.snippet_from_doc(&doc);
-                    snippet.to_html()
-                })
-                .unwrap_or_default();
+            let content = doc
+                .get_first(f.content)
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let excerpt = make_snippet(content, terms, 160);
 
             results.push(SearchResult {
                 path,
@@ -312,6 +308,148 @@ impl Index {
         notes
     }
 
+}
+
+/// Build a snippet from content with highlighted query terms (supports fuzzy matching).
+fn make_snippet(content: &str, terms: &[&str], max_len: usize) -> String {
+    if content.is_empty() || terms.is_empty() {
+        return String::new();
+    }
+
+    // Find all word boundaries and their positions
+    let words: Vec<(usize, usize)> = word_positions(content);
+    if words.is_empty() {
+        return String::new();
+    }
+
+    // Find which words match any query term (exact or edit distance 1)
+    let lower_terms: Vec<String> = terms.iter().map(|t| t.to_lowercase()).collect();
+    let mut match_positions: Vec<(usize, usize)> = Vec::new(); // (start, end) of matching words
+    for &(start, end) in &words {
+        let word = content[start..end].to_lowercase();
+        for term in &lower_terms {
+            if word == *term || edit_distance_one(&word, term) {
+                match_positions.push((start, end));
+                break;
+            }
+        }
+    }
+
+    if match_positions.is_empty() {
+        // No matches — return beginning of content
+        let end = content.len().min(max_len);
+        let snip = &content[..end];
+        return escape_html(snip);
+    }
+
+    // Pick window around the first match
+    let first_match = match_positions[0].0;
+    let window_start = first_match.saturating_sub(40);
+    // Align to word boundary
+    let window_start = content[..window_start]
+        .rfind(|c: char| c.is_whitespace())
+        .map(|p| p + 1)
+        .unwrap_or(0);
+    let window_end = (window_start + max_len).min(content.len());
+    let window_end = content[window_end..]
+        .find(|c: char| c.is_whitespace())
+        .map(|p| window_end + p)
+        .unwrap_or(content.len());
+
+    // Build output with <b> tags around matches
+    let mut out = String::new();
+    let mut pos = window_start;
+    for &(ms, me) in &match_positions {
+        if ms < window_start || me > window_end {
+            continue;
+        }
+        if ms > pos {
+            out.push_str(&escape_html(&content[pos..ms]));
+        }
+        out.push_str("<b>");
+        out.push_str(&escape_html(&content[ms..me]));
+        out.push_str("</b>");
+        pos = me;
+    }
+    if pos < window_end {
+        out.push_str(&escape_html(&content[pos..window_end]));
+    }
+
+    out
+}
+
+fn word_positions(s: &str) -> Vec<(usize, usize)> {
+    let mut words = Vec::new();
+    let mut i = 0;
+    let bytes = s.as_bytes();
+    while i < bytes.len() {
+        if bytes[i].is_ascii_alphanumeric() {
+            let start = i;
+            while i < bytes.len() && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'-' || bytes[i] == b'_') {
+                i += 1;
+            }
+            words.push((start, i));
+        } else {
+            i += 1;
+        }
+    }
+    words
+}
+
+/// Check if two strings have edit distance exactly 1.
+fn edit_distance_one(a: &str, b: &str) -> bool {
+    let a = a.as_bytes();
+    let b = b.as_bytes();
+    let (la, lb) = (a.len(), b.len());
+    if la.abs_diff(lb) > 1 {
+        return false;
+    }
+    if la == lb {
+        // Substitution: exactly one position differs
+        let mut diffs = 0;
+        for i in 0..la {
+            if a[i] != b[i] {
+                diffs += 1;
+                if diffs > 1 { return false; }
+            }
+        }
+        diffs == 1
+    } else {
+        // Insertion/deletion
+        let (short, long) = if la < lb { (a, b) } else { (b, a) };
+        let mut si = 0;
+        let mut li = 0;
+        let mut diffs = 0;
+        while si < short.len() && li < long.len() {
+            if short[si] != long[li] {
+                diffs += 1;
+                if diffs > 1 { return false; }
+                li += 1;
+            } else {
+                si += 1;
+                li += 1;
+            }
+        }
+        true
+    }
+}
+
+fn escape_html(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for ch in s.chars() {
+        match ch {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\n' => out.push(' '),
+            _ => out.push(ch),
+        }
+    }
+    out
+}
+
+impl Index {
     /// Full reindex: walk directory, index all .md files. Single commit at end.
     pub fn full_reindex(&self, root: &Path) {
         let start = std::time::Instant::now();
@@ -355,5 +493,66 @@ impl Index {
         }
         let elapsed = start.elapsed();
         eprintln!("\tindexed in {:.1}ms", elapsed.as_secs_f64() * 1000.0);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn edit_distance_one_substitution() {
+        assert!(edit_distance_one("cat", "bat"));
+    }
+
+    #[test]
+    fn edit_distance_one_insertion() {
+        assert!(edit_distance_one("lunchctl", "launchctl"));
+    }
+
+    #[test]
+    fn edit_distance_one_deletion() {
+        assert!(edit_distance_one("launchctl", "lunchctl"));
+    }
+
+    #[test]
+    fn edit_distance_one_same() {
+        assert!(!edit_distance_one("foo", "foo"));
+    }
+
+    #[test]
+    fn edit_distance_one_too_far() {
+        assert!(!edit_distance_one("abc", "xyz"));
+    }
+
+    #[test]
+    fn snippet_exact_match() {
+        let s = make_snippet("the quick brown fox jumps", &["fox"], 160);
+        assert!(s.contains("<b>fox</b>"), "got: {s}");
+    }
+
+    #[test]
+    fn snippet_fuzzy_match() {
+        let s = make_snippet("use launchctl to reboot", &["lunchctl"], 160);
+        assert!(s.contains("<b>launchctl</b>"), "got: {s}");
+    }
+
+    #[test]
+    fn snippet_no_match() {
+        let s = make_snippet("hello world", &["zzz"], 160);
+        assert_eq!(s, "hello world");
+    }
+
+    #[test]
+    fn snippet_escapes_html() {
+        let s = make_snippet("a <b>tag</b> here", &["tag"], 160);
+        assert!(s.contains("&lt;b&gt;"), "should escape html: {s}");
+        assert!(s.contains("<b>tag</b>"), "should highlight match: {s}");
+    }
+
+    #[test]
+    fn snippet_case_insensitive() {
+        let s = make_snippet("Hello World", &["hello"], 160);
+        assert!(s.contains("<b>Hello</b>"), "got: {s}");
     }
 }
