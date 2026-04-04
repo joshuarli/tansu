@@ -18,6 +18,10 @@ Building a local-first Obsidian alternative. A Rust server watches a directory o
 - **Rename**: App UI rename (right-click tab or command) with auto-update of all wiki-links referencing the renamed note.
 - **New note**: Search modal creates empty file at root, opens in tab.
 - **Startup indexing**: Background — server serves immediately, index builds on a separate thread. Search returns partial results until complete.
+- **Search excerpts**: tantivy's built-in snippet/highlight API.
+- **Logging**: stdout, method/path/status/timing per request. `-q` flag to suppress.
+- **Paste handling**: all external pastes stripped to plain text.
+- **Single client**: SSE endpoint enforces one connected client. Second connection gets 409.
 
 ## Disk Layout
 
@@ -47,9 +51,10 @@ httparse = "1"
 tantivy = "0.22"
 notify = "7"
 serde_json = "1"
+pulldown-cmark = { version = "0.12", default-features = false }
 ```
 
-Four dependencies. No pulldown-cmark (all HTML rendering is client-side via marked.js; server extracts headings/tags/links with a custom scanner). No image crate, no sha1, no base64, no async runtime.
+Five dependencies. pulldown-cmark is used to strip markdown syntax before indexing content in tantivy (yields cleaner search tokens). All HTML rendering is still client-side via marked.js. No image crate, no sha1, no base64, no async runtime.
 
 ## Project Structure
 
@@ -59,8 +64,9 @@ src/
   index.rs         # tantivy schema, indexing, search, backlinks
   watcher.rs       # notify file watcher, debounce, self-event filtering
   revisions.rs     # save/list/get/restore revisions
-  scanner.rs       # single-pass extraction of headings, tags, [[links]] from markdown
+  scanner.rs       # single-pass extraction of headings, tags, [[links]] from raw markdown
   merge.rs         # line-based 3-way merge for conflict resolution
+  strip.rs         # pulldown-cmark markdown stripping for clean content indexing
 web/
   index.html       # SPA shell
   ts/
@@ -101,13 +107,27 @@ Self-event filtering: `Arc<Mutex<HashSet<PathBuf>>>` of recently-written paths, 
 |-------|------|--------|-------|
 | path | STRING | yes | unique key, relative path |
 | title | TEXT | yes | first H1 or filename stem |
-| content | TEXT | yes (fieldnorms) | markdown stripped, for search excerpts |
+| content | TEXT | yes (fieldnorms) | stripped via pulldown-cmark (plain text), for search |
 | headings | TEXT | yes | all headings space-separated |
 | tags | TEXT | yes | extracted #tag tokens |
 | mtime | u64 | yes (fast) | unix seconds |
 | links_to | TEXT | yes | space-separated normalized link targets |
 
 Backlinks: search `links_to:"target-name"` to find all notes linking to a given note.
+
+### Search Strategy (two-phase, from ferrisearch)
+1. **Phase 1**: exact + prefix matching across all fields. If >= 5 results, return immediately.
+2. **Phase 2**: if < 5 results, retry with fuzzy matching on content field (distance ~0.2).
+Field boosts: title 10, headings 5, tags 2, content 1.
+
+### Tag Recognition
+Simple word-boundary rule: `#word` where `#` is preceded by whitespace or start-of-line, and the tag is `[a-zA-Z0-9_-]+`. No hierarchical tags (no `/`). Heading lines (`# `, `## `) are excluded by the scanner since those are parsed as headings first.
+
+### Content Stripping
+Use pulldown-cmark to walk the AST and emit only text events (stripping all markdown syntax: headings markers, emphasis, link URLs, code fences, etc.). The resulting plain text is indexed in the `content` field.
+
+### Atomic Writes
+Write `{path}.tmp` in the same directory as the target, then `fs::rename`. Same-filesystem guarantee.
 
 ## API
 
@@ -149,10 +169,10 @@ Two modes with a toggle button:
 - **Inline**: Cmd+B bold, Cmd+I italic, backtick for code
 - **Wiki-links**: typing `[[` shows autocomplete dropdown from `/api/notes`. Rendered as `<a class="wiki-link">`. Click opens in tab.
 - **Images**: `![[file.webp]]` rendered as `<img src="/z-images/file.webp">`. Paste handler: OffscreenCanvas -> webp blob -> POST /api/image -> insert markup.
-- **Tables**: rendered from markdown, serialize back to pipe syntax
+- **Tables**: render-only in WYSIWYG (displayed from markdown, not editable). Edit tables in source mode.
 - **Code blocks**: rendered as `<pre><code>` with highlight.js syntax highlighting. Serialize back to fenced blocks.
-- **Footnotes**: rendered, serialize back to `[^n]` syntax
-- **Toolbar**: H1 H2 H3 | B I | UL OL Quote HR | Code Table | Image | Source
+- **No toolbar**: all formatting via keyboard shortcuts and markdown block transforms. Minimalist.
+- **Paste**: all external pastes stripped to plain text (same as vitrine2).
 
 **Source mode** — plain textarea showing raw markdown. Escape hatch for complex formatting. Switching back to WYSIWYG re-parses the markdown.
 
@@ -163,7 +183,7 @@ Two modes with a toggle button:
 ### SSE + External Changes
 When a file changes on disk while the note is open:
 - **Clean tab**: reload content silently.
-- **Dirty tab**: attempt line-based 3-way merge. Base = most recent revision from `.tansu/revisions/` (fetched via API), theirs = new disk content, ours = current editor content. If merge succeeds, update editor silently with merged result. If conflicts, show banner: "File changed externally — conflicts detected" with options to keep local, take remote, or view both.
+- **Dirty tab**: attempt line-based 3-way merge. Base = most recent revision from `.tansu/revisions/` (fetched via `/api/revision`), theirs = new disk content (fetched via `/api/note`), ours = current editor content. If merge succeeds, update editor silently with merged result. If conflicts, show banner: "File changed externally — conflicts detected" with options to keep local, take remote, or view both.
 
 ### Delete
 Right-click tab -> Delete (with confirmation). Server saves a final revision before removing the file. Recoverable from `.tansu/revisions/`.
@@ -205,13 +225,13 @@ Button in toolbar opens revision list (timestamps with relative dates). Click to
 10. **Frontend shell** — index.html, tsconfig.json, Makefile, main.ts, api.ts, style.css base.
 11. **Search modal** — search.ts: overlay, debounced plain-text search, keyboard nav, create-new-note.
 12. **Tab management** — tabs.ts: tab bar, open/close/switch, dirty tracking, rename via context menu.
-13. **WYSIWYG editor** — editor.ts: contenteditable, block transforms, inline formatting, DOM<->markdown, toolbar, source mode toggle. wikilinks.ts: marked.js extension for [[links]] and ![[images]].
+13. **WYSIWYG editor** — editor.ts: contenteditable, block transforms, inline formatting (Cmd+B/I, backtick), DOM<->markdown, source mode toggle. No toolbar — keyboard shortcuts only. wikilinks.ts: marked.js extension for [[links]] and ![[images]]. Tables render read-only; edit in source mode.
 14. **Syntax highlighting** — integrate vendored highlight.js for code blocks in the editor.
 15. **Wiki-link autocomplete** — inline `[[` autocomplete dropdown, resolution by proximity to current note.
 16. **Image paste** — client-side webp conversion (OffscreenCanvas), upload with suggested filename, insert markup.
-17. **3-way merge** — merge.ts: line-based 3-way merge for handling SSE external-change events on dirty tabs.
+17. **3-way merge** — merge.ts: line-based 3-way merge for handling SSE external-change events on dirty tabs. Base = last revision from server.
 18. **Backlinks + revisions UI** — backlinks section below editor, revision history panel.
-19. **Polish** — styling, keyboard shortcuts, edge cases.
+19. **Polish** — styling, edge cases.
 
 ## Rename Flow (Server-Side)
 
@@ -230,7 +250,9 @@ Button in toolbar opens revision list (timestamps with relative dates). Click to
 - Revision auto-cleanup
 - Link graph visualization
 - Mobile/responsive
-- Advanced table editing UI
+- WYSIWYG table editing (v1: render-only, edit in source mode)
+- Footnotes
+- Floating toolbar (v1: keyboard shortcuts only)
 
 ## Dev Workflow
 
