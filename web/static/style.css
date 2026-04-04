@@ -179,6 +179,27 @@ body {
 .editor-content a { color: var(--link); text-decoration: none; }
 .editor-content a:hover { text-decoration: underline; }
 .editor-content img { max-width: 100%; border-radius: var(--radius); }
+.editor-content mark { background: rgba(255, 220, 0, 0.4); border-radius: 2px; padding: 0.1em 0.2em; }
+.editor-content del { text-decoration: line-through; color: var(--fg-muted); }
+
+.editor-content .callout {
+  margin: 0.5em 0;
+  padding: 12px 16px;
+  border-radius: var(--radius);
+  border-left: 4px solid var(--accent);
+  background: var(--bg-subtle);
+}
+.editor-content .callout-title { font-weight: 600; margin-bottom: 4px; }
+.editor-content .callout-body > *:first-child { margin-top: 0; }
+.editor-content .callout-body > *:last-child { margin-bottom: 0; }
+.editor-content .callout-warning, .editor-content .callout-caution { border-left-color: #d4a72c; background: #fff8c5; }
+.editor-content .callout-danger, .editor-content .callout-bug { border-left-color: var(--danger); background: #fff0f0; }
+.editor-content .callout-tip, .editor-content .callout-hint { border-left-color: #1a7f37; background: #dafbe1; }
+.editor-content .callout-success, .editor-content .callout-check, .editor-content .callout-done { border-left-color: #1a7f37; background: #dafbe1; }
+.editor-content .callout-failure, .editor-content .callout-fail, .editor-content .callout-missing { border-left-color: var(--danger); background: #fff0f0; }
+.editor-content .callout-question, .editor-content .callout-faq { border-left-color: #8250df; background: #fbefff; }
+.editor-content .callout-example, .editor-content .callout-abstract, .editor-content .callout-summary { border-left-color: #6639ba; background: #fbefff; }
+.editor-content .callout-quote { border-left-color: var(--fg-muted); }
 
 .wiki-link { color: var(--link); cursor: pointer; text-decoration: none; }
 .wiki-link:hover { text-decoration: underline; }

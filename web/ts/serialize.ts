@@ -18,12 +18,38 @@ function blockToMd(el: HTMLElement): string | null {
   if (tag === 'H4') return `#### ${inlineToMd(el)}`;
   if (tag === 'H5') return `##### ${inlineToMd(el)}`;
   if (tag === 'H6') return `###### ${inlineToMd(el)}`;
+  if (el.classList.contains('callout')) {
+    const type = el.getAttribute('data-callout') ?? 'note';
+    const titleEl = el.querySelector('.callout-title');
+    const bodyEl = el.querySelector('.callout-body');
+    const icon = titleEl?.textContent?.match(/^.\s*/)?.[0] ?? '';
+    const titleText = (titleEl?.textContent ?? '').replace(icon, '').trim();
+    const defaultTitle = type.charAt(0).toUpperCase() + type.slice(1);
+    const titleSuffix = titleText && titleText !== defaultTitle ? ` ${titleText}` : '';
+    let lines = `> [!${type}]${titleSuffix}`;
+    if (bodyEl) {
+      for (const child of bodyEl.children) {
+        const inner = blockToMd(child as HTMLElement) ?? '';
+        lines += '\n' + inner.split('\n').map(l => `> ${l}`).join('\n');
+      }
+    }
+    return lines;
+  }
+
   if (tag === 'P' || tag === 'DIV') return inlineToMd(el);
   if (tag === 'HR') return '---';
 
   if (tag === 'UL') {
     return Array.from(el.children)
-      .map(li => `- ${inlineToMd(li as HTMLElement)}`)
+      .map(li => {
+        const checkbox = li.querySelector('input[type="checkbox"]');
+        if (checkbox) {
+          const checked = (checkbox as HTMLInputElement).checked;
+          const text = inlineToMd(li as HTMLElement);
+          return `- [${checked ? 'x' : ' '}] ${text}`;
+        }
+        return `- ${inlineToMd(li as HTMLElement)}`;
+      })
       .join('\n');
   }
 
@@ -66,8 +92,12 @@ function inlineToMd(el: HTMLElement): string {
 
       if (childTag === 'STRONG' || childTag === 'B') {
         md += `**${inlineToMd(child)}**`;
+      } else if (childTag === 'DEL' || childTag === 'S') {
+        md += `~~${inlineToMd(child)}~~`;
       } else if (childTag === 'EM' || childTag === 'I') {
         md += `*${inlineToMd(child)}*`;
+      } else if (childTag === 'MARK') {
+        md += `==${inlineToMd(child)}==`;
       } else if (childTag === 'CODE') {
         md += '`' + (child.textContent ?? '') + '`';
       } else if (childTag === 'A') {
@@ -92,6 +122,8 @@ function inlineToMd(el: HTMLElement): string {
           const alt = child.getAttribute('alt') ?? '';
           md += `![${alt}](${src})`;
         }
+      } else if (childTag === 'INPUT') {
+        // Skip — task list checkboxes are handled at the block level
       } else if (childTag === 'BR') {
         md += '\n';
       } else {
