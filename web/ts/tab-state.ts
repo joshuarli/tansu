@@ -1,6 +1,7 @@
 /// Pure tab state management — no DOM dependencies.
 
 import { getNote, deleteNote, createNote, saveState, getState } from './api.ts';
+import { emit } from './events.ts';
 
 export interface Tab {
   path: string;
@@ -12,13 +13,6 @@ export interface Tab {
 
 let tabs: Tab[] = [];
 let activeIndex = -1;
-let onTabChange: ((tab: Tab | null) => void) | null = null;
-let onTabClose: ((tab: Tab) => void) | null = null;
-let onRender: (() => void) | null = null;
-
-export function setOnTabChange(fn: (tab: Tab | null) => void) { onTabChange = fn; }
-export function setOnTabClose(fn: (tab: Tab) => void) { onTabClose = fn; }
-export function setOnRender(fn: () => void) { onRender = fn; }
 
 export function getTabs(): Tab[] { return tabs; }
 export function getActiveTab(): Tab | null { return tabs[activeIndex] ?? null; }
@@ -29,8 +23,8 @@ function persistState() {
 }
 
 function notifyChange() {
-  onRender?.();
-  onTabChange?.(tabs[activeIndex] ?? null);
+  emit('tab:render', undefined);
+  emit('tab:change', tabs[activeIndex] ?? null);
   persistState();
 }
 
@@ -77,7 +71,7 @@ export function closeTab(index: number) {
 
   if (tab.dirty && !confirm('Discard unsaved changes?')) return;
 
-  onTabClose?.(tab);
+  emit('tab:close', tab);
   tabs.splice(index, 1);
 
   if (tabs.length === 0) {
@@ -107,7 +101,7 @@ export function markDirty(path: string) {
   const tab = tabs.find(t => t.path === path);
   if (tab && !tab.dirty) {
     tab.dirty = true;
-    onRender?.();
+    emit('tab:render', undefined);
   }
 }
 
@@ -118,7 +112,7 @@ export function markClean(path: string, content: string, mtime: number) {
     tab.content = content;
     tab.mtime = mtime;
     tab.title = titleFromPath(path);
-    onRender?.();
+    emit('tab:render', undefined);
   }
 }
 

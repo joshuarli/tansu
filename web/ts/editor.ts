@@ -1,6 +1,7 @@
 import { saveNote, getBacklinks, uploadImage } from './api.ts';
 import { markDirty, markClean, getActiveTab, openTab } from './tabs.ts';
-import { toggleRevisions, hideRevisions, setOnRestore } from './revisions.ts';
+import { toggleRevisions, hideRevisions } from './revisions.ts';
+import { on } from './events.ts';
 import { stemFromPath } from './util.ts';
 import { merge3 } from './merge.ts';
 import { domToMarkdown } from './serialize.ts';
@@ -22,7 +23,7 @@ export { _invalidateNoteCache as invalidateNoteCache };
 export function initEditor() {
   editorArea = document.getElementById('editor-area')!;
 
-  setOnRestore((content, mtime) => {
+  on<{ content: string; mtime: number }>('revision:restore', ({ content, mtime }) => {
     if (currentPath) {
       loadContent(content);
       markClean(currentPath, content, mtime);

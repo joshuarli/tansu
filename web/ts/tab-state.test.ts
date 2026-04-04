@@ -1,6 +1,7 @@
 /// Tests for tab-state.ts — pure data logic, no DOM needed.
 
 import { assertEqual, assert, mockFetch } from './test-helper.ts';
+import { on, clearAll } from './events.ts';
 
 const mock = mockFetch();
 mock.on('GET', '/api/note', { content: '# Test', mtime: 1000 });
@@ -12,15 +13,14 @@ mock.on('POST', '/api/note', { mtime: 2000 });
 import {
   openTab, closeTab, getActiveTab, getTabs, getActiveIndex,
   nextTab, prevTab, markDirty, markClean, updateTabContent,
-  updateTabPath, setOnTabChange, closeActiveTab, titleFromPath,
-  setOnRender,
+  updateTabPath, closeActiveTab, titleFromPath,
 } from './tab-state.ts';
 
 // Track renders and tab changes
 let renderCount = 0;
 let changeCount = 0;
-setOnRender(() => { renderCount++; });
-setOnTabChange(() => { changeCount++; });
+on('tab:render', () => { renderCount++; });
+on('tab:change', () => { changeCount++; });
 
 // titleFromPath (pure function)
 assertEqual(titleFromPath('notes/hello.md'), 'hello', 'titleFromPath basic');
@@ -83,4 +83,5 @@ closeActiveTab();
 assertEqual(getTabs().length, 0, 'none after close active');
 
 mock.restore();
+clearAll();
 console.log('All tab-state tests passed');

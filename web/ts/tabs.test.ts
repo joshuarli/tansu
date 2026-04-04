@@ -12,8 +12,9 @@ mock.on('POST', '/api/note', { mtime: 2000 });
 const {
   openTab, closeTab, getActiveTab, getTabs, getActiveIndex,
   nextTab, prevTab, markDirty, markClean, updateTabContent,
-  updateTabPath, setOnTabChange, closeActiveTab,
+  updateTabPath, closeActiveTab,
 } = await import('./tabs.ts');
+const { on, clearAll } = await import('./events.ts');
 
 // Initially no tabs
 assertEqual(getActiveTab(), null, 'no active tab initially');
@@ -22,7 +23,7 @@ assertEqual(getActiveIndex(), -1, 'active index -1');
 
 // Track tab changes
 let changeCount = 0;
-setOnTabChange(() => { changeCount++; });
+on('tab:change', () => { changeCount++; });
 
 // Open a tab
 const tab1 = await openTab('notes/hello.md');
@@ -79,5 +80,6 @@ assertEqual(getTabs().length, 0, 'no tabs after close active');
 assertEqual(getActiveTab(), null, 'no active after close all');
 
 mock.restore();
+clearAll();
 cleanup();
 console.log('All tabs tests passed');

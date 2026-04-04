@@ -6,12 +6,13 @@ mock.on('GET', /\/api\/revisions\?/, [1000, 2000, 3000]);
 mock.on('GET', /\/api\/revision\?/, { content: '# Old version' });
 mock.on('POST', '/api/restore', { mtime: 5000 });
 
-const { toggleRevisions, hideRevisions, setOnRestore } = await import('./revisions.ts');
+const { toggleRevisions, hideRevisions } = await import('./revisions.ts');
+const { on, clearAll } = await import('./events.ts');
 
 // Track restore calls
 let restoredContent: string | null = null;
 let restoredMtime = 0;
-setOnRestore((content, mtime) => {
+on<{ content: string; mtime: number }>('revision:restore', ({ content, mtime }) => {
   restoredContent = content;
   restoredMtime = mtime;
 });
@@ -56,5 +57,6 @@ assert(document.querySelector('.revisions-panel') !== null, 'new path panel show
 hideRevisions();
 
 mock.restore();
+clearAll();
 cleanup();
 console.log('All revisions tests passed');

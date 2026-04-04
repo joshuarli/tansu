@@ -2,15 +2,16 @@ import { toggleSearch, openSearch, closeSearch, isSearchOpen } from './search.ts
 import { toggleSettings, closeSettings, isSettingsOpen } from './settings.ts';
 import { togglePalette, closePalette, isPaletteOpen, registerCommands } from './palette.ts';
 import {
-  setOnTabChange, setOnTabClose, closeActiveTab, nextTab, prevTab,
+  closeActiveTab, nextTab, prevTab,
   getActiveTab, openTab, updateTabPath, updateTabContent, restoreSession,
   createNewNote,
 } from './tabs.ts';
+import type { Tab } from './tabs.ts';
+import { on } from './events.ts';
 import { initEditor, showEditor, hideEditor, saveCurrentNote, reloadFromDisk, invalidateNoteCache } from './editor.ts';
 import { registerWikiLinkClickHandler } from './wikilinks.ts';
 import { renameNote, getNote, listNotes } from './api.ts';
 import { stemFromPath } from './util.ts';
-import type { Tab } from './tabs.ts';
 
 // Initialize editor
 initEditor();
@@ -40,16 +41,12 @@ registerWikiLinkClickHandler(async (target: string) => {
 });
 
 // Tab change handler: show/hide editor
-setOnTabChange((tab: Tab | null) => {
+on<Tab | null>('tab:change', (tab) => {
   if (tab) {
     showEditor(tab.path, tab.content);
   } else {
     hideEditor();
   }
-});
-
-setOnTabClose((_tab: Tab) => {
-  // Nothing special needed
 });
 
 // Register command palette commands

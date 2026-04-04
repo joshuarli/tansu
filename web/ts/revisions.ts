@@ -1,13 +1,9 @@
 import { listRevisions, getRevision, restoreRevision } from './api.ts';
+import { emit } from './events.ts';
 import { relativeTime } from './util.ts';
 
 let panelEl: HTMLElement | null = null;
 let currentPath: string | null = null;
-let onRestore: ((content: string, mtime: number) => void) | null = null;
-
-export function setOnRestore(fn: (content: string, mtime: number) => void) {
-  onRestore = fn;
-}
 
 export function toggleRevisions(path: string) {
   if (panelEl && currentPath === path) {
@@ -79,7 +75,7 @@ async function showRevisions(path: string) {
         if (!confirm('Restore this revision? Current content will be saved as a new revision.')) return;
         const result = await restoreRevision(path, ts);
         const content = await getRevision(path, ts);
-        onRestore?.(content, result.mtime);
+        emit('revision:restore', { content, mtime: result.mtime });
         hideRevisions();
       };
 

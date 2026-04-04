@@ -1,9 +1,10 @@
 /// Tab bar DOM rendering. Re-exports all tab state for backwards compatibility.
 
 import { deleteNote } from './api.ts';
+import { on } from './events.ts';
 import {
   getTabs, getActiveIndex, getActiveTab, switchTab, closeTab,
-  createNewNote, setOnRender,
+  createNewNote,
 } from './tab-state.ts';
 
 export {
@@ -11,7 +12,6 @@ export {
   openTab, switchTab, closeTab, closeActiveTab, nextTab, prevTab,
   markDirty, markClean, updateTabContent, updateTabPath,
   deleteActiveTab, createNewNote, restoreSession,
-  setOnTabChange, setOnTabClose,
 } from './tab-state.ts';
 
 const tabBar = document.getElementById('tab-bar')!;
@@ -19,7 +19,7 @@ const emptyState = document.getElementById('empty-state')!;
 
 let contextMenuEl: HTMLElement | null = null;
 
-setOnRender(render);
+on('tab:render', render);
 
 function render() {
   tabBar.innerHTML = '';
