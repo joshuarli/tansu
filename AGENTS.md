@@ -36,16 +36,19 @@ All paths are relative to the notes directory passed as a CLI argument.
 
 ## Rust crate structure
 
-All source in `src/`:
+Dual-target crate: `src/lib.rs` exports all modules, `src/main.rs` is the server binary.
 
+- **lib.rs** -- Re-exports all modules as a library crate (enables criterion benchmarks and the bench binary to import directly).
 - **main.rs** -- `Server` struct, CLI arg parsing, TCP accept loop, request dispatch, all API handler methods. Defines serde request/response types inline.
 - **http.rs** -- HTTP primitives: `percent_decode`, `query_param`, `mime`, `write_headers`/`write_error`/`write_body`/`write_json`/`respond_json`, `serve_file` (uses `sendfile(2)` on macOS/Linux), `read_body`/`parse_body`, `normalize_into` (path traversal prevention), `mtime_secs`.
-- **index.rs** -- `Index` (tantivy wrapper). Schema: `path` (STRING), `title` (TEXT), `content` (TEXT), `headings` (TEXT), `tags` (TEXT), `mtime` (u64), `links_to` (TEXT). Methods: `index_note`, `remove_note`, `search` (two-phase: exact then fuzzy fallback), `get_backlinks`, `get_all_notes`, `full_reindex`.
+- **index.rs** -- `Index` (tantivy wrapper). Schema: `path` (STRING), `title` (TEXT), `content` (TEXT), `headings` (TEXT), `tags` (TEXT), `mtime` (u64), `links_to` (TEXT). Methods: `index_note`, `remove_note`, `search` (two-phase: exact then fuzzy fallback), `get_backlinks`, `get_all_notes`, `full_reindex`. Uses lazy commits (`ensure_committed` before reads) and a `notes_cache` (`Mutex<Option<Vec<...>>>`) invalidated on writes/commits.
 - **scanner.rs** -- Single-pass extraction of `#headings`, `#tags`, and `[[wiki-links]]` from raw markdown. Returns `ScanResult { title, headings, tags, links }`. Normalizes link targets (lowercase, strip path/extension).
 - **strip.rs** -- `strip_markdown`: uses `pulldown-cmark` to convert markdown to plain text for search indexing. Skips code blocks.
 - **revisions.rs** -- `save_revision` (copies current file content to `.tansu/revisions/<stem>/<timestamp_ms>.md`), `list_revisions` (sorted descending), `get_revision`.
 - **settings.rs** -- `Settings` struct for search configuration, persisted to `.tansu/settings.json`. Fields: weight_title/headings/tags/content (f32), fuzzy_distance (u8), result_limit (usize), show_score_breakdown (bool), excluded_folders (Vec<String>). All fields have serde defaults. Changing `excluded_folders` triggers a full reindex.
 - **watcher.rs** -- `start_watcher`: sets up `notify::RecommendedWatcher`, filters to `.md` files only, ignores `.tansu/` directory, checks `self_writes` set to filter out server's own writes.
+- **util.rs** -- `StrExt` trait: `truncate_chars` (by Unicode scalar count), `truncate_bytes` (snaps to `floor_char_boundary`).
+- **bin/bench.rs** -- Quick ad-hoc benchmark binary (avg/p50/p99/min/max). Run with `make bench-quick`.
 
 ## Frontend structure
 
@@ -74,7 +77,7 @@ All source in `web/ts/`, bundled to `web/static/app.js`:
 - **Self-write filtering**: server tracks paths it writes to in a `HashSet<PathBuf>` behind `Arc<Mutex<_>>`. The watcher callback checks and removes from this set to avoid re-indexing server's own writes.
 - **Serde for all JSON**: request/response types are `#[derive(Serialize)]` / `#[derive(Deserialize)]` structs in `main.rs`. No manual JSON construction.
 - **No async runtime**: everything is synchronous std. The server handles one request at a time on the main thread.
-- **Minimal dependencies**: only 6 crates in `Cargo.toml` (httparse, tantivy, notify, serde, serde_json, pulldown-cmark).
+- **Minimal dependencies**: 6 runtime crates (httparse, tantivy, notify, serde, serde_json, pulldown-cmark). Dev-only: criterion for benchmarks.
 - **Wiki-link resolution**: links are matched by filename stem (case-insensitive). Backlinks are indexed in tantivy via the `links_to` field. Rename updates all referencing notes.
 - **Image handling**: paste triggers WebP conversion client-side, uploads raw blob to `/api/image`, server stores in `z-images/` with dedup naming.
 - **Custom snippet generator**: tantivy's `SnippetGenerator` cannot highlight fuzzy-matched terms because `FuzzyTermQuery` doesn't implement `query_terms()` (the expanded terms exist inside `AutomatonWeight` but aren't publicly exposed). Our `make_snippet` in `index.rs` tokenizes stored content, matches query terms within edit distance 1, and wraps matches in `<b>` tags. Do not replace this with tantivy's built-in snippet generator.
@@ -109,22 +112,33 @@ Static files are served from `/static/*` and images from `/z-images/*`. All othe
 bunx tsc              # type-check TypeScript (no emit)
 bun build web/ts/main.ts --outfile web/static/app.js --minify   # bundle frontend
 cargo build           # build Rust server (debug)
-cargo test            # run tests (47 unit tests across http, scanner, strip, revisions)
+cargo test            # run tests
 make build            # all of the above
 make dev              # watch-mode TS + run server
+make bench            # criterion benchmarks (baselines in target/criterion/)
+make bench-quick      # ad-hoc bench binary against ~/notes
 ```
 
 The server binary expects `web/index.html` and `web/static/` to be next to the executable or in the current directory.
 
 ## Testing
 
-`cargo test` runs 47 unit tests:
+`cargo test` runs 67 unit tests:
 - **http.rs**: percent decoding, query param parsing, path normalization, mtime, MIME types
 - **scanner.rs**: heading/tag/wiki-link extraction, normalization, edge cases
 - **strip.rs**: markdown-to-plaintext conversion
 - **revisions.rs**: save/list/get revisions, subdirectory paths, rapid save dedup
+- **index.rs**: edit distance, snippets (exact/fuzzy/multibyte/HTML escaping), dirty flag, lazy commit + cache
+- **settings.rs**: defaults, partial deserialization, round-trip
+- **util.rs**: truncate_bytes/truncate_chars with multibyte edge cases
 
 TypeScript type checking: `bunx tsc` (strict mode, `noEmit`).
+
+## Benchmarking
+
+Criterion benchmarks in `benches/index.rs` with a counting global allocator that reports alloc count, total bytes, and net retained bytes per operation. Baselines stored in `target/criterion/`. Run `make bench` to compare against previous baselines.
+
+Key operations benchmarked: `get_all_notes`, `index_note` (deferred write only), `index_note + search` (realistic write-read cycle including commit), exact/fuzzy/multi-term/miss search queries.
 
 ## Style
 

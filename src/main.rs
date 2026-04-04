@@ -11,19 +11,11 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
-mod http;
-mod index;
-mod revisions;
-mod scanner;
-mod settings;
-mod strip;
-mod util;
-mod watcher;
-
-use http::*;
-use index::Index;
-use settings::Settings;
-use watcher::WatchEvent;
+use tansu::http::*;
+use tansu::index::Index;
+use tansu::settings::Settings;
+use tansu::watcher::{self, WatchEvent};
+use tansu::revisions;
 
 #[derive(Serialize)]
 struct NoteResponse<'a> {

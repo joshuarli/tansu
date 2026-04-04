@@ -1,22 +1,7 @@
 use std::{env, fs, path::Path, time::Instant};
 
-// Re-use library modules from the main crate
-// Since tansu is a binary crate, we import the modules directly
-#[path = "../index.rs"]
-mod index;
-#[path = "../scanner.rs"]
-mod scanner;
-#[path = "../strip.rs"]
-mod strip;
-#[path = "../http.rs"]
-mod http;
-#[path = "../settings.rs"]
-mod settings;
-#[path = "../util.rs"]
-mod util;
-
-use index::Index;
-use settings::Settings;
+use tansu::index::Index;
+use tansu::settings::Settings;
 
 fn main() {
     let dir = env::args().nth(1).unwrap_or_else(|| {
@@ -52,7 +37,7 @@ fn main() {
         std::hint::black_box(notes.len());
     });
 
-    // 2. Search: common terms (should hit many results, exact phase sufficient)
+    // 2. Search: common terms
     let common_queries = ["the", "rust", "linux", "note", "project", "config"];
     for q in common_queries {
         let label = format!("search exact '{q}'");

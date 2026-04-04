@@ -1,7 +1,7 @@
 use std::{
     fs,
     path::Path,
-    sync::{Arc, RwLock, atomic::{AtomicBool, Ordering}},
+    sync::{Arc, Mutex, RwLock, atomic::{AtomicBool, Ordering}},
 };
 
 use tantivy::{
@@ -52,6 +52,8 @@ struct IndexInner {
     reader: IndexReader,
     fields: Fields,
     dirty: AtomicBool,
+    uncommitted: AtomicBool,
+    notes_cache: Mutex<Option<Vec<(String, String)>>>,
 }
 
 impl Index {
@@ -98,6 +100,8 @@ impl Index {
                     links_to,
                 },
                 dirty: AtomicBool::new(true),
+                uncommitted: AtomicBool::new(false),
+                notes_cache: Mutex::new(None),
             }),
         })
     }
@@ -135,6 +139,18 @@ impl Index {
         let mut writer = self.inner.writer.write().unwrap();
         let _ = writer.commit();
         self.inner.dirty.store(true, Ordering::Release);
+        self.inner.uncommitted.store(false, Ordering::Release);
+        *self.inner.notes_cache.lock().unwrap() = None;
+    }
+
+    /// Commit only if there are uncommitted writes.
+    fn ensure_committed(&self) {
+        if self.inner.uncommitted.swap(false, Ordering::AcqRel) {
+            let mut writer = self.inner.writer.write().unwrap();
+            let _ = writer.commit();
+            self.inner.dirty.store(true, Ordering::Release);
+            *self.inner.notes_cache.lock().unwrap() = None;
+        }
     }
 
     /// Reload the reader only if the index has been committed to since last reload.
@@ -144,29 +160,30 @@ impl Index {
         }
     }
 
-    /// Index a single note and commit immediately.
+    /// Index a single note. Commit is deferred until the next read operation.
     pub fn index_note(&self, rel_path: &str, content: &str, full_path: &Path) {
         self.add_doc(rel_path, content, full_path);
-        self.commit();
+        self.inner.uncommitted.store(true, Ordering::Release);
+        *self.inner.notes_cache.lock().unwrap() = None;
     }
 
-    /// Index a single note without committing. Call `commit()` separately.
+    /// Alias for index_note (all writes are now deferred).
     pub fn index_note_deferred(&self, rel_path: &str, content: &str, full_path: &Path) {
-        self.add_doc(rel_path, content, full_path);
+        self.index_note(rel_path, content, full_path);
     }
 
     pub fn remove_note(&self, rel_path: &str) {
-        let mut writer = self.inner.writer.write().unwrap();
-        let path_term = tantivy::Term::from_field_text(self.inner.fields.path, rel_path);
-        writer.delete_term(path_term);
-        let _ = writer.commit();
-        self.inner.dirty.store(true, Ordering::Release);
-    }
-
-    pub fn remove_note_deferred(&self, rel_path: &str) {
         let writer = self.inner.writer.write().unwrap();
         let path_term = tantivy::Term::from_field_text(self.inner.fields.path, rel_path);
         writer.delete_term(path_term);
+        drop(writer);
+        self.inner.uncommitted.store(true, Ordering::Release);
+        *self.inner.notes_cache.lock().unwrap() = None;
+    }
+
+    /// Alias for remove_note (all writes are now deferred).
+    pub fn remove_note_deferred(&self, rel_path: &str) {
+        self.remove_note(rel_path);
     }
 
     /// Two-phase search: exact first, fuzzy fallback if <5 results.
@@ -175,6 +192,7 @@ impl Index {
         &self, query: &str, limit: usize, filter_path: Option<&str>,
         fuzzy_distance: u8, weights: [f32; 4],
     ) -> Vec<SearchResult> {
+        self.ensure_committed();
         self.reload_if_dirty();
         let searcher = self.inner.reader.searcher();
 
@@ -296,6 +314,7 @@ impl Index {
     }
 
     pub fn get_backlinks(&self, target_stem: &str) -> Vec<String> {
+        self.ensure_committed();
         self.reload_if_dirty();
         let searcher = self.inner.reader.searcher();
         let f = &self.inner.fields;
@@ -319,7 +338,17 @@ impl Index {
     }
 
     pub fn get_all_notes(&self) -> Vec<(String, String)> {
+        self.ensure_committed();
         self.reload_if_dirty();
+
+        // Return cached result if available
+        {
+            let cache = self.inner.notes_cache.lock().unwrap();
+            if let Some(ref notes) = *cache {
+                return notes.clone();
+            }
+        }
+
         let searcher = self.inner.reader.searcher();
         let f = &self.inner.fields;
 
@@ -347,6 +376,8 @@ impl Index {
                 }
             }
         }
+
+        *self.inner.notes_cache.lock().unwrap() = Some(notes.clone());
         notes
     }
 
@@ -684,6 +715,44 @@ mod tests {
         let s = make_snippet(content, &["zzz"], 10);
         // Should not panic, just truncate safely
         assert!(!s.is_empty());
+    }
+
+    #[test]
+    fn lazy_commit_and_cache() {
+        let dir = std::env::temp_dir().join(format!("tansu_test_lazy_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let idx = Index::open_or_create(&dir).unwrap();
+
+        let tmp = std::env::temp_dir().join("tansu_test_lazy_note.md");
+        fs::write(&tmp, "hello world").unwrap();
+
+        // index_note stages the write but doesn't commit
+        idx.index_note("test.md", "hello world", &tmp);
+        assert!(idx.inner.uncommitted.load(Ordering::Acquire));
+
+        // get_all_notes triggers ensure_committed + returns the note
+        let notes = idx.get_all_notes();
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0].0, "test.md");
+        assert!(!idx.inner.uncommitted.load(Ordering::Acquire));
+
+        // Second call returns cached result
+        let notes2 = idx.get_all_notes();
+        assert_eq!(notes2.len(), 1);
+
+        // Index another note, cache should be invalidated
+        idx.index_note("test2.md", "second note", &tmp);
+        let notes3 = idx.get_all_notes();
+        assert_eq!(notes3.len(), 2);
+
+        // Search also triggers commit
+        idx.index_note("test3.md", "unique findme word", &tmp);
+        let results = idx.search("findme", 10, None, 0, [10.0, 5.0, 2.0, 1.0]);
+        assert!(!results.is_empty());
+
+        let _ = fs::remove_dir_all(&dir);
+        let _ = fs::remove_file(&tmp);
     }
 
 }

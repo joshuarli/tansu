@@ -17,6 +17,9 @@ dev:
 NOTES_DIR ?= ~/notes
 
 bench:
+	cargo bench --bench index
+
+bench-quick:
 	cargo run --bin bench -- $(NOTES_DIR)
 
 clean:
