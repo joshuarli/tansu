@@ -73,6 +73,7 @@ All source in `web/ts/`, bundled to `web/static/app.js`:
 - **Minimal dependencies**: only 6 crates in `Cargo.toml` (httparse, tantivy, notify, serde, serde_json, pulldown-cmark).
 - **Wiki-link resolution**: links are matched by filename stem (case-insensitive). Backlinks are indexed in tantivy via the `links_to` field. Rename updates all referencing notes.
 - **Image handling**: paste triggers WebP conversion client-side, uploads raw blob to `/api/image`, server stores in `z-images/` with dedup naming.
+- **Custom snippet generator**: tantivy's `SnippetGenerator` cannot highlight fuzzy-matched terms because `FuzzyTermQuery` doesn't implement `query_terms()` (the expanded terms exist inside `AutomatonWeight` but aren't publicly exposed). Our `make_snippet` in `index.rs` tokenizes stored content, matches query terms within edit distance 1, and wraps matches in `<b>` tags. Do not replace this with tantivy's built-in snippet generator.
 
 ## API surface
 
