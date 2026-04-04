@@ -1,4 +1,4 @@
-import { toggleSearch, closeSearch, isSearchOpen } from './search.ts';
+import { toggleSearch, openSearch, closeSearch, isSearchOpen } from './search.ts';
 import {
   setOnTabChange, setOnTabClose, closeActiveTab, nextTab, prevTab,
   getActiveTab, openTab, updateTabPath, updateTabContent, restoreSession,
@@ -56,6 +56,22 @@ document.addEventListener('keydown', (e) => {
   if (meta && e.key === 'k') {
     e.preventDefault();
     toggleSearch();
+    return;
+  }
+
+  // Shift+Cmd+F: global search
+  if (meta && e.shiftKey && e.key === 'f') {
+    e.preventDefault();
+    openSearch();
+    return;
+  }
+
+  // Cmd+F: search in current note
+  if (meta && !e.shiftKey && e.key === 'f') {
+    e.preventDefault();
+    const tab = getActiveTab();
+    if (tab) openSearch(tab.path);
+    else openSearch();
     return;
   }
 

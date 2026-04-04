@@ -143,7 +143,8 @@ impl Index {
     }
 
     /// Two-phase search: exact first, fuzzy fallback if <5 results.
-    pub fn search(&self, query: &str, limit: usize) -> Vec<SearchResult> {
+    /// If `filter_path` is Some, only return results from that document.
+    pub fn search(&self, query: &str, limit: usize, filter_path: Option<&str>) -> Vec<SearchResult> {
         let _ = self.inner.reader.reload();
         let searcher = self.inner.reader.searcher();
 
@@ -153,19 +154,19 @@ impl Index {
         }
 
         // Phase 1: exact
-        let phase1_query = self.build_query(&terms, false);
+        let phase1_query = self.build_query(&terms, false, filter_path);
         let results = self.execute_search(&searcher, &phase1_query, limit);
 
-        if results.len() >= 5 {
+        if results.len() >= 5 || filter_path.is_some() {
             return results;
         }
 
         // Phase 2: add fuzzy
-        let phase2_query = self.build_query(&terms, true);
+        let phase2_query = self.build_query(&terms, true, filter_path);
         self.execute_search(&searcher, &phase2_query, limit)
     }
 
-    fn build_query(&self, terms: &[&str], fuzzy: bool) -> BooleanQuery {
+    fn build_query(&self, terms: &[&str], fuzzy: bool, filter_path: Option<&str>) -> BooleanQuery {
         let f = &self.inner.fields;
         let search_fields = [
             (f.title, 10.0),
@@ -203,6 +204,12 @@ impl Index {
 
             let word_query = BooleanQuery::new(field_queries);
             term_queries.push((Occur::Must, Box::new(word_query)));
+        }
+
+        if let Some(path) = filter_path {
+            let path_term = tantivy::Term::from_field_text(f.path, path);
+            let path_query = TermQuery::new(path_term, IndexRecordOption::Basic);
+            term_queries.push((Occur::Must, Box::new(path_query)));
         }
 
         BooleanQuery::new(term_queries)

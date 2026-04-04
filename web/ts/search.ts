@@ -11,16 +11,19 @@ const resultsEl = document.getElementById('search-results')!;
 let results: SearchResult[] = [];
 let selectedIndex = 0;
 let isOpen = false;
+let scopePath: string | null = null;
 
 export function toggleSearch() {
   if (isOpen) closeSearch();
   else openSearch();
 }
 
-export function openSearch() {
+export function openSearch(filterPath?: string) {
   isOpen = true;
+  scopePath = filterPath ?? null;
   overlay.classList.remove('hidden');
   input.value = '';
+  input.placeholder = scopePath ? `Find in note...` : 'Search notes...';
   resultsEl.innerHTML = '';
   results = [];
   selectedIndex = 0;
@@ -45,7 +48,7 @@ const doSearch = debounce(async () => {
     return;
   }
   try {
-    results = await searchNotes(q);
+    results = await searchNotes(q, scopePath ?? undefined);
   } catch {
     results = [];
   }
@@ -107,8 +110,8 @@ function renderResults(query: string) {
     resultsEl.appendChild(el);
   });
 
-  // Create note option
-  if (query.length > 0) {
+  // Create note option (not shown when scoped to a single file)
+  if (query.length > 0 && !scopePath) {
     const createEl = document.createElement('div');
     createEl.className = 'search-create' + (selectedIndex === results.length ? ' selected' : '');
     createEl.textContent = `Create "${query}"`;

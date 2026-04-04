@@ -37,6 +37,7 @@ export function showEditor(path: string, content: string) {
   hideRevisions();
   hideAutocomplete();
 
+
   const emptyState = document.getElementById('empty-state');
   editorArea.innerHTML = '';
   if (emptyState) editorArea.appendChild(emptyState);
@@ -87,6 +88,7 @@ export function hideEditor() {
   currentPath = null;
   hideRevisions();
   hideAutocomplete();
+
   if (container) { container.remove(); container = null; }
   if (backlinksEl) { backlinksEl.remove(); backlinksEl = null; }
   contentEl = null;

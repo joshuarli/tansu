@@ -15,8 +15,10 @@ export interface NoteEntry {
   title: string;
 }
 
-export async function searchNotes(q: string): Promise<SearchResult[]> {
-  const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
+export async function searchNotes(q: string, path?: string): Promise<SearchResult[]> {
+  let url = `/api/search?q=${encodeURIComponent(q)}`;
+  if (path) url += `&path=${encodeURIComponent(path)}`;
+  const res = await fetch(url);
   if (!res.ok) throw new Error(`search failed: ${res.status}`);
   return res.json() as Promise<SearchResult[]>;
 }

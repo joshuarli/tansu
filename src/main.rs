@@ -300,7 +300,8 @@ impl Server {
         if q.is_empty() {
             return write_json(sock, "[]");
         }
-        let results = self.index.search(&q, 20);
+        let filter_path = query_param(path_raw, "path");
+        let results = self.index.search(&q, 20, filter_path.as_deref());
         let hits: Vec<SearchHit> = results.iter().map(|r| SearchHit {
             path: &r.path, title: &r.title, excerpt: &r.excerpt, score: r.score,
         }).collect();
