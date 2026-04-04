@@ -8,7 +8,6 @@ import { handleBlockTransform } from './transforms.ts';
 import { checkWikiLinkTrigger, hideAutocomplete, invalidateNoteCache as _invalidateNoteCache } from './autocomplete.ts';
 import { renderMarkdown } from './markdown.ts';
 
-declare const hljs: { highlightElement: (el: HTMLElement) => void };
 
 let editorArea: HTMLElement;
 let container: HTMLElement | null = null;
@@ -188,16 +187,9 @@ function loadContent(markdown: string) {
     sourceEl.value = markdown;
   } else if (contentEl) {
     contentEl.innerHTML = renderMarkdown(markdown);
-    highlightCodeBlocks();
   }
 }
 
-function highlightCodeBlocks() {
-  if (!contentEl) return;
-  contentEl.querySelectorAll('pre code').forEach((el) => {
-    try { hljs.highlightElement(el as HTMLElement); } catch {}
-  });
-}
 
 function toggleSourceMode() {
   if (!contentEl || !sourceEl) return;
@@ -205,7 +197,6 @@ function toggleSourceMode() {
   if (isSourceMode) {
     const md = sourceEl.value;
     contentEl.innerHTML = renderMarkdown(md);
-    highlightCodeBlocks();
     contentEl.style.display = '';
     sourceEl.style.display = 'none';
     isSourceMode = false;

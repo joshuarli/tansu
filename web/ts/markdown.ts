@@ -3,6 +3,7 @@
 /// fenced code blocks, tables, HR, and inline formatting.
 
 import { escapeHtml } from './util.ts';
+import { highlightCode } from './highlight.ts';
 
 const calloutIcons: Record<string, string> = {
   note: '\u{1F4DD}', info: '\u2139\uFE0F', tip: '\u{1F4A1}', hint: '\u{1F4A1}',
@@ -152,9 +153,9 @@ function renderBlock(block: Block): string {
     case 'hr':
       return '<hr>';
     case 'code': {
-      const escaped = escapeHtml(block.text);
+      const highlighted = block.lang ? highlightCode(block.text, block.lang) : escapeHtml(block.text);
       const cls = block.lang ? ` class="language-${escapeHtml(block.lang)}"` : '';
-      return `<pre><code${cls}>${escaped}</code></pre>`;
+      return `<pre><code${cls}>${highlighted}</code></pre>`;
     }
     case 'list': {
       const tag = block.ordered ? 'ol' : 'ul';
