@@ -39,7 +39,8 @@ All paths are relative to the notes directory passed as a CLI argument.
 Dual-target crate: `src/lib.rs` exports all modules, `src/main.rs` is the server binary.
 
 - **lib.rs** -- Re-exports all modules as a library crate (enables criterion benchmarks and the bench binary to import directly).
-- **main.rs** -- `Server` struct, CLI arg parsing, TCP accept loop, request dispatch, all API handler methods. Defines serde request/response types inline.
+- **main.rs** -- `Server` struct, CLI arg parsing, TCP accept loop, request dispatch, all API handler methods, session management, encryption lifecycle. Defines serde request/response types inline.
+- **crypto.rs** -- AES-256-GCM encryption, key wrapping, recovery keys, vault I/O. See `SECURITY.md` for design doc.
 - **http.rs** -- HTTP primitives: `percent_decode`, `query_param`, `mime`, `write_headers`/`write_error`/`write_body`/`write_json`/`respond_json`, `serve_file` (uses `sendfile(2)` on macOS/Linux), `read_body`/`parse_body`, `normalize_into` (path traversal prevention), `mtime_secs`.
 - **index.rs** -- `Index` (tantivy wrapper). Schema: `path` (STRING), `title` (TEXT), `content` (TEXT), `headings` (TEXT), `tags` (TEXT), `mtime` (u64), `links_to` (TEXT). Methods: `index_note`, `remove_note`, `search` (two-phase: exact then fuzzy fallback), `get_backlinks`, `get_all_notes`, `full_reindex`. Uses lazy commits (`ensure_committed` before reads) and a `notes_cache` (`Mutex<Option<Vec<...>>>`) invalidated on writes/commits.
 - **scanner.rs** -- Single-pass extraction of `#headings`, `#tags`, and `[[wiki-links]]` from raw markdown. Returns `ScanResult { title, headings, tags, links }`. Normalizes link targets (lowercase, strip path/extension).
@@ -67,7 +68,8 @@ All source in `web/ts/`, bundled to `web/static/app.js`:
 - **merge.ts** -- Line-based 3-way merge (LCS diff). Returns merged string or null on conflict.
 - **revisions.ts** -- Revisions side panel. Lists timestamps, preview on click, restore with confirmation.
 - **palette.ts** -- Command palette modal (Cmd+P). Filterable list of all commands with shortcut hints. `registerCommands()` called from main.ts.
-- **settings.ts** -- Settings modal (Cmd+Shift+S). Sliders for search weights, dropdown for fuzzy distance, checkbox for score breakdown, text input for excluded folders. Saves to server via PUT `/api/settings`.
+- **settings.ts** -- Settings modal (Cmd+Shift+S). Sliders for search weights, dropdown for fuzzy distance, checkbox for score breakdown, text input for excluded folders. Security section for PRF credential management and lock. Saves to server via PUT `/api/settings`.
+- **webauthn.ts** -- WebAuthn PRF extension for biometric unlock (Face ID / Touch ID).
 - **util.ts** -- `debounce`, `escapeHtml`, `relativeTime`, `stemFromPath`.
 
 ## Key conventions
@@ -77,6 +79,7 @@ All source in `web/ts/`, bundled to `web/static/app.js`:
 - **Self-write filtering**: server tracks paths it writes to in a `HashSet<PathBuf>` behind `Arc<Mutex<_>>`. The watcher callback checks and removes from this set to avoid re-indexing server's own writes.
 - **Serde for all JSON**: request/response types are `#[derive(Serialize)]` / `#[derive(Deserialize)]` structs in `main.rs`. No manual JSON construction.
 - **No async runtime**: everything is synchronous std. The server handles one request at a time on the main thread.
+- **Encryption is opt-in**: `tansu encrypt <dir>` to enable, `tansu decrypt <dir>` to revert. Plaintext mode (no crypto.json) = no auth, no sessions.
 - **Minimal dependencies**: 6 runtime crates (httparse, tantivy, notify, serde, serde_json, pulldown-cmark). Dev-only: criterion for benchmarks.
 - **Wiki-link resolution**: links are matched by filename stem (case-insensitive). Backlinks are indexed in tantivy via the `links_to` field. Rename updates all referencing notes.
 - **Image handling**: paste triggers WebP conversion client-side, uploads raw blob to `/api/image`, server stores in `z-images/` with dedup naming.
@@ -104,17 +107,24 @@ All source in `web/ts/`, bundled to `web/static/app.js`:
 | PUT    | `/api/settings`           | Update settings (excluded_folders change triggers reindex) |
 | GET    | `/events`                 | SSE stream (events: `connected`, `changed`, `deleted`)     |
 
-Static files are served from `/static/*` and images from `/z-images/*`. All other GET paths serve `index.html` (SPA-style).
+| GET    | `/api/status`             | App status (locked state, PRF credentials)                 |
+| POST   | `/api/unlock`             | Unlock with recovery key or PRF output                     |
+| POST   | `/api/lock`               | Lock the app (clears session)                              |
+| POST   | `/api/prf/register`       | Register a WebAuthn PRF credential                         |
+| DELETE | `/api/prf`                | Remove a PRF credential                                    |
+
+Static files are served from `/static/*` and images from `/z-images/*`. All other GET paths serve `index.html` (SPA-style). When encrypted and locked, non-API requests redirect to `/`.
 
 ## Build commands
 
 ```sh
-bunx tsc              # type-check TypeScript (no emit)
+bunx tsgo --noEmit    # type-check TypeScript (TS7 native, no emit)
 bun build web/ts/main.ts --outfile web/static/app.js --minify   # bundle frontend
-cargo build           # build Rust server (debug)
-cargo test            # run tests
+bun test              # run all TypeScript tests
+cargo build           # build Rust server (never use --release)
+cargo test            # run Rust tests
 make build            # all of the above
-make dev              # watch-mode TS + run server
+make dev              # TS build + run server
 make bench            # criterion benchmarks (baselines in target/criterion/)
 make bench-quick      # ad-hoc bench binary against ~/notes
 ```
@@ -123,7 +133,7 @@ The server binary expects `web/index.html` and `web/static/` to be next to the e
 
 ## Testing
 
-`cargo test` runs 67 unit tests:
+`cargo test` runs 98 unit tests:
 
 - **http.rs**: percent decoding, query param parsing, path normalization, mtime, MIME types
 - **scanner.rs**: heading/tag/wiki-link extraction, normalization, edge cases
@@ -133,13 +143,24 @@ The server binary expects `web/index.html` and `web/static/` to be next to the e
 - **settings.rs**: defaults, partial deserialization, round-trip
 - **util.rs**: truncate_bytes/truncate_chars with multibyte edge cases
 
-TypeScript type checking: `bunx tsc` (strict mode, `noEmit`).
+- **crypto.rs**: encryption/decryption round-trip, key wrapping, recovery key parsing, PRF unlock, tampered ciphertext rejection
+
+TypeScript tests: `bun test` runs 22 test files with coverage enforcement (79% line/function threshold).
+
+Type checking: `bunx tsgo` (strict mode, `noEmit`).
 
 ## Benchmarking
 
 Criterion benchmarks in `benches/index.rs` with a counting global allocator that reports alloc count, total bytes, and net retained bytes per operation. Baselines stored in `target/criterion/`. Run `make bench` to compare against previous baselines.
 
 Key operations benchmarked: `get_all_notes`, `index_note` (deferred write only), `index_note + search` (realistic write-read cycle including commit), exact/fuzzy/multi-term/miss search queries.
+
+## Dev conventions
+
+- Tests live alongside source: `foo.rs` has `#[cfg(test)] mod tests`, `foo.ts` has `foo.test.ts`
+- Pre-commit hooks are not used; user verifies commits independently
+- Never push to remote
+- Never build release binaries (`cargo build --release`)
 
 ## Style
 

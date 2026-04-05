@@ -8,7 +8,7 @@ build-rs:
 	cargo build
 
 check:
-	bunx tsc
+	bunx tsgo
 	cargo check
 
 lint-ts:
@@ -16,7 +16,7 @@ lint-ts:
 
 ts: lint-ts
 	bun run oxfmt web/ts/
-	bunx tsc --noEmit --pretty false
+	bunx tsgo --noEmit
 	bun build web/ts/main.ts --outfile web/static/app.js --target browser --format esm
 
 dev: ts
