@@ -132,6 +132,24 @@ describe("revisions", () => {
     expect(isRevisionsOpen()).toBe(false);
   });
 
+  test("empty revisions shows 'No revisions yet.' message", async () => {
+    // Mock empty revisions list
+    mock.on("GET", /\/api\/revisions\?/, []);
+
+    const opts = makeOpts("empty.md");
+    toggleRevisions(opts);
+    await new Promise((r) => setTimeout(r, 200));
+
+    expect(isRevisionsOpen()).toBe(true);
+    expect(host.querySelectorAll(".revision-item").length).toBe(0);
+    expect(host.textContent).toContain("No revisions yet.");
+
+    hideRevisions();
+
+    // Restore original mock
+    mock.on("GET", /\/api\/revisions\?/, [1000, 2000, 3000]);
+  });
+
   test("clicking a revision item shows diff preview", async () => {
     const opts = makeOpts("test.md");
     toggleRevisions(opts);

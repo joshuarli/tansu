@@ -106,4 +106,92 @@ describe("palette", () => {
 
     closePalette();
   });
+
+  test("clicking a command item executes its action", () => {
+    openPalette();
+    const listEl = document.getElementById("palette-list")!;
+
+    actionCalled = false;
+    // Click the first item ("Save")
+    const saveItem = listEl.children[0]! as HTMLElement;
+    saveItem.click();
+    expect(actionCalled).toBe(true);
+    expect(isPaletteOpen()).toBe(false);
+  });
+
+  test("matchesKey correctly matches keyboard events", async () => {
+    const { matchesKey } = await import("./palette.ts");
+
+    // Exact match: meta+key
+    expect(
+      matchesKey(
+        new KeyboardEvent("keydown", { key: "s", metaKey: true }),
+        { key: "s", meta: true },
+      ),
+    ).toBe(true);
+
+    // ctrlKey also counts as meta
+    expect(
+      matchesKey(
+        new KeyboardEvent("keydown", { key: "s", ctrlKey: true }),
+        { key: "s", meta: true },
+      ),
+    ).toBe(true);
+
+    // Missing meta when required
+    expect(
+      matchesKey(
+        new KeyboardEvent("keydown", { key: "s" }),
+        { key: "s", meta: true },
+      ),
+    ).toBe(false);
+
+    // Extra meta when not required
+    expect(
+      matchesKey(
+        new KeyboardEvent("keydown", { key: "s", metaKey: true }),
+        { key: "s" },
+      ),
+    ).toBe(false);
+
+    // Shift matching
+    expect(
+      matchesKey(
+        new KeyboardEvent("keydown", { key: "P", metaKey: true, shiftKey: true }),
+        { key: "P", meta: true, shift: true },
+      ),
+    ).toBe(true);
+
+    // Missing shift
+    expect(
+      matchesKey(
+        new KeyboardEvent("keydown", { key: "P", metaKey: true }),
+        { key: "P", meta: true, shift: true },
+      ),
+    ).toBe(false);
+
+    // Extra shift when not required
+    expect(
+      matchesKey(
+        new KeyboardEvent("keydown", { key: "k", metaKey: true, shiftKey: true }),
+        { key: "k", meta: true },
+      ),
+    ).toBe(false);
+
+    // Wrong key
+    expect(
+      matchesKey(
+        new KeyboardEvent("keydown", { key: "x", metaKey: true }),
+        { key: "s", meta: true },
+      ),
+    ).toBe(false);
+
+    // Simple key with no modifiers
+    expect(
+      matchesKey(
+        new KeyboardEvent("keydown", { key: "Escape" }),
+        { key: "Escape" },
+      ),
+    ).toBe(true);
+  });
 });

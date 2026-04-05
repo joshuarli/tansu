@@ -39,6 +39,106 @@ describe("settings", () => {
     cleanup();
   });
 
+  test("save() collects form values and calls saveSettings", async () => {
+    await openSettings();
+    const panel = document.getElementById("settings-panel")!;
+
+    // Modify some form values
+    const titleSlider = panel.querySelector('input[data-key="weight_title"]') as HTMLInputElement;
+    titleSlider.value = "8";
+    const scoreCheckbox = panel.querySelector(
+      'input[data-key="show_score_breakdown"]',
+    ) as HTMLInputElement;
+    scoreCheckbox.checked = false;
+    const excludedInput = panel.querySelector(
+      'input[data-key="excluded_folders"]',
+    ) as HTMLInputElement;
+    excludedInput.value = "archive, drafts";
+
+    // Click save
+    const saveBtn = panel.querySelector("#settings-save") as HTMLButtonElement;
+    saveBtn.click();
+    await new Promise((r) => setTimeout(r, 10));
+
+    // Settings should be closed after successful save
+    expect(isSettingsOpen()).toBe(false);
+  });
+
+  test("security section renders when encrypted", async () => {
+    // Register status mock for encrypted vault with PRF credentials
+    mock.on("GET", "/api/status", {
+      encrypted: true,
+      locked: false,
+      needs_setup: false,
+      prf_credential_names: ["Face ID"],
+      prf_credential_ids: ["abc123"],
+    });
+
+    await openSettings();
+    const panel = document.getElementById("settings-panel")!;
+
+    // Security section should be rendered
+    expect(panel.innerHTML).toContain("Security");
+    expect(panel.innerHTML).toContain("Face ID");
+    expect(panel.innerHTML).toContain("Lock now");
+    expect(panel.querySelector(".prf-remove") !== null).toBe(true);
+    closeSettings();
+  });
+
+  test("lock button calls lockApp and closes", async () => {
+    mock.on("GET", "/api/status", {
+      encrypted: true,
+      locked: false,
+      needs_setup: false,
+      prf_credential_names: [],
+      prf_credential_ids: [],
+    });
+    mock.on("GET", "/api/lock", {});
+
+    await openSettings();
+    const panel = document.getElementById("settings-panel")!;
+    const lockBtn = panel.querySelector("#lock-now") as HTMLButtonElement;
+    expect(lockBtn !== null).toBe(true);
+    lockBtn.click();
+    await new Promise((r) => setTimeout(r, 10));
+
+    // Lock should close the panel
+    expect(isSettingsOpen()).toBe(false);
+  });
+
+  test("settings error fallback renders defaults", async () => {
+    // Mock getSettings to return 500
+    mock.on("GET", "/api/settings", { error: "fail" }, 500);
+    mock.on("GET", "/api/status", { error: "fail" }, 500);
+
+    await openSettings();
+    const panel = document.getElementById("settings-panel")!;
+
+    // Should still render with defaults
+    expect(panel.querySelector("h2") !== null).toBe(true);
+    expect(panel.innerHTML).toContain("Title");
+
+    // Default values: weight_title=10, fuzzy_distance=1, result_limit=20
+    const titleSlider = panel.querySelector('input[data-key="weight_title"]') as HTMLInputElement;
+    expect(titleSlider.value).toBe("10");
+    const resultLimit = panel.querySelector('input[data-key="result_limit"]') as HTMLInputElement;
+    expect(resultLimit.value).toBe("20");
+
+    closeSettings();
+
+    // Restore working mocks for subsequent tests
+    mock.on("GET", "/api/settings", {
+      weight_title: 10,
+      weight_headings: 5,
+      weight_tags: 2,
+      weight_content: 1,
+      fuzzy_distance: 1,
+      result_limit: 20,
+      show_score_breakdown: true,
+      excluded_folders: ["archive"],
+    });
+  });
+
   test("settings lifecycle", async () => {
     // Initially closed
     expect(isSettingsOpen()).toBe(false);

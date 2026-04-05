@@ -204,6 +204,64 @@ describe("line breaks", () => {
   });
 });
 
+describe("inline branches", () => {
+  test("escaped characters prevent formatting", () => {
+    const html = renderMarkdown("\\*not bold\\*");
+    expect(html).not.toContain("<strong>");
+    expect(html).not.toContain("<em>");
+    expect(html).toContain("*");
+  });
+
+  test("wiki-image renders img tag with src", () => {
+    const html = renderMarkdown("![[image.png]]");
+    expect(html).toContain("<img");
+    expect(html).toContain('data-wiki-image="image.png"');
+    expect(html).toContain("/z-images/image.png");
+  });
+
+  test("highlight renders mark tag", () => {
+    const html = renderMarkdown("==highlighted==");
+    expect(html).toContain("<mark>highlighted</mark>");
+  });
+
+  test("strikethrough renders del tag", () => {
+    const html = renderMarkdown("~~struck~~");
+    expect(html).toContain("<del>struck</del>");
+  });
+
+  test("standard image renders img tag", () => {
+    const html = renderMarkdown("![alt text](http://example.com/img.png)");
+    expect(html).toContain("<img");
+    expect(html).toContain('alt="alt text"');
+    expect(html).toContain('src="http://example.com/img.png"');
+  });
+
+  test("standard link renders anchor tag", () => {
+    const html = renderMarkdown("[click here](http://example.com)");
+    expect(html).toContain('<a href="http://example.com">click here</a>');
+  });
+
+  test("table renders with headers and cells", () => {
+    const html = renderMarkdown("| a | b |\n|---|---|\n| 1 | 2 |");
+    expect(html).toContain("<table>");
+    expect(html).toContain("<th>a</th>");
+    expect(html).toContain("<th>b</th>");
+    expect(html).toContain("<td>1</td>");
+    expect(html).toContain("<td>2</td>");
+  });
+
+  test("inline code inside link text", () => {
+    const html = renderMarkdown("[`code`](http://url)");
+    expect(html).toContain("<code>code</code>");
+    expect(html).toContain('<a href="http://url">');
+  });
+
+  test("ampersand is escaped", () => {
+    const html = renderMarkdown("a & b");
+    expect(html).toContain("&amp;");
+  });
+});
+
 describe("edge cases", () => {
   test("empty input", () => {
     expect(renderMarkdown("")).toBe("");

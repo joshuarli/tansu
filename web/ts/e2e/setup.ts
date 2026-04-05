@@ -18,9 +18,11 @@ export async function setup(): Promise<{ page: Page; baseUrl: string; notesDir: 
   const build = Bun.spawnSync(["bun", "build", "web/ts/main.ts", "--outfile", "web/static/app.js", "--minify"]);
   if (build.exitCode !== 0) throw new Error("Frontend build failed");
 
-  // Create temp notes dir with a test note
+  // Create temp notes dir with test notes
   notesDir = mkdtempSync(join(tmpdir(), "tansu-e2e-"));
   writeFileSync(join(notesDir, "test.md"), "# Hello\n\nThis is a test note.");
+  writeFileSync(join(notesDir, "second.md"), "# Second\n\nAnother note.");
+  writeFileSync(join(notesDir, "linked.md"), "# Linked\n\nHas a [[test]] link.");
 
   // Start server
   server = spawn("cargo", ["run", "--bin", "tansu", "--", notesDir, "--port", String(PORT)], {

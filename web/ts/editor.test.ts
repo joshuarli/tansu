@@ -71,6 +71,8 @@ describe("editor", () => {
   let showEditor: (path: string, content: string) => void;
   let hideEditor: () => void;
   let getCurrentContent: () => string;
+  let saveCurrentNote: () => Promise<void>;
+  let reloadFromDisk: (content: string, mtime: number) => void;
 
   beforeAll(async () => {
     cleanup = setupDOM();
@@ -99,6 +101,8 @@ describe("editor", () => {
     showEditor = mod.showEditor;
     hideEditor = mod.hideEditor;
     getCurrentContent = mod.getCurrentContent;
+    saveCurrentNote = mod.saveCurrentNote;
+    reloadFromDisk = mod.reloadFromDisk;
 
     initEditor();
   });
@@ -195,5 +199,139 @@ describe("editor", () => {
     cmSource.value = "custom source";
     expect(getCurrentContent()).toBe("custom source");
     hideEditor();
+  });
+
+  test("saveCurrentNote success: markClean called", async () => {
+    const { openTab, getTabs, getActiveTab, closeTab } = await import("./tab-state.ts");
+    mock.on("GET", "/api/note", { content: "# Save Test", mtime: 1000 });
+    await openTab("save-test.md");
+    showEditor("save-test.md", "# Save Test");
+    await new Promise((r) => setTimeout(r, 50));
+
+    // Switch to source mode and set content
+    const sourceBtn = Array.from(document.querySelectorAll(".editor-toolbar button")).find(
+      (b) => b.textContent === "Source",
+    ) as HTMLButtonElement;
+    sourceBtn.click();
+    const sourceEl = document.querySelector(".editor-source") as HTMLTextAreaElement;
+    sourceEl.value = "# Updated Content";
+
+    // Mock successful save
+    mock.on("PUT", "/api/note", { mtime: 3000 });
+
+    await saveCurrentNote();
+
+    const tab = getActiveTab();
+    expect(tab!.dirty).toBe(false);
+    expect(tab!.mtime).toBe(3000);
+    expect(tab!.content).toBe("# Updated Content");
+
+    hideEditor();
+    while (getTabs().length > 0) closeTab(0);
+    mock.on("GET", "/api/note", { content: "# Test", mtime: 1000 });
+    mock.on("PUT", "/api/note", { mtime: 2000 });
+  });
+
+  test("saveCurrentNote false-conflict: retries with mtime=0", async () => {
+    const { openTab, getTabs, getActiveTab, closeTab } = await import("./tab-state.ts");
+    mock.on("GET", "/api/note", { content: "# FC Test", mtime: 1000 });
+    await openTab("fc-test.md");
+    showEditor("fc-test.md", "# FC Test");
+    await new Promise((r) => setTimeout(r, 50));
+
+    // Source mode
+    const sourceBtn = Array.from(document.querySelectorAll(".editor-toolbar button")).find(
+      (b) => b.textContent === "Source",
+    ) as HTMLButtonElement;
+    sourceBtn.click();
+    const sourceEl = document.querySelector(".editor-source") as HTMLTextAreaElement;
+    sourceEl.value = "# FC Test";
+
+    // First save returns conflict with same content (false conflict)
+    mock.on("PUT", "/api/note", { mtime: 1000, conflict: true, content: "# FC Test" }, 409);
+
+    // The retry should succeed — override the mock for the retry call
+    // (later handlers take precedence, but both match PUT /api/note)
+    // We track calls to detect the retry
+    let putCount = 0;
+    const wrappedFetch = globalThis.fetch;
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : (input as Request).url;
+      if ((init?.method ?? "GET").toUpperCase() === "PUT" && url.includes("/api/note")) {
+        putCount++;
+        if (putCount >= 2) {
+          // Second PUT = the retry with mtime=0
+          return new Response(JSON.stringify({ mtime: 4000 }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+      }
+      return wrappedFetch(input, init);
+    }) as typeof fetch;
+
+    await saveCurrentNote();
+
+    globalThis.fetch = wrappedFetch;
+
+    expect(putCount).toBeGreaterThanOrEqual(2);
+    const tab = getActiveTab();
+    expect(tab!.dirty).toBe(false);
+    expect(tab!.mtime).toBe(4000);
+
+    hideEditor();
+    while (getTabs().length > 0) closeTab(0);
+    mock.on("GET", "/api/note", { content: "# Test", mtime: 1000 });
+    mock.on("PUT", "/api/note", { mtime: 2000 });
+  });
+
+  test("reloadFromDisk on clean tab: content updates", async () => {
+    const { openTab, getTabs, getActiveTab, closeTab } = await import("./tab-state.ts");
+    mock.on("GET", "/api/note", { content: "# Reload Test", mtime: 1000 });
+    await openTab("reload-test.md");
+    showEditor("reload-test.md", "# Reload Test");
+    await new Promise((r) => setTimeout(r, 50));
+
+    // Tab is clean; reloadFromDisk should update content without conflict
+    reloadFromDisk("# New Disk Content", 5000);
+
+    const tab = getActiveTab();
+    expect(tab!.content).toBe("# New Disk Content");
+    expect(tab!.mtime).toBe(5000);
+    expect(tab!.dirty).toBe(false);
+
+    // No conflict banner should appear
+    expect(document.querySelector(".conflict-banner")).toBe(null);
+
+    hideEditor();
+    while (getTabs().length > 0) closeTab(0);
+    mock.on("GET", "/api/note", { content: "# Test", mtime: 1000 });
+  });
+
+  test("revision:restore event updates editor content", async () => {
+    const { openTab, getTabs, getActiveTab, markDirty, closeTab } = await import("./tab-state.ts");
+    const { emit } = await import("./events.ts");
+
+    mock.on("GET", "/api/note", { content: "# Rev Test", mtime: 1000 });
+    await openTab("rev-test.md");
+    showEditor("rev-test.md", "# Rev Test");
+    await new Promise((r) => setTimeout(r, 50));
+
+    // Mark dirty first so we know restore cleans it
+    markDirty("rev-test.md");
+    expect(getActiveTab()!.dirty).toBe(true);
+
+    // Emit revision:restore
+    emit("revision:restore", { content: "# Restored Version", mtime: 8000 });
+    await new Promise((r) => setTimeout(r, 50));
+
+    const tab = getActiveTab();
+    expect(tab!.content).toBe("# Restored Version");
+    expect(tab!.mtime).toBe(8000);
+    expect(tab!.dirty).toBe(false);
+
+    hideEditor();
+    while (getTabs().length > 0) closeTab(0);
+    mock.on("GET", "/api/note", { content: "# Test", mtime: 1000 });
   });
 });

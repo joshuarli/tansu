@@ -188,4 +188,78 @@ describe("search", () => {
     expect(resultsEl.children.length).toBe(0);
     closeSearch2();
   });
+
+  test("search API error clears results", async () => {
+    const input = document.getElementById("search-input")! as HTMLInputElement;
+    const resultsEl = document.getElementById("search-results")!;
+
+    // Override search to return 500
+    mock.on("GET", "/api/search", { error: "fail" }, 500);
+
+    openSearch();
+    input.value = "broken query";
+    input.dispatchEvent(new Event("input"));
+    await new Promise((r) => setTimeout(r, 200));
+
+    // Should show only the "Create" option, no search results
+    const searchResults = resultsEl.querySelectorAll(".search-result");
+    expect(searchResults.length).toBe(0);
+
+    // Create option should still appear for the typed query
+    const createEl = resultsEl.querySelector(".search-create") as HTMLElement | null;
+    expect(createEl !== null).toBe(true);
+    expect(createEl!.textContent!).toContain("broken query");
+
+    closeSearch();
+
+    // Restore working search mock
+    mock.on("GET", "/api/search", [
+      {
+        path: "a.md",
+        title: "Alpha",
+        excerpt: "test",
+        score: 1.5,
+        field_scores: { title: 1, headings: 0.5, tags: 0, content: 0 },
+      },
+    ]);
+  });
+
+  test("create note option calls createNote API", async () => {
+    const input = document.getElementById("search-input")! as HTMLInputElement;
+    const resultsEl = document.getElementById("search-results")!;
+
+    // Return empty results so "Create" is the only option
+    mock.on("GET", "/api/search", []);
+    mock.on("POST", "/api/note", { mtime: 9999 });
+
+    openTabCalled = false;
+    openSearch2();
+    input.value = "my new note";
+    input.dispatchEvent(new Event("input"));
+    await new Promise((r) => setTimeout(r, 200));
+
+    // The create option should be present
+    const createEl = resultsEl.querySelector(".search-create") as HTMLElement | null;
+    expect(createEl !== null).toBe(true);
+    expect(createEl!.textContent!).toContain("my new note");
+
+    // Click the create option directly
+    createEl!.click();
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(openTabCalled).toBe(true);
+    expect(openTabPath).toBe("my new note.md");
+    expect(isSearchOpen2()).toBe(false);
+
+    // Restore search mock
+    mock.on("GET", "/api/search", [
+      {
+        path: "a.md",
+        title: "Alpha",
+        excerpt: "test",
+        score: 1.5,
+        field_scores: { title: 1, headings: 0.5, tags: 0, content: 0 },
+      },
+    ]);
+  });
 });

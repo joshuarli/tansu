@@ -24,6 +24,7 @@ describe("tab-state", () => {
   let titleFromPath: (path: string) => string;
   let createNewNote: () => Promise<void>;
   let restoreSession: () => Promise<void>;
+  let switchTab: (index: number) => Promise<void>;
   let offRender: () => void;
   let offChange: () => void;
 
@@ -39,6 +40,7 @@ describe("tab-state", () => {
     const mod = await import("./tab-state.ts");
     openTab = mod.openTab;
     closeTab = mod.closeTab;
+    switchTab = mod.switchTab;
     getActiveTab = mod.getActiveTab;
     getTabs = mod.getTabs;
     getActiveIndex = mod.getActiveIndex;
@@ -201,5 +203,114 @@ describe("tab-state", () => {
     await restoreSession();
 
     expect(getTabs().length).toBe(0);
+  });
+
+  test("switchTab catch block: getNote failure for lazy-loaded tab", async () => {
+    while (getTabs().length > 0) closeTab(0);
+
+    // Open two tabs normally
+    mock.on("GET", "/api/note", { content: "# A", mtime: 1000 });
+    await openTab("notes/a.md");
+    mock.on("GET", "/api/note", { content: "# B", mtime: 2000 });
+    await openTab("notes/b.md");
+
+    // Manually set tab 0 to lazy state (mtime=0, not dirty) to simulate
+    // a tab that was restored from session but not yet loaded
+    const tab0 = getTabs()[0]!;
+    tab0.content = "";
+    tab0.mtime = 0;
+
+    // Make getNote fail for this path
+    mock.on("GET", "/api/note", "server error", 500);
+
+    const warnSpy = console.warn;
+    let warned = false;
+    console.warn = (..._args: unknown[]) => { warned = true; };
+
+    await switchTab(0);
+
+    console.warn = warnSpy;
+
+    // Tab should still exist but with mtime=0 (load failed)
+    expect(getTabs()[0]!.path).toBe("notes/a.md");
+    expect(getTabs()[0]!.mtime).toBe(0);
+    expect(warned).toBe(true);
+
+    while (getTabs().length > 0) closeTab(0);
+    mock.on("GET", "/api/note", { content: "# Test", mtime: 1000 });
+  });
+
+  test("closeTab adjusts activeIndex when closing tab before active", async () => {
+    while (getTabs().length > 0) closeTab(0);
+
+    mock.on("GET", "/api/note", { content: "# X", mtime: 1000 });
+    await openTab("notes/x.md");
+    await openTab("notes/y.md");
+    await openTab("notes/z.md");
+
+    // Switch to tab 2 (index 1 — middle tab)
+    await switchTab(1);
+    expect(getActiveIndex()).toBe(1);
+
+    // Close tab 0 (before the active tab)
+    closeTab(0);
+
+    // activeIndex should decrement from 1 to 0
+    expect(getActiveIndex()).toBe(0);
+    expect(getActiveTab()!.path).toBe("notes/y.md");
+    expect(getTabs().length).toBe(2);
+
+    while (getTabs().length > 0) closeTab(0);
+  });
+
+  test("createNewNote catch block: createNote API failure", async () => {
+    while (getTabs().length > 0) closeTab(0);
+
+    const origPrompt = globalThis.prompt;
+    (globalThis as any).prompt = () => "Failing Note";
+
+    // Make createNote (POST /api/note) fail
+    mock.on("POST", "/api/note", "server error", 500);
+
+    const errorSpy = console.error;
+    let errorCalled = false;
+    console.error = (..._args: unknown[]) => { errorCalled = true; };
+
+    await createNewNote();
+
+    console.error = errorSpy;
+
+    expect(errorCalled).toBe(true);
+    // No tab should have been created since createNote threw
+    expect(getTabs().length).toBe(0);
+
+    (globalThis as any).prompt = origPrompt;
+    mock.on("POST", "/api/note", { mtime: 2000 });
+  });
+
+  test("restoreSession getNote failure: tab created with empty content", async () => {
+    while (getTabs().length > 0) closeTab(0);
+
+    mock.on("GET", "/api/state", { tabs: ["notes/fail.md"], active: 0 });
+    // getNote will fail for the active tab
+    mock.on("GET", "/api/note", "server error", 500);
+
+    const warnSpy = console.warn;
+    let warned = false;
+    console.warn = (..._args: unknown[]) => { warned = true; };
+
+    await restoreSession();
+
+    console.warn = warnSpy;
+
+    expect(warned).toBe(true);
+    expect(getTabs().length).toBe(1);
+    expect(getTabs()[0]!.path).toBe("notes/fail.md");
+    expect(getTabs()[0]!.content).toBe("");
+    expect(getTabs()[0]!.mtime).toBe(0);
+
+    while (getTabs().length > 0) closeTab(0);
+    mock.on("GET", "/api/note", { content: "# Test", mtime: 1000 });
+    mock.on("GET", "/api/state", { tabs: [], active: -1 });
   });
 });
