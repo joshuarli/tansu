@@ -225,7 +225,9 @@ describe("tab-state", () => {
 
     const warnSpy = console.warn;
     let warned = false;
-    console.warn = (..._args: unknown[]) => { warned = true; };
+    console.warn = (..._args: unknown[]) => {
+      warned = true;
+    };
 
     await switchTab(0);
 
@@ -274,7 +276,9 @@ describe("tab-state", () => {
 
     const errorSpy = console.error;
     let errorCalled = false;
-    console.error = (..._args: unknown[]) => { errorCalled = true; };
+    console.error = (..._args: unknown[]) => {
+      errorCalled = true;
+    };
 
     await createNewNote();
 
@@ -297,7 +301,9 @@ describe("tab-state", () => {
 
     const warnSpy = console.warn;
     let warned = false;
-    console.warn = (..._args: unknown[]) => { warned = true; };
+    console.warn = (..._args: unknown[]) => {
+      warned = true;
+    };
 
     await restoreSession();
 

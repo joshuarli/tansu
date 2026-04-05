@@ -1,5 +1,7 @@
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+
 import type { Page } from "playwright";
+
 import { setup, teardown } from "./setup.ts";
 
 describe("e2e: autocomplete", () => {
@@ -55,9 +57,8 @@ describe("e2e: autocomplete", () => {
       await page.keyboard.type("sec", { delay: 50 });
       await page.waitForTimeout(500);
 
-      const filtered = await page.$$eval(
-        ".autocomplete-dropdown .autocomplete-item",
-        (els) => els.map((e) => e.textContent),
+      const filtered = await page.$$eval(".autocomplete-dropdown .autocomplete-item", (els) =>
+        els.map((e) => e.textContent),
       );
       const hasSecond = filtered.some((t) => t?.toLowerCase().includes("second"));
       expect(hasSecond).toBe(true);

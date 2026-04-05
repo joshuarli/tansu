@@ -256,7 +256,12 @@ describe("editor", () => {
     let putCount = 0;
     const wrappedFetch = globalThis.fetch;
     globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : (input as Request).url;
+      const url =
+        typeof input === "string"
+          ? input
+          : input instanceof URL
+            ? input.toString()
+            : (input as Request).url;
       if ((init?.method ?? "GET").toUpperCase() === "PUT" && url.includes("/api/note")) {
         putCount++;
         if (putCount >= 2) {

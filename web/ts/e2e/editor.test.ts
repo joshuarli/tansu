@@ -1,5 +1,7 @@
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+
 import type { Page } from "playwright";
+
 import { setup, teardown } from "./setup.ts";
 
 describe("e2e: editor", () => {
@@ -41,7 +43,10 @@ describe("e2e: editor", () => {
     expect(html).toContain("This is a test note.");
 
     // contentEditable
-    const editable = await page.$eval(".editor-content", (el) => (el as HTMLElement).contentEditable);
+    const editable = await page.$eval(
+      ".editor-content",
+      (el) => (el as HTMLElement).contentEditable,
+    );
     expect(editable).toBe("true");
 
     // Source mode toggle

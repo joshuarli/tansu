@@ -1,8 +1,8 @@
-build: check build-ts build-rs
+# bun quiet output
+AGENT = 1
+export AGENT
 
-build-ts:
-	bun run oxfmt --check web/ts/
-	bun build web/ts/main.ts --outfile web/static/app.js --minify
+build: check build-ts build-rs
 
 build-rs:
 	cargo build
@@ -10,6 +10,8 @@ build-rs:
 check:
 	bunx tsgo
 	cargo check
+
+test: test-ts test-rs
 
 lint-ts:
 	bun run oxlint web/ts/
@@ -20,7 +22,7 @@ test-ts:
 test-e2e:
 	bun test web/ts/e2e/
 
-ts: lint-ts test-ts
+ts: lint-ts
 	bun run oxfmt web/ts/
 	bunx tsgo --noEmit --pretty false
 	bun build web/ts/main.ts --outfile web/static/app.js --minify
@@ -29,6 +31,9 @@ dev: ts
 	cargo run --bin tansu -- $(NOTES_DIR) --port 3000
 
 NOTES_DIR ?= ~/notes
+
+test-rs:
+	cargo test -- --test-threads=4
 
 bench:
 	cargo bench --bench index
