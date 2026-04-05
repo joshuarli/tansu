@@ -4,6 +4,8 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
+use crate::crypto::Vault;
+
 /// Directory for revisions of a given note path.
 fn revisions_dir(root: &Path, rel_path: &str) -> PathBuf {
     let stem = Path::new(rel_path)
@@ -14,6 +16,8 @@ fn revisions_dir(root: &Path, rel_path: &str) -> PathBuf {
 }
 
 /// Save the current content of a note as a revision.
+/// In encrypted mode, the file is already encrypted on disk, so we copy raw bytes
+/// (the revision file will be encrypted too).
 /// Does nothing if the file doesn't exist or can't be read.
 pub fn save_revision(root: &Path, rel_path: &str, full_path: &Path) {
     let Ok(content) = fs::read(full_path) else {
@@ -49,11 +53,20 @@ pub fn list_revisions(root: &Path, rel_path: &str) -> Vec<u64> {
     timestamps
 }
 
-/// Get the content of a specific revision.
-pub fn get_revision(root: &Path, rel_path: &str, timestamp: u64) -> Option<String> {
+/// Get the content of a specific revision (decrypts if vault provided).
+pub fn get_revision(
+    root: &Path,
+    rel_path: &str,
+    timestamp: u64,
+    vault: Option<&Vault>,
+) -> Option<String> {
     let dir = revisions_dir(root, rel_path);
     let path = dir.join(format!("{timestamp}.md"));
-    fs::read_to_string(path).ok()
+    if let Some(vault) = vault {
+        vault.read_to_string(&path).ok()
+    } else {
+        fs::read_to_string(path).ok()
+    }
 }
 
 #[cfg(test)]
@@ -85,7 +98,7 @@ mod tests {
         fs::write(&note, "hello").unwrap();
         save_revision(&tmp, "test.md", &note);
         let revs = list_revisions(&tmp, "test.md");
-        let content = get_revision(&tmp, "test.md", revs[0]).unwrap();
+        let content = get_revision(&tmp, "test.md", revs[0], None).unwrap();
         assert_eq!(content, "hello");
         let _ = fs::remove_dir_all(&tmp);
     }
@@ -96,7 +109,6 @@ mod tests {
         let note = tmp.join("test.md");
         fs::write(&note, "hello").unwrap();
         save_revision(&tmp, "test.md", &note);
-        // Small delay to ensure distinct millisecond timestamps
         std::thread::sleep(std::time::Duration::from_millis(2));
         fs::write(&note, "world").unwrap();
         save_revision(&tmp, "test.md", &note);
@@ -119,6 +131,31 @@ mod tests {
         save_revision(&tmp, "sub/note.md", &note);
         let revs = list_revisions(&tmp, "sub/note.md");
         assert_eq!(revs.len(), 1);
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn get_revision_encrypted() {
+        use crate::crypto;
+        let tmp = temp_dir("encrypted_rev");
+        let note = tmp.join("test.md");
+
+        let vault = Vault::from_raw(crypto::generate_master_key());
+        vault.write(&note, b"encrypted content").unwrap();
+
+        // save_revision copies raw bytes (already encrypted)
+        save_revision(&tmp, "test.md", &note);
+        let revs = list_revisions(&tmp, "test.md");
+        assert_eq!(revs.len(), 1);
+
+        // get_revision with vault decrypts
+        let content = get_revision(&tmp, "test.md", revs[0], Some(&vault)).unwrap();
+        assert_eq!(content, "encrypted content");
+
+        // get_revision without vault returns None (can't decrypt)
+        let raw = get_revision(&tmp, "test.md", revs[0], None);
+        assert!(raw.is_none() || raw.unwrap() != "encrypted content");
+
         let _ = fs::remove_dir_all(&tmp);
     }
 }

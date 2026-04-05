@@ -1,5 +1,6 @@
-import { getSettings, saveSettings } from "./api.ts";
-import type { Settings } from "./api.ts";
+import { getSettings, saveSettings, getStatus, registerPrf, removePrf, lockApp } from "./api.ts";
+import type { Settings, AppStatus } from "./api.ts";
+import { isPrfLikelySupported, createPrfCredential } from "./webauthn.ts";
 
 export interface SettingsPanel {
   toggle(): void;
@@ -13,6 +14,7 @@ export function createSettings(): SettingsPanel {
   const panel = document.getElementById("settings-panel")!;
   let isOpen = false;
   let current: Settings | null = null;
+  let status: AppStatus | null = null;
 
   function close() {
     isOpen = false;
@@ -36,6 +38,11 @@ export function createSettings(): SettingsPanel {
         show_score_breakdown: true,
         excluded_folders: [],
       };
+    }
+    try {
+      status = await getStatus();
+    } catch {
+      status = null;
     }
     render();
   }
@@ -86,6 +93,7 @@ export function createSettings(): SettingsPanel {
         <p class="settings-hint">Comma-separated folder names to exclude from indexing. Changes trigger a reindex.</p>
         <input type="text" data-key="excluded_folders" class="settings-text" value="${s.excluded_folders.join(", ")}" placeholder="archive, drafts">
       </div>
+      ${renderSecuritySection()}
       <div class="settings-actions">
         <button id="settings-save">Save</button>
         <button id="settings-cancel">Cancel</button>
@@ -102,6 +110,7 @@ export function createSettings(): SettingsPanel {
 
     panel.querySelector("#settings-save")!.addEventListener("click", save);
     panel.querySelector("#settings-cancel")!.addEventListener("click", close);
+    wireSecuritySection();
   }
 
   async function save() {
@@ -135,6 +144,86 @@ export function createSettings(): SettingsPanel {
       close();
     } catch (e) {
       console.error("Failed to save settings:", e);
+    }
+  }
+
+  function renderSecuritySection(): string {
+    if (!status || !status.encrypted) return "";
+
+    const names = status.prf_credential_names;
+    const ids = status.prf_credential_ids;
+    const rows = ids
+      .map(
+        (id, i) =>
+          `<div class="settings-row">
+            <span>${names[i] || id.slice(0, 12) + "..."}</span>
+            <button class="prf-remove" data-id="${id}">Remove</button>
+          </div>`,
+      )
+      .join("");
+
+    const canAdd = isPrfLikelySupported();
+    return `
+      <div class="settings-section">
+        <h3>Security</h3>
+        ${ids.length > 0 ? `<p class="settings-hint">Registered biometric credentials:</p>${rows}` : '<p class="settings-hint">No biometric credentials registered.</p>'}
+        ${canAdd ? '<button id="prf-add">Add biometric credential</button>' : '<p class="settings-hint">WebAuthn PRF not available in this browser.</p>'}
+        <button id="lock-now" style="margin-top:8px">Lock now</button>
+        <div id="security-status" style="min-height:1.6em;font-size:13px;color:var(--fg-muted)"></div>
+      </div>
+    `;
+  }
+
+  function wireSecuritySection() {
+    if (!status || !status.encrypted) return;
+
+    const statusEl = panel.querySelector("#security-status") as HTMLElement | null;
+
+    // Remove credential buttons
+    for (const btn of panel.querySelectorAll<HTMLButtonElement>(".prf-remove")) {
+      btn.addEventListener("click", async () => {
+        const id = btn.dataset["id"]!;
+        if (!confirm("Remove this biometric credential?")) return;
+        btn.disabled = true;
+        const ok = await removePrf(id);
+        if (ok) {
+          status = await getStatus();
+          render();
+        } else if (statusEl) {
+          statusEl.textContent = "Failed to remove credential.";
+        }
+      });
+    }
+
+    // Add credential button
+    const addBtn = panel.querySelector("#prf-add") as HTMLButtonElement | null;
+    if (addBtn) {
+      addBtn.addEventListener("click", async () => {
+        if (statusEl) statusEl.textContent = "Waiting for biometrics...";
+        try {
+          const result = await createPrfCredential();
+          const name = prompt("Name this credential (e.g. 'MacBook Touch ID')") || "Unnamed";
+          if (statusEl) statusEl.textContent = "Registering...";
+          const ok = await registerPrf(result.credentialId, result.prfKeyB64, name);
+          if (ok) {
+            status = await getStatus();
+            render();
+          } else if (statusEl) {
+            statusEl.textContent = "Registration failed.";
+          }
+        } catch (e) {
+          if (statusEl) statusEl.textContent = e instanceof Error ? e.message : "Failed.";
+        }
+      });
+    }
+
+    // Lock button
+    const lockBtn = panel.querySelector("#lock-now") as HTMLButtonElement | null;
+    if (lockBtn) {
+      lockBtn.addEventListener("click", async () => {
+        await lockApp();
+        close();
+      });
     }
   }
 

@@ -184,6 +184,24 @@ pub fn write_error(mut sock: &TcpStream, code: u16, msg: &str) -> io::Result<()>
     sock.write_all(&buf[..n])
 }
 
+pub fn write_redirect(sock: &TcpStream, location: &str) -> io::Result<()> {
+    let mut buf = [0u8; 256];
+    let n = {
+        let mut c = io::Cursor::new(&mut buf[..]);
+        write!(
+            c,
+            "HTTP/1.1 302 Found\r\n\
+             Location: {location}\r\n\
+             Content-Length: 0\r\n\
+             Connection: close\r\n\
+             \r\n"
+        )?;
+        c.position() as usize
+    };
+    let mut w: &TcpStream = sock;
+    w.write_all(&buf[..n])
+}
+
 pub fn write_body(sock: &TcpStream, ct: &str, body: &[u8]) -> io::Result<()> {
     write_headers(sock, 200, "OK", ct, body.len() as u64)?;
     let mut w: &TcpStream = sock;
@@ -228,6 +246,28 @@ pub fn serve_file(sock: &TcpStream, path: &Path, len: u64, content_type: &str) -
     let file = File::open(path)?;
     write_headers(sock, 200, "OK", content_type, len)?;
     send_file(&file, sock, len)
+}
+
+/// Write a response body with cache headers (for decrypted content served from memory).
+pub fn write_body_cached(sock: &TcpStream, ct: &str, body: &[u8]) -> io::Result<()> {
+    let len = body.len();
+    let mut hdr = [0u8; 512];
+    let n = {
+        let mut c = io::Cursor::new(&mut hdr[..]);
+        write!(
+            c,
+            "HTTP/1.1 200 OK\r\n\
+             Content-Type: {ct}\r\n\
+             Content-Length: {len}\r\n\
+             Cache-Control: public, max-age=3600\r\n\
+             Connection: close\r\n\
+             \r\n"
+        )?;
+        c.position() as usize
+    };
+    let mut w: &TcpStream = sock;
+    w.write_all(&hdr[..n])?;
+    w.write_all(body)
 }
 
 /// Serve a static file with long-lived cache headers.
@@ -317,6 +357,34 @@ pub fn normalize_into(base: &Path, raw: &str, out: &mut std::path::PathBuf) -> b
         }
     }
     out.starts_with(base)
+}
+
+/// Find a header value by name (case-insensitive). Returns None if not found.
+pub fn find_header<'a>(headers: &[httparse::Header<'a>], name: &str) -> Option<&'a str> {
+    headers
+        .iter()
+        .find(|h| h.name.eq_ignore_ascii_case(name))
+        .and_then(|h| std::str::from_utf8(h.value).ok())
+}
+
+/// Encode bytes as lowercase hex string.
+pub fn hex_encode(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// Write a JSON response with a Set-Cookie header.
+pub fn write_json_with_cookie(sock: &TcpStream, json: &str, cookie: &str) -> io::Result<()> {
+    let hdr = format!(
+        "HTTP/1.1 200 OK\r\n\
+         Content-Type: application/json\r\n\
+         Content-Length: {}\r\n\
+         Set-Cookie: {cookie}\r\n\
+         \r\n",
+        json.len()
+    );
+    let mut w: &TcpStream = sock;
+    w.write_all(hdr.as_bytes())?;
+    w.write_all(json.as_bytes())
 }
 
 /// Get mtime of a file as unix seconds, returning 0 on any error.
@@ -429,5 +497,32 @@ mod tests {
     #[test]
     fn mime_unknown_type() {
         assert_eq!(mime(Path::new("test.xyz")), "application/octet-stream");
+    }
+
+    #[test]
+    fn hex_encode_empty() {
+        assert_eq!(hex_encode(&[]), "");
+    }
+
+    #[test]
+    fn hex_encode_bytes() {
+        assert_eq!(hex_encode(&[0x00, 0xff, 0x0a, 0xbc]), "00ff0abc");
+    }
+
+    #[test]
+    fn find_header_case_insensitive() {
+        let mut headers = [httparse::EMPTY_HEADER; 2];
+        headers[0] = httparse::Header {
+            name: "Content-Type",
+            value: b"application/json",
+        };
+        headers[1] = httparse::Header {
+            name: "X-Custom",
+            value: b"hello",
+        };
+        assert_eq!(find_header(&headers, "content-type"), Some("application/json"));
+        assert_eq!(find_header(&headers, "CONTENT-TYPE"), Some("application/json"));
+        assert_eq!(find_header(&headers, "x-custom"), Some("hello"));
+        assert_eq!(find_header(&headers, "missing"), None);
     }
 }

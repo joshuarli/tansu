@@ -873,3 +873,101 @@ body {
   background: var(--fg-muted);
   color: white;
 }
+
+#unlock-screen {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100vh;
+  gap: 24px;
+}
+#unlock-screen h1 {
+  font-size: 24px;
+  font-weight: 600;
+}
+#unlock-screen p {
+  color: var(--fg-muted);
+  font-size: 14px;
+}
+#unlock-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 360px;
+  max-width: 90vw;
+}
+#unlock-form input {
+  font-family: var(--mono);
+  font-size: 14px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  outline: none;
+  letter-spacing: 0.5px;
+}
+#unlock-form input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(9, 105, 218, 0.15);
+}
+#unlock-form button {
+  padding: 8px 16px;
+  background: var(--accent);
+  color: white;
+  border: none;
+  border-radius: var(--radius);
+  font-size: 14px;
+  cursor: pointer;
+}
+#unlock-form button:hover {
+  opacity: 0.9;
+}
+#unlock-form button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+#unlock-error {
+  color: var(--danger);
+  font-size: 13px;
+  min-height: 1.6em;
+}
+#unlock-status {
+  color: var(--fg-muted);
+  font-size: 13px;
+  min-height: 1.6em;
+}
+#unlock-biometric {
+  padding: 10px 24px;
+  background: var(--accent);
+  color: white;
+  border: none;
+  border-radius: var(--radius);
+  font-size: 15px;
+  cursor: pointer;
+}
+#unlock-biometric:hover {
+  opacity: 0.9;
+}
+.prf-remove {
+  padding: 2px 8px;
+  font-size: 12px;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  color: var(--danger);
+}
+.prf-remove:hover {
+  background: var(--bg-subtle);
+}
+#prf-add, #lock-now {
+  padding: 6px 12px;
+  font-size: 13px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  cursor: pointer;
+}
+#prf-add:hover, #lock-now:hover {
+  background: var(--bg-subtle);
+}

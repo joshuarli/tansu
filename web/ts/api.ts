@@ -160,6 +160,64 @@ export interface Settings {
   excluded_folders: string[];
 }
 
+export interface AppStatus {
+  locked: boolean;
+  encrypted: boolean;
+  needs_setup: boolean;
+  prf_credential_ids: string[];
+  prf_credential_names: string[];
+}
+
+export async function getStatus(): Promise<AppStatus> {
+  const res = await fetch("/api/status");
+  if (!res.ok) throw new Error(`status failed: ${res.status}`);
+  return res.json() as Promise<AppStatus>;
+}
+
+export async function unlockWithRecoveryKey(recoveryKey: string): Promise<boolean> {
+  const res = await fetch("/api/unlock", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ recovery_key: recoveryKey }),
+  });
+  return res.ok;
+}
+
+export async function unlockWithPrf(prfKeyB64: string): Promise<boolean> {
+  const res = await fetch("/api/unlock", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ prf_key: prfKeyB64 }),
+  });
+  return res.ok;
+}
+
+export async function lockApp(): Promise<void> {
+  await fetch("/api/lock");
+}
+
+export async function registerPrf(
+  credentialId: string,
+  prfKeyB64: string,
+  name: string,
+): Promise<boolean> {
+  const res = await fetch("/api/prf/register", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ credential_id: credentialId, prf_key: prfKeyB64, name }),
+  });
+  return res.ok;
+}
+
+export async function removePrf(credentialId: string): Promise<boolean> {
+  const res = await fetch("/api/prf/remove", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ credential_id: credentialId }),
+  });
+  return res.ok;
+}
+
 export async function getSettings(): Promise<Settings> {
   const res = await fetch("/api/settings");
   if (!res.ok) throw new Error(`settings failed: ${res.status}`);

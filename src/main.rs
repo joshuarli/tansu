@@ -10,11 +10,14 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
+use tansu::crypto::{self, CryptoConfig, Vault};
 use tansu::http::*;
 use tansu::index::Index;
 use tansu::revisions;
 use tansu::settings::Settings;
 use tansu::watcher::{self, WatchEvent};
+
+const SESSION_TIMEOUT_SECS: u64 = 24 * 60 * 60; // 24 hours
 
 #[derive(Serialize)]
 struct NoteResponse<'a> {
@@ -96,6 +99,11 @@ struct RenameRequest {
     new_path: String,
 }
 
+struct SessionState {
+    token: [u8; 32],
+    last_activity: Instant,
+}
+
 struct Server {
     dir: PathBuf,
     quiet: bool,
@@ -104,16 +112,79 @@ struct Server {
     watch_rx: mpsc::Receiver<WatchEvent>,
     self_writes: Arc<Mutex<HashSet<PathBuf>>>,
     sse_client: Arc<Mutex<Option<TcpStream>>>,
+    /// None = plaintext mode or locked. Check `encrypted` to distinguish.
+    vault: Option<Vault>,
+    session: Option<SessionState>,
+    /// True if crypto.json exists (encrypted mode). False = plaintext, no auth needed.
+    encrypted: bool,
+    crypto_config: Option<CryptoConfig>,
 }
 
 impl Server {
+    fn is_locked(&self) -> bool {
+        self.encrypted && self.vault.is_none()
+    }
+
+    fn check_session(&mut self, headers: &[httparse::Header<'_>]) -> bool {
+        if !self.encrypted {
+            return true; // plaintext mode, no auth needed
+        }
+        let session = match &mut self.session {
+            Some(s) => s,
+            None => return false,
+        };
+        // Check idle timeout
+        if session.last_activity.elapsed().as_secs() > SESSION_TIMEOUT_SECS {
+            self.lock_server();
+            return false;
+        }
+        // Validate cookie with constant-time comparison
+        let cookie = find_header(headers, "cookie").unwrap_or("");
+        let token_hex = hex_encode(&session.token);
+        let expected = format!("tansu_session={token_hex}");
+        let valid = cookie.split(';').any(|part| {
+            let part = part.trim();
+            if part.len() != expected.len() {
+                return false;
+            }
+            use subtle::ConstantTimeEq;
+            part.as_bytes().ct_eq(expected.as_bytes()).into()
+        });
+        if valid {
+            self.session.as_mut().unwrap().last_activity = Instant::now();
+        }
+        valid
+    }
+
+    fn create_session(&mut self) -> String {
+        let mut token = [0u8; 32];
+        use rand::RngCore;
+        rand::rngs::OsRng.fill_bytes(&mut token);
+        let hex = hex_encode(&token);
+        self.session = Some(SessionState {
+            token,
+            last_activity: Instant::now(),
+        });
+        hex
+    }
+
+    fn lock_server(&mut self) {
+        self.vault = None;
+        self.session = None;
+        // Send locked event to SSE client
+        self.broadcast_sse("locked", "");
+        // Close SSE connection
+        let mut guard = self.sse_client.lock().unwrap();
+        *guard = None;
+    }
+
     fn drain_watch_events(&mut self) {
         let mut had_events = false;
         while let Ok(event) = self.watch_rx.try_recv() {
             had_events = true;
             match event {
                 WatchEvent::Modified(path) | WatchEvent::Created(path) => {
-                    if let Ok(content) = fs::read_to_string(&path) {
+                    if let Ok(content) = self.read_content(&path) {
                         let rel = path.strip_prefix(&self.dir).unwrap_or(&path);
                         let rel_str = rel.to_string_lossy();
                         self.index.index_note(&rel_str, &content, &path);
@@ -147,14 +218,60 @@ impl Server {
         self.self_writes.lock().unwrap().insert(path.to_path_buf());
     }
 
-    fn atomic_write(&self, path: &Path, content: &[u8]) -> io::Result<()> {
+    /// Read a user-content file as String (decrypts if vault is active).
+    fn read_content(&self, path: &Path) -> io::Result<String> {
+        if let Some(ref vault) = self.vault {
+            vault.read_to_string(path)
+        } else {
+            fs::read_to_string(path)
+        }
+    }
+
+    /// Read a user-content file as raw bytes (decrypts if vault is active).
+    fn read_content_bytes(&self, path: &Path) -> io::Result<Vec<u8>> {
+        if let Some(ref vault) = self.vault {
+            vault.read(path)
+        } else {
+            fs::read(path)
+        }
+    }
+
+    /// Atomic write of user content (encrypts if vault is active).
+    fn write_content(&self, path: &Path, content: &[u8]) -> io::Result<()> {
         self.mark_self_write(path);
-        let mut tmp = path.as_os_str().to_owned();
-        tmp.push(".tmp");
-        let tmp = PathBuf::from(tmp);
-        fs::write(&tmp, content)?;
-        fs::rename(&tmp, path)?;
-        Ok(())
+        if let Some(ref vault) = self.vault {
+            vault.write(path, content)
+        } else {
+            crypto::atomic_write(path, content)
+        }
+    }
+
+    /// Plain write for non-content files (images upload, etc.)
+    fn write_content_raw(&self, path: &Path, content: &[u8]) -> io::Result<()> {
+        if let Some(ref vault) = self.vault {
+            let encrypted = vault.encrypt(content);
+            fs::write(path, encrypted)
+        } else {
+            fs::write(path, content)
+        }
+    }
+
+    /// Reindex all markdown files using the vault for decryption.
+    fn reindex_with_vault(&self) {
+        let vault = match &self.vault {
+            Some(v) => v,
+            None => return,
+        };
+        let files = crypto::collect_content_files(&self.dir);
+        for path in &files {
+            if path.extension().is_some_and(|e| e == "md") {
+                if let Ok(content) = vault.read_to_string(path) {
+                    let rel = path.strip_prefix(&self.dir).unwrap_or(path);
+                    self.index.index_note(&rel.to_string_lossy(), &content, path);
+                }
+            }
+        }
+        self.index.commit();
     }
 
     fn handle(&mut self, mut stream: TcpStream) -> io::Result<()> {
@@ -245,6 +362,49 @@ impl Server {
         let path = path_raw.split('?').next().unwrap_or("/");
         let mut fp = PathBuf::new();
 
+        // Always allow: status, unlock, static assets, index page
+        match path {
+            "/api/status" => return self.api_status(stream),
+            "/api/unlock" if method == "POST" => {
+                return self.api_unlock(stream, headers, raw_buf, header_len);
+            }
+            _ => {}
+        }
+
+        // Static assets are always served (needed for unlock page)
+        if path.starts_with("/static/") && method == "GET" {
+            let decoded = percent_decode(path);
+            let static_dir = self.static_dir();
+            if !normalize_into(&static_dir, &decoded.replacen("/static/", "/", 1), &mut fp) {
+                return write_error(stream, 403, "Forbidden");
+            }
+            return match fs::metadata(&fp) {
+                Ok(m) if m.is_file() => serve_file_cached(stream, &fp, m.len(), mime(&fp)),
+                _ => write_error(stream, 404, "Not Found"),
+            };
+        }
+
+        // Index page always served (it handles locked state client-side)
+        if path == "/" && method == "GET" {
+            return self.serve_index(stream);
+        }
+
+        // If locked, reject everything else
+        if self.is_locked() {
+            if path.starts_with("/api/") {
+                return write_error(stream, 403, "Locked");
+            }
+            return write_redirect(stream, "/");
+        }
+
+        // If encrypted, check session
+        if self.encrypted && !self.check_session(headers) {
+            if path.starts_with("/api/") {
+                return write_error(stream, 403, "Unauthorized");
+            }
+            return write_redirect(stream, "/");
+        }
+
         if path.starts_with("/api/") {
             return self.dispatch_api(stream, method, path, path_raw, headers, raw_buf, header_len);
         }
@@ -262,22 +422,17 @@ impl Server {
             if !normalize_into(&self.dir, &decoded, &mut fp) {
                 return write_error(stream, 403, "Forbidden");
             }
-            return match fs::metadata(&fp) {
-                Ok(m) if m.is_file() => serve_file_cached(stream, &fp, m.len(), mime(&fp)),
-                _ => write_error(stream, 404, "Not Found"),
-            };
-        }
-
-        if path.starts_with("/static/") {
-            let decoded = percent_decode(path);
-            let static_dir = self.static_dir();
-            if !normalize_into(&static_dir, &decoded.replacen("/static/", "/", 1), &mut fp) {
-                return write_error(stream, 403, "Forbidden");
+            if !fp.is_file() {
+                return write_error(stream, 404, "Not Found");
             }
-            return match fs::metadata(&fp) {
-                Ok(m) if m.is_file() => serve_file_cached(stream, &fp, m.len(), mime(&fp)),
-                _ => write_error(stream, 404, "Not Found"),
-            };
+            if self.vault.is_some() {
+                // Encrypted mode: decrypt and serve bytes
+                let data = self.read_content_bytes(&fp)?;
+                return write_body_cached(stream, mime(&fp), &data);
+            } else {
+                let meta = fs::metadata(&fp)?;
+                return serve_file_cached(stream, &fp, meta.len(), mime(&fp));
+            }
         }
 
         self.serve_index(stream)
@@ -314,6 +469,13 @@ impl Server {
             ("PUT", "/api/state") => self.api_put_state(stream, headers, raw_buf, header_len),
             ("GET", "/api/settings") => self.api_get_settings(stream),
             ("PUT", "/api/settings") => self.api_put_settings(stream, headers, raw_buf, header_len),
+            ("GET", "/api/lock") => self.api_lock(stream),
+            ("POST", "/api/prf/register") => {
+                self.api_prf_register(stream, headers, raw_buf, header_len)
+            }
+            ("POST", "/api/prf/remove") => {
+                self.api_prf_remove(stream, headers, raw_buf, header_len)
+            }
             _ => write_error(stream, 404, "Not Found"),
         }
     }
@@ -365,6 +527,175 @@ impl Server {
         Ok(())
     }
 
+    fn api_status(&self, sock: &TcpStream) -> io::Result<()> {
+        let locked = self.is_locked();
+        let needs_setup = self.encrypted && self.crypto_config.is_none();
+        // Credential IDs are needed for WebAuthn allowCredentials (must be public)
+        let prf_ids: Vec<&str> = self
+            .crypto_config
+            .as_ref()
+            .map(|c| c.prf_credentials.iter().map(|p| p.id.as_str()).collect())
+            .unwrap_or_default();
+        // Credential names leak device info — only send when unlocked
+        let prf_names: Vec<&str> = if !locked {
+            self.crypto_config
+                .as_ref()
+                .map(|c| c.prf_credentials.iter().map(|p| p.name.as_str()).collect())
+                .unwrap_or_default()
+        } else {
+            vec![]
+        };
+        let json = serde_json::json!({
+            "locked": locked,
+            "needs_setup": needs_setup,
+            "encrypted": self.encrypted,
+            "prf_credential_ids": prf_ids,
+            "prf_credential_names": prf_names,
+        });
+        write_json(sock, &json.to_string())
+    }
+
+    fn api_unlock(
+        &mut self,
+        sock: &mut TcpStream,
+        headers: &[httparse::Header<'_>],
+        raw_buf: &[u8],
+        header_len: usize,
+    ) -> io::Result<()> {
+        if !self.is_locked() {
+            return write_error(sock, 400, "Not locked");
+        }
+        let config = match &self.crypto_config {
+            Some(c) => c,
+            None => return write_error(sock, 500, "No crypto config"),
+        };
+
+        let body = read_body(sock, headers, raw_buf, header_len)?;
+        let req: serde_json::Value = serde_json::from_slice(&body)
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+
+        let master = if let Some(rk_str) = req.get("recovery_key").and_then(|v| v.as_str()) {
+            let recovery = match crypto::parse_recovery_key(rk_str) {
+                Ok(r) => r,
+                Err(_) => return write_error(sock, 403, "Unlock failed"),
+            };
+            match config.unlock_with_recovery_key(&recovery) {
+                Ok(k) => k,
+                Err(_) => return write_error(sock, 403, "Unlock failed"),
+            }
+        } else if let Some(prf_b64) = req.get("prf_key").and_then(|v| v.as_str()) {
+            let prf_bytes = base64::Engine::decode(
+                &base64::engine::general_purpose::STANDARD,
+                prf_b64,
+            )
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+            match config.unlock_with_prf(&prf_bytes) {
+                Ok(k) => k,
+                Err(_) => return write_error(sock, 403, "Unlock failed"),
+            }
+        } else {
+            return write_error(sock, 400, "Provide recovery_key or prf_key");
+        };
+
+        self.vault = Some(Vault::new(master));
+        let token_hex = self.create_session();
+        let cookie = format!(
+            "tansu_session={token_hex}; HttpOnly; SameSite=Strict; Path=/"
+        );
+
+        self.reindex_with_vault();
+
+        write_json_with_cookie(sock, r#"{"ok":true}"#, &cookie)
+    }
+
+    fn api_lock(&mut self, sock: &TcpStream) -> io::Result<()> {
+        if self.encrypted {
+            self.lock_server();
+        }
+        write_json(sock, r#"{"ok":true}"#)
+    }
+
+    fn api_prf_register(
+        &mut self,
+        sock: &mut TcpStream,
+        headers: &[httparse::Header<'_>],
+        raw_buf: &[u8],
+        header_len: usize,
+    ) -> io::Result<()> {
+        let vault = match &self.vault {
+            Some(v) => v,
+            None => return write_error(sock, 403, "Locked"),
+        };
+
+        let body = read_body(sock, headers, raw_buf, header_len)?;
+
+        #[derive(Deserialize)]
+        struct PrfRegReq {
+            credential_id: String,
+            prf_key: String,
+            name: String,
+        }
+        let req: PrfRegReq = serde_json::from_slice(&body)
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+
+        let prf_bytes = base64::Engine::decode(
+            &base64::engine::general_purpose::STANDARD,
+            &req.prf_key,
+        )
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+
+        let kek = crypto::kek_from_prf(&prf_bytes);
+        let wrapped = vault.wrap_master_key(&kek);
+
+        let config = match &mut self.crypto_config {
+            Some(c) => c,
+            None => return write_error(sock, 500, "No crypto config"),
+        };
+
+        config.prf_credentials.push(crypto::PrfCredential {
+            id: req.credential_id,
+            name: req.name,
+            created: timestamp_now(),
+            wrapped_key: (&wrapped).into(),
+        });
+        config.save(&self.dir)?;
+
+        write_json(sock, r#"{"ok":true}"#)
+    }
+
+    fn api_prf_remove(
+        &mut self,
+        sock: &mut TcpStream,
+        headers: &[httparse::Header<'_>],
+        raw_buf: &[u8],
+        header_len: usize,
+    ) -> io::Result<()> {
+        if self.vault.is_none() {
+            return write_error(sock, 403, "Locked");
+        }
+
+        let body = read_body(sock, headers, raw_buf, header_len)?;
+
+        #[derive(Deserialize)]
+        struct PrfRemoveReq {
+            credential_id: String,
+        }
+        let req: PrfRemoveReq = serde_json::from_slice(&body)
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+
+        let config = match &mut self.crypto_config {
+            Some(c) => c,
+            None => return write_error(sock, 500, "No crypto config"),
+        };
+
+        config
+            .prf_credentials
+            .retain(|c| c.id != req.credential_id);
+        config.save(&self.dir)?;
+
+        write_json(sock, r#"{"ok":true}"#)
+    }
+
     fn api_search(&self, sock: &TcpStream, path_raw: &str) -> io::Result<()> {
         let q = query_param(path_raw, "q").unwrap_or_default();
         if q.is_empty() {
@@ -409,7 +740,7 @@ impl Server {
         if !full.is_file() {
             return write_error(sock, 404, "Not Found");
         }
-        let content = fs::read_to_string(&full)?;
+        let content = self.read_content(&full)?;
         let mtime = mtime_secs(&full);
         respond_json(
             sock,
@@ -440,7 +771,7 @@ impl Server {
         let current_mtime = mtime_secs(&full);
 
         if req.expected_mtime != 0 && current_mtime != req.expected_mtime {
-            let current_content = fs::read_to_string(&full).unwrap_or_default();
+            let current_content = self.read_content(&full).unwrap_or_default();
             return respond_json_status(
                 stream,
                 409,
@@ -454,7 +785,7 @@ impl Server {
         }
 
         // Skip revision + write if content hasn't changed
-        let current_content = fs::read_to_string(&full).unwrap_or_default();
+        let current_content = self.read_content(&full).unwrap_or_default();
         if current_content == req.content {
             return respond_json(
                 stream,
@@ -465,7 +796,7 @@ impl Server {
         }
 
         revisions::save_revision(&self.dir, &rel, &full);
-        self.atomic_write(&full, req.content.as_bytes())?;
+        self.write_content(&full, req.content.as_bytes())?;
         self.index.index_note(&rel, &req.content, &full);
 
         respond_json(
@@ -508,7 +839,7 @@ impl Server {
             req.content
         };
 
-        self.atomic_write(&full, content.as_bytes())?;
+        self.write_content(&full, content.as_bytes())?;
         self.index.index_note(&rel, &content, &full);
 
         respond_json_status(
@@ -570,7 +901,7 @@ impl Server {
         fs::rename(&old_full, &new_full)?;
 
         self.index.remove_note(&req.old_path);
-        if let Ok(content) = fs::read_to_string(&new_full) {
+        if let Ok(content) = self.read_content(&new_full) {
             self.index.index_note(&req.new_path, &content, &new_full);
         }
 
@@ -590,12 +921,12 @@ impl Server {
         let referencing = self.index.get_backlinks(old_stem);
         for note_path in &referencing {
             let note_full = self.dir.join(note_path);
-            if let Ok(content) = fs::read_to_string(&note_full) {
+            if let Ok(content) = self.read_content(&note_full) {
                 let new_content =
                     content.replace(&format!("[[{old_stem}]]"), &format!("[[{new_stem}]]"));
                 if new_content != content {
                     revisions::save_revision(&self.dir, note_path, &note_full);
-                    if let Err(e) = self.atomic_write(&note_full, new_content.as_bytes()) {
+                    if let Err(e) = self.write_content(&note_full, new_content.as_bytes()) {
                         eprintln!("rename: failed to update {}: {e}", note_full.display());
                         continue;
                     }
@@ -674,7 +1005,7 @@ impl Server {
             counter += 1;
         }
 
-        fs::write(&dest, &body)?;
+        self.write_content_raw(&dest, &body)?;
 
         respond_json_status(
             stream,
@@ -703,7 +1034,7 @@ impl Server {
         };
         let ts: u64 = ts_str.parse().map_err(|_| io::Error::other("bad ts"))?;
 
-        match revisions::get_revision(&self.dir, &rel, ts) {
+        match revisions::get_revision(&self.dir, &rel, ts, self.vault.as_ref()) {
             Some(content) => respond_json(sock, &ContentResponse { content: &content }),
             None => write_error(sock, 404, "revision not found"),
         }
@@ -749,12 +1080,17 @@ impl Server {
         new_settings.save(&self.dir)?;
         self.settings = new_settings;
         if needs_reindex {
-            let index = self.index.clone();
-            let dir = self.dir.clone();
-            let excluded = self.settings.excluded_folders.clone();
-            std::thread::spawn(move || {
-                index.full_reindex(&dir, &excluded);
-            });
+            if self.vault.is_some() {
+                // Encrypted mode: reindex synchronously using vault
+                self.reindex_with_vault();
+            } else {
+                let index = self.index.clone();
+                let dir = self.dir.clone();
+                let excluded = self.settings.excluded_folders.clone();
+                std::thread::spawn(move || {
+                    index.full_reindex(&dir, &excluded);
+                });
+            }
         }
         respond_json(stream, &OkResponse { ok: true })
     }
@@ -773,12 +1109,12 @@ impl Server {
             return write_error(sock, 403, "Forbidden");
         }
 
-        let Some(rev_content) = revisions::get_revision(&self.dir, &rel, ts) else {
+        let Some(rev_content) = revisions::get_revision(&self.dir, &rel, ts, self.vault.as_ref()) else {
             return write_error(sock, 404, "revision not found");
         };
 
         revisions::save_revision(&self.dir, &rel, &full);
-        self.atomic_write(&full, rev_content.as_bytes())?;
+        self.write_content(&full, rev_content.as_bytes())?;
         self.index.index_note(&rel, &rev_content, &full);
 
         respond_json(
@@ -790,31 +1126,220 @@ impl Server {
     }
 }
 
+fn timestamp_now() -> String {
+    use std::time::SystemTime;
+    let secs = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    // Simple ISO-8601-ish format without chrono
+    let s = secs % 60;
+    let m = (secs / 60) % 60;
+    let h = (secs / 3600) % 24;
+    let days = secs / 86400;
+    // Approximate date from days since epoch (good enough for a created timestamp)
+    let (y, mo, d) = days_to_ymd(days);
+    format!("{y:04}-{mo:02}-{d:02}T{h:02}:{m:02}:{s:02}Z")
+}
+
+fn days_to_ymd(mut days: u64) -> (u64, u64, u64) {
+    // Simplified Gregorian calendar calculation
+    let mut y = 1970;
+    loop {
+        let dy = if y % 4 == 0 && (y % 100 != 0 || y % 400 == 0) { 366 } else { 365 };
+        if days < dy {
+            break;
+        }
+        days -= dy;
+        y += 1;
+    }
+    let leap = y % 4 == 0 && (y % 100 != 0 || y % 400 == 0);
+    let month_days = [
+        31,
+        if leap { 29 } else { 28 },
+        31, 30, 31, 30, 31, 31, 30, 31, 30, 31,
+    ];
+    let mut mo = 0;
+    for &md in &month_days {
+        if days < md {
+            break;
+        }
+        days -= md;
+        mo += 1;
+    }
+    (y, mo + 1, days + 1)
+}
+
 fn die(msg: &str) -> ! {
     eprintln!("{msg}");
     std::process::exit(1);
 }
 
+fn subcommand_dir(args: &[String]) -> PathBuf {
+    let dir_str = args.first().map(|s| s.as_str()).unwrap_or(".");
+    match fs::canonicalize(dir_str) {
+        Ok(p) if p.is_dir() => p,
+        Ok(_) => die("path is not a directory"),
+        Err(e) => die(&format!("{dir_str}: {e}")),
+    }
+}
+
+fn cmd_encrypt(dir: &Path) {
+    use zeroize::Zeroize;
+    let crypto_path = dir.join(".tansu/crypto.json");
+    if crypto_path.exists() {
+        die("already encrypted (crypto.json exists). Run 'tansu decrypt' first to re-encrypt.");
+    }
+
+    let mut master = crypto::generate_master_key();
+    let mut recovery = crypto::generate_recovery_key();
+    let kek = crypto::kek_from_recovery_key(&recovery);
+    let wrapped = crypto::wrap_key(&master, &kek);
+
+    eprintln!(
+        "Generated recovery key (save this — it cannot be shown again):\n\n  {}\n",
+        crypto::format_recovery_key(&recovery)
+    );
+    eprint!("Press Enter to continue after saving...");
+    let _ = io::stderr().flush();
+    let mut line = String::new();
+    io::stdin().read_line(&mut line).unwrap();
+
+    let config = CryptoConfig {
+        version: 1,
+        master_key_recovery: (&wrapped).into(),
+        prf_credentials: vec![],
+    };
+    config.save(dir).unwrap_or_else(|e| die(&format!("write crypto.json: {e}")));
+
+    let vault = Vault::from_raw(master);
+    master.zeroize();
+    recovery.zeroize();
+
+    let files = crypto::collect_content_files(dir);
+    let total = files.len();
+    let mut encrypted = 0;
+
+    for path in &files {
+        let data = match fs::read(path) {
+            Ok(d) => d,
+            Err(e) => {
+                eprintln!("  skip {}: {e}", path.display());
+                continue;
+            }
+        };
+        if crypto::is_encrypted(&data) {
+            encrypted += 1;
+            continue;
+        }
+        vault.write(path, &data).unwrap_or_else(|e| {
+            die(&format!("encrypt {}: {e}", path.display()));
+        });
+        encrypted += 1;
+        eprint!("\rEncrypting... {encrypted}/{total} files");
+    }
+
+    eprintln!("\rEncrypted {encrypted}/{total} files.         ");
+    eprintln!("Done. Server will now require unlock on startup.");
+}
+
+fn cmd_decrypt(dir: &Path) {
+    let config = CryptoConfig::load(dir).unwrap_or_else(|e| die(&format!("load crypto.json: {e}")));
+
+    eprint!("Recovery key: ");
+    let _ = io::stderr().flush();
+    let mut input = String::new();
+    io::stdin().read_line(&mut input).unwrap();
+    let recovery = crypto::parse_recovery_key(input.trim())
+        .unwrap_or_else(|e| die(&format!("invalid recovery key: {e}")));
+
+    let master = config
+        .unlock_with_recovery_key(&recovery)
+        .unwrap_or_else(|_| die("wrong recovery key"));
+
+    let vault = Vault::new(master);
+    let files = crypto::collect_content_files(dir);
+    let total = files.len();
+    let mut decrypted = 0;
+
+    for path in &files {
+        let data = match fs::read(path) {
+            Ok(d) => d,
+            Err(e) => {
+                eprintln!("  skip {}: {e}", path.display());
+                continue;
+            }
+        };
+        if !crypto::is_encrypted(&data) {
+            decrypted += 1;
+            continue;
+        }
+        let plaintext = vault.decrypt(&data).unwrap_or_else(|e| {
+            die(&format!("decrypt {}: {e}", path.display()));
+        });
+        crypto::atomic_write(path, &plaintext).unwrap_or_else(|e| {
+            die(&format!("write {}: {e}", path.display()));
+        });
+        decrypted += 1;
+        eprint!("\rDecrypting... {decrypted}/{total} files");
+    }
+
+    eprintln!("\rDecrypted {decrypted}/{total} files.         ");
+
+    // Remove crypto.json
+    let crypto_path = dir.join(".tansu/crypto.json");
+    fs::remove_file(&crypto_path).unwrap_or_else(|e| {
+        eprintln!("warning: could not remove crypto.json: {e}");
+    });
+    eprintln!("Removed crypto.json. Server will now start in plaintext mode.");
+}
+
 fn main() {
+    // Check for subcommands before normal arg parsing
+    let args: Vec<String> = env::args().collect();
+    if args.len() >= 2 {
+        match args[1].as_str() {
+            "encrypt" => {
+                let dir = subcommand_dir(&args[2..]);
+                cmd_encrypt(&dir);
+                return;
+            }
+            "decrypt" => {
+                let dir = subcommand_dir(&args[2..]);
+                cmd_decrypt(&dir);
+                return;
+            }
+            _ => {}
+        }
+    }
+
     let mut quiet = false;
     let mut port = String::from("3000");
     let mut bind = String::from("127.0.0.1");
     let mut dir = String::new();
 
-    let mut args = env::args().skip(1);
-    while let Some(arg) = args.next() {
+    let mut args_iter = env::args().skip(1);
+    while let Some(arg) = args_iter.next() {
         match arg.as_str() {
             "-q" => quiet = true,
-            "-p" | "--port" => port = args.next().unwrap_or_else(|| die("-p requires a value")),
-            "-b" | "--bind" => bind = args.next().unwrap_or_else(|| die("-b requires a value")),
+            "-p" | "--port" => {
+                port = args_iter.next().unwrap_or_else(|| die("-p requires a value"));
+            }
+            "-b" | "--bind" => {
+                bind = args_iter.next().unwrap_or_else(|| die("-b requires a value"));
+            }
             "-h" | "--help" => {
                 eprintln!(
                     "usage: tansu [options] <directory>\n\
                      \n\
-                     directory    path to notes directory\n\
-                     -q           quiet; disable request logging\n\
-                     -p port      port to listen on (default: 3000)\n\
-                     -b address   bind address (default: 127.0.0.1)"
+                     commands:\n\
+                     \x20 encrypt <dir>   encrypt all notes in directory\n\
+                     \x20 decrypt <dir>   decrypt all notes in directory\n\
+                     \n\
+                     options:\n\
+                     \x20 -q              quiet; disable request logging\n\
+                     \x20 -p port         port to listen on (default: 3000)\n\
+                     \x20 -b address      bind address (default: 127.0.0.1)"
                 );
                 std::process::exit(0);
             }
@@ -837,18 +1362,24 @@ fn main() {
     };
 
     let settings = Settings::load(&dir);
+    let crypto_config = CryptoConfig::load_if_exists(&dir)
+        .unwrap_or_else(|e| die(&format!("load crypto.json: {e}")));
+    let encrypted = crypto_config.is_some();
 
     let index_dir = dir.join(".tansu/index");
     fs::create_dir_all(&index_dir).unwrap_or_else(|e| die(&format!("create index dir: {e}")));
     let index =
         Index::open_or_create(&index_dir).unwrap_or_else(|e| die(&format!("open index: {e}")));
 
-    let index_clone = index.clone();
-    let dir_clone = dir.clone();
-    let excluded = settings.excluded_folders.clone();
-    std::thread::spawn(move || {
-        index_clone.full_reindex(&dir_clone, &excluded);
-    });
+    // Only reindex at startup in plaintext mode; encrypted mode rebuilds on unlock
+    if !encrypted {
+        let index_clone = index.clone();
+        let dir_clone = dir.clone();
+        let excluded = settings.excluded_folders.clone();
+        std::thread::spawn(move || {
+            index_clone.full_reindex(&dir_clone, &excluded);
+        });
+    }
 
     let self_writes = Arc::new(Mutex::new(HashSet::<PathBuf>::new()));
     let (watch_tx, watch_rx) = mpsc::channel();
@@ -859,7 +1390,11 @@ fn main() {
     let listener =
         TcpListener::bind(&addr).unwrap_or_else(|e| die(&format!("failed to bind {addr}: {e}")));
 
-    eprintln!("\ttansu serving {} on http://{addr}", dir.display());
+    if encrypted {
+        eprintln!("\ttansu serving {} on http://{addr} (locked)", dir.display());
+    } else {
+        eprintln!("\ttansu serving {} on http://{addr}", dir.display());
+    }
 
     let mut srv = Server {
         dir,
@@ -869,6 +1404,10 @@ fn main() {
         watch_rx,
         self_writes,
         sse_client: Arc::new(Mutex::new(None)),
+        vault: None,
+        session: None,
+        encrypted,
+        crypto_config,
     };
 
     for stream in listener.incoming() {
