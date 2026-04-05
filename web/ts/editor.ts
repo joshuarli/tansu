@@ -164,7 +164,19 @@ export function classifySaveResult(
   return { type: "real-conflict", diskContent, diskMtime: result.mtime };
 }
 
+let saving = false;
+
 export async function saveCurrentNote() {
+  if (saving) return;
+  saving = true;
+  try {
+    await _doSave();
+  } finally {
+    saving = false;
+  }
+}
+
+async function _doSave() {
   const tab = getActiveTab();
   if (!tab || !currentPath) return;
 
@@ -276,6 +288,7 @@ function setupEditorEvents() {
 
     if (meta && e.key === "s") {
       e.preventDefault();
+      e.stopPropagation();
       saveCurrentNote();
       return;
     }
@@ -316,6 +329,7 @@ function setupEditorEvents() {
     const meta = e.metaKey || e.ctrlKey;
     if (meta && e.key === "s") {
       e.preventDefault();
+      e.stopPropagation();
       saveCurrentNote();
     }
   });
