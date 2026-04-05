@@ -12,14 +12,20 @@
     "noEmit": true,
 
     "strict": true,
+    "forceConsistentCasingInFileNames": true,
     "skipLibCheck": true,
+
     "noFallthroughCasesInSwitch": true,
     "noUncheckedIndexedAccess": true,
     "noImplicitOverride": true,
-
     "noUnusedLocals": true,
     "noUnusedParameters": true,
-    "noPropertyAccessFromIndexSignature": true
+    "noPropertyAccessFromIndexSignature": true,
+    "allowUnusedLabels": false,
+    "allowUnreachableCode": false,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitReturns": true,
+    "isolatedModules": true
   },
-  "include": ["web/ts"]
+  "include": ["web/ts"],
 }
