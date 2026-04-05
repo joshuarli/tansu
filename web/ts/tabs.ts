@@ -19,7 +19,6 @@ export {
   markClean,
   updateTabContent,
   updateTabPath,
-  deleteActiveTab,
   createNewNote,
   restoreSession,
 } from "./tab-state.ts";

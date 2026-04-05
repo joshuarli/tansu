@@ -17,7 +17,7 @@ lint-ts:
 ts: lint-ts
 	bun run oxfmt web/ts/
 	bunx tsgo --noEmit
-	bun build web/ts/main.ts --outfile web/static/app.js --target browser --format esm
+	bun build web/ts/main.ts --outfile web/static/app.js --minify
 
 dev: ts
 	cargo run --bin tansu -- $(NOTES_DIR) --port 3000

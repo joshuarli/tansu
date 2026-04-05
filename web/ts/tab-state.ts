@@ -1,6 +1,6 @@
 /// Pure tab state management — no DOM dependencies.
 
-import { getNote, deleteNote, createNote, saveState, getState } from "./api.ts";
+import { getNote, createNote, saveState, getState } from "./api.ts";
 import { emit } from "./events.ts";
 
 export interface Tab {
@@ -138,20 +138,6 @@ export function updateTabPath(oldPath: string, newPath: string) {
     tab.title = titleFromPath(newPath);
     notifyChange();
   }
-}
-
-export async function deleteActiveTab() {
-  const tab = getActiveTab();
-  if (!tab) return;
-  if (!confirm(`Delete ${tab.title}?`)) return;
-  await deleteNote(tab.path);
-  tabs.splice(activeIndex, 1);
-  if (tabs.length === 0) {
-    activeIndex = -1;
-  } else if (activeIndex >= tabs.length) {
-    activeIndex = tabs.length - 1;
-  }
-  notifyChange();
 }
 
 export async function createNewNote() {
