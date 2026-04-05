@@ -100,11 +100,26 @@ export function createSettings(): SettingsPanel {
       </div>
     `;
 
-    // Wire up sliders to show value
+    // Wire up sliders to show current value as the thumb moves.
+    // Sliders are numeric range inputs — live update is fine and expected.
     for (const input of panel.querySelectorAll<HTMLInputElement>('input[type="range"]')) {
       const val = input.nextElementSibling as HTMLSpanElement;
       input.addEventListener("input", () => {
         val.textContent = input.value;
+      });
+    }
+
+    // Excluded-folders field: only save on blur or Enter to avoid triggering
+    // a full server-side reindex on every keystroke.
+    const foldersInput = panel.querySelector<HTMLInputElement>(
+      'input[data-key="excluded_folders"]',
+    );
+    if (foldersInput) {
+      foldersInput.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          save();
+        }
       });
     }
 

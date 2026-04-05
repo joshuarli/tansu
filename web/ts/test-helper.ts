@@ -1,6 +1,35 @@
 /// Shared test utilities: DOM setup via happy-dom, fetch mocking.
 
 import { Window } from "happy-dom";
+import type {
+  Note,
+  SaveResult,
+  NoteEntry,
+  SearchResult,
+  SessionState,
+  Settings,
+  AppStatus,
+} from "./api.ts";
+
+/// All possible JSON bodies that the mock server can return.
+/// Using a union keeps mock.on() calls honest about shape without requiring
+/// explicit generics at every call site.
+export type MockBody =
+  | Note
+  | SaveResult
+  | NoteEntry[]
+  | SearchResult[]
+  | SessionState
+  | Settings
+  | AppStatus
+  | { mtime: number }
+  | { updated: string[] }
+  | { filename: string }
+  | { content: string }
+  | number[]
+  | string[]
+  | Record<string, never>
+  | string;
 
 const TANSU_HTML = `<!doctype html>
 <html><head></head><body>
@@ -93,7 +122,7 @@ export function mockFetch(): MockFetch {
   const origFetch = globalThis.fetch;
 
   const mock: MockFetch = {
-    on(method: string, urlPattern: string | RegExp, body: unknown, status = 200) {
+    on(method: string, urlPattern: string | RegExp, body: MockBody, status = 200) {
       handlers.push({
         match: (url, init) => {
           const m = (init?.method ?? "GET").toUpperCase() === method.toUpperCase();
@@ -127,6 +156,6 @@ export function mockFetch(): MockFetch {
 }
 
 export interface MockFetch {
-  on(method: string, urlPattern: string | RegExp, body: unknown, status?: number): MockFetch;
+  on(method: string, urlPattern: string | RegExp, body: MockBody, status?: number): MockFetch;
   restore(): void;
 }

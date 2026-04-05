@@ -73,7 +73,9 @@ describe("tab-state", () => {
   });
 
   test("tab lifecycle", async () => {
-    // Track renders and tab changes
+    // Clean state and pin mock to avoid pollution from concurrent test files.
+    while (getTabs().length > 0) closeTab(0);
+    mock.on("GET", "/api/note", { content: "# Test", mtime: 1000 });
     let renderCount = 0;
     let changeCount = 0;
     const offR = on("tab:render", () => {

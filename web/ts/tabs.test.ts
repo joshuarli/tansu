@@ -7,17 +7,11 @@ describe("tabs", () => {
   let mock: ReturnType<typeof mockFetch>;
   let openTab: (path: string) => Promise<any>;
   let closeTab: (i: number) => void;
-  let getActiveTab: () => any;
   let getTabs: () => any[];
   let getActiveIndex: () => number;
-  let nextTab: () => void;
-  let prevTab: () => void;
   let markDirty: (path: string) => void;
-  let markClean: (path: string, content: string, mtime: number) => void;
-  let updateTabContent: (path: string, content: string, mtime: number) => void;
-  let updateTabPath: (oldPath: string, newPath: string) => void;
   let closeActiveTab: () => void;
-  let offChange: () => void;
+  let switchTab: (index: number) => Promise<void>;
 
   const tick = () => new Promise<void>((r) => setTimeout(r, 0));
 
@@ -25,7 +19,6 @@ describe("tabs", () => {
     cleanup = setupDOM();
     mock = mockFetch();
 
-    // Mock API responses needed by tabs
     mock.on("GET", "/api/note", { content: "# Test", mtime: 1000 });
     mock.on("PUT", "/api/state", {});
     mock.on("GET", "/api/state", { tabs: [], active: -1 });
@@ -35,261 +28,185 @@ describe("tabs", () => {
     const mod = await import("./tabs.ts");
     openTab = mod.openTab;
     closeTab = mod.closeTab;
-    getActiveTab = mod.getActiveTab;
+    switchTab = mod.switchTab;
     getTabs = mod.getTabs;
     getActiveIndex = mod.getActiveIndex;
-    nextTab = mod.nextTab;
-    prevTab = mod.prevTab;
     markDirty = mod.markDirty;
-    markClean = mod.markClean;
-    updateTabContent = mod.updateTabContent;
-    updateTabPath = mod.updateTabPath;
     closeActiveTab = mod.closeActiveTab;
 
-    const { on } = await import("./events.ts");
-
-    // Clean up any leaked state from other test files sharing the module
+    // Clean up any leaked state from other test files sharing the module.
     while (getTabs().length > 0) closeTab(0);
-
-    let changeCount = 0;
-    offChange = on("tab:change", () => {
-      changeCount++;
-    });
   });
 
   afterAll(() => {
     mock.restore();
-    offChange();
     cleanup();
   });
 
-  test("tab state lifecycle", async () => {
-    expect(getActiveTab()).toBe(null);
-    expect(getTabs().length).toBe(0);
-    expect(getActiveIndex()).toBe(-1);
-
-    // Track tab changes
-    let changeCount = 0;
-    const { on } = await import("./events.ts");
-    const offC = on("tab:change", () => {
-      changeCount++;
-    });
-
-    // Open a tab
-    const tab1 = await openTab("notes/hello.md");
-    expect(tab1.path).toBe("notes/hello.md");
-    expect(tab1.title).toBe("hello");
-    expect(tab1.content).toBe("# Test");
-    expect(tab1.dirty).toBe(false);
-    expect(getTabs().length).toBe(1);
-    expect(getActiveIndex()).toBe(0);
-    expect(changeCount > 0).toBe(true);
-
-    // Open same tab again — should not duplicate
-    const tab1Again = await openTab("notes/hello.md");
-    expect(getTabs().length).toBe(1);
-    expect(tab1Again.path).toBe(tab1.path);
-
-    // Open second tab
-    await openTab("notes/world.md");
-    expect(getTabs().length).toBe(2);
-    expect(getActiveIndex()).toBe(1);
-    expect(getActiveTab()!.path).toBe("notes/world.md");
-
-    // nextTab / prevTab
-    await nextTab();
-    expect(getActiveIndex()).toBe(0);
-    await prevTab();
-    expect(getActiveIndex()).toBe(1);
-
-    // markDirty / markClean
-    markDirty("notes/hello.md");
-    expect(getTabs()[0]!.dirty).toBe(true);
-    markClean("notes/hello.md", "# Updated", 2000);
-    expect(getTabs()[0]!.dirty).toBe(false);
-    expect(getTabs()[0]!.content).toBe("# Updated");
-    expect(getTabs()[0]!.mtime).toBe(2000);
-
-    // updateTabContent
-    updateTabContent("notes/world.md", "# World", 3000);
-    expect(getTabs()[1]!.content).toBe("# World");
-
-    // updateTabPath
-    updateTabPath("notes/world.md", "notes/earth.md");
-    expect(getTabs()[1]!.path).toBe("notes/earth.md");
-    expect(getTabs()[1]!.title).toBe("earth");
-
-    // closeTab
-    closeTab(0);
-    expect(getTabs().length).toBe(1);
-    expect(getActiveTab()!.path).toBe("notes/earth.md");
-
-    // closeActiveTab
-    closeActiveTab();
-    expect(getTabs().length).toBe(0);
-    expect(getActiveTab()).toBe(null);
-
-    offC();
-  });
-
-  test("DOM rendering", async () => {
-    const tabBar = document.getElementById("tab-bar")!;
-    const emptyState = document.getElementById("empty-state")!;
-
-    // Open two tabs and check DOM.
+  // Helper: ensure a clean slate before each DOM test.
+  async function openTwo() {
+    while (getTabs().length > 0) closeTab(0);
     await openTab("notes/alpha.md");
     await openTab("notes/beta.md");
     await tick();
+  }
 
+  test("tab bar renders correct number of tabs", async () => {
+    await openTwo();
+    const tabBar = document.getElementById("tab-bar")!;
     const tabEls = tabBar.querySelectorAll(".tab:not(.tab-new)");
     expect(tabEls.length).toBe(2);
-    expect(emptyState.style.display).toBe("none");
+    while (getTabs().length > 0) closeTab(0);
+  });
 
-    // Active tab (index 1, beta) has .active class; alpha does not.
+  test("empty-state hides when tabs are open, shows when all closed", async () => {
+    const emptyState = document.getElementById("empty-state")!;
+    await openTwo();
+    expect(emptyState.style.display).toBe("none");
+    while (getTabs().length > 0) {
+      closeTab(0);
+      await tick();
+    }
+    expect(emptyState.style.display).toBe("flex");
+  });
+
+  test("active tab gets .active class; others do not", async () => {
+    await openTwo();
+    const tabBar = document.getElementById("tab-bar")!;
+    const tabEls = tabBar.querySelectorAll(".tab:not(.tab-new)");
+    // beta was opened second so it is active (index 1)
     expect(tabEls[1]!.classList.contains("active")).toBe(true);
     expect(tabEls[0]!.classList.contains("active")).toBe(false);
+    while (getTabs().length > 0) closeTab(0);
+  });
 
-    // Tab labels match titles.
+  test("tab labels match note titles", async () => {
+    await openTwo();
+    const tabBar = document.getElementById("tab-bar")!;
     const labels = tabBar.querySelectorAll(".tab:not(.tab-new) span:not(.close):not(.dirty)");
     expect(labels[0]!.textContent).toBe("alpha");
     expect(labels[1]!.textContent).toBe("beta");
+    while (getTabs().length > 0) closeTab(0);
+  });
 
-    // "+" button is still present alongside real tabs.
+  test("+ button is always present", async () => {
+    await openTwo();
+    const tabBar = document.getElementById("tab-bar")!;
     const addBtn = tabBar.querySelector(".tab-new");
     expect(addBtn !== null).toBe(true);
     expect(addBtn!.textContent).toBe("+");
+    while (getTabs().length > 0) closeTab(0);
+  });
 
-    // Dirty indicator: no dot before markDirty.
-    expect(tabEls[0]!.querySelector(".dirty")).toBe(null);
+  test("dirty indicator appears after markDirty, absent otherwise", async () => {
+    await openTwo();
+    const tabBar = document.getElementById("tab-bar")!;
+    const tabEls = () => tabBar.querySelectorAll(".tab:not(.tab-new)");
+
+    expect(tabEls()[0]!.querySelector(".dirty")).toBe(null);
     markDirty("notes/alpha.md");
     await tick();
+    expect(tabEls()[0]!.querySelector(".dirty") !== null).toBe(true);
+    expect(tabEls()[1]!.querySelector(".dirty")).toBe(null);
+    while (getTabs().length > 0) closeTab(0);
+  });
 
-    const tabElsAfterDirty = tabBar.querySelectorAll(".tab:not(.tab-new)");
-    expect(tabElsAfterDirty[0]!.querySelector(".dirty") !== null).toBe(true);
-    expect(tabElsAfterDirty[1]!.querySelector(".dirty")).toBe(null);
-
-    // Close button triggers closeTab: click the close button on the first tab.
-    const closeBtn = tabElsAfterDirty[0]!.querySelector(".close") as HTMLElement;
-    expect(closeBtn !== null).toBe(true);
+  test("close button on tab removes that tab", async () => {
+    await openTwo();
+    const tabBar = document.getElementById("tab-bar")!;
+    markDirty("notes/alpha.md");
+    await tick();
+    const tabEls = tabBar.querySelectorAll(".tab:not(.tab-new)");
+    const closeBtn = tabEls[0]!.querySelector(".close") as HTMLElement;
     closeBtn.click();
     await tick();
+    const remaining = tabBar.querySelectorAll(".tab:not(.tab-new)");
+    expect(remaining.length).toBe(1);
+    expect(remaining[0]!.querySelector("span:not(.close):not(.dirty)")!.textContent).toBe("beta");
+    while (getTabs().length > 0) closeTab(0);
+  });
 
-    const tabElsAfterClose = tabBar.querySelectorAll(".tab:not(.tab-new)");
-    expect(tabElsAfterClose.length).toBe(1);
-    expect(tabElsAfterClose[0]!.querySelector("span:not(.close):not(.dirty)")!.textContent).toBe(
-      "beta",
-    );
-
-    // Context menu: right-clicking a tab should create .context-menu in the body.
+  test("context menu appears on right-click with Rename / Delete / Close", async () => {
+    while (getTabs().length > 0) closeTab(0);
     await openTab("notes/gamma.md");
     await tick();
-
-    const tabForCtx = tabBar.querySelectorAll(".tab:not(.tab-new)")[0]!;
-    const ctxEvent = new MouseEvent("contextmenu", {
-      bubbles: true,
-      cancelable: true,
-      clientX: 50,
-      clientY: 50,
-    });
-    (tabForCtx as HTMLElement).dispatchEvent(ctxEvent);
+    const tabBar = document.getElementById("tab-bar")!;
+    const tabEl = tabBar.querySelectorAll(".tab:not(.tab-new)")[0]!;
+    (tabEl as HTMLElement).dispatchEvent(
+      new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 50, clientY: 50 }),
+    );
     await tick();
-
     const menu = document.body.querySelector(".context-menu");
     expect(menu !== null).toBe(true);
-
-    // Context menu items: Rename, Delete, Close.
     const items = menu!.querySelectorAll(".context-menu-item");
     expect(items.length).toBe(3);
     expect(items[0]!.textContent).toBe("Rename...");
     expect(items[1]!.textContent).toBe("Delete");
     expect(items[2]!.textContent).toBe("Close");
+    while (getTabs().length > 0) closeTab(0);
+  });
 
-    // Clicking "Close" in the context menu removes the tab and hides the menu.
-    const tabCountBeforeCtxClose = tabBar.querySelectorAll(".tab:not(.tab-new)").length;
+  test("context menu Close removes the tab", async () => {
+    while (getTabs().length > 0) closeTab(0);
+    await openTab("notes/gamma.md");
+    await openTab("notes/delta.md");
+    await tick();
+    const tabBar = document.getElementById("tab-bar")!;
+    const countBefore = tabBar.querySelectorAll(".tab:not(.tab-new)").length;
+    const tabEl = tabBar.querySelectorAll(".tab:not(.tab-new)")[0]!;
+    (tabEl as HTMLElement).dispatchEvent(
+      new MouseEvent("contextmenu", { bubbles: true, cancelable: true }),
+    );
+    await tick();
+    const items = document.body.querySelectorAll(".context-menu-item");
     (items[2] as HTMLElement).click();
     await tick();
-
-    const menuAfter = document.body.querySelector(".context-menu");
-    expect(menuAfter).toBe(null);
-    const tabCountAfterCtxClose = tabBar.querySelectorAll(".tab:not(.tab-new)").length;
-    expect(tabCountAfterCtxClose).toBe(tabCountBeforeCtxClose - 1);
-
-    // Close all remaining tabs so state is clean for teardown.
-    while (getTabs().length > 0) {
-      closeTab(0);
-      await tick();
-    }
-
-    expect(emptyState.style.display).toBe("flex");
+    expect(document.body.querySelector(".context-menu")).toBe(null);
+    expect(tabBar.querySelectorAll(".tab:not(.tab-new)").length).toBe(countBefore - 1);
+    while (getTabs().length > 0) closeTab(0);
   });
 
   test("context menu Delete removes tab after confirm", async () => {
-    const tabBar = document.getElementById("tab-bar")!;
-
+    while (getTabs().length > 0) closeTab(0);
     await openTab("notes/to-delete.md");
     await tick();
-
-    const tabCountBefore = getTabs().length;
-    const tabEl = tabBar.querySelectorAll(".tab:not(.tab-new)")[tabCountBefore - 1]!;
-
-    // Right-click to open context menu
-    const ctxEvent = new MouseEvent("contextmenu", {
-      bubbles: true,
-      cancelable: true,
-      clientX: 100,
-      clientY: 100,
-    });
-    (tabEl as HTMLElement).dispatchEvent(ctxEvent);
+    const tabBar = document.getElementById("tab-bar")!;
+    const countBefore = getTabs().length;
+    const tabEl = tabBar.querySelectorAll(".tab:not(.tab-new)")[countBefore - 1]!;
+    (tabEl as HTMLElement).dispatchEvent(
+      new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 100, clientY: 100 }),
+    );
     await tick();
-
     const menu = document.body.querySelector(".context-menu");
-    expect(menu !== null).toBe(true);
-
-    // Click "Delete" (second item) — confirm is mocked to return true
     const items = menu!.querySelectorAll(".context-menu-item");
     expect(items[1]!.textContent).toBe("Delete");
     expect(items[1]!.classList.contains("danger")).toBe(true);
     (items[1] as HTMLElement).click();
     await tick();
-    // Allow the deleteNote promise to resolve
     await new Promise((r) => setTimeout(r, 50));
-
-    expect(getTabs().length).toBe(tabCountBefore - 1);
-    // Menu should be removed
+    expect(getTabs().length).toBe(countBefore - 1);
     expect(document.body.querySelector(".context-menu")).toBe(null);
   });
 
   test("context menu Rename dispatches tansu:rename event", async () => {
-    const tabBar = document.getElementById("tab-bar")!;
-
+    while (getTabs().length > 0) closeTab(0);
     await openTab("notes/to-rename.md");
     await tick();
+    const tabBar = document.getElementById("tab-bar")!;
+    const tabEl = tabBar.querySelectorAll(".tab:not(.tab-new)")[getTabs().length - 1]!;
 
-    const tabCount = getTabs().length;
-    const tabEl = tabBar.querySelectorAll(".tab:not(.tab-new)")[tabCount - 1]!;
-
-    // Listen for the rename event
     let renameDetail: any = null;
     const handler = (e: Event) => {
       renameDetail = (e as CustomEvent).detail;
     };
     window.addEventListener("tansu:rename", handler);
 
-    // Right-click to open context menu
-    const ctxEvent = new MouseEvent("contextmenu", {
-      bubbles: true,
-      cancelable: true,
-      clientX: 100,
-      clientY: 100,
-    });
-    (tabEl as HTMLElement).dispatchEvent(ctxEvent);
+    (tabEl as HTMLElement).dispatchEvent(
+      new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 100, clientY: 100 }),
+    );
     await tick();
-
-    const menu = document.body.querySelector(".context-menu");
-    const items = menu!.querySelectorAll(".context-menu-item");
+    const items = document.body.querySelectorAll(".context-menu-item");
     expect(items[0]!.textContent).toBe("Rename...");
-
-    // prompt is mocked to return "test" by setupDOM
     (items[0] as HTMLElement).click();
     await tick();
 
@@ -298,11 +215,6 @@ describe("tabs", () => {
     expect(renameDetail.newName).toBe("test");
 
     window.removeEventListener("tansu:rename", handler);
-
-    // Clean up
-    while (getTabs().length > 0) {
-      closeTab(0);
-      await tick();
-    }
+    while (getTabs().length > 0) closeTab(0);
   });
 });

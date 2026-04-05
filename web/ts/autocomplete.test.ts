@@ -2,6 +2,12 @@ import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 
 import { setupDOM, mockFetch } from "./test-helper.ts";
 
+const NOTES = [
+  { path: "notes/alpha.md", title: "Alpha" },
+  { path: "notes/beta.md", title: "Beta" },
+  { path: "notes/gamma.md", title: "Gamma" },
+];
+
 describe("autocomplete", () => {
   let cleanup: () => void;
   let mock: ReturnType<typeof mockFetch>;
@@ -14,11 +20,7 @@ describe("autocomplete", () => {
     cleanup = setupDOM();
     mock = mockFetch();
 
-    mock.on("GET", "/api/notes", [
-      { path: "notes/alpha.md", title: "Alpha" },
-      { path: "notes/beta.md", title: "Beta" },
-      { path: "notes/gamma.md", title: "Gamma" },
-    ]);
+    mock.on("GET", "/api/notes", NOTES);
     mock.on("PUT", "/api/state", {});
     mock.on("GET", "/api/state", { tabs: [], active: -1 });
 
@@ -33,63 +35,228 @@ describe("autocomplete", () => {
   });
 
   afterAll(() => {
+    contentEl.remove();
     mock.restore();
     cleanup();
   });
 
-  test("autocomplete lifecycle", async () => {
-    // No trigger when no [[ in text
+  function typeInEditor(text: string, cursorAt?: number) {
     contentEl.innerHTML = "";
-    const text1 = document.createTextNode("hello world");
-    contentEl.appendChild(text1);
-    const range1 = document.createRange();
-    range1.setStart(text1, 11);
-    range1.collapse(true);
-    const sel1 = window.getSelection()!;
-    sel1.removeAllRanges();
-    sel1.addRange(range1);
+    const node = document.createTextNode(text);
+    contentEl.appendChild(node);
+    const pos = cursorAt ?? text.length;
+    const range = document.createRange();
+    range.setStart(node, pos);
+    range.collapse(true);
+    const sel = window.getSelection()!;
+    sel.removeAllRanges();
+    sel.addRange(range);
+    return node;
+  }
+
+  function fireKey(key: string) {
+    // Dispatch on contentEl so the event bubbles up through the capture phase
+    // on document, where the autocomplete keydown handler is registered.
+    contentEl.dispatchEvent(
+      new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }),
+    );
+  }
+
+  function getDropdown() {
+    return document.querySelector(".autocomplete");
+  }
+
+  function getItems() {
+    return Array.from(getDropdown()?.querySelectorAll(".autocomplete-item") ?? []);
+  }
+
+  function selectedIndex() {
+    return getItems().findIndex((el) => el.classList.contains("selected"));
+  }
+
+  test("no trigger when text has no [[", async () => {
+    typeInEditor("hello world");
     checkWikiLinkTrigger(contentEl, "test.md");
     await new Promise((r) => setTimeout(r, 50));
-    expect(document.querySelector(".autocomplete")).toBe(null);
+    expect(getDropdown()).toBe(null);
+  });
 
-    // Trigger with [[ shows autocomplete
-    contentEl.innerHTML = "";
-    const text2 = document.createTextNode("see [[al");
-    contentEl.appendChild(text2);
-    const range2 = document.createRange();
-    range2.setStart(text2, 8);
-    range2.collapse(true);
-    const sel2 = window.getSelection()!;
-    sel2.removeAllRanges();
-    sel2.addRange(range2);
+  test("no trigger when cursor is after a closed [[...]]", async () => {
+    typeInEditor("see [[done]] and more");
+    checkWikiLinkTrigger(contentEl, "test.md");
+    await new Promise((r) => setTimeout(r, 50));
+    expect(getDropdown()).toBe(null);
+  });
+
+  test("no trigger when selection is on non-text node", async () => {
+    // Selection on a non-TEXT_NODE (e.g. contentEl itself) should hide autocomplete
+    contentEl.innerHTML = "<b>bold</b>";
+    const sel = window.getSelection()!;
+    const range = document.createRange();
+    range.setStart(contentEl, 0);
+    range.collapse(true);
+    sel.removeAllRanges();
+    sel.addRange(range);
+    checkWikiLinkTrigger(contentEl, "test.md");
+    await new Promise((r) => setTimeout(r, 50));
+    expect(getDropdown()).toBe(null);
+  });
+
+  test("dropdown appears and filters by query", async () => {
+    invalidateNoteCache();
+    typeInEditor("see [[al");
     checkWikiLinkTrigger(contentEl, "test.md");
     await new Promise((r) => setTimeout(r, 100));
-    const ac = document.querySelector(".autocomplete");
-    expect(ac !== null).toBe(true);
-    // Should filter to Alpha
-    const items = ac!.querySelectorAll(".autocomplete-item");
-    expect(items.length >= 1).toBe(true);
-    expect(items[0]!.textContent!.includes("Alpha")).toBe(true);
-
-    // hideAutocomplete removes it
+    expect(getDropdown() !== null).toBe(true);
+    const items = getItems();
+    expect(items.length).toBe(1);
+    expect(items[0]!.textContent).toContain("Alpha");
     hideAutocomplete();
-    expect(document.querySelector(".autocomplete")).toBe(null);
+  });
 
-    // invalidateNoteCache clears cached notes (subsequent trigger re-fetches)
+  test("dropdown shows all notes when query is empty ([[)", async () => {
+    invalidateNoteCache();
+    typeInEditor("see [[");
+    checkWikiLinkTrigger(contentEl, "test.md");
+    await new Promise((r) => setTimeout(r, 100));
+    const items = getItems();
+    expect(items.length).toBe(NOTES.length);
+    hideAutocomplete();
+  });
+
+  test("dropdown hides when there are no matches", async () => {
+    invalidateNoteCache();
+    typeInEditor("[[zzzznothing");
+    checkWikiLinkTrigger(contentEl, "test.md");
+    await new Promise((r) => setTimeout(r, 100));
+    expect(getDropdown()).toBe(null);
+  });
+
+  test("first item is selected by default", async () => {
+    invalidateNoteCache();
+    typeInEditor("[[");
+    checkWikiLinkTrigger(contentEl, "test.md");
+    await new Promise((r) => setTimeout(r, 100));
+    expect(selectedIndex()).toBe(0);
+    hideAutocomplete();
+  });
+
+  test("ArrowDown moves selection forward", async () => {
+    invalidateNoteCache();
+    typeInEditor("[[");
+    checkWikiLinkTrigger(contentEl, "test.md");
+    await new Promise((r) => setTimeout(r, 100));
+    expect(selectedIndex()).toBe(0);
+    fireKey("ArrowDown");
+    expect(selectedIndex()).toBe(1);
+    hideAutocomplete();
+  });
+
+  test("ArrowDown wraps at the end of the list", async () => {
+    invalidateNoteCache();
+    typeInEditor("[[");
+    checkWikiLinkTrigger(contentEl, "test.md");
+    await new Promise((r) => setTimeout(r, 100));
+    const count = getItems().length;
+    // Advance to last item
+    for (let i = 0; i < count - 1; i++) fireKey("ArrowDown");
+    expect(selectedIndex()).toBe(count - 1);
+    // One more wraps back to 0
+    fireKey("ArrowDown");
+    expect(selectedIndex()).toBe(0);
+    hideAutocomplete();
+  });
+
+  test("ArrowUp wraps at the beginning of the list", async () => {
+    invalidateNoteCache();
+    typeInEditor("[[");
+    checkWikiLinkTrigger(contentEl, "test.md");
+    await new Promise((r) => setTimeout(r, 100));
+    const count = getItems().length;
+    // At index 0, ArrowUp should wrap to last
+    fireKey("ArrowUp");
+    expect(selectedIndex()).toBe(count - 1);
+    hideAutocomplete();
+  });
+
+  test("Escape dismisses the dropdown", async () => {
+    invalidateNoteCache();
+    typeInEditor("[[");
+    checkWikiLinkTrigger(contentEl, "test.md");
+    await new Promise((r) => setTimeout(r, 100));
+    expect(getDropdown() !== null).toBe(true);
+    fireKey("Escape");
+    expect(getDropdown()).toBe(null);
+  });
+
+  test("Enter completes the selected wiki-link", async () => {
+    invalidateNoteCache();
+    const node = typeInEditor("see [[al");
+    checkWikiLinkTrigger(contentEl, "test.md");
+    await new Promise((r) => setTimeout(r, 100));
+    expect(getItems()[0]!.textContent).toContain("Alpha");
+    fireKey("Enter");
+    // Dropdown should be gone
+    expect(getDropdown()).toBe(null);
+    // Text node should now contain the completed wiki-link
+    expect(node.textContent).toContain("[[alpha]]");
+  });
+
+  test("Tab completes the selected wiki-link", async () => {
+    invalidateNoteCache();
+    const node = typeInEditor("link [[be");
+    checkWikiLinkTrigger(contentEl, "test.md");
+    await new Promise((r) => setTimeout(r, 100));
+    expect(getItems()[0]!.textContent).toContain("Beta");
+    fireKey("Tab");
+    expect(getDropdown()).toBe(null);
+    expect(node.textContent).toContain("[[beta]]");
+  });
+
+  test("clicking an item completes the wiki-link", async () => {
+    invalidateNoteCache();
+    const node = typeInEditor("see [[ga");
+    checkWikiLinkTrigger(contentEl, "test.md");
+    await new Promise((r) => setTimeout(r, 100));
+    const item = getItems()[0]! as HTMLElement;
+    expect(item.textContent).toContain("Gamma");
+    item.click();
+    expect(getDropdown()).toBe(null);
+    expect(node.textContent).toContain("[[gamma]]");
+  });
+
+  test("invalidateNoteCache causes a re-fetch on next trigger", async () => {
+    // First trigger — populates cache
+    invalidateNoteCache();
+    typeInEditor("[[");
+    checkWikiLinkTrigger(contentEl, "test.md");
+    await new Promise((r) => setTimeout(r, 100));
+    hideAutocomplete();
+
+    // Replace with a different set of notes
+    mock.on("GET", "/api/notes", [{ path: "notes/new.md", title: "New Note" }]);
     invalidateNoteCache();
 
-    // Already-closed wiki link should not trigger
-    contentEl.innerHTML = "";
-    const text3 = document.createTextNode("see [[done]] and more");
-    contentEl.appendChild(text3);
-    const range3 = document.createRange();
-    range3.setStart(text3, 21);
-    range3.collapse(true);
-    const sel3 = window.getSelection()!;
-    sel3.removeAllRanges();
-    sel3.addRange(range3);
+    typeInEditor("[[new");
     checkWikiLinkTrigger(contentEl, "test.md");
-    await new Promise((r) => setTimeout(r, 50));
-    expect(document.querySelector(".autocomplete")).toBe(null);
+    await new Promise((r) => setTimeout(r, 100));
+    const items = getItems();
+    expect(items.length).toBe(1);
+    expect(items[0]!.textContent).toContain("New Note");
+    hideAutocomplete();
+
+    // Restore original note list
+    mock.on("GET", "/api/notes", NOTES);
+    invalidateNoteCache();
+  });
+
+  test("hideAutocomplete removes the dropdown", async () => {
+    invalidateNoteCache();
+    typeInEditor("[[");
+    checkWikiLinkTrigger(contentEl, "test.md");
+    await new Promise((r) => setTimeout(r, 100));
+    expect(getDropdown() !== null).toBe(true);
+    hideAutocomplete();
+    expect(getDropdown()).toBe(null);
   });
 });
