@@ -1,5 +1,79 @@
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { setupDOM, mockFetch } from "./test-helper.ts";
+import { classifySaveResult, classifyReload } from "./editor.ts";
+import type { SaveAction } from "./editor.ts";
+
+describe("classifySaveResult", () => {
+  test("no conflict → clean", () => {
+    const action = classifySaveResult(
+      { mtime: 100 },
+      "editor content",
+      "tab content",
+    );
+    expect(action.type).toBe("clean");
+    expect((action as Extract<SaveAction, { type: "clean" }>).mtime).toBe(100);
+    expect((action as Extract<SaveAction, { type: "clean" }>).content).toBe("editor content");
+  });
+
+  test("conflict but disk matches editor → false-conflict", () => {
+    const action = classifySaveResult(
+      { conflict: true, content: "same", mtime: 200 },
+      "same",
+      "old tab content",
+    );
+    expect(action.type).toBe("false-conflict");
+  });
+
+  test("conflict but disk matches tab saved content → false-conflict", () => {
+    const action = classifySaveResult(
+      { conflict: true, content: "tab saved", mtime: 200 },
+      "editor different",
+      "tab saved",
+    );
+    expect(action.type).toBe("false-conflict");
+  });
+
+  test("conflict with genuinely different disk content → real-conflict", () => {
+    const action = classifySaveResult(
+      { conflict: true, content: "disk version", mtime: 300 },
+      "editor version",
+      "tab version",
+    );
+    expect(action.type).toBe("real-conflict");
+    const rc = action as Extract<SaveAction, { type: "real-conflict" }>;
+    expect(rc.diskContent).toBe("disk version");
+    expect(rc.diskMtime).toBe(300);
+  });
+
+  test("conflict with missing disk content → real-conflict with empty string", () => {
+    const action = classifySaveResult(
+      { conflict: true, mtime: 400 },
+      "editor",
+      "tab",
+    );
+    expect(action.type).toBe("real-conflict");
+    expect((action as Extract<SaveAction, { type: "real-conflict" }>).diskContent).toBe("");
+  });
+
+  test("conflict with empty disk content matching empty editor → false-conflict", () => {
+    const action = classifySaveResult(
+      { conflict: true, content: "", mtime: 500 },
+      "",
+      "tab",
+    );
+    expect(action.type).toBe("false-conflict");
+  });
+});
+
+describe("classifyReload", () => {
+  test("not dirty → load", () => {
+    expect(classifyReload(false).type).toBe("load");
+  });
+
+  test("dirty → conflict", () => {
+    expect(classifyReload(true).type).toBe("conflict");
+  });
+});
 
 describe("editor", () => {
   let cleanup: () => void;

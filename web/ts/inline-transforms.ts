@@ -24,6 +24,21 @@ export const patterns: InlinePattern[] = [
 
 const MAX_SEARCH = 200;
 
+/// Compute the range [start, end) of text to replace for a matched pattern.
+export function computeReplaceRange(
+  pat: InlinePattern,
+  matchStart: number,
+  cursorPos: number,
+): { start: number; end: number } {
+  return { start: matchStart, end: pat.trailingSpace ? cursorPos - 1 : cursorPos };
+}
+
+/// Build the HTML to insert for a matched inline pattern.
+export function buildReplacementHtml(pat: InlinePattern, content: string): string {
+  const suffix = pat.trailingSpace ? "" : "\u200B";
+  return `<${pat.tag}>${escapeHtml(content)}</${pat.tag}>${suffix}`;
+}
+
 /// Check if the user just completed an inline markdown pattern at the cursor.
 /// If so, replace the raw markers with a styled element. Returns true if a
 /// transform was applied.
@@ -41,20 +56,16 @@ export function checkInlineTransform(): boolean {
     const m = matchPattern(text, pos, pat);
     if (m === null) continue;
 
+    const { start, end } = computeReplaceRange(pat, m.start, pos);
+    const html = buildReplacementHtml(pat, m.content);
+
     const range = document.createRange();
-    range.setStart(node, m.start);
-    // For trailingSpace patterns, leave the space in place as natural cursor target
-    range.setEnd(node, pat.trailingSpace ? pos - 1 : pos);
+    range.setStart(node, start);
+    range.setEnd(node, end);
     sel.removeAllRanges();
     sel.addRange(range);
 
-    // ZWS after element gives cursor a text node to land in outside the styled element
-    const suffix = pat.trailingSpace ? "" : "\u200B";
-    document.execCommand(
-      "insertHTML",
-      false,
-      `<${pat.tag}>${escapeHtml(m.content)}</${pat.tag}>${suffix}`,
-    );
+    document.execCommand("insertHTML", false, html);
 
     // For trailingSpace patterns, the space text node is already there —
     // move cursor to after it so typing continues outside the styled element

@@ -142,43 +142,76 @@ export function getCurrentContent(): string {
   return "";
 }
 
+export type SaveAction =
+  | { type: "clean"; content: string; mtime: number }
+  | { type: "false-conflict"; content: string }
+  | { type: "real-conflict"; diskContent: string; diskMtime: number }
+  | { type: "no-op" };
+
+/// Pure decision: given a save result, determine what action to take.
+export function classifySaveResult(
+  result: { conflict?: boolean; content?: string; mtime: number },
+  editorContent: string,
+  tabContent: string,
+): SaveAction {
+  if (!result.conflict) {
+    return { type: "clean", content: editorContent, mtime: result.mtime };
+  }
+  const diskContent = result.content ?? "";
+  if (diskContent === editorContent || diskContent === tabContent) {
+    return { type: "false-conflict", content: editorContent };
+  }
+  return { type: "real-conflict", diskContent, diskMtime: result.mtime };
+}
+
 export async function saveCurrentNote() {
   const tab = getActiveTab();
   if (!tab || !currentPath) return;
 
   const content = getCurrentContent();
   const result = await saveNote(currentPath, content, tab.mtime);
+  const action = classifySaveResult(result, content, tab.content);
 
-  if (result.conflict) {
-    const diskContent = result.content ?? "";
-    // False conflict: mtime drifted but content unchanged (Spotlight, iCloud, etc.)
-    if (diskContent === content || diskContent === tab.content) {
+  switch (action.type) {
+    case "clean":
+      markClean(currentPath, action.content, action.mtime);
+      break;
+    case "false-conflict": {
       const retry = await saveNote(currentPath, content, 0);
       markClean(currentPath, content, retry.mtime);
-      return;
+      break;
     }
-    // Real conflict: disk content genuinely differs
-    if (container) {
-      showConflictBanner(
-        container,
-        currentPath,
-        diskContent,
-        result.mtime,
-        loadContent,
-        getCurrentContent,
-      );
-    }
-    return;
+    case "real-conflict":
+      if (container) {
+        showConflictBanner(
+          container,
+          currentPath,
+          action.diskContent,
+          action.diskMtime,
+          loadContent,
+          getCurrentContent,
+        );
+      }
+      break;
   }
+}
 
-  markClean(currentPath, content, result.mtime);
+export type ReloadAction =
+  | { type: "load" }
+  | { type: "conflict" };
+
+/// Pure decision: determine how to handle a disk reload.
+export function classifyReload(isDirty: boolean): ReloadAction {
+  return isDirty ? { type: "conflict" } : { type: "load" };
 }
 
 export function reloadFromDisk(content: string, mtime: number) {
   const tab = getActiveTab();
   if (!tab || !currentPath) return;
 
-  if (!tab.dirty) {
+  const action = classifyReload(tab.dirty);
+
+  if (action.type === "load") {
     loadContent(content);
     markClean(currentPath, content, mtime);
     return;

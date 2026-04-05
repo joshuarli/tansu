@@ -6,5 +6,5 @@ minimumReleaseAge = 259200 # three days
 coverage = true
 randomize = true
 coverageSkipTestFiles = true
-coverageThreshold = { line = 0.88, function = 0.89 }
+coverageThreshold = { line = 0.89, function = 0.90 }
 
