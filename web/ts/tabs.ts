@@ -24,14 +24,13 @@ export {
   restoreSession,
 } from "./tab-state.ts";
 
-const tabBar = document.getElementById("tab-bar")!;
-const emptyState = document.getElementById("empty-state")!;
-
 let contextMenuEl: HTMLElement | null = null;
 
 on("tab:render", render);
 
 function render() {
+  const tabBar = document.getElementById("tab-bar")!;
+  const emptyState = document.getElementById("empty-state")!;
   tabBar.innerHTML = "";
   const tabs = getTabs();
   const activeIndex = getActiveIndex();

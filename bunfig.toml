@@ -1,0 +1,11 @@
+[install]
+linker = "isolated"
+minimumReleaseAge = 259200  # three days
+
+[test]
+coverage = true
+randomize = true
+coverageSkipTestFiles = true
+coverageThreshold = { line = 0.79, function = 0.79 }
+coveragePathIgnorePatterns = ["web/ts/webauthn.ts"]
+

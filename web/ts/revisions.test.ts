@@ -7,9 +7,9 @@ mock.on("GET", /\/api\/revision\?/, { content: "# Old version" });
 mock.on("POST", "/api/restore", { mtime: 5000 });
 
 const { toggleRevisions, hideRevisions, isRevisionsOpen } = await import("./revisions.ts");
-const { on, clearAll } = await import("./events.ts");
+const { on } = await import("./events.ts");
 
-on("revision:restore", () => {});
+const offRestore = on("revision:restore", () => {});
 
 // Create a host element to render revisions into
 const host = document.createElement("div");
@@ -70,6 +70,6 @@ hideRevisions();
 
 host.remove();
 mock.restore();
-clearAll();
+offRestore();
 cleanup();
 console.log("All revisions tests passed");

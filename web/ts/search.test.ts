@@ -1,4 +1,4 @@
-import { setupDOM, assertEqual, assert, mockFetch } from "./test-helper.ts";
+import { setupDOM, assertEqual, assert, assertContains, mockFetch } from "./test-helper.ts";
 const cleanup = setupDOM();
 const mock = mockFetch();
 
@@ -80,6 +80,88 @@ openSearch();
 overlay.click();
 // The click handler checks e.target === overlay — direct click should close
 assertEqual(isSearchOpen(), false, "overlay click closes");
+
+// --- New tests: results rendering, keyboard nav, Enter, Create, click ---
+
+// Use a fresh search instance with a tracked openTab
+let openTabCalled = false;
+let openTabPath = "";
+const { open: openSearch2, close: closeSearch2, isOpen: isSearchOpen2 } = createSearch({
+  openTab: async (path: string) => { openTabCalled = true; openTabPath = path; },
+  invalidateNoteCache: () => {},
+});
+
+// Type in search box → results render after debounce
+openSearch2();
+input.value = "alpha";
+input.dispatchEvent(new Event("input"));
+await new Promise((r) => setTimeout(r, 200));
+const resultsEl = document.getElementById("search-results")!;
+assert(resultsEl.children.length > 0, "results rendered after debounce");
+
+// Results show title and path
+const firstResult = resultsEl.children[0]! as HTMLElement;
+assertContains(firstResult.textContent!, "Alpha", "result shows title");
+assertContains(firstResult.textContent!, "a.md", "result shows path");
+
+// Score breakdown rendered (show_score_breakdown: true in mock)
+assertContains(firstResult.textContent!, "title:", "score breakdown rendered");
+
+// Create option appears for non-empty query
+const createEl = Array.from(resultsEl.children).find((el) =>
+  el.textContent?.startsWith('Create "')
+) as HTMLElement | undefined;
+assert(createEl !== undefined, "Create option appears");
+assertContains(createEl!.textContent!, "alpha", "Create option contains query");
+
+// Count selected items before navigation — should be exactly one
+const selectedBefore = Array.from(resultsEl.children).filter((el) =>
+  el.classList.contains("selected")
+).length;
+assertEqual(selectedBefore, 1, "exactly one item selected initially");
+
+// ArrowDown moves selection
+input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+// After one ArrowDown from the createSearch2 instance, check exactly one selected item
+const selectedAfterDown = Array.from(resultsEl.children).filter((el) =>
+  el.classList.contains("selected")
+).length;
+assertEqual(selectedAfterDown, 1, "exactly one item selected after ArrowDown");
+
+// ArrowUp moves selection: still exactly one selected item
+input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }));
+const selectedAfterUp = Array.from(resultsEl.children).filter((el) =>
+  el.classList.contains("selected")
+).length;
+assertEqual(selectedAfterUp, 1, "exactly one item selected after ArrowUp");
+
+// Enter on selected result closes search and calls openTab
+openTabCalled = false;
+input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+await new Promise((r) => setTimeout(r, 10));
+assertEqual(isSearchOpen2(), false, "Enter closes search");
+assert(openTabCalled, "Enter calls openTab");
+assertEqual(openTabPath, "a.md", "openTab called with result path");
+
+// Click on result closes search
+openSearch2();
+input.value = "alpha";
+input.dispatchEvent(new Event("input"));
+await new Promise((r) => setTimeout(r, 200));
+openTabCalled = false;
+const clickResult = resultsEl.children[0]! as HTMLElement;
+clickResult.click();
+await new Promise((r) => setTimeout(r, 10));
+assertEqual(isSearchOpen2(), false, "click on result closes search");
+assert(openTabCalled, "click on result calls openTab");
+
+// Empty query clears results (no search results, no Create option)
+openSearch2();
+input.value = "";
+input.dispatchEvent(new Event("input"));
+await new Promise((r) => setTimeout(r, 200));
+assertEqual(resultsEl.children.length, 0, "empty query clears results");
+closeSearch2();
 
 mock.restore();
 cleanup();

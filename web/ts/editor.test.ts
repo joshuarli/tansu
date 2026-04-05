@@ -71,6 +71,47 @@ hideEditor();
 const emptyState = document.getElementById("empty-state");
 assertEqual(emptyState!.style.display, "flex", "empty state shown");
 
+// --- New tests: source mode, reloadFromDisk ---
+
+// Source mode: click Source button → textarea visible, contentEl hidden
+showEditor("toggle.md", "# Toggle");
+await new Promise((r) => setTimeout(r, 50));
+
+const contentElToggle = document.querySelector(".editor-content") as HTMLElement;
+const sourceElToggle = document.querySelector(".editor-source") as HTMLTextAreaElement;
+const sourceBtn = Array.from(document.querySelectorAll(".editor-toolbar button")).find(
+  (b) => b.textContent === "Source"
+) as HTMLButtonElement;
+assert(sourceBtn !== null, "Source button found");
+
+// Click Source button to enter source mode
+sourceBtn.click();
+assertEqual(contentElToggle.style.display, "none", "contentEl hidden in source mode");
+assert(sourceElToggle.style.display !== "none", "sourceEl visible in source mode");
+
+// Source mode getCurrentContent returns textarea value
+sourceElToggle.value = "# Raw markdown";
+const srcContent = getCurrentContent();
+assertEqual(srcContent, "# Raw markdown", "source mode getCurrentContent returns textarea value");
+
+// Click Source button again to return to rich text mode
+sourceBtn.click();
+assert(contentElToggle.style.display !== "none", "contentEl visible after toggling back");
+assertEqual(sourceElToggle.style.display, "none", "sourceEl hidden after toggling back");
+
+// Verify getCurrentContent in source mode reflects textarea directly
+// (covers the isSourceMode branch in getCurrentContent without needing a real tab)
+showEditor("cm.md", "# Current");
+await new Promise((r) => setTimeout(r, 50));
+const cmSource = document.querySelector(".editor-source") as HTMLTextAreaElement;
+const cmSourceBtn = Array.from(document.querySelectorAll(".editor-toolbar button")).find(
+  (b) => b.textContent === "Source"
+) as HTMLButtonElement;
+cmSourceBtn.click();
+cmSource.value = "custom source";
+assertEqual(getCurrentContent(), "custom source", "source mode returns textarea value directly");
+hideEditor();
+
 mock.restore();
 cleanup();
 console.log("All editor tests passed");

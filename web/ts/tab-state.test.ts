@@ -1,8 +1,10 @@
-/// Tests for tab-state.ts — pure data logic, no DOM needed.
+/// Tests for tab-state.ts — pure data logic, but needs DOM because
+/// tabs.ts registers a render listener on the shared event bus.
 
-import { on, clearAll } from "./events.ts";
-import { assertEqual, assert, mockFetch } from "./test-helper.ts";
+import { on } from "./events.ts";
+import { setupDOM, assertEqual, assert, mockFetch } from "./test-helper.ts";
 
+const cleanup = setupDOM();
 const mock = mockFetch();
 mock.on("GET", "/api/note", { content: "# Test", mtime: 1000 });
 mock.on("PUT", "/api/state", {});
@@ -29,10 +31,10 @@ import {
 // Track renders and tab changes
 let renderCount = 0;
 let changeCount = 0;
-on("tab:render", () => {
+const offRender = on("tab:render", () => {
   renderCount++;
 });
-on("tab:change", () => {
+const offChange = on("tab:change", () => {
   changeCount++;
 });
 
@@ -97,5 +99,7 @@ closeActiveTab();
 assertEqual(getTabs().length, 0, "none after close active");
 
 mock.restore();
-clearAll();
+offRender();
+offChange();
+cleanup();
 console.log("All tab-state tests passed");
