@@ -1,4 +1,5 @@
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+
 import { setupDOM, mockFetch } from "./test-helper.ts";
 
 describe("settings", () => {
@@ -67,7 +68,9 @@ describe("settings", () => {
     expect(scoreCheckbox.checked).toBe(true);
 
     // Excluded folders populated
-    const excludedInput = panel.querySelector('input[data-key="excluded_folders"]') as HTMLInputElement;
+    const excludedInput = panel.querySelector(
+      'input[data-key="excluded_folders"]',
+    ) as HTMLInputElement;
     expect(excludedInput !== null).toBe(true);
     expect(excludedInput.value).toBe("archive");
 

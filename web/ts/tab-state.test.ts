@@ -2,6 +2,7 @@
 /// tabs.ts registers a render listener on the shared event bus.
 
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+
 import { on } from "./events.ts";
 import { setupDOM, mockFetch } from "./test-helper.ts";
 
@@ -73,8 +74,12 @@ describe("tab-state", () => {
     // Track renders and tab changes
     let renderCount = 0;
     let changeCount = 0;
-    const offR = on("tab:render", () => { renderCount++; });
-    const offC = on("tab:change", () => { changeCount++; });
+    const offR = on("tab:render", () => {
+      renderCount++;
+    });
+    const offC = on("tab:change", () => {
+      changeCount++;
+    });
 
     // Initially empty
     expect(getActiveTab()).toBe(null);

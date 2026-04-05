@@ -1,4 +1,5 @@
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+
 import { setupDOM, mockFetch } from "./test-helper.ts";
 
 describe("tabs", () => {
@@ -51,7 +52,9 @@ describe("tabs", () => {
     while (getTabs().length > 0) closeTab(0);
 
     let changeCount = 0;
-    offChange = on("tab:change", () => { changeCount++; });
+    offChange = on("tab:change", () => {
+      changeCount++;
+    });
   });
 
   afterAll(() => {
@@ -68,7 +71,9 @@ describe("tabs", () => {
     // Track tab changes
     let changeCount = 0;
     const { on } = await import("./events.ts");
-    const offC = on("tab:change", () => { changeCount++; });
+    const offC = on("tab:change", () => {
+      changeCount++;
+    });
 
     // Open a tab
     const tab1 = await openTab("notes/hello.md");
@@ -171,9 +176,9 @@ describe("tabs", () => {
 
     const tabElsAfterClose = tabBar.querySelectorAll(".tab:not(.tab-new)");
     expect(tabElsAfterClose.length).toBe(1);
-    expect(
-      tabElsAfterClose[0]!.querySelector("span:not(.close):not(.dirty)")!.textContent,
-    ).toBe("beta");
+    expect(tabElsAfterClose[0]!.querySelector("span:not(.close):not(.dirty)")!.textContent).toBe(
+      "beta",
+    );
 
     // Context menu: right-clicking a tab should create .context-menu in the body.
     await openTab("notes/gamma.md");

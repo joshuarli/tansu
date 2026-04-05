@@ -1,4 +1,5 @@
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+
 import { setupDOM } from "./test-helper.ts";
 
 describe("palette", () => {
@@ -7,7 +8,9 @@ describe("palette", () => {
   let openPalette: () => void;
   let closePalette: () => void;
   let isPaletteOpen: () => boolean;
-  let registerCommands: (cmds: Array<{ label: string; shortcut: string; action: () => void }>) => void;
+  let registerCommands: (
+    cmds: Array<{ label: string; shortcut: string; action: () => void }>,
+  ) => void;
   let actionCalled = false;
 
   beforeAll(async () => {

@@ -1,4 +1,5 @@
 import { describe, test, expect } from "bun:test";
+
 import { highlightCode } from "./highlight.ts";
 
 describe("unknown language", () => {
@@ -27,7 +28,9 @@ describe("keywords", () => {
 
 describe("types", () => {
   test("ts type", () => {
-    expect(highlightCode('let x: string = ""', "ts")).toContain('<span class="hl-type">string</span>');
+    expect(highlightCode('let x: string = ""', "ts")).toContain(
+      '<span class="hl-type">string</span>',
+    );
   });
   test("python type", () => {
     expect(highlightCode("None", "python")).toContain('<span class="hl-type">None</span>');
@@ -36,10 +39,14 @@ describe("types", () => {
 
 describe("strings", () => {
   test("js string", () => {
-    expect(highlightCode('let s = "hello"', "js")).toContain('<span class="hl-str">&quot;hello&quot;</span>');
+    expect(highlightCode('let s = "hello"', "js")).toContain(
+      '<span class="hl-str">&quot;hello&quot;</span>',
+    );
   });
   test("js single-quote string", () => {
-    expect(highlightCode("let s = 'hello'", "js")).toContain("<span class=\"hl-str\">'hello'</span>");
+    expect(highlightCode("let s = 'hello'", "js")).toContain(
+      "<span class=\"hl-str\">'hello'</span>",
+    );
   });
 });
 
@@ -75,7 +82,9 @@ describe("function calls", () => {
 
 describe("rust macros", () => {
   test("rust macro", () => {
-    expect(highlightCode('println!("hi")', "rust")).toContain('<span class="hl-macro">println!</span>');
+    expect(highlightCode('println!("hi")', "rust")).toContain(
+      '<span class="hl-macro">println!</span>',
+    );
   });
 });
 
@@ -145,7 +154,9 @@ describe("multiline", () => {
 
 describe("string escapes", () => {
   test("escaped quote in string", () => {
-    expect(highlightCode('let s = "a\\"b"', "js")).toContain('<span class="hl-str">&quot;a\\&quot;b&quot;</span>');
+    expect(highlightCode('let s = "a\\"b"', "js")).toContain(
+      '<span class="hl-str">&quot;a\\&quot;b&quot;</span>',
+    );
   });
 });
 
@@ -157,7 +168,9 @@ describe("partial keyword match", () => {
 
 describe("JSON", () => {
   test("json key string", () => {
-    expect(highlightCode('{"key": "value"}', "json")).toContain('<span class="hl-str">&quot;key&quot;</span>');
+    expect(highlightCode('{"key": "value"}', "json")).toContain(
+      '<span class="hl-str">&quot;key&quot;</span>',
+    );
   });
   test("json number", () => {
     expect(highlightCode('{"n": 123}', "json")).toContain('<span class="hl-num">123</span>');
@@ -172,7 +185,9 @@ describe("JSON", () => {
 
 describe("YAML", () => {
   test("yaml comment", () => {
-    expect(highlightCode("key: value # comment", "yaml")).toContain('<span class="hl-cmt"># comment</span>');
+    expect(highlightCode("key: value # comment", "yaml")).toContain(
+      '<span class="hl-cmt"># comment</span>',
+    );
   });
   test("yaml bool", () => {
     expect(highlightCode("enabled: true", "yaml")).toContain('<span class="hl-type">true</span>');
@@ -187,13 +202,17 @@ describe("TOML", () => {
     expect(highlightCode("# comment", "toml")).toContain('<span class="hl-cmt"># comment</span>');
   });
   test("toml string", () => {
-    expect(highlightCode('key = "value"', "toml")).toContain('<span class="hl-str">&quot;value&quot;</span>');
+    expect(highlightCode('key = "value"', "toml")).toContain(
+      '<span class="hl-str">&quot;value&quot;</span>',
+    );
   });
 });
 
 describe("shell aliases", () => {
   test("sh keyword", () => {
-    expect(highlightCode("if true; then echo hi; fi", "sh")).toContain('<span class="hl-kw">if</span>');
+    expect(highlightCode("if true; then echo hi; fi", "sh")).toContain(
+      '<span class="hl-kw">if</span>',
+    );
   });
   test("zsh keyword", () => {
     expect(highlightCode("export FOO=bar", "zsh")).toContain('<span class="hl-kw">export</span>');
@@ -225,6 +244,10 @@ describe("C/C++", () => {
 });
 
 describe("edge cases", () => {
-  test("empty input", () => { expect(highlightCode("", "js")).toBe("") });
-  test("no lang passthrough", () => { expect(highlightCode("hello", "")).toBe("hello") });
+  test("empty input", () => {
+    expect(highlightCode("", "js")).toBe("");
+  });
+  test("no lang passthrough", () => {
+    expect(highlightCode("hello", "")).toBe("hello");
+  });
 });

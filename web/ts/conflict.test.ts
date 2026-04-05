@@ -1,4 +1,5 @@
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+
 import { setupDOM, mockFetch } from "./test-helper.ts";
 
 describe("conflict", () => {
@@ -49,14 +50,28 @@ describe("conflict", () => {
 
   test("banner exists", () => {
     const container = makeContainer();
-    showConflictBanner(container, "notes/a.md", "disk content", 1000, () => {}, () => "mine");
+    showConflictBanner(
+      container,
+      "notes/a.md",
+      "disk content",
+      1000,
+      () => {},
+      () => "mine",
+    );
     const banner = container.querySelector(".conflict-banner");
     expect(banner !== null).toBe(true);
   });
 
   test("message text correct", () => {
     const container = makeContainer();
-    showConflictBanner(container, "notes/a.md", "disk content", 1000, () => {}, () => "mine");
+    showConflictBanner(
+      container,
+      "notes/a.md",
+      "disk content",
+      1000,
+      () => {},
+      () => "mine",
+    );
     const span = container.querySelector(".conflict-banner")!.querySelector("span");
     expect(span !== null).toBe(true);
     expect(span!.textContent!.includes("File changed externally")).toBe(true);
@@ -64,7 +79,14 @@ describe("conflict", () => {
 
   test("two buttons", () => {
     const container = makeContainer();
-    showConflictBanner(container, "notes/a.md", "disk content", 1000, () => {}, () => "mine");
+    showConflictBanner(
+      container,
+      "notes/a.md",
+      "disk content",
+      1000,
+      () => {},
+      () => "mine",
+    );
     const buttons = container.querySelector(".conflict-banner")!.querySelectorAll("button");
     expect(buttons.length).toBe(2);
     expect(buttons[0]!.textContent).toBe("Keep mine");
@@ -73,7 +95,14 @@ describe("conflict", () => {
 
   test("banner removed after Keep mine", async () => {
     const container = makeContainer();
-    showConflictBanner(container, "notes/b.md", "disk content", 1000, () => {}, () => "my content");
+    showConflictBanner(
+      container,
+      "notes/b.md",
+      "disk content",
+      1000,
+      () => {},
+      () => "my content",
+    );
     const banner = container.querySelector(".conflict-banner")!;
     const keepBtn = banner.querySelectorAll("button")[0]! as HTMLButtonElement;
     keepBtn.click();
@@ -86,8 +115,13 @@ describe("conflict", () => {
     const container = makeContainer();
     let loadedWith = "";
     showConflictBanner(
-      container, "notes/c.md", "their content", 1500,
-      (md) => { loadedWith = md; },
+      container,
+      "notes/c.md",
+      "their content",
+      1500,
+      (md) => {
+        loadedWith = md;
+      },
       () => "my content",
     );
     const banner = container.querySelector(".conflict-banner")!;
@@ -99,8 +133,22 @@ describe("conflict", () => {
 
   test("only one banner after calling twice", () => {
     const container = makeContainer();
-    showConflictBanner(container, "notes/d.md", "first disk", 1000, () => {}, () => "mine");
-    showConflictBanner(container, "notes/d.md", "second disk", 2000, () => {}, () => "mine");
+    showConflictBanner(
+      container,
+      "notes/d.md",
+      "first disk",
+      1000,
+      () => {},
+      () => "mine",
+    );
+    showConflictBanner(
+      container,
+      "notes/d.md",
+      "second disk",
+      2000,
+      () => {},
+      () => "mine",
+    );
     const banners = container.querySelectorAll(".conflict-banner");
     expect(banners.length).toBe(1);
   });
@@ -119,10 +167,14 @@ describe("conflict", () => {
     };
 
     handleReloadConflict(
-      tab, container, "notes/e.md",
+      tab,
+      container,
+      "notes/e.md",
       "x\na\nb", // theirs (disk)
       2000,
-      (md) => { loadedWith = md; },
+      (md) => {
+        loadedWith = md;
+      },
       () => "a\nb\nc", // ours (editor)
     );
 
@@ -144,10 +196,14 @@ describe("conflict", () => {
     };
 
     handleReloadConflict(
-      tab, container, "notes/f.md",
+      tab,
+      container,
+      "notes/f.md",
       "a\nY", // theirs: changed line 2 to Y
       2000,
-      (md) => { loadedWith = md; },
+      (md) => {
+        loadedWith = md;
+      },
       () => "a\nX", // ours: changed line 2 to X — conflict
     );
 

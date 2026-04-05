@@ -15,7 +15,10 @@ lint-ts:
 	bun run oxlint web/ts/
 
 test-ts:
-	bun test
+	bun test web/ts/*.test.ts
+
+test-e2e:
+	bun test web/ts/e2e/
 
 ts: lint-ts test-ts
 	bun run oxfmt web/ts/

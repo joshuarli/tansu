@@ -1,4 +1,5 @@
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+
 import { setupDOM, mockFetch } from "./test-helper.ts";
 
 describe("search", () => {

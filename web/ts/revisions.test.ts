@@ -1,4 +1,5 @@
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+
 import { setupDOM, mockFetch } from "./test-helper.ts";
 
 describe("revisions", () => {
@@ -19,8 +20,12 @@ describe("revisions", () => {
       onHide: () => {
         hideCalled = true;
       },
-      get hideCalled() { return hideCalled; },
-      set hideCalled(v: boolean) { hideCalled = v; },
+      get hideCalled() {
+        return hideCalled;
+      },
+      set hideCalled(v: boolean) {
+        hideCalled = v;
+      },
     };
   }
 

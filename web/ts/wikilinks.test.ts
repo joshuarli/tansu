@@ -1,4 +1,5 @@
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+
 import { setupDOM } from "./test-helper.ts";
 
 describe("wikilinks", () => {

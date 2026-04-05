@@ -396,9 +396,16 @@ function kw(s: string): string[] {
 const RUST: Rules = {
   lineComment: "//",
   blockComment: ["/*", "*/"],
-  strings: [['"', '"', false], ["'", "'", false]],
-  keywords: kw("as async await break const continue crate dyn else enum extern fn for if impl in let loop match mod move mut pub ref return self static struct super trait type unsafe use where while yield"),
-  types: kw("Box Err None Ok Option Result Self Some String Vec bool char f32 f64 false i128 i16 i32 i64 i8 isize str true u128 u16 u32 u64 u8 usize"),
+  strings: [
+    ['"', '"', false],
+    ["'", "'", false],
+  ],
+  keywords: kw(
+    "as async await break const continue crate dyn else enum extern fn for if impl in let loop match mod move mut pub ref return self static struct super trait type unsafe use where while yield",
+  ),
+  types: kw(
+    "Box Err None Ok Option Result Self Some String Vec bool char f32 f64 false i128 i16 i32 i64 i8 isize str true u128 u16 u32 u64 u8 usize",
+  ),
   operators: ["&&", "->", "!=", "==", "<=", ">=", "=>", "||"],
   highlightNumbers: true,
   highlightFnCalls: true,
@@ -408,8 +415,15 @@ const RUST: Rules = {
 const PYTHON: Rules = {
   lineComment: "#",
   blockComment: ["", ""],
-  strings: [['"""', '"""', true], ["'''", "'''", true], ['"', '"', false], ["'", "'", false]],
-  keywords: kw("and as assert async await break class continue def del elif else except finally for from global if import in is lambda nonlocal not or pass raise return try while with yield"),
+  strings: [
+    ['"""', '"""', true],
+    ["'''", "'''", true],
+    ['"', '"', false],
+    ["'", "'", false],
+  ],
+  keywords: kw(
+    "and as assert async await break class continue def del elif else except finally for from global if import in is lambda nonlocal not or pass raise return try while with yield",
+  ),
   types: kw("False None True bool bytes dict float int list self set str tuple"),
   operators: ["!=", "==", "<=", ">="],
   highlightNumbers: true,
@@ -420,9 +434,17 @@ const PYTHON: Rules = {
 const GO: Rules = {
   lineComment: "//",
   blockComment: ["/*", "*/"],
-  strings: [["`", "`", true], ['"', '"', false], ["'", "'", false]],
-  keywords: kw("break case chan const continue default defer else fallthrough for func go goto if import interface map package range return select struct switch type var"),
-  types: kw("bool byte complex128 complex64 error false float32 float64 int int16 int32 int64 int8 iota nil rune string true uint uint16 uint32 uint64 uint8 uintptr"),
+  strings: [
+    ["`", "`", true],
+    ['"', '"', false],
+    ["'", "'", false],
+  ],
+  keywords: kw(
+    "break case chan const continue default defer else fallthrough for func go goto if import interface map package range return select struct switch type var",
+  ),
+  types: kw(
+    "bool byte complex128 complex64 error false float32 float64 int int16 int32 int64 int8 iota nil rune string true uint uint16 uint32 uint64 uint8 uintptr",
+  ),
   operators: ["&&", ":=", "!=", "==", "<=", ">=", "||"],
   highlightNumbers: true,
   highlightFnCalls: true,
@@ -432,32 +454,49 @@ const GO: Rules = {
 const JS_BASE: Omit<Rules, "keywords" | "types"> = {
   lineComment: "//",
   blockComment: ["/*", "*/"],
-  strings: [["`", "`", true], ['"', '"', false], ["'", "'", false]],
+  strings: [
+    ["`", "`", true],
+    ['"', '"', false],
+    ["'", "'", false],
+  ],
   operators: ["&&", "!==", "===", "!=", "==", "<=", ">=", "=>", "||"],
   highlightNumbers: true,
   highlightFnCalls: true,
   highlightBangMacros: false,
 };
 
-const JS_KW = kw("async await break case catch class const continue debugger default delete do else export extends finally for from function if import in instanceof let new of return static super switch this throw try typeof var void while with yield");
+const JS_KW = kw(
+  "async await break case catch class const continue debugger default delete do else export extends finally for from function if import in instanceof let new of return static super switch this throw try typeof var void while with yield",
+);
 
 const TS: Rules = {
   ...JS_BASE,
-  keywords: kw("abstract as async await break case catch class const continue debugger default delete do else enum export extends finally for from function if implements import in instanceof interface let new of package private protected public return static super switch this throw try typeof var void while with yield"),
-  types: kw("Array Map Promise Set any bigint boolean false never null number object string symbol true undefined unknown void"),
+  keywords: kw(
+    "abstract as async await break case catch class const continue debugger default delete do else enum export extends finally for from function if implements import in instanceof interface let new of package private protected public return static super switch this throw try typeof var void while with yield",
+  ),
+  types: kw(
+    "Array Map Promise Set any bigint boolean false never null number object string symbol true undefined unknown void",
+  ),
 };
 
 const JS: Rules = {
   ...JS_BASE,
   keywords: JS_KW,
-  types: kw("Array Boolean Infinity Map NaN Number Object Promise Set String false null true undefined"),
+  types: kw(
+    "Array Boolean Infinity Map NaN Number Object Promise Set String false null true undefined",
+  ),
 };
 
 const BASH: Rules = {
   lineComment: "#",
   blockComment: ["", ""],
-  strings: [['"', '"', false], ["'", "'", false]],
-  keywords: kw("break case continue declare do done elif else esac eval exec exit export fi for function if in local readonly return set shift source then trap unset while"),
+  strings: [
+    ['"', '"', false],
+    ["'", "'", false],
+  ],
+  keywords: kw(
+    "break case continue declare do done elif else esac eval exec exit export fi for function if in local readonly return set shift source then trap unset while",
+  ),
   types: kw("false true"),
   operators: ["&&", "||"],
   highlightNumbers: true,
@@ -468,9 +507,16 @@ const BASH: Rules = {
 const C: Rules = {
   lineComment: "//",
   blockComment: ["/*", "*/"],
-  strings: [['"', '"', false], ["'", "'", false]],
-  keywords: kw("auto break case const continue default do else enum extern for goto if inline register restrict return sizeof static struct switch typedef union volatile while"),
-  types: kw("NULL bool char double false float int int16_t int32_t int64_t int8_t long short signed size_t true uint16_t uint32_t uint64_t uint8_t unsigned void"),
+  strings: [
+    ['"', '"', false],
+    ["'", "'", false],
+  ],
+  keywords: kw(
+    "auto break case const continue default do else enum extern for goto if inline register restrict return sizeof static struct switch typedef union volatile while",
+  ),
+  types: kw(
+    "NULL bool char double false float int int16_t int32_t int64_t int8_t long short signed size_t true uint16_t uint32_t uint64_t uint8_t unsigned void",
+  ),
   operators: ["&&", "->", "!=", "==", "<=", ">=", "||"],
   highlightNumbers: true,
   highlightFnCalls: true,
@@ -489,7 +535,12 @@ const TOML: Rules = {
   ...DATA_BASE,
   lineComment: "#",
   blockComment: ["", ""],
-  strings: [['"""', '"""', true], ["'''", "'''", true], ['"', '"', false], ["'", "'", false]],
+  strings: [
+    ['"""', '"""', true],
+    ["'''", "'''", true],
+    ['"', '"', false],
+    ["'", "'", false],
+  ],
   types: kw("false true"),
 };
 
@@ -505,7 +556,10 @@ const YAML: Rules = {
   ...DATA_BASE,
   lineComment: "#",
   blockComment: ["", ""],
-  strings: [['"', '"', false], ["'", "'", false]],
+  strings: [
+    ['"', '"', false],
+    ["'", "'", false],
+  ],
   types: kw("false no null true yes"),
 };
 

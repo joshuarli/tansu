@@ -1,15 +1,12 @@
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
-import { setupDOM, mockFetch } from "./test-helper.ts";
+
 import { classifySaveResult, classifyReload } from "./editor.ts";
 import type { SaveAction } from "./editor.ts";
+import { setupDOM, mockFetch } from "./test-helper.ts";
 
 describe("classifySaveResult", () => {
   test("no conflict → clean", () => {
-    const action = classifySaveResult(
-      { mtime: 100 },
-      "editor content",
-      "tab content",
-    );
+    const action = classifySaveResult({ mtime: 100 }, "editor content", "tab content");
     expect(action.type).toBe("clean");
     expect((action as Extract<SaveAction, { type: "clean" }>).mtime).toBe(100);
     expect((action as Extract<SaveAction, { type: "clean" }>).content).toBe("editor content");
@@ -46,21 +43,13 @@ describe("classifySaveResult", () => {
   });
 
   test("conflict with missing disk content → real-conflict with empty string", () => {
-    const action = classifySaveResult(
-      { conflict: true, mtime: 400 },
-      "editor",
-      "tab",
-    );
+    const action = classifySaveResult({ conflict: true, mtime: 400 }, "editor", "tab");
     expect(action.type).toBe("real-conflict");
     expect((action as Extract<SaveAction, { type: "real-conflict" }>).diskContent).toBe("");
   });
 
   test("conflict with empty disk content matching empty editor → false-conflict", () => {
-    const action = classifySaveResult(
-      { conflict: true, content: "", mtime: 500 },
-      "",
-      "tab",
-    );
+    const action = classifySaveResult({ conflict: true, content: "", mtime: 500 }, "", "tab");
     expect(action.type).toBe("false-conflict");
   });
 });

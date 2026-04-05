@@ -2,6 +2,7 @@
 /// Verifies that domToMarkdown(renderMarkdown(md)) produces equivalent output.
 
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+
 import { setupDOM } from "./test-helper.ts";
 
 describe("roundtrip", () => {
@@ -27,24 +28,60 @@ describe("roundtrip", () => {
     cleanup();
   });
 
-  test("h1 roundtrip", () => { expect(roundtrip("# Hello")).toBe("# Hello"); });
-  test("h2 roundtrip", () => { expect(roundtrip("## Sub")).toBe("## Sub"); });
-  test("h6 roundtrip", () => { expect(roundtrip("###### Deep")).toBe("###### Deep"); });
-  test("paragraph roundtrip", () => { expect(roundtrip("Hello world")).toBe("Hello world"); });
-  test("two paragraphs", () => { expect(roundtrip("First\n\nSecond")).toBe("First\n\nSecond"); });
-  test("bold roundtrip", () => { expect(roundtrip("**bold**")).toBe("**bold**"); });
-  test("italic roundtrip", () => { expect(roundtrip("*italic*")).toBe("*italic*"); });
-  test("inline code roundtrip", () => { expect(roundtrip("use `foo` here")).toBe("use `foo` here"); });
-  test("strikethrough roundtrip", () => { expect(roundtrip("~~deleted~~")).toBe("~~deleted~~"); });
-  test("highlight roundtrip", () => { expect(roundtrip("==marked==")).toBe("==marked=="); });
-  test("link roundtrip", () => { expect(roundtrip("[text](http://url)")).toBe("[text](http://url)"); });
-  test("wiki-link roundtrip", () => { expect(roundtrip("[[my note]]")).toBe("[[my note]]"); });
-  test("wiki-link pipe roundtrip", () => { expect(roundtrip("[[target|display]]")).toBe("[[target|display]]"); });
-  test("image roundtrip", () => { expect(roundtrip("![alt](src.png)")).toBe("![alt](src.png)"); });
-  test("wiki-image roundtrip", () => { expect(roundtrip("![[photo.webp]]")).toBe("![[photo.webp]]"); });
-  test("hr roundtrip", () => { expect(roundtrip("---")).toBe("---"); });
-  test("ul roundtrip", () => { expect(roundtrip("- one\n- two\n- three")).toBe("- one\n- two\n- three"); });
-  test("ol roundtrip", () => { expect(roundtrip("1. first\n2. second")).toBe("1. first\n2. second"); });
+  test("h1 roundtrip", () => {
+    expect(roundtrip("# Hello")).toBe("# Hello");
+  });
+  test("h2 roundtrip", () => {
+    expect(roundtrip("## Sub")).toBe("## Sub");
+  });
+  test("h6 roundtrip", () => {
+    expect(roundtrip("###### Deep")).toBe("###### Deep");
+  });
+  test("paragraph roundtrip", () => {
+    expect(roundtrip("Hello world")).toBe("Hello world");
+  });
+  test("two paragraphs", () => {
+    expect(roundtrip("First\n\nSecond")).toBe("First\n\nSecond");
+  });
+  test("bold roundtrip", () => {
+    expect(roundtrip("**bold**")).toBe("**bold**");
+  });
+  test("italic roundtrip", () => {
+    expect(roundtrip("*italic*")).toBe("*italic*");
+  });
+  test("inline code roundtrip", () => {
+    expect(roundtrip("use `foo` here")).toBe("use `foo` here");
+  });
+  test("strikethrough roundtrip", () => {
+    expect(roundtrip("~~deleted~~")).toBe("~~deleted~~");
+  });
+  test("highlight roundtrip", () => {
+    expect(roundtrip("==marked==")).toBe("==marked==");
+  });
+  test("link roundtrip", () => {
+    expect(roundtrip("[text](http://url)")).toBe("[text](http://url)");
+  });
+  test("wiki-link roundtrip", () => {
+    expect(roundtrip("[[my note]]")).toBe("[[my note]]");
+  });
+  test("wiki-link pipe roundtrip", () => {
+    expect(roundtrip("[[target|display]]")).toBe("[[target|display]]");
+  });
+  test("image roundtrip", () => {
+    expect(roundtrip("![alt](src.png)")).toBe("![alt](src.png)");
+  });
+  test("wiki-image roundtrip", () => {
+    expect(roundtrip("![[photo.webp]]")).toBe("![[photo.webp]]");
+  });
+  test("hr roundtrip", () => {
+    expect(roundtrip("---")).toBe("---");
+  });
+  test("ul roundtrip", () => {
+    expect(roundtrip("- one\n- two\n- three")).toBe("- one\n- two\n- three");
+  });
+  test("ol roundtrip", () => {
+    expect(roundtrip("1. first\n2. second")).toBe("1. first\n2. second");
+  });
 
   test("code block roundtrip", () => {
     expect(roundtrip("```js\nconst x = 1;\n```")).toBe("```js\nconst x = 1;\n```");
@@ -107,37 +144,43 @@ describe("roundtrip", () => {
   });
 
   test("complex doc heading", () => {
-    const doc = "# Title\n\nSome **bold** and *italic* text.\n\n- item 1\n- item 2\n\n```js\nconst x = 1;\n```\n\n> A quote";
+    const doc =
+      "# Title\n\nSome **bold** and *italic* text.\n\n- item 1\n- item 2\n\n```js\nconst x = 1;\n```\n\n> A quote";
     const rt = roundtrip(doc);
     expect(rt).toContain("# Title");
   });
 
   test("complex doc bold", () => {
-    const doc = "# Title\n\nSome **bold** and *italic* text.\n\n- item 1\n- item 2\n\n```js\nconst x = 1;\n```\n\n> A quote";
+    const doc =
+      "# Title\n\nSome **bold** and *italic* text.\n\n- item 1\n- item 2\n\n```js\nconst x = 1;\n```\n\n> A quote";
     const rt = roundtrip(doc);
     expect(rt).toContain("**bold**");
   });
 
   test("complex doc italic", () => {
-    const doc = "# Title\n\nSome **bold** and *italic* text.\n\n- item 1\n- item 2\n\n```js\nconst x = 1;\n```\n\n> A quote";
+    const doc =
+      "# Title\n\nSome **bold** and *italic* text.\n\n- item 1\n- item 2\n\n```js\nconst x = 1;\n```\n\n> A quote";
     const rt = roundtrip(doc);
     expect(rt).toContain("*italic*");
   });
 
   test("complex doc list", () => {
-    const doc = "# Title\n\nSome **bold** and *italic* text.\n\n- item 1\n- item 2\n\n```js\nconst x = 1;\n```\n\n> A quote";
+    const doc =
+      "# Title\n\nSome **bold** and *italic* text.\n\n- item 1\n- item 2\n\n```js\nconst x = 1;\n```\n\n> A quote";
     const rt = roundtrip(doc);
     expect(rt).toContain("- item 1");
   });
 
   test("complex doc code", () => {
-    const doc = "# Title\n\nSome **bold** and *italic* text.\n\n- item 1\n- item 2\n\n```js\nconst x = 1;\n```\n\n> A quote";
+    const doc =
+      "# Title\n\nSome **bold** and *italic* text.\n\n- item 1\n- item 2\n\n```js\nconst x = 1;\n```\n\n> A quote";
     const rt = roundtrip(doc);
     expect(rt).toContain("```js");
   });
 
   test("complex doc quote", () => {
-    const doc = "# Title\n\nSome **bold** and *italic* text.\n\n- item 1\n- item 2\n\n```js\nconst x = 1;\n```\n\n> A quote";
+    const doc =
+      "# Title\n\nSome **bold** and *italic* text.\n\n- item 1\n- item 2\n\n```js\nconst x = 1;\n```\n\n> A quote";
     const rt = roundtrip(doc);
     expect(rt).toContain("> A quote");
   });

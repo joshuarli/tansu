@@ -1,4 +1,5 @@
 import { describe, test, expect, afterAll } from "bun:test";
+
 import {
   searchNotes,
   getNote,
