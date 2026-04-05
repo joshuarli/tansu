@@ -1,90 +1,106 @@
-import { setupDOM, assertEqual, assert } from "./test-helper.ts";
-const cleanup = setupDOM();
+import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+import { setupDOM } from "./test-helper.ts";
 
-const { createPalette } = await import("./palette.ts");
-const {
-  toggle: togglePalette,
-  open: openPalette,
-  close: closePalette,
-  isOpen: isPaletteOpen,
-  registerCommands,
-} = createPalette();
+describe("palette", () => {
+  let cleanup: () => void;
+  let togglePalette: () => void;
+  let openPalette: () => void;
+  let closePalette: () => void;
+  let isPaletteOpen: () => boolean;
+  let registerCommands: (cmds: Array<{ label: string; shortcut: string; action: () => void }>) => void;
+  let actionCalled = false;
 
-// Initially closed
-assertEqual(isPaletteOpen(), false, "initially closed");
+  beforeAll(async () => {
+    cleanup = setupDOM();
 
-// Register commands
-let actionCalled = false;
-registerCommands([
-  {
-    label: "Save",
-    shortcut: "⌘S",
-    action: () => {
-      actionCalled = true;
-    },
-  },
-  { label: "Search", shortcut: "⌘K", action: () => {} },
-  { label: "New note", shortcut: "⌘T", action: () => {} },
-]);
+    const { createPalette } = await import("./palette.ts");
+    const p = createPalette();
+    togglePalette = p.toggle;
+    openPalette = p.open;
+    closePalette = p.close;
+    isPaletteOpen = p.isOpen;
+    registerCommands = p.registerCommands;
 
-// Open
-openPalette();
-assertEqual(isPaletteOpen(), true, "open");
-const overlay = document.getElementById("palette-overlay")!;
-assert(!overlay.classList.contains("hidden"), "overlay visible");
+    registerCommands([
+      {
+        label: "Save",
+        shortcut: "⌘S",
+        action: () => {
+          actionCalled = true;
+        },
+      },
+      { label: "Search", shortcut: "⌘K", action: () => {} },
+      { label: "New note", shortcut: "⌘T", action: () => {} },
+    ]);
+  });
 
-// Items rendered
-const listEl = document.getElementById("palette-list")!;
-assertEqual(listEl.children.length, 3, "all commands rendered");
-assert(listEl.children[0]!.textContent!.includes("Save"), "first command is Save");
+  afterAll(() => {
+    closePalette();
+    cleanup();
+  });
 
-// Toggle closes
-togglePalette();
-assertEqual(isPaletteOpen(), false, "toggle closes");
-assert(overlay.classList.contains("hidden"), "overlay hidden");
+  test("palette lifecycle", () => {
+    // Initially closed
+    expect(isPaletteOpen()).toBe(false);
 
-// Toggle opens again
-togglePalette();
-assertEqual(isPaletteOpen(), true, "toggle reopens");
+    // Open
+    openPalette();
+    expect(isPaletteOpen()).toBe(true);
+    const overlay = document.getElementById("palette-overlay")!;
+    expect(overlay.classList.contains("hidden")).toBe(false);
 
-// Filter via input
-const input = document.getElementById("palette-input")! as HTMLInputElement;
-input.value = "sav";
-input.dispatchEvent(new Event("input"));
-assertEqual(listEl.children.length, 1, "filtered to 1");
-assert(listEl.children[0]!.textContent!.includes("Save"), "filtered shows Save");
+    // Items rendered
+    const listEl = document.getElementById("palette-list")!;
+    expect(listEl.children.length).toBe(3);
+    expect(listEl.children[0]!.textContent!.includes("Save")).toBe(true);
 
-// Clear filter shows all
-input.value = "";
-input.dispatchEvent(new Event("input"));
-assertEqual(listEl.children.length, 3, "cleared filter shows all");
+    // Toggle closes
+    togglePalette();
+    expect(isPaletteOpen()).toBe(false);
+    expect(overlay.classList.contains("hidden")).toBe(true);
 
-// Keyboard: Escape closes
-closePalette();
-openPalette();
-input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
-assertEqual(isPaletteOpen(), false, "escape closes");
+    // Toggle opens again
+    togglePalette();
+    expect(isPaletteOpen()).toBe(true);
 
-// Keyboard: Enter selects
-openPalette();
-input.value = "";
-input.dispatchEvent(new Event("input"));
-actionCalled = false;
-input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
-assertEqual(actionCalled, true, "enter triggers action");
-assertEqual(isPaletteOpen(), false, "closed after enter");
+    // Filter via input
+    const input = document.getElementById("palette-input")! as HTMLInputElement;
+    input.value = "sav";
+    input.dispatchEvent(new Event("input"));
+    expect(listEl.children.length).toBe(1);
+    expect(listEl.children[0]!.textContent!.includes("Save")).toBe(true);
 
-// Keyboard: ArrowDown moves selection
-openPalette();
-input.value = "";
-input.dispatchEvent(new Event("input"));
-input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
-assert(listEl.children[1]!.classList.contains("selected"), "arrow down selects second");
+    // Clear filter shows all
+    input.value = "";
+    input.dispatchEvent(new Event("input"));
+    expect(listEl.children.length).toBe(3);
 
-// ArrowUp wraps
-input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }));
-assert(listEl.children[0]!.classList.contains("selected"), "arrow up wraps back");
+    // Keyboard: Escape closes
+    closePalette();
+    openPalette();
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    expect(isPaletteOpen()).toBe(false);
 
-closePalette();
-cleanup();
-console.log("All palette tests passed");
+    // Keyboard: Enter selects
+    openPalette();
+    input.value = "";
+    input.dispatchEvent(new Event("input"));
+    actionCalled = false;
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    expect(actionCalled).toBe(true);
+    expect(isPaletteOpen()).toBe(false);
+
+    // Keyboard: ArrowDown moves selection
+    openPalette();
+    input.value = "";
+    input.dispatchEvent(new Event("input"));
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+    expect(listEl.children[1]!.classList.contains("selected")).toBe(true);
+
+    // ArrowUp wraps
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }));
+    expect(listEl.children[0]!.classList.contains("selected")).toBe(true);
+
+    closePalette();
+  });
+});

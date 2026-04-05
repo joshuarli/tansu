@@ -1,73 +1,128 @@
-import { computeDiff } from "./diff.ts";
-import { assertEqual, assert } from "./test-helper.ts";
+import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+import { computeDiff, renderDiff } from "./diff.ts";
+import type { DiffHunk } from "./diff.ts";
+import { setupDOM } from "./test-helper.ts";
 
-// No changes
-{
-  const hunks = computeDiff("hello\nworld", "hello\nworld");
-  assertEqual(hunks.length, 0, "identical texts produce no hunks");
-}
+describe("computeDiff", () => {
+  test("identical texts produce no hunks", () => {
+    const hunks = computeDiff("hello\nworld", "hello\nworld");
+    expect(hunks.length).toBe(0);
+  });
 
-// Single line change
-{
-  const hunks = computeDiff("hello\nworld", "hello\nearth");
-  assertEqual(hunks.length, 1, "one hunk for single change");
-  const lines = hunks[0]!.lines;
-  assert(
-    lines.some((l) => l.type === "del" && l.text === "world"),
-    "deleted line present",
-  );
-  assert(
-    lines.some((l) => l.type === "add" && l.text === "earth"),
-    "added line present",
-  );
-  assert(
-    lines.some((l) => l.type === "ctx" && l.text === "hello"),
-    "context line present",
-  );
-}
+  test("one hunk for single change", () => {
+    const hunks = computeDiff("hello\nworld", "hello\nearth");
+    expect(hunks.length).toBe(1);
+    const lines = hunks[0]!.lines;
+    expect(lines.some((l) => l.type === "del" && l.text === "world")).toBe(true);
+    expect(lines.some((l) => l.type === "add" && l.text === "earth")).toBe(true);
+    expect(lines.some((l) => l.type === "ctx" && l.text === "hello")).toBe(true);
+  });
 
-// Pure addition
-{
-  const hunks = computeDiff("a\nb", "a\nb\nc");
-  assertEqual(hunks.length, 1, "one hunk for addition");
-  const addLines = hunks[0]!.lines.filter((l) => l.type === "add");
-  assertEqual(addLines.length, 1, "one added line");
-  assertEqual(addLines[0]!.text, "c", "added line text");
-}
+  test("one hunk for addition", () => {
+    const hunks = computeDiff("a\nb", "a\nb\nc");
+    expect(hunks.length).toBe(1);
+    const addLines = hunks[0]!.lines.filter((l) => l.type === "add");
+    expect(addLines.length).toBe(1);
+    expect(addLines[0]!.text).toBe("c");
+  });
 
-// Pure deletion
-{
-  const hunks = computeDiff("a\nb\nc", "a\nb");
-  assertEqual(hunks.length, 1, "one hunk for deletion");
-  const delLines = hunks[0]!.lines.filter((l) => l.type === "del");
-  assertEqual(delLines.length, 1, "one deleted line");
-  assertEqual(delLines[0]!.text, "c", "deleted line text");
-}
+  test("one hunk for deletion", () => {
+    const hunks = computeDiff("a\nb\nc", "a\nb");
+    expect(hunks.length).toBe(1);
+    const delLines = hunks[0]!.lines.filter((l) => l.type === "del");
+    expect(delLines.length).toBe(1);
+    expect(delLines[0]!.text).toBe("c");
+  });
 
-// Changes far apart produce separate hunks
-{
-  const oldLines = Array.from({ length: 20 }, (_, i) => `line ${i}`);
-  const newLines = [...oldLines];
-  newLines[2] = "changed 2";
-  newLines[17] = "changed 17";
-  const hunks = computeDiff(oldLines.join("\n"), newLines.join("\n"));
-  assert(hunks.length >= 2, `far apart changes produce multiple hunks (got ${hunks.length})`);
-}
+  test("far apart changes produce multiple hunks", () => {
+    const oldLines = Array.from({ length: 20 }, (_, i) => `line ${i}`);
+    const newLines = [...oldLines];
+    newLines[2] = "changed 2";
+    newLines[17] = "changed 17";
+    const hunks = computeDiff(oldLines.join("\n"), newLines.join("\n"));
+    expect(hunks.length >= 2).toBe(true);
+  });
 
-// Empty old (all additions)
-{
-  const hunks = computeDiff("", "hello\nworld");
-  assertEqual(hunks.length, 1, "one hunk for all-add");
-  const addLines = hunks[0]!.lines.filter((l) => l.type === "add");
-  assert(addLines.length >= 1, "has added lines");
-}
+  test("one hunk for all-add", () => {
+    const hunks = computeDiff("", "hello\nworld");
+    expect(hunks.length).toBe(1);
+    const addLines = hunks[0]!.lines.filter((l) => l.type === "add");
+    expect(addLines.length >= 1).toBe(true);
+  });
 
-// Empty new (all deletions)
-{
-  const hunks = computeDiff("hello\nworld", "");
-  assertEqual(hunks.length, 1, "one hunk for all-del");
-  const delLines = hunks[0]!.lines.filter((l) => l.type === "del");
-  assert(delLines.length >= 1, "has deleted lines");
-}
+  test("one hunk for all-del", () => {
+    const hunks = computeDiff("hello\nworld", "");
+    expect(hunks.length).toBe(1);
+    const delLines = hunks[0]!.lines.filter((l) => l.type === "del");
+    expect(delLines.length >= 1).toBe(true);
+  });
+});
 
-console.log("All diff tests passed");
+describe("renderDiff", () => {
+  let cleanup: () => void;
+
+  beforeAll(() => {
+    cleanup = setupDOM();
+  });
+
+  afterAll(() => {
+    cleanup();
+  });
+
+  test("empty hunks renders 'No changes.' text", () => {
+    const el = renderDiff([]);
+    expect(el.className).toBe("diff-view");
+    expect(el.textContent).toBe("No changes.");
+    expect(el.children.length).toBe(0);
+  });
+
+  test("renders hunk header with correct line numbers", () => {
+    const hunks: DiffHunk[] = [
+      {
+        oldStart: 0,
+        newStart: 0,
+        lines: [
+          { type: "ctx", text: "hello" },
+          { type: "del", text: "world" },
+          { type: "add", text: "earth" },
+        ],
+      },
+    ];
+    const el = renderDiff(hunks);
+    expect(el.className).toBe("diff-view");
+
+    const hunkEl = el.querySelector(".diff-hunk")!;
+    expect(hunkEl !== null).toBe(true);
+
+    const header = hunkEl.querySelector(".diff-hunk-header")!;
+    expect(header.textContent).toBe("@@ -1 +1 @@");
+
+    const lines = hunkEl.querySelectorAll(".diff-line");
+    expect(lines.length).toBe(3);
+
+    expect(lines[0]!.classList.contains("diff-ctx")).toBe(true);
+    expect(lines[0]!.textContent).toContain("hello");
+
+    expect(lines[1]!.classList.contains("diff-del")).toBe(true);
+    expect(lines[1]!.textContent).toContain("-");
+    expect(lines[1]!.textContent).toContain("world");
+
+    expect(lines[2]!.classList.contains("diff-add")).toBe(true);
+    expect(lines[2]!.textContent).toContain("+");
+    expect(lines[2]!.textContent).toContain("earth");
+  });
+
+  test("renders multiple hunks", () => {
+    const hunks: DiffHunk[] = [
+      { oldStart: 0, newStart: 0, lines: [{ type: "del", text: "a" }] },
+      { oldStart: 10, newStart: 10, lines: [{ type: "add", text: "b" }] },
+    ];
+    const el = renderDiff(hunks);
+    const hunkEls = el.querySelectorAll(".diff-hunk");
+    expect(hunkEls.length).toBe(2);
+
+    const headers = el.querySelectorAll(".diff-hunk-header");
+    expect(headers[0]!.textContent).toBe("@@ -1 +1 @@");
+    expect(headers[1]!.textContent).toBe("@@ -11 +11 @@");
+  });
+});

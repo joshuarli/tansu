@@ -1,45 +1,6 @@
-/// Shared test utilities: DOM setup via happy-dom, assertions, fetch mocking.
+/// Shared test utilities: DOM setup via happy-dom, fetch mocking.
 
 import { Window } from "happy-dom";
-
-export function assert(cond: boolean, msg: string) {
-  if (!cond) throw new Error(`FAIL: ${msg}`);
-}
-
-export function assertEqual<T>(actual: T, expected: T, msg: string) {
-  if (actual !== expected)
-    throw new Error(
-      `FAIL: ${msg}: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`,
-    );
-}
-
-export function assertContains(hay: string, needle: string, msg: string) {
-  assert(hay.includes(needle), `${msg}: expected "${needle}" in "${hay}"`);
-}
-
-export function assertNotContains(hay: string, needle: string, msg: string) {
-  assert(!hay.includes(needle), `${msg}: unexpected "${needle}" in "${hay}"`);
-}
-
-export function assertThrows(fn: () => void, msg: string) {
-  let threw = false;
-  try {
-    fn();
-  } catch {
-    threw = true;
-  }
-  assert(threw, `${msg}: expected to throw`);
-}
-
-export async function assertRejects(fn: () => Promise<unknown>, msg: string) {
-  let threw = false;
-  try {
-    await fn();
-  } catch {
-    threw = true;
-  }
-  assert(threw, `${msg}: expected to reject`);
-}
 
 const TANSU_HTML = `<!doctype html>
 <html><head></head><body>

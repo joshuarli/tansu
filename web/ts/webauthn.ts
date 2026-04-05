@@ -4,14 +4,14 @@
 // different outputs for different apps. Not secret.
 let prfSalt: ArrayBuffer | null = null;
 
-async function getPrfSalt(): Promise<ArrayBuffer> {
+export async function getPrfSalt(): Promise<ArrayBuffer> {
   if (!prfSalt) {
     prfSalt = await crypto.subtle.digest("SHA-256", new TextEncoder().encode("tansu-prf-salt-v1"));
   }
   return prfSalt;
 }
 
-function bufToBase64(buf: BufferSource): string {
+export function bufToBase64(buf: BufferSource): string {
   const bytes =
     buf instanceof ArrayBuffer
       ? new Uint8Array(buf)
@@ -19,11 +19,11 @@ function bufToBase64(buf: BufferSource): string {
   return btoa(String.fromCharCode(...bytes));
 }
 
-function bufToBase64url(buf: ArrayBuffer): string {
+export function bufToBase64url(buf: ArrayBuffer): string {
   return bufToBase64(buf).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
-function base64urlToBuf(b64: string): ArrayBuffer {
+export function base64urlToBuf(b64: string): ArrayBuffer {
   const padded =
     b64.replace(/-/g, "+").replace(/_/g, "/") + "==".slice(0, (4 - (b64.length % 4)) % 4);
   const binary = atob(padded);

@@ -1,6 +1,7 @@
-import { matchPattern, patterns } from "./inline-transforms.ts";
+import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+import { matchPattern, patterns, checkInlineTransform } from "./inline-transforms.ts";
 import type { InlinePattern } from "./inline-transforms.ts";
-import { assertEqual } from "./test-helper.ts";
+import { setupDOM } from "./test-helper.ts";
 
 const bold = patterns[0]!;
 const del_ = patterns[1]!;
@@ -12,62 +13,88 @@ function m(text: string, pos: number, pat: InlinePattern) {
   return matchPattern(text, pos, pat);
 }
 
-// Bold: **text**
-assertEqual(m("**bold**", 8, bold)?.content, "bold", "bold basic");
-assertEqual(m("**bold**", 8, bold)?.start, 0, "bold start");
-assertEqual(m("hello **world**", 15, bold)?.content, "world", "bold mid-text");
-assertEqual(m("**a**", 5, bold)?.content, "a", "bold single char");
-assertEqual(m("****", 4, bold), null, "bold empty content");
-assertEqual(m("** bold**", 9, bold), null, "bold leading space");
-assertEqual(m("**bold **", 9, bold), null, "bold trailing space");
-assertEqual(m("*bold**", 7, bold), null, "bold no opening pair");
+describe("bold (**text**)", () => {
+  test("bold basic", () => { expect(m("**bold**", 8, bold)?.content).toBe("bold") });
+  test("bold start", () => { expect(m("**bold**", 8, bold)?.start).toBe(0) });
+  test("bold mid-text", () => { expect(m("hello **world**", 15, bold)?.content).toBe("world") });
+  test("bold single char", () => { expect(m("**a**", 5, bold)?.content).toBe("a") });
+  test("bold empty content", () => { expect(m("****", 4, bold)).toBe(null) });
+  test("bold leading space", () => { expect(m("** bold**", 9, bold)).toBe(null) });
+  test("bold trailing space", () => { expect(m("**bold **", 9, bold)).toBe(null) });
+  test("bold no opening pair", () => { expect(m("*bold**", 7, bold)).toBe(null) });
+});
 
-// Italic: *text*
-assertEqual(m("*italic*", 8, em)?.content, "italic", "italic basic");
-assertEqual(m("*a*", 3, em)?.content, "a", "italic single char");
-assertEqual(m("**bold**", 8, em), null, "italic rejects ** closing");
-assertEqual(m("**bold*", 7, em), null, "italic rejects ** opening");
-assertEqual(m("hello *world*", 13, em)?.content, "world", "italic mid-text");
-assertEqual(m("* italic*", 9, em), null, "italic leading space");
-assertEqual(m("*italic *", 9, em), null, "italic trailing space");
+describe("italic (*text*)", () => {
+  test("italic basic", () => { expect(m("*italic*", 8, em)?.content).toBe("italic") });
+  test("italic single char", () => { expect(m("*a*", 3, em)?.content).toBe("a") });
+  test("italic rejects ** closing", () => { expect(m("**bold**", 8, em)).toBe(null) });
+  test("italic rejects ** opening", () => { expect(m("**bold*", 7, em)).toBe(null) });
+  test("italic mid-text", () => { expect(m("hello *world*", 13, em)?.content).toBe("world") });
+  test("italic leading space", () => { expect(m("* italic*", 9, em)).toBe(null) });
+  test("italic trailing space", () => { expect(m("*italic *", 9, em)).toBe(null) });
+});
 
-// Code: `text` (requires trailing space)
-assertEqual(m("`code` ", 7, code)?.content, "code", "code basic (space trigger)");
-assertEqual(m("hello `x` ", 10, code)?.content, "x", "code single char (space trigger)");
-assertEqual(m("`code`\u00A0", 7, code)?.content, "code", "code nbsp trigger");
-assertEqual(m("`code`", 6, code), null, "code no trailing space");
-assertEqual(m("`` ", 3, code), null, "code empty");
-assertEqual(m("``` ", 4, code), null, "triple backtick not matched as code");
+describe("code (`text`)", () => {
+  test("code basic (space trigger)", () => { expect(m("`code` ", 7, code)?.content).toBe("code") });
+  test("code single char (space trigger)", () => { expect(m("hello `x` ", 10, code)?.content).toBe("x") });
+  test("code nbsp trigger", () => { expect(m("`code`\u00A0", 7, code)?.content).toBe("code") });
+  test("code no trailing space", () => { expect(m("`code`", 6, code)).toBe(null) });
+  test("code empty", () => { expect(m("`` ", 3, code)).toBe(null) });
+  test("triple backtick not matched as code", () => { expect(m("``` ", 4, code)).toBe(null) });
+});
 
-// Strikethrough: ~~text~~
-assertEqual(m("~~strike~~", 10, del_)?.content, "strike", "del basic");
-assertEqual(m("~~~~", 4, del_), null, "del empty");
+describe("strikethrough (~~text~~)", () => {
+  test("del basic", () => { expect(m("~~strike~~", 10, del_)?.content).toBe("strike") });
+  test("del empty", () => { expect(m("~~~~", 4, del_)).toBe(null) });
+});
 
-// Highlight: ==text==
-assertEqual(m("==mark==", 8, mark)?.content, "mark", "mark basic");
+describe("highlight (==text==)", () => {
+  test("mark basic", () => { expect(m("==mark==", 8, mark)?.content).toBe("mark") });
+});
 
-// Cross-pattern: ** should not match as two separate *
-assertEqual(m("**bold**", 8, em), null, "no italic inside bold markers");
+describe("cross-pattern", () => {
+  test("no italic inside bold markers", () => { expect(m("**bold**", 8, em)).toBe(null) });
 
-// Pattern order: bold takes priority over italic
-let matched = false;
-for (const pat of patterns) {
-  const result = matchPattern("**bold**", 8, pat);
-  if (result) {
-    assertEqual(pat.tag, "strong", "bold matches before italic");
-    matched = true;
-    break;
-  }
-}
-assertEqual(matched, true, "some pattern matched **bold**");
+  test("bold matches before italic", () => {
+    let matched = false;
+    for (const pat of patterns) {
+      const result = matchPattern("**bold**", 8, pat);
+      if (result) {
+        expect(pat.tag).toBe("strong");
+        matched = true;
+        break;
+      }
+    }
+    expect(matched).toBe(true);
+  });
 
-// Nested scenario: *italic* after **bold** text
-assertEqual(m("**bold** then *italic*", 22, em)?.content, "italic", "italic after bold text");
+  test("italic after bold text", () => { expect(m("**bold** then *italic*", 22, em)?.content).toBe("italic") });
+});
 
-// Edge: cursor not at end of match
-assertEqual(m("**bold** more", 8, bold)?.content, "bold", "bold with trailing text");
+describe("edge cases", () => {
+  test("bold with trailing text", () => { expect(m("**bold** more", 8, bold)?.content).toBe("bold") });
+  test("bold nearest match", () => { expect(m("a **b** c **d**", 15, bold)?.content).toBe("d") });
+});
 
-// Edge: marker appears multiple times — match closest
-assertEqual(m("a **b** c **d**", 15, bold)?.content, "d", "bold nearest match");
+// checkInlineTransform relies on window.getSelection() and document.execCommand(),
+// both of which are not fully supported by happy-dom. We can test the early-return
+// path (no selection), but the happy path that actually transforms DOM content
+// would require a real browser environment or more extensive mocking than is
+// worthwhile here.
+describe("checkInlineTransform", () => {
+  let cleanup: () => void;
 
-console.log("All inline-transforms tests passed");
+  beforeAll(() => {
+    cleanup = setupDOM();
+  });
+
+  afterAll(() => {
+    cleanup();
+  });
+
+  test("returns false when no selection exists", () => {
+    // happy-dom's getSelection returns null or an empty selection
+    const result = checkInlineTransform();
+    expect(result).toBe(false);
+  });
+});

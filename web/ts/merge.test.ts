@@ -1,87 +1,36 @@
+import { describe, test, expect } from "bun:test";
 import { merge3 } from "./merge.ts";
-import { assertEqual } from "./test-helper.ts";
 
-// No changes
-assertEqual(merge3("a\nb\nc", "a\nb\nc", "a\nb\nc"), "a\nb\nc", "no changes");
-
-// Only ours changed
-assertEqual(merge3("a\nb\nc", "a\nB\nc", "a\nb\nc"), "a\nB\nc", "ours changed");
-
-// Only theirs changed
-assertEqual(merge3("a\nb\nc", "a\nb\nc", "a\nB\nc"), "a\nB\nc", "theirs changed");
-
-// Both changed different lines
-assertEqual(merge3("a\nb\nc", "A\nb\nc", "a\nb\nC"), "A\nb\nC", "both changed different lines");
-
-// Both changed same line identically
-assertEqual(merge3("a\nb\nc", "a\nX\nc", "a\nX\nc"), "a\nX\nc", "both changed same line same way");
-
-// Conflict: both changed same line differently
-assertEqual(merge3("a\nb\nc", "a\nX\nc", "a\nY\nc"), null, "conflict same line");
-
-// Ours deleted a line
-assertEqual(merge3("a\nb\nc", "a\nc", "a\nb\nc"), "a\nc", "ours deleted line");
-
-// Theirs deleted a line
-assertEqual(merge3("a\nb\nc", "a\nb\nc", "a\nc"), "a\nc", "theirs deleted line");
-
-// Both deleted same line
-assertEqual(merge3("a\nb\nc", "a\nc", "a\nc"), "a\nc", "both deleted same line");
-
-// Ours added lines at end (previously caused infinite loop)
-assertEqual(merge3("a\nb", "a\nb\nc\nd", "a\nb"), "a\nb\nc\nd", "ours added at end");
-
-// Theirs added lines at end
-assertEqual(merge3("a\nb", "a\nb", "a\nb\nc\nd"), "a\nb\nc\nd", "theirs added at end");
-
-// Both added same lines at end
-assertEqual(merge3("a\nb", "a\nb\nc", "a\nb\nc"), "a\nb\nc", "both added same at end");
-
-// Both added different lines at end — conflict
-assertEqual(merge3("a\nb", "a\nb\nc", "a\nb\nd"), null, "both added different at end");
-
-// Empty base, ours adds content
-assertEqual(merge3("", "hello", ""), "hello", "empty base ours added");
-
-// Empty base, theirs adds content
-assertEqual(merge3("", "", "hello"), "hello", "empty base theirs added");
-
-// Single line files
-assertEqual(merge3("old", "new", "old"), "new", "single line ours");
-assertEqual(merge3("old", "old", "new"), "new", "single line theirs");
-assertEqual(merge3("old", "new", "new"), "new", "single line both same");
-assertEqual(merge3("old", "a", "b"), null, "single line conflict");
-
-// Replacements on different lines
-assertEqual(
-  merge3("a\nb\nc\nd", "A\nb\nc\nd", "a\nb\nc\nD"),
-  "A\nb\nc\nD",
-  "replace different lines",
-);
-
-// Multiple replacements by one side
-assertEqual(merge3("a\nb\nc", "A\nB\nC", "a\nb\nc"), "A\nB\nC", "ours replaces all");
-assertEqual(merge3("a\nb\nc", "a\nb\nc", "X\nY\nZ"), "X\nY\nZ", "theirs replaces all");
-
-// Both replace all identically
-assertEqual(merge3("a\nb\nc", "X\nY\nZ", "X\nY\nZ"), "X\nY\nZ", "both replace all same");
-
-// Both replace all differently — conflict
-assertEqual(merge3("a\nb\nc", "X\nY\nZ", "A\nB\nC"), null, "both replace all different");
-
-// Delete first line
-assertEqual(merge3("a\nb\nc", "b\nc", "a\nb\nc"), "b\nc", "ours deleted first");
-
-// Delete last line
-assertEqual(merge3("a\nb\nc", "a\nb", "a\nb\nc"), "a\nb", "ours deleted last");
-
-// Ours adds at start (insert before first line)
-assertEqual(merge3("b\nc", "a\nb\nc", "b\nc"), "a\nb\nc", "ours added at start");
-
-// Mixed: ours edits, theirs appends
-assertEqual(merge3("a\nb", "A\nb", "a\nb\nc"), "A\nb\nc", "ours edits theirs appends");
-
-// Both empty
-assertEqual(merge3("", "", ""), "", "all empty");
-
-console.log("All merge tests passed");
+describe("merge3", () => {
+  test("no changes", () => { expect(merge3("a\nb\nc", "a\nb\nc", "a\nb\nc")).toBe("a\nb\nc") });
+  test("ours changed", () => { expect(merge3("a\nb\nc", "a\nB\nc", "a\nb\nc")).toBe("a\nB\nc") });
+  test("theirs changed", () => { expect(merge3("a\nb\nc", "a\nb\nc", "a\nB\nc")).toBe("a\nB\nc") });
+  test("both changed different lines", () => { expect(merge3("a\nb\nc", "A\nb\nc", "a\nb\nC")).toBe("A\nb\nC") });
+  test("both changed same line same way", () => { expect(merge3("a\nb\nc", "a\nX\nc", "a\nX\nc")).toBe("a\nX\nc") });
+  test("conflict same line", () => { expect(merge3("a\nb\nc", "a\nX\nc", "a\nY\nc")).toBe(null) });
+  test("ours deleted line", () => { expect(merge3("a\nb\nc", "a\nc", "a\nb\nc")).toBe("a\nc") });
+  test("theirs deleted line", () => { expect(merge3("a\nb\nc", "a\nb\nc", "a\nc")).toBe("a\nc") });
+  test("both deleted same line", () => { expect(merge3("a\nb\nc", "a\nc", "a\nc")).toBe("a\nc") });
+  test("ours added at end", () => { expect(merge3("a\nb", "a\nb\nc\nd", "a\nb")).toBe("a\nb\nc\nd") });
+  test("theirs added at end", () => { expect(merge3("a\nb", "a\nb", "a\nb\nc\nd")).toBe("a\nb\nc\nd") });
+  test("both added same at end", () => { expect(merge3("a\nb", "a\nb\nc", "a\nb\nc")).toBe("a\nb\nc") });
+  test("both added different at end", () => { expect(merge3("a\nb", "a\nb\nc", "a\nb\nd")).toBe(null) });
+  test("empty base ours added", () => { expect(merge3("", "hello", "")).toBe("hello") });
+  test("empty base theirs added", () => { expect(merge3("", "", "hello")).toBe("hello") });
+  test("single line ours", () => { expect(merge3("old", "new", "old")).toBe("new") });
+  test("single line theirs", () => { expect(merge3("old", "old", "new")).toBe("new") });
+  test("single line both same", () => { expect(merge3("old", "new", "new")).toBe("new") });
+  test("single line conflict", () => { expect(merge3("old", "a", "b")).toBe(null) });
+  test("replace different lines", () => {
+    expect(merge3("a\nb\nc\nd", "A\nb\nc\nd", "a\nb\nc\nD")).toBe("A\nb\nc\nD");
+  });
+  test("ours replaces all", () => { expect(merge3("a\nb\nc", "A\nB\nC", "a\nb\nc")).toBe("A\nB\nC") });
+  test("theirs replaces all", () => { expect(merge3("a\nb\nc", "a\nb\nc", "X\nY\nZ")).toBe("X\nY\nZ") });
+  test("both replace all same", () => { expect(merge3("a\nb\nc", "X\nY\nZ", "X\nY\nZ")).toBe("X\nY\nZ") });
+  test("both replace all different", () => { expect(merge3("a\nb\nc", "X\nY\nZ", "A\nB\nC")).toBe(null) });
+  test("ours deleted first", () => { expect(merge3("a\nb\nc", "b\nc", "a\nb\nc")).toBe("b\nc") });
+  test("ours deleted last", () => { expect(merge3("a\nb\nc", "a\nb", "a\nb\nc")).toBe("a\nb") });
+  test("ours added at start", () => { expect(merge3("b\nc", "a\nb\nc", "b\nc")).toBe("a\nb\nc") });
+  test("ours edits theirs appends", () => { expect(merge3("a\nb", "A\nb", "a\nb\nc")).toBe("A\nb\nc") });
+  test("all empty", () => { expect(merge3("", "", "")).toBe("") });
+});

@@ -1,126 +1,144 @@
 /// Roundtrip tests: markdown → HTML → markdown.
 /// Verifies that domToMarkdown(renderMarkdown(md)) produces equivalent output.
 
-import { setupDOM, assertEqual, assertContains } from "./test-helper.ts";
-const cleanup = setupDOM();
+import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+import { setupDOM } from "./test-helper.ts";
 
-const { renderMarkdown } = await import("./markdown.ts");
-const { domToMarkdown } = await import("./serialize.ts");
+describe("roundtrip", () => {
+  let cleanup: () => void;
+  let renderMarkdown: (md: string) => string;
+  let domToMarkdown: (el: HTMLElement) => string;
 
-function roundtrip(md: string): string {
-  const el = document.createElement("div");
-  el.innerHTML = renderMarkdown(md);
-  return domToMarkdown(el);
-}
+  function roundtrip(md: string): string {
+    const el = document.createElement("div");
+    el.innerHTML = renderMarkdown(md);
+    return domToMarkdown(el);
+  }
 
-// Headings
-assertEqual(roundtrip("# Hello"), "# Hello", "h1 roundtrip");
-assertEqual(roundtrip("## Sub"), "## Sub", "h2 roundtrip");
-assertEqual(roundtrip("###### Deep"), "###### Deep", "h6 roundtrip");
+  beforeAll(async () => {
+    cleanup = setupDOM();
+    const mdMod = await import("./markdown.ts");
+    const serMod = await import("./serialize.ts");
+    renderMarkdown = mdMod.renderMarkdown;
+    domToMarkdown = serMod.domToMarkdown;
+  });
 
-// Paragraphs
-assertEqual(roundtrip("Hello world"), "Hello world", "paragraph roundtrip");
+  afterAll(() => {
+    cleanup();
+  });
 
-// Multiple paragraphs
-assertEqual(roundtrip("First\n\nSecond"), "First\n\nSecond", "two paragraphs");
+  test("h1 roundtrip", () => { expect(roundtrip("# Hello")).toBe("# Hello"); });
+  test("h2 roundtrip", () => { expect(roundtrip("## Sub")).toBe("## Sub"); });
+  test("h6 roundtrip", () => { expect(roundtrip("###### Deep")).toBe("###### Deep"); });
+  test("paragraph roundtrip", () => { expect(roundtrip("Hello world")).toBe("Hello world"); });
+  test("two paragraphs", () => { expect(roundtrip("First\n\nSecond")).toBe("First\n\nSecond"); });
+  test("bold roundtrip", () => { expect(roundtrip("**bold**")).toBe("**bold**"); });
+  test("italic roundtrip", () => { expect(roundtrip("*italic*")).toBe("*italic*"); });
+  test("inline code roundtrip", () => { expect(roundtrip("use `foo` here")).toBe("use `foo` here"); });
+  test("strikethrough roundtrip", () => { expect(roundtrip("~~deleted~~")).toBe("~~deleted~~"); });
+  test("highlight roundtrip", () => { expect(roundtrip("==marked==")).toBe("==marked=="); });
+  test("link roundtrip", () => { expect(roundtrip("[text](http://url)")).toBe("[text](http://url)"); });
+  test("wiki-link roundtrip", () => { expect(roundtrip("[[my note]]")).toBe("[[my note]]"); });
+  test("wiki-link pipe roundtrip", () => { expect(roundtrip("[[target|display]]")).toBe("[[target|display]]"); });
+  test("image roundtrip", () => { expect(roundtrip("![alt](src.png)")).toBe("![alt](src.png)"); });
+  test("wiki-image roundtrip", () => { expect(roundtrip("![[photo.webp]]")).toBe("![[photo.webp]]"); });
+  test("hr roundtrip", () => { expect(roundtrip("---")).toBe("---"); });
+  test("ul roundtrip", () => { expect(roundtrip("- one\n- two\n- three")).toBe("- one\n- two\n- three"); });
+  test("ol roundtrip", () => { expect(roundtrip("1. first\n2. second")).toBe("1. first\n2. second"); });
 
-// Bold
-assertEqual(roundtrip("**bold**"), "**bold**", "bold roundtrip");
+  test("code block roundtrip", () => {
+    expect(roundtrip("```js\nconst x = 1;\n```")).toBe("```js\nconst x = 1;\n```");
+  });
 
-// Italic
-assertEqual(roundtrip("*italic*"), "*italic*", "italic roundtrip");
+  test("code block no lang roundtrip", () => {
+    expect(roundtrip("```\nhello\n```")).toBe("```\nhello\n```");
+  });
 
-// Inline code
-assertEqual(roundtrip("use `foo` here"), "use `foo` here", "inline code roundtrip");
+  test("blockquote roundtrip", () => {
+    expect(roundtrip("> quoted text")).toBe("> quoted text");
+  });
 
-// Strikethrough
-assertEqual(roundtrip("~~deleted~~"), "~~deleted~~", "strikethrough roundtrip");
+  test("table header roundtrip", () => {
+    const table = "| A | B |\n| --- | --- |\n| 1 | 2 |";
+    const rt = roundtrip(table);
+    expect(rt).toContain("| A | B |");
+  });
 
-// Highlight
-assertEqual(roundtrip("==marked=="), "==marked==", "highlight roundtrip");
+  test("table row roundtrip", () => {
+    const table = "| A | B |\n| --- | --- |\n| 1 | 2 |";
+    const rt = roundtrip(table);
+    expect(rt).toContain("| 1 | 2 |");
+  });
 
-// Links
-assertEqual(roundtrip("[text](http://url)"), "[text](http://url)", "link roundtrip");
+  test("table separator roundtrip", () => {
+    const table = "| A | B |\n| --- | --- |\n| 1 | 2 |";
+    const rt = roundtrip(table);
+    expect(rt).toContain("---");
+  });
 
-// Wiki-links
-assertEqual(roundtrip("[[my note]]"), "[[my note]]", "wiki-link roundtrip");
-assertEqual(roundtrip("[[target|display]]"), "[[target|display]]", "wiki-link pipe roundtrip");
+  test("callout type roundtrip", () => {
+    const callout = "> [!warning] Be careful\n> This is important";
+    const rt = roundtrip(callout);
+    expect(rt).toContain("[!warning]");
+  });
 
-// Images
-assertEqual(roundtrip("![alt](src.png)"), "![alt](src.png)", "image roundtrip");
+  test("callout title roundtrip", () => {
+    const callout = "> [!warning] Be careful\n> This is important";
+    const rt = roundtrip(callout);
+    expect(rt).toContain("Be careful");
+  });
 
-// Wiki-images
-assertEqual(roundtrip("![[photo.webp]]"), "![[photo.webp]]", "wiki-image roundtrip");
+  test("callout body roundtrip", () => {
+    const callout = "> [!warning] Be careful\n> This is important";
+    const rt = roundtrip(callout);
+    expect(rt).toContain("This is important");
+  });
 
-// HR
-assertEqual(roundtrip("---"), "---", "hr roundtrip");
+  test("nested inline roundtrip", () => {
+    expect(roundtrip("**bold *and italic***")).toBe("**bold *and italic***");
+  });
 
-// Unordered list
-assertEqual(roundtrip("- one\n- two\n- three"), "- one\n- two\n- three", "ul roundtrip");
+  test("code block html entities roundtrip", () => {
+    expect(roundtrip("```\n<div>test</div>\n```")).toBe("```\n<div>test</div>\n```");
+  });
 
-// Ordered list
-assertEqual(roundtrip("1. first\n2. second"), "1. first\n2. second", "ol roundtrip");
+  test("heading + paragraph roundtrip", () => {
+    expect(roundtrip("# Title\n\nBody text")).toBe("# Title\n\nBody text");
+  });
 
-// Fenced code block (with language)
-assertEqual(
-  roundtrip("```js\nconst x = 1;\n```"),
-  "```js\nconst x = 1;\n```",
-  "code block roundtrip",
-);
+  test("complex doc heading", () => {
+    const doc = "# Title\n\nSome **bold** and *italic* text.\n\n- item 1\n- item 2\n\n```js\nconst x = 1;\n```\n\n> A quote";
+    const rt = roundtrip(doc);
+    expect(rt).toContain("# Title");
+  });
 
-// Fenced code block (no language)
-assertEqual(roundtrip("```\nhello\n```"), "```\nhello\n```", "code block no lang roundtrip");
+  test("complex doc bold", () => {
+    const doc = "# Title\n\nSome **bold** and *italic* text.\n\n- item 1\n- item 2\n\n```js\nconst x = 1;\n```\n\n> A quote";
+    const rt = roundtrip(doc);
+    expect(rt).toContain("**bold**");
+  });
 
-// Blockquote
-assertEqual(roundtrip("> quoted text"), "> quoted text", "blockquote roundtrip");
+  test("complex doc italic", () => {
+    const doc = "# Title\n\nSome **bold** and *italic* text.\n\n- item 1\n- item 2\n\n```js\nconst x = 1;\n```\n\n> A quote";
+    const rt = roundtrip(doc);
+    expect(rt).toContain("*italic*");
+  });
 
-// Table
-{
-  const table = "| A | B |\n| --- | --- |\n| 1 | 2 |";
-  const rt = roundtrip(table);
-  assertContains(rt, "| A | B |", "table header roundtrip");
-  assertContains(rt, "| 1 | 2 |", "table row roundtrip");
-  assertContains(rt, "---", "table separator roundtrip");
-}
+  test("complex doc list", () => {
+    const doc = "# Title\n\nSome **bold** and *italic* text.\n\n- item 1\n- item 2\n\n```js\nconst x = 1;\n```\n\n> A quote";
+    const rt = roundtrip(doc);
+    expect(rt).toContain("- item 1");
+  });
 
-// Callout
-{
-  const callout = "> [!warning] Be careful\n> This is important";
-  const rt = roundtrip(callout);
-  assertContains(rt, "[!warning]", "callout type roundtrip");
-  assertContains(rt, "Be careful", "callout title roundtrip");
-  assertContains(rt, "This is important", "callout body roundtrip");
-}
+  test("complex doc code", () => {
+    const doc = "# Title\n\nSome **bold** and *italic* text.\n\n- item 1\n- item 2\n\n```js\nconst x = 1;\n```\n\n> A quote";
+    const rt = roundtrip(doc);
+    expect(rt).toContain("```js");
+  });
 
-// Nested inline — nesting structure is preserved through the DOM
-assertEqual(roundtrip("**bold *and italic***"), "**bold *and italic***", "nested inline roundtrip");
-
-// Code block with HTML entities
-assertEqual(
-  roundtrip("```\n<div>test</div>\n```"),
-  "```\n<div>test</div>\n```",
-  "code block html entities roundtrip",
-);
-
-// Heading + paragraph
-assertEqual(
-  roundtrip("# Title\n\nBody text"),
-  "# Title\n\nBody text",
-  "heading + paragraph roundtrip",
-);
-
-// Complex document
-{
-  const doc =
-    "# Title\n\nSome **bold** and *italic* text.\n\n- item 1\n- item 2\n\n```js\nconst x = 1;\n```\n\n> A quote";
-  const rt = roundtrip(doc);
-  assertContains(rt, "# Title", "complex doc heading");
-  assertContains(rt, "**bold**", "complex doc bold");
-  assertContains(rt, "*italic*", "complex doc italic");
-  assertContains(rt, "- item 1", "complex doc list");
-  assertContains(rt, "```js", "complex doc code");
-  assertContains(rt, "> A quote", "complex doc quote");
-}
-
-cleanup();
-console.log("All roundtrip tests passed");
+  test("complex doc quote", () => {
+    const doc = "# Title\n\nSome **bold** and *italic* text.\n\n- item 1\n- item 2\n\n```js\nconst x = 1;\n```\n\n> A quote";
+    const rt = roundtrip(doc);
+    expect(rt).toContain("> A quote");
+  });
+});

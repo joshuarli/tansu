@@ -14,9 +14,12 @@ check:
 lint-ts:
 	bun run oxlint web/ts/
 
-ts: lint-ts
+test-ts:
+	bun test
+
+ts: lint-ts test-ts
 	bun run oxfmt web/ts/
-	bunx tsgo --noEmit
+	bunx tsgo --noEmit --pretty false
 	bun build web/ts/main.ts --outfile web/static/app.js --minify
 
 dev: ts

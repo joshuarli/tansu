@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "for f in web/ts/*.test.ts; do bun run \"$f\" || exit 1; done"
+    "test": "bun test"
   },
   "devDependencies": {
     "@types/bun": "latest",

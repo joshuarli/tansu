@@ -1,160 +1,151 @@
-import { setupDOM, assertEqual, assertContains } from "./test-helper.ts";
-const cleanup = setupDOM();
-
+import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+import { setupDOM } from "./test-helper.ts";
 import { domToMarkdown } from "./serialize.ts";
 
-function html(content: string): HTMLElement {
-  const el = document.createElement("div");
-  el.innerHTML = content;
-  return el;
-}
+describe("serialize", () => {
+  let cleanup: () => void;
 
-// Heading serialization
-assertEqual(domToMarkdown(html("<h1>Title</h1>")), "# Title", "h1");
-assertEqual(domToMarkdown(html("<h2>Sub</h2>")), "## Sub", "h2");
-assertEqual(domToMarkdown(html("<h3>Deep</h3>")), "### Deep", "h3");
-assertEqual(domToMarkdown(html("<h6>H6</h6>")), "###### H6", "h6");
+  function html(content: string): HTMLElement {
+    const el = document.createElement("div");
+    el.innerHTML = content;
+    return el;
+  }
 
-// Paragraph
-assertEqual(domToMarkdown(html("<p>Hello world</p>")), "Hello world", "paragraph");
+  beforeAll(() => {
+    cleanup = setupDOM();
+  });
 
-// Multiple blocks
-assertEqual(
-  domToMarkdown(html("<h1>Title</h1><p>Body</p>")),
-  "# Title\n\nBody",
-  "heading + paragraph",
-);
+  afterAll(() => {
+    cleanup();
+  });
 
-// Bold / italic / strikethrough / mark / code
-assertEqual(domToMarkdown(html("<p><strong>bold</strong></p>")), "**bold**", "bold");
-assertEqual(domToMarkdown(html("<p><b>bold</b></p>")), "**bold**", "b tag");
-assertEqual(domToMarkdown(html("<p><em>italic</em></p>")), "*italic*", "italic");
-assertEqual(domToMarkdown(html("<p><i>italic</i></p>")), "*italic*", "i tag");
-assertEqual(domToMarkdown(html("<p><del>deleted</del></p>")), "~~deleted~~", "strikethrough del");
-assertEqual(domToMarkdown(html("<p><s>deleted</s></p>")), "~~deleted~~", "strikethrough s");
-assertEqual(domToMarkdown(html("<p><mark>marked</mark></p>")), "==marked==", "highlight");
-assertEqual(domToMarkdown(html("<p><code>code</code></p>")), "`code`", "inline code");
+  test("h1", () => { expect(domToMarkdown(html("<h1>Title</h1>"))).toBe("# Title"); });
+  test("h2", () => { expect(domToMarkdown(html("<h2>Sub</h2>"))).toBe("## Sub"); });
+  test("h3", () => { expect(domToMarkdown(html("<h3>Deep</h3>"))).toBe("### Deep"); });
+  test("h6", () => { expect(domToMarkdown(html("<h6>H6</h6>"))).toBe("###### H6"); });
+  test("paragraph", () => { expect(domToMarkdown(html("<p>Hello world</p>"))).toBe("Hello world"); });
 
-// Links
-assertEqual(
-  domToMarkdown(html('<p><a href="http://example.com">click</a></p>')),
-  "[click](http://example.com)",
-  "link",
-);
+  test("heading + paragraph", () => {
+    expect(domToMarkdown(html("<h1>Title</h1><p>Body</p>"))).toBe("# Title\n\nBody");
+  });
 
-// Wiki-links
-assertEqual(
-  domToMarkdown(html('<p><a class="wiki-link" data-target="My Note">My Note</a></p>')),
-  "[[My Note]]",
-  "wiki-link same display",
-);
-assertEqual(
-  domToMarkdown(html('<p><a class="wiki-link" data-target="target">display</a></p>')),
-  "[[target|display]]",
-  "wiki-link different display",
-);
+  test("bold", () => { expect(domToMarkdown(html("<p><strong>bold</strong></p>"))).toBe("**bold**"); });
+  test("b tag", () => { expect(domToMarkdown(html("<p><b>bold</b></p>"))).toBe("**bold**"); });
+  test("italic", () => { expect(domToMarkdown(html("<p><em>italic</em></p>"))).toBe("*italic*"); });
+  test("i tag", () => { expect(domToMarkdown(html("<p><i>italic</i></p>"))).toBe("*italic*"); });
+  test("strikethrough del", () => { expect(domToMarkdown(html("<p><del>deleted</del></p>"))).toBe("~~deleted~~"); });
+  test("strikethrough s", () => { expect(domToMarkdown(html("<p><s>deleted</s></p>"))).toBe("~~deleted~~"); });
+  test("highlight", () => { expect(domToMarkdown(html("<p><mark>marked</mark></p>"))).toBe("==marked=="); });
+  test("inline code", () => { expect(domToMarkdown(html("<p><code>code</code></p>"))).toBe("`code`"); });
 
-// Images
-assertEqual(
-  domToMarkdown(html('<p><img src="photo.png" alt="desc"></p>')),
-  "![desc](photo.png)",
-  "image",
-);
+  test("link", () => {
+    expect(domToMarkdown(html('<p><a href="http://example.com">click</a></p>'))).toBe("[click](http://example.com)");
+  });
 
-// Wiki-images
-assertEqual(
-  domToMarkdown(
-    html('<p><img data-wiki-image="photo.webp" src="/z-images/photo.webp" alt="photo.webp"></p>'),
-  ),
-  "![[photo.webp]]",
-  "wiki-image",
-);
+  test("wiki-link same display", () => {
+    expect(domToMarkdown(html('<p><a class="wiki-link" data-target="My Note">My Note</a></p>'))).toBe("[[My Note]]");
+  });
 
-// HR
-assertEqual(domToMarkdown(html("<hr>")), "---", "hr");
+  test("wiki-link different display", () => {
+    expect(domToMarkdown(html('<p><a class="wiki-link" data-target="target">display</a></p>'))).toBe("[[target|display]]");
+  });
 
-// Unordered list
-assertEqual(domToMarkdown(html("<ul><li>one</li><li>two</li></ul>")), "- one\n- two", "ul");
+  test("image", () => {
+    expect(domToMarkdown(html('<p><img src="photo.png" alt="desc"></p>'))).toBe("![desc](photo.png)");
+  });
 
-// Ordered list
-assertEqual(
-  domToMarkdown(html("<ol><li>first</li><li>second</li></ol>")),
-  "1. first\n2. second",
-  "ol",
-);
+  test("wiki-image", () => {
+    expect(domToMarkdown(
+      html('<p><img data-wiki-image="photo.webp" src="/z-images/photo.webp" alt="photo.webp"></p>'),
+    )).toBe("![[photo.webp]]");
+  });
 
-// Task list — build DOM programmatically to avoid happy-dom querySelector issue
-{
-  const root = document.createElement("div");
-  const ul = document.createElement("ul");
-  const li1 = document.createElement("li");
-  const cb1 = document.createElement("input");
-  cb1.type = "checkbox";
-  li1.appendChild(cb1);
-  li1.appendChild(document.createTextNode("todo"));
-  const li2 = document.createElement("li");
-  const cb2 = document.createElement("input");
-  cb2.type = "checkbox";
-  cb2.checked = true;
-  li2.appendChild(cb2);
-  li2.appendChild(document.createTextNode("done"));
-  ul.append(li1, li2);
-  root.appendChild(ul);
-  assertEqual(domToMarkdown(root), "- [ ] todo\n- [x] done", "task list");
-}
+  test("hr", () => { expect(domToMarkdown(html("<hr>"))).toBe("---"); });
+  test("ul", () => { expect(domToMarkdown(html("<ul><li>one</li><li>two</li></ul>"))).toBe("- one\n- two"); });
 
-// Code block
-assertEqual(
-  domToMarkdown(html('<pre><code class="language-js">const x = 1;</code></pre>')),
-  "```js\nconst x = 1;\n```",
-  "code block with lang",
-);
+  test("ol", () => {
+    expect(domToMarkdown(html("<ol><li>first</li><li>second</li></ol>"))).toBe("1. first\n2. second");
+  });
 
-assertEqual(
-  domToMarkdown(html("<pre><code>plain code</code></pre>")),
-  "```\nplain code\n```",
-  "code block no lang",
-);
+  test("task list", () => {
+    // Build DOM programmatically to avoid happy-dom querySelector issue
+    const root = document.createElement("div");
+    const ul = document.createElement("ul");
+    const li1 = document.createElement("li");
+    const cb1 = document.createElement("input");
+    cb1.type = "checkbox";
+    li1.appendChild(cb1);
+    li1.appendChild(document.createTextNode("todo"));
+    const li2 = document.createElement("li");
+    const cb2 = document.createElement("input");
+    cb2.type = "checkbox";
+    cb2.checked = true;
+    li2.appendChild(cb2);
+    li2.appendChild(document.createTextNode("done"));
+    ul.append(li1, li2);
+    root.appendChild(ul);
+    expect(domToMarkdown(root)).toBe("- [ ] todo\n- [x] done");
+  });
 
-// Blockquote
-assertContains(
-  domToMarkdown(html("<blockquote><p>quoted</p></blockquote>")),
-  "> quoted",
-  "blockquote",
-);
+  test("code block with lang", () => {
+    expect(domToMarkdown(html('<pre><code class="language-js">const x = 1;</code></pre>'))).toBe("```js\nconst x = 1;\n```");
+  });
 
-// Table
-const tableHtml = "<table><tr><th>A</th><th>B</th></tr><tr><td>1</td><td>2</td></tr></table>";
-const tableMd = domToMarkdown(html(tableHtml));
-assertContains(tableMd, "| A | B |", "table header");
-assertContains(tableMd, "| --- | --- |", "table separator");
-assertContains(tableMd, "| 1 | 2 |", "table row");
+  test("code block no lang", () => {
+    expect(domToMarkdown(html("<pre><code>plain code</code></pre>"))).toBe("```\nplain code\n```");
+  });
 
-// Callout
-const calloutHtml = `<div class="callout callout-warning" data-callout="warning">
+  test("blockquote", () => {
+    expect(domToMarkdown(html("<blockquote><p>quoted</p></blockquote>"))).toContain("> quoted");
+  });
+
+  test("table header", () => {
+    const tableHtml = "<table><tr><th>A</th><th>B</th></tr><tr><td>1</td><td>2</td></tr></table>";
+    expect(domToMarkdown(html(tableHtml))).toContain("| A | B |");
+  });
+
+  test("table separator", () => {
+    const tableHtml = "<table><tr><th>A</th><th>B</th></tr><tr><td>1</td><td>2</td></tr></table>";
+    expect(domToMarkdown(html(tableHtml))).toContain("| --- | --- |");
+  });
+
+  test("table row", () => {
+    const tableHtml = "<table><tr><th>A</th><th>B</th></tr><tr><td>1</td><td>2</td></tr></table>";
+    expect(domToMarkdown(html(tableHtml))).toContain("| 1 | 2 |");
+  });
+
+  test("callout type", () => {
+    const calloutHtml = `<div class="callout callout-warning" data-callout="warning">
   <div class="callout-title">\u26a0\ufe0f Be careful</div>
   <div class="callout-body"><p>This is important</p></div>
 </div>`;
-const calloutMd = domToMarkdown(html(calloutHtml));
-assertContains(calloutMd, "> [!warning]", "callout type");
-assertContains(calloutMd, "Be careful", "callout title");
-assertContains(calloutMd, "> This is important", "callout body");
+    expect(domToMarkdown(html(calloutHtml))).toContain("> [!warning]");
+  });
 
-// Nested inline
-assertEqual(
-  domToMarkdown(html("<p><strong><em>bold italic</em></strong></p>")),
-  "***bold italic***",
-  "nested bold italic",
-);
+  test("callout title", () => {
+    const calloutHtml = `<div class="callout callout-warning" data-callout="warning">
+  <div class="callout-title">\u26a0\ufe0f Be careful</div>
+  <div class="callout-body"><p>This is important</p></div>
+</div>`;
+    expect(domToMarkdown(html(calloutHtml))).toContain("Be careful");
+  });
 
-// BR becomes newline
-assertContains(domToMarkdown(html("<p>line1<br>line2</p>")), "line1\nline2", "br to newline");
+  test("callout body", () => {
+    const calloutHtml = `<div class="callout callout-warning" data-callout="warning">
+  <div class="callout-title">\u26a0\ufe0f Be careful</div>
+  <div class="callout-body"><p>This is important</p></div>
+</div>`;
+    expect(domToMarkdown(html(calloutHtml))).toContain("> This is important");
+  });
 
-// Empty
-assertEqual(domToMarkdown(html("")), "", "empty");
+  test("nested bold italic", () => {
+    expect(domToMarkdown(html("<p><strong><em>bold italic</em></strong></p>"))).toBe("***bold italic***");
+  });
 
-// DIV treated as paragraph
-assertEqual(domToMarkdown(html("<div>text</div>")), "text", "div as paragraph");
+  test("br to newline", () => {
+    expect(domToMarkdown(html("<p>line1<br>line2</p>"))).toContain("line1\nline2");
+  });
 
-cleanup();
-console.log("All serialize tests passed");
+  test("empty", () => { expect(domToMarkdown(html(""))).toBe(""); });
+  test("div as paragraph", () => { expect(domToMarkdown(html("<div>text</div>"))).toBe("text"); });
+});

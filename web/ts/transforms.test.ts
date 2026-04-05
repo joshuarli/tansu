@@ -1,322 +1,317 @@
-import { setupDOM, assertEqual, assert, mockFetch } from "./test-helper.ts";
-const cleanup = setupDOM();
-const mock = mockFetch();
+import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+import { setupDOM, mockFetch } from "./test-helper.ts";
 
-// tabs.ts needs API mocks at import time
-mock.on("PUT", "/api/state", {});
-mock.on("GET", "/api/state", { tabs: [], active: -1 });
+describe("transforms", () => {
+  let cleanup: () => void;
+  let mock: ReturnType<typeof mockFetch>;
+  let handleBlockTransform: (event: KeyboardEvent, contentEl: HTMLElement, path: string) => void;
+  let checkBlockInputTransform: (contentEl: HTMLElement) => boolean;
 
-const { handleBlockTransform, checkBlockInputTransform } = await import("./transforms.ts");
+  function makeContentEl(): HTMLElement {
+    const el = document.createElement("div");
+    el.className = "editor-content";
+    el.contentEditable = "true";
+    document.body.appendChild(el);
+    return el;
+  }
 
-function makeContentEl(): HTMLElement {
-  const el = document.createElement("div");
-  el.className = "editor-content";
-  el.contentEditable = "true";
-  document.body.appendChild(el);
-  return el;
-}
+  function simulateTransform(contentEl: HTMLElement, text: string): { prevented: boolean } {
+    const p = document.createElement("p");
+    p.textContent = text;
+    contentEl.appendChild(p);
 
-function simulateTransform(contentEl: HTMLElement, text: string): { prevented: boolean } {
-  const p = document.createElement("p");
-  p.textContent = text;
-  contentEl.appendChild(p);
+    // Place cursor inside the paragraph
+    const range = document.createRange();
+    const textNode = p.firstChild ?? p;
+    range.setStart(textNode, text.length);
+    range.collapse(true);
+    const sel = window.getSelection()!;
+    sel.removeAllRanges();
+    sel.addRange(range);
 
-  // Place cursor inside the paragraph
-  const range = document.createRange();
-  const textNode = p.firstChild ?? p;
-  range.setStart(textNode, text.length);
-  range.collapse(true);
-  const sel = window.getSelection()!;
-  sel.removeAllRanges();
-  sel.addRange(range);
+    let prevented = false;
+    const event = new KeyboardEvent("keydown", { key: "Enter", bubbles: true });
+    Object.defineProperty(event, "preventDefault", {
+      value: () => {
+        prevented = true;
+      },
+    });
+    handleBlockTransform(event, contentEl, "test.md");
+    return { prevented };
+  }
 
-  let prevented = false;
-  const event = new KeyboardEvent("keydown", { key: "Enter", bubbles: true });
-  Object.defineProperty(event, "preventDefault", {
-    value: () => {
-      prevented = true;
-    },
+  function simulateInputTransform(contentEl: HTMLElement, text: string): boolean {
+    const p = document.createElement("p");
+    p.textContent = text;
+    contentEl.appendChild(p);
+
+    const range = document.createRange();
+    const textNode = p.firstChild ?? p;
+    range.setStart(textNode, text.length);
+    range.collapse(true);
+    const sel = window.getSelection()!;
+    sel.removeAllRanges();
+    sel.addRange(range);
+
+    return checkBlockInputTransform(contentEl);
+  }
+
+  beforeAll(async () => {
+    cleanup = setupDOM();
+    mock = mockFetch();
+
+    // tabs.ts needs API mocks at import time
+    mock.on("PUT", "/api/state", {});
+    mock.on("GET", "/api/state", { tabs: [], active: -1 });
+
+    const mod = await import("./transforms.ts");
+    handleBlockTransform = mod.handleBlockTransform;
+    checkBlockInputTransform = mod.checkBlockInputTransform;
   });
-  handleBlockTransform(event, contentEl, "test.md");
-  return { prevented };
-}
 
-// Heading transform
-{
-  const el = makeContentEl();
-  const { prevented } = simulateTransform(el, "## Hello");
-  assert(prevented, "heading prevented default");
-  const h2 = el.querySelector("h2");
-  assert(h2 !== null, "h2 created");
-  assertEqual(h2!.textContent, "Hello", "h2 text");
-  // Paragraph added after heading
-  const p = h2!.nextElementSibling;
-  assert(p !== null && p.tagName === "P", "p after heading");
-  el.remove();
-}
+  afterAll(() => {
+    mock.restore();
+    cleanup();
+  });
 
-// HR transform
-{
-  const el = makeContentEl();
-  const { prevented } = simulateTransform(el, "---");
-  assert(prevented, "hr prevented default");
-  assert(el.querySelector("hr") !== null, "hr created");
-  el.remove();
-}
+  test("heading prevented default", () => {
+    const el = makeContentEl();
+    const { prevented } = simulateTransform(el, "## Hello");
+    expect(prevented).toBe(true);
+    el.remove();
+  });
 
-// Code block transform
-{
-  const el = makeContentEl();
-  const { prevented } = simulateTransform(el, "```js");
-  assert(prevented, "code prevented default");
-  const pre = el.querySelector("pre");
-  assert(pre !== null, "pre created");
-  const code = pre!.querySelector("code");
-  assert(code !== null, "code created");
-  assertEqual(code!.className, "language-js", "code lang class");
-  el.remove();
-}
+  test("h2 created", () => {
+    const el = makeContentEl();
+    simulateTransform(el, "## Hello");
+    const h2 = el.querySelector("h2");
+    expect(h2 !== null).toBe(true);
+    expect(h2!.textContent).toBe("Hello");
+    // Paragraph added after heading
+    const p = h2!.nextElementSibling;
+    expect(p !== null && p.tagName === "P").toBe(true);
+    el.remove();
+  });
 
-// UL transform
-{
-  const el = makeContentEl();
-  const { prevented } = simulateTransform(el, "- item");
-  assert(prevented, "ul prevented default");
-  const ul = el.querySelector("ul");
-  assert(ul !== null, "ul created");
-  const li = ul!.querySelector("li");
-  assertEqual(li!.textContent, "item", "li text");
-  el.remove();
-}
+  test("hr prevented default", () => {
+    const el = makeContentEl();
+    const { prevented } = simulateTransform(el, "---");
+    expect(prevented).toBe(true);
+    expect(el.querySelector("hr") !== null).toBe(true);
+    el.remove();
+  });
 
-// OL transform
-{
-  const el = makeContentEl();
-  const { prevented } = simulateTransform(el, "1. first");
-  assert(prevented, "ol prevented default");
-  const ol = el.querySelector("ol");
-  assert(ol !== null, "ol created");
-  assertEqual(ol!.querySelector("li")!.textContent, "first", "ol li text");
-  el.remove();
-}
+  test("code prevented default", () => {
+    const el = makeContentEl();
+    const { prevented } = simulateTransform(el, "```js");
+    expect(prevented).toBe(true);
+    const pre = el.querySelector("pre");
+    expect(pre !== null).toBe(true);
+    const code = pre!.querySelector("code");
+    expect(code !== null).toBe(true);
+    expect(code!.className).toBe("language-js");
+    el.remove();
+  });
 
-// Blockquote transform
-{
-  const el = makeContentEl();
-  const { prevented } = simulateTransform(el, "> quoted");
-  assert(prevented, "bq prevented default");
-  const bq = el.querySelector("blockquote");
-  assert(bq !== null, "blockquote created");
-  assertEqual(bq!.querySelector("p")!.textContent, "quoted", "bq text");
-  el.remove();
-}
+  test("ul prevented default", () => {
+    const el = makeContentEl();
+    const { prevented } = simulateTransform(el, "- item");
+    expect(prevented).toBe(true);
+    const ul = el.querySelector("ul");
+    expect(ul !== null).toBe(true);
+    const li = ul!.querySelector("li");
+    expect(li!.textContent).toBe("item");
+    el.remove();
+  });
 
-// No transform for normal text
-{
-  const el = makeContentEl();
-  const { prevented } = simulateTransform(el, "just text");
-  assert(!prevented, "normal text not prevented");
-  el.remove();
-}
+  test("ol prevented default", () => {
+    const el = makeContentEl();
+    const { prevented } = simulateTransform(el, "1. first");
+    expect(prevented).toBe(true);
+    const ol = el.querySelector("ol");
+    expect(ol !== null).toBe(true);
+    expect(ol!.querySelector("li")!.textContent).toBe("first");
+    el.remove();
+  });
 
-// === Input-triggered (Space) transforms ===
+  test("bq prevented default", () => {
+    const el = makeContentEl();
+    const { prevented } = simulateTransform(el, "> quoted");
+    expect(prevented).toBe(true);
+    const bq = el.querySelector("blockquote");
+    expect(bq !== null).toBe(true);
+    expect(bq!.querySelector("p")!.textContent).toBe("quoted");
+    el.remove();
+  });
 
-function simulateInputTransform(contentEl: HTMLElement, text: string): boolean {
-  const p = document.createElement("p");
-  p.textContent = text;
-  contentEl.appendChild(p);
+  test("normal text not prevented", () => {
+    const el = makeContentEl();
+    const { prevented } = simulateTransform(el, "just text");
+    expect(prevented).toBe(false);
+    el.remove();
+  });
 
-  const range = document.createRange();
-  const textNode = p.firstChild ?? p;
-  range.setStart(textNode, text.length);
-  range.collapse(true);
-  const sel = window.getSelection()!;
-  sel.removeAllRanges();
-  sel.addRange(range);
+  test("h2 input transform", () => {
+    const el = makeContentEl();
+    expect(simulateInputTransform(el, "## ")).toBe(true);
+    const h2 = el.querySelector("h2");
+    expect(h2 !== null).toBe(true);
+    expect(h2!.innerHTML).toBe("<br>");
+    el.remove();
+  });
 
-  return checkBlockInputTransform(contentEl);
-}
+  test("h2 nbsp input transform", () => {
+    const el = makeContentEl();
+    expect(simulateInputTransform(el, "##\u00A0")).toBe(true);
+    expect(el.querySelector("h2") !== null).toBe(true);
+    el.remove();
+  });
 
-// Heading input transform: "## " → H2
-{
-  const el = makeContentEl();
-  assert(simulateInputTransform(el, "## "), "h2 input transform");
-  const h2 = el.querySelector("h2");
-  assert(h2 !== null, "h2 created via input");
-  assertEqual(h2!.innerHTML, "<br>", "h2 empty with br");
-  el.remove();
-}
+  test("h1 input transform", () => {
+    const el = makeContentEl();
+    expect(simulateInputTransform(el, "# ")).toBe(true);
+    expect(el.querySelector("h1") !== null).toBe(true);
+    el.remove();
+  });
 
-// Heading with nbsp (contentEditable inserts \u00A0)
-{
-  const el = makeContentEl();
-  assert(simulateInputTransform(el, "##\u00A0"), "h2 nbsp input transform");
-  assert(el.querySelector("h2") !== null, "h2 created via nbsp");
-  el.remove();
-}
+  test("h3 input transform", () => {
+    const el = makeContentEl();
+    expect(simulateInputTransform(el, "### ")).toBe(true);
+    expect(el.querySelector("h3") !== null).toBe(true);
+    el.remove();
+  });
 
-// H1 input transform
-{
-  const el = makeContentEl();
-  assert(simulateInputTransform(el, "# "), "h1 input transform");
-  assert(el.querySelector("h1") !== null, "h1 created");
-  el.remove();
-}
+  test("ul input transform", () => {
+    const el = makeContentEl();
+    expect(simulateInputTransform(el, "- ")).toBe(true);
+    const ul = el.querySelector("ul");
+    expect(ul !== null).toBe(true);
+    const li = ul!.querySelector("li");
+    expect(li !== null).toBe(true);
+    expect(li!.innerHTML).toBe("<br>");
+    el.remove();
+  });
 
-// H3 input transform
-{
-  const el = makeContentEl();
-  assert(simulateInputTransform(el, "### "), "h3 input transform");
-  assert(el.querySelector("h3") !== null, "h3 created");
-  el.remove();
-}
+  test("ul asterisk input transform", () => {
+    const el = makeContentEl();
+    expect(simulateInputTransform(el, "* ")).toBe(true);
+    expect(el.querySelector("ul") !== null).toBe(true);
+    el.remove();
+  });
 
-// UL input transform: "- " → UL
-{
-  const el = makeContentEl();
-  assert(simulateInputTransform(el, "- "), "ul input transform");
-  const ul = el.querySelector("ul");
-  assert(ul !== null, "ul created via input");
-  const li = ul!.querySelector("li");
-  assert(li !== null, "li created");
-  assertEqual(li!.innerHTML, "<br>", "li empty with br");
-  el.remove();
-}
+  test("ol input transform", () => {
+    const el = makeContentEl();
+    expect(simulateInputTransform(el, "1. ")).toBe(true);
+    const ol = el.querySelector("ol");
+    expect(ol !== null).toBe(true);
+    el.remove();
+  });
 
-// UL with asterisk: "* " → UL
-{
-  const el = makeContentEl();
-  assert(simulateInputTransform(el, "* "), "ul asterisk input transform");
-  assert(el.querySelector("ul") !== null, "ul created via asterisk");
-  el.remove();
-}
+  test("bq input transform", () => {
+    const el = makeContentEl();
+    expect(simulateInputTransform(el, "> ")).toBe(true);
+    const bq = el.querySelector("blockquote");
+    expect(bq !== null).toBe(true);
+    const p = bq!.querySelector("p");
+    expect(p !== null).toBe(true);
+    expect(p!.innerHTML).toBe("<br>");
+    el.remove();
+  });
 
-// OL input transform: "1. " → OL
-{
-  const el = makeContentEl();
-  assert(simulateInputTransform(el, "1. "), "ol input transform");
-  const ol = el.querySelector("ol");
-  assert(ol !== null, "ol created via input");
-  el.remove();
-}
+  test("code block input transform", () => {
+    const el = makeContentEl();
+    expect(simulateInputTransform(el, "``` ")).toBe(true);
+    const pre = el.querySelector("pre");
+    expect(pre !== null).toBe(true);
+    const code = pre!.querySelector("code");
+    expect(code !== null).toBe(true);
+    el.remove();
+  });
 
-// Blockquote input transform: "> " → blockquote
-{
-  const el = makeContentEl();
-  assert(simulateInputTransform(el, "> "), "bq input transform");
-  const bq = el.querySelector("blockquote");
-  assert(bq !== null, "blockquote created via input");
-  const p = bq!.querySelector("p");
-  assert(p !== null, "p inside blockquote");
-  assertEqual(p!.innerHTML, "<br>", "bq p empty with br");
-  el.remove();
-}
+  test("code block lang input transform", () => {
+    const el = makeContentEl();
+    expect(simulateInputTransform(el, "```js ")).toBe(true);
+    const code = el.querySelector("code");
+    expect(code !== null).toBe(true);
+    expect(code!.className).toBe("language-js");
+    el.remove();
+  });
 
-// Code block input transform: "``` " → pre>code
-{
-  const el = makeContentEl();
-  assert(simulateInputTransform(el, "``` "), "code block input transform");
-  const pre = el.querySelector("pre");
-  assert(pre !== null, "pre created via input");
-  const code = pre!.querySelector("code");
-  assert(code !== null, "code created via input");
-  el.remove();
-}
+  test("code block nbsp input transform", () => {
+    const el = makeContentEl();
+    expect(simulateInputTransform(el, "```\u00A0")).toBe(true);
+    expect(el.querySelector("pre") !== null).toBe(true);
+    el.remove();
+  });
 
-// Code block with language: "```js " → pre>code.language-js
-{
-  const el = makeContentEl();
-  assert(simulateInputTransform(el, "```js "), "code block lang input transform");
-  const code = el.querySelector("code");
-  assert(code !== null, "code element with lang");
-  assertEqual(code!.className, "language-js", "code lang class via input");
-  el.remove();
-}
+  test("no input transform for normal text", () => {
+    const el = makeContentEl();
+    expect(simulateInputTransform(el, "hello ")).toBe(false);
+    el.remove();
+  });
 
-// Code block with nbsp
-{
-  const el = makeContentEl();
-  assert(simulateInputTransform(el, "```\u00A0"), "code block nbsp input transform");
-  assert(el.querySelector("pre") !== null, "pre created via nbsp");
-  el.remove();
-}
+  test("unwrapped text node triggers transform", () => {
+    const el = makeContentEl();
+    const textNode = document.createTextNode("## ");
+    el.appendChild(textNode);
 
-// No transform for normal text
-{
-  const el = makeContentEl();
-  assert(!simulateInputTransform(el, "hello "), "no input transform for normal text");
-  el.remove();
-}
+    const range = document.createRange();
+    range.setStart(textNode, 3);
+    range.collapse(true);
+    const sel = window.getSelection()!;
+    sel.removeAllRanges();
+    sel.addRange(range);
 
-// Unwrapped text node (no <p> wrapper — common in contentEditable)
-{
-  const el = makeContentEl();
-  const textNode = document.createTextNode("## ");
-  el.appendChild(textNode);
+    expect(checkBlockInputTransform(el)).toBe(true);
+    expect(el.querySelector("h2") !== null).toBe(true);
+    el.remove();
+  });
 
-  const range = document.createRange();
-  range.setStart(textNode, 3);
-  range.collapse(true);
-  const sel = window.getSelection()!;
-  sel.removeAllRanges();
-  sel.addRange(range);
+  test("heading re-level triggers", () => {
+    const el = makeContentEl();
+    const h1 = document.createElement("h1");
+    h1.textContent = "### hello";
+    el.appendChild(h1);
+    const range = document.createRange();
+    range.setStart(h1.firstChild!, 4);
+    range.collapse(true);
+    window.getSelection()!.removeAllRanges();
+    window.getSelection()!.addRange(range);
+    expect(checkBlockInputTransform(el)).toBe(true);
+    const h3 = el.querySelector("h3");
+    expect(h3 !== null).toBe(true);
+    expect(h3!.textContent).toBe("hello");
+    el.remove();
+  });
 
-  assert(checkBlockInputTransform(el), "unwrapped text node triggers transform");
-  assert(el.querySelector("h2") !== null, "h2 created from unwrapped text");
-  el.remove();
-}
+  test("heading re-level empty triggers", () => {
+    const el = makeContentEl();
+    const h1 = document.createElement("h1");
+    h1.textContent = "## ";
+    el.appendChild(h1);
+    const range = document.createRange();
+    range.setStart(h1.firstChild!, 3);
+    range.collapse(true);
+    window.getSelection()!.removeAllRanges();
+    window.getSelection()!.addRange(range);
+    expect(checkBlockInputTransform(el)).toBe(true);
+    const h2 = el.querySelector("h2");
+    expect(h2 !== null).toBe(true);
+    expect(h2!.innerHTML).toBe("<br>");
+    el.remove();
+  });
 
-// Re-level heading: "### " at start of H1 → H3
-{
-  const el = makeContentEl();
-  const h1 = document.createElement("h1");
-  h1.textContent = "### hello";
-  el.appendChild(h1);
-  const range = document.createRange();
-  range.setStart(h1.firstChild!, 4);
-  range.collapse(true);
-  window.getSelection()!.removeAllRanges();
-  window.getSelection()!.addRange(range);
-  assert(checkBlockInputTransform(el), "heading re-level triggers");
-  const h3 = el.querySelector("h3");
-  assert(h3 !== null, "h3 created from h1");
-  assertEqual(h3!.textContent, "hello", "h3 preserves content");
-  el.remove();
-}
-
-// Re-level heading: "## " with no content
-{
-  const el = makeContentEl();
-  const h1 = document.createElement("h1");
-  h1.textContent = "## ";
-  el.appendChild(h1);
-  const range = document.createRange();
-  range.setStart(h1.firstChild!, 3);
-  range.collapse(true);
-  window.getSelection()!.removeAllRanges();
-  window.getSelection()!.addRange(range);
-  assert(checkBlockInputTransform(el), "heading re-level empty triggers");
-  const h2 = el.querySelector("h2");
-  assert(h2 !== null, "h2 created from h1");
-  assertEqual(h2!.innerHTML, "<br>", "h2 empty with br");
-  el.remove();
-}
-
-// No transform inside heading without marker
-{
-  const el = makeContentEl();
-  const h2 = document.createElement("h2");
-  h2.textContent = "just text";
-  el.appendChild(h2);
-  const range = document.createRange();
-  range.setStart(h2.firstChild!, 9);
-  range.collapse(true);
-  window.getSelection()!.removeAllRanges();
-  window.getSelection()!.addRange(range);
-  assert(!checkBlockInputTransform(el), "no transform for plain heading text");
-  el.remove();
-}
-
-mock.restore();
-cleanup();
-console.log("All transforms tests passed");
+  test("no transform for plain heading text", () => {
+    const el = makeContentEl();
+    const h2 = document.createElement("h2");
+    h2.textContent = "just text";
+    el.appendChild(h2);
+    const range = document.createRange();
+    range.setStart(h2.firstChild!, 9);
+    range.collapse(true);
+    window.getSelection()!.removeAllRanges();
+    window.getSelection()!.addRange(range);
+    expect(checkBlockInputTransform(el)).toBe(false);
+    el.remove();
+  });
+});

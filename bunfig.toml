@@ -6,6 +6,5 @@ minimumReleaseAge = 259200 # three days
 coverage = true
 randomize = true
 coverageSkipTestFiles = true
-coverageThreshold = { line = 0.79, function = 0.79 }
-coveragePathIgnorePatterns = ["web/ts/webauthn.ts"]
+coverageThreshold = { line = 0.88, function = 0.89 }
 
