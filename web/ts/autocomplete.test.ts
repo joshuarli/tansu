@@ -59,9 +59,7 @@ describe("autocomplete", () => {
   function fireKey(key: string) {
     // Dispatch on contentEl so the event bubbles up through the capture phase
     // on document, where the autocomplete keydown handler is registered.
-    contentEl.dispatchEvent(
-      new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }),
-    );
+    contentEl.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
   }
 
   function getDropdown() {

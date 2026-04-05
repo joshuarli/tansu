@@ -14,7 +14,9 @@ let notesDir: string;
 let baseUrl: string;
 let activePort: number;
 
-export async function setup(port = 3099): Promise<{ page: Page; baseUrl: string; notesDir: string }> {
+export async function setup(
+  port = 3099,
+): Promise<{ page: Page; baseUrl: string; notesDir: string }> {
   activePort = port;
   // Build frontend
   const build = Bun.spawnSync([

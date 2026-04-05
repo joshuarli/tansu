@@ -8,10 +8,7 @@ describe("tabs", () => {
   let openTab: (path: string) => Promise<any>;
   let closeTab: (i: number) => void;
   let getTabs: () => any[];
-  let getActiveIndex: () => number;
   let markDirty: (path: string) => void;
-  let closeActiveTab: () => void;
-  let switchTab: (index: number) => Promise<void>;
 
   const tick = () => new Promise<void>((r) => setTimeout(r, 0));
 
@@ -28,11 +25,8 @@ describe("tabs", () => {
     const mod = await import("./tabs.ts");
     openTab = mod.openTab;
     closeTab = mod.closeTab;
-    switchTab = mod.switchTab;
     getTabs = mod.getTabs;
-    getActiveIndex = mod.getActiveIndex;
     markDirty = mod.markDirty;
-    closeActiveTab = mod.closeActiveTab;
 
     // Clean up any leaked state from other test files sharing the module.
     while (getTabs().length > 0) closeTab(0);
@@ -174,7 +168,12 @@ describe("tabs", () => {
     const countBefore = getTabs().length;
     const tabEl = tabBar.querySelectorAll(".tab:not(.tab-new)")[countBefore - 1]!;
     (tabEl as HTMLElement).dispatchEvent(
-      new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 100, clientY: 100 }),
+      new MouseEvent("contextmenu", {
+        bubbles: true,
+        cancelable: true,
+        clientX: 100,
+        clientY: 100,
+      }),
     );
     await tick();
     const menu = document.body.querySelector(".context-menu");
@@ -202,7 +201,12 @@ describe("tabs", () => {
     window.addEventListener("tansu:rename", handler);
 
     (tabEl as HTMLElement).dispatchEvent(
-      new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 100, clientY: 100 }),
+      new MouseEvent("contextmenu", {
+        bubbles: true,
+        cancelable: true,
+        clientX: 100,
+        clientY: 100,
+      }),
     );
     await tick();
     const items = document.body.querySelectorAll(".context-menu-item");

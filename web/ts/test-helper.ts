@@ -1,6 +1,7 @@
 /// Shared test utilities: DOM setup via happy-dom, fetch mocking.
 
 import { Window } from "happy-dom";
+
 import type {
   Note,
   SaveResult,
@@ -28,6 +29,7 @@ export type MockBody =
   | { content: string }
   | number[]
   | string[]
+  | { error: string }
   | Record<string, never>
   | string;
 

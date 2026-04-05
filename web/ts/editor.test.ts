@@ -257,12 +257,7 @@ describe("editor", () => {
     sourceEl.value = "# My edits";
 
     // Server says file changed to something different
-    mock.on(
-      "PUT",
-      "/api/note",
-      { mtime: 2000, conflict: true, content: "# Disk version" },
-      409,
-    );
+    mock.on("PUT", "/api/note", { mtime: 2000, conflict: true, content: "# Disk version" }, 409);
 
     await saveCurrentNote();
 

@@ -107,11 +107,11 @@ All source in `web/ts/`, bundled to `web/static/app.js`:
 | PUT    | `/api/settings`           | Update settings (excluded_folders change triggers reindex) |
 | GET    | `/events`                 | SSE stream (events: `connected`, `changed`, `deleted`)     |
 
-| GET    | `/api/status`             | App status (locked state, PRF credentials)                 |
-| POST   | `/api/unlock`             | Unlock with recovery key or PRF output                     |
-| POST   | `/api/lock`               | Lock the app (clears session)                              |
-| POST   | `/api/prf/register`       | Register a WebAuthn PRF credential                         |
-| DELETE | `/api/prf`                | Remove a PRF credential                                    |
+| GET | `/api/status` | App status (locked state, PRF credentials) |
+| POST | `/api/unlock` | Unlock with recovery key or PRF output |
+| POST | `/api/lock` | Lock the app (clears session) |
+| POST | `/api/prf/register` | Register a WebAuthn PRF credential |
+| DELETE | `/api/prf` | Remove a PRF credential |
 
 Static files are served from `/static/*` and images from `/z-images/*`. All other GET paths serve `index.html` (SPA-style). When encrypted and locked, non-API requests redirect to `/`.
 
