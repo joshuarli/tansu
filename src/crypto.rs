@@ -1,6 +1,5 @@
 use std::{
-    fs,
-    io,
+    fs, io,
     path::{Path, PathBuf},
 };
 
@@ -59,7 +58,10 @@ impl Vault {
     pub fn decrypt(&self, blob: &[u8]) -> io::Result<Vec<u8>> {
         let header_len = MAGIC.len() + NONCE_LEN;
         if blob.len() < header_len || &blob[..MAGIC.len()] != MAGIC {
-            return Err(io::Error::new(io::ErrorKind::InvalidData, "not an encrypted file"));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "not an encrypted file",
+            ));
         }
         let nonce_bytes = &blob[MAGIC.len()..header_len];
         let ciphertext = &blob[header_len..];
@@ -123,7 +125,9 @@ pub fn wrap_key(master: &[u8; 32], kek: &[u8; 32]) -> WrappedKey {
     let mut nonce_bytes = [0u8; NONCE_LEN];
     OsRng.fill_bytes(&mut nonce_bytes);
     let nonce = Nonce::from_slice(&nonce_bytes);
-    let ciphertext = cipher.encrypt(nonce, master.as_slice()).expect("wrap failed");
+    let ciphertext = cipher
+        .encrypt(nonce, master.as_slice())
+        .expect("wrap failed");
     WrappedKey {
         nonce: nonce_bytes,
         ciphertext,
@@ -140,7 +144,10 @@ pub fn unwrap_key(wrapped: &WrappedKey, kek: &[u8; 32]) -> io::Result<Zeroizing<
             .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "wrong key"))?,
     );
     if plaintext.len() != 32 {
-        return Err(io::Error::new(io::ErrorKind::InvalidData, "invalid key length"));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "invalid key length",
+        ));
     }
     let mut key = [0u8; 32];
     key.copy_from_slice(&plaintext);
@@ -232,7 +239,10 @@ impl WrappedKeyJson {
             .decode(&self.nonce)
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
         if nonce_vec.len() != NONCE_LEN {
-            return Err(io::Error::new(io::ErrorKind::InvalidData, "bad nonce length"));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "bad nonce length",
+            ));
         }
         let mut nonce = [0u8; NONCE_LEN];
         nonce.copy_from_slice(&nonce_vec);
@@ -264,8 +274,7 @@ impl CryptoConfig {
     pub fn load(dir: &Path) -> io::Result<Self> {
         let path = dir.join(".tansu/crypto.json");
         let data = fs::read_to_string(path)?;
-        serde_json::from_str(&data)
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+        serde_json::from_str(&data).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
     }
 
     pub fn load_if_exists(dir: &Path) -> io::Result<Option<Self>> {
@@ -312,7 +321,10 @@ impl CryptoConfig {
                 return Ok(key);
             }
         }
-        Err(io::Error::new(io::ErrorKind::PermissionDenied, "no matching credential"))
+        Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "no matching credential",
+        ))
     }
 }
 
@@ -610,8 +622,14 @@ mod tests {
             .map(|p| p.strip_prefix(&tmp).unwrap().to_string_lossy().to_string())
             .collect();
 
-        assert!(rel.contains(&"note.md".to_string()), "should include note.md");
-        assert!(rel.contains(&"subfolder/deep.md".to_string()), "should include subfolder/deep.md");
+        assert!(
+            rel.contains(&"note.md".to_string()),
+            "should include note.md"
+        );
+        assert!(
+            rel.contains(&"subfolder/deep.md".to_string()),
+            "should include subfolder/deep.md"
+        );
         assert!(
             rel.contains(&".tansu/revisions/note/123.md".to_string()),
             "should include revisions"
@@ -627,8 +645,7 @@ mod tests {
 
     #[test]
     fn full_encrypt_decrypt_directory() {
-        let tmp =
-            std::env::temp_dir().join(format!("tansu-test-full-enc-{}", std::process::id()));
+        let tmp = std::env::temp_dir().join(format!("tansu-test-full-enc-{}", std::process::id()));
         fs::create_dir_all(tmp.join(".tansu/revisions/note")).unwrap();
         fs::create_dir_all(tmp.join("z-images")).unwrap();
         fs::create_dir_all(tmp.join("sub")).unwrap();

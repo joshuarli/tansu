@@ -80,7 +80,7 @@ await new Promise((r) => setTimeout(r, 50));
 const contentElToggle = document.querySelector(".editor-content") as HTMLElement;
 const sourceElToggle = document.querySelector(".editor-source") as HTMLTextAreaElement;
 const sourceBtn = Array.from(document.querySelectorAll(".editor-toolbar button")).find(
-  (b) => b.textContent === "Source"
+  (b) => b.textContent === "Source",
 ) as HTMLButtonElement;
 assert(sourceBtn !== null, "Source button found");
 
@@ -105,7 +105,7 @@ showEditor("cm.md", "# Current");
 await new Promise((r) => setTimeout(r, 50));
 const cmSource = document.querySelector(".editor-source") as HTMLTextAreaElement;
 const cmSourceBtn = Array.from(document.querySelectorAll(".editor-toolbar button")).find(
-  (b) => b.textContent === "Source"
+  (b) => b.textContent === "Source",
 ) as HTMLButtonElement;
 cmSourceBtn.click();
 cmSource.value = "custom source";

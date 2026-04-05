@@ -3,10 +3,12 @@
 ## Threat Model
 
 Self-hosted on an untrusted VPS, accessed via Tailscale. Threats:
+
 - Cloud provider or attacker reads disk contents
 - VPS disk image copied/leaked
 
 Non-threats (out of scope):
+
 - Compromised running server process (at-rest model; server holds key in memory)
 - Network interception (Tailscale WireGuard tunnel)
 - Client-side attacks (user's own device)
@@ -51,15 +53,15 @@ AES-256-GCM, random 12-byte nonce per write. Birthday bound for nonce collision 
 
 ## What Gets Encrypted
 
-| Data | Encrypted | Notes |
-|------|-----------|-------|
-| Note .md files | Yes | |
-| Revision .md files | Yes | |
-| Uploaded images | Yes | |
-| `.tansu/settings.json` | No | No sensitive content (font size, theme) |
-| `.tansu/state.json` | No | Tab paths only, acceptable |
-| `.tansu/crypto.json` | No | Contains wrapped keys, not plaintext secrets |
-| Tantivy search index | In-memory only | `RamDirectory`, rebuilt on unlock |
+| Data                   | Encrypted      | Notes                                        |
+| ---------------------- | -------------- | -------------------------------------------- |
+| Note .md files         | Yes            |                                              |
+| Revision .md files     | Yes            |                                              |
+| Uploaded images        | Yes            |                                              |
+| `.tansu/settings.json` | No             | No sensitive content (font size, theme)      |
+| `.tansu/state.json`    | No             | Tab paths only, acceptable                   |
+| `.tansu/crypto.json`   | No             | Contains wrapped keys, not plaintext secrets |
+| Tantivy search index   | In-memory only | `RamDirectory`, rebuilt on unlock            |
 
 ## Session Management
 
@@ -72,6 +74,7 @@ Set-Cookie: tansu_session=<hex>; HttpOnly; SameSite=Strict; Path=/
 No `Secure` flag (Tailscale, not TLS). Every API request checks this cookie — missing or wrong token returns 403.
 
 **Idle timeout**: Server tracks the timestamp of the last authenticated API request. SSE connections do not count as activity — only real user actions (save, load, search, etc.) reset the timer. After **24 hours of inactivity**, the server re-locks:
+
 1. Zeroize master key
 2. Drop tantivy `RamDirectory` index
 3. Clear session token
@@ -99,6 +102,7 @@ START ──────────────────────→ PLAI
 ```
 
 **Locked state**: Server serves only:
+
 - `GET /` → unlock page (biometric button + recovery key fallback)
 - `POST /api/unlock` → accepts recovery key or PRF-derived key
 - `GET /api/status` → `{ locked, needs_setup, prf_credential_ids, prf_credential_names }`
@@ -106,6 +110,7 @@ START ──────────────────────→ PLAI
 - All other routes return 403
 
 **Unlock flow**:
+
 1. Decrypt master key into memory
 2. Set session cookie
 3. Return 200 immediately (client transitions to app)
@@ -115,6 +120,7 @@ START ──────────────────────→ PLAI
 ## Persisted Crypto State
 
 `.tansu/crypto.json`:
+
 ```json
 {
   "version": 1,
@@ -150,10 +156,11 @@ No server-side assertion verification needed. The PRF-derived key is self-authen
 ### Registration (requires active session)
 
 Browser:
+
 ```js
-const prfSalt = new Uint8Array(await crypto.subtle.digest(
-  "SHA-256", new TextEncoder().encode("tansu-prf-salt-v1")
-));
+const prfSalt = new Uint8Array(
+  await crypto.subtle.digest("SHA-256", new TextEncoder().encode("tansu-prf-salt-v1")),
+);
 
 const credential = await navigator.credentials.create({
   publicKey: {
@@ -163,9 +170,9 @@ const credential = await navigator.credentials.create({
     pubKeyCredParams: [{ alg: -7, type: "public-key" }],
     authenticatorSelection: { userVerification: "required" },
     extensions: {
-      prf: { eval: { first: prfSalt } }
-    }
-  }
+      prf: { eval: { first: prfSalt } },
+    },
+  },
 });
 
 const prfResult = credential.getClientExtensionResults().prf;
@@ -180,11 +187,12 @@ Server: derive KEK_prf = HKDF-SHA256(prfOutput, salt="tansu-prf-kek"), wrap mast
 ### Authentication (unlock)
 
 Browser:
+
 ```js
 // credential IDs from GET /api/status → prf_credential_ids
-const allowCredentials = credentialIds.map(id => ({
+const allowCredentials = credentialIds.map((id) => ({
   type: "public-key",
-  id: base64urlToBuffer(id)
+  id: base64urlToBuffer(id),
 }));
 
 const assertion = await navigator.credentials.get({
@@ -194,9 +202,9 @@ const assertion = await navigator.credentials.get({
     allowCredentials,
     userVerification: "required",
     extensions: {
-      prf: { eval: { first: prfSalt } }
-    }
-  }
+      prf: { eval: { first: prfSalt } },
+    },
+  },
 });
 
 const prfOutput = assertion.getClientExtensionResults().prf.results.first;
@@ -266,6 +274,7 @@ pub fn save_crypto_config(dir: &Path, config: &CryptoConfig) -> Result<()>;
 ```
 
 `Server` holds `Option<Vault>` + `Option<SessionState>`:
+
 - Both `None` = locked (or plaintext mode if no `crypto.json`)
 - Both `Some` = unlocked
 
@@ -338,19 +347,20 @@ In settings panel: list registered credentials (name + created date), buttons to
 ### Re-lock handling
 
 SSE listener in `main.ts` handles `event: locked`:
+
 1. Clear editor state (hide editor, close tabs in memory)
 2. Render unlock page into `#app`
 3. On re-unlock, restore UI from `state.json`
 
 ## Rust Dependencies
 
-| Crate | Purpose |
-|-------|---------|
-| `aes-gcm` | AES-256-GCM encryption (RustCrypto, pure Rust) |
-| `hkdf` + `sha2` | KEK derivation for both recovery key and PRF (RustCrypto, pure Rust) |
-| `zeroize` | Secure memory clearing for keys |
-| `rand` | Already a dependency; used for nonce, master key, recovery key, session token |
-| `base64` | Encoding for crypto.json (already a dependency via tantivy) |
+| Crate           | Purpose                                                                       |
+| --------------- | ----------------------------------------------------------------------------- |
+| `aes-gcm`       | AES-256-GCM encryption (RustCrypto, pure Rust)                                |
+| `hkdf` + `sha2` | KEK derivation for both recovery key and PRF (RustCrypto, pure Rust)          |
+| `zeroize`       | Secure memory clearing for keys                                               |
+| `rand`          | Already a dependency; used for nonce, master key, recovery key, session token |
+| `base64`        | Encoding for crypto.json (already a dependency via tantivy)                   |
 
 No `argon2` — recovery key has full entropy, HKDF is sufficient.
 No WebAuthn server library — PRF output is self-authenticating.
@@ -358,6 +368,7 @@ No WebAuthn server library — PRF output is self-authenticating.
 ## Implementation Progress
 
 ### Step 1: `crypto.rs`
+
 - [x] Vault struct with encrypt/decrypt (magic header + AES-256-GCM)
 - [x] Vault file I/O: `read_to_string`, `read`, `write` (atomic)
 - [x] Key wrapping: `wrap_key` / `unwrap_key`
@@ -367,6 +378,7 @@ No WebAuthn server library — PRF output is self-authenticating.
 - [x] Tests for all of the above (17 tests)
 
 ### Step 2: CLI subcommands
+
 - [x] Subcommand dispatch (`tansu encrypt`, `tansu decrypt`, or start server)
 - [x] `tansu encrypt`: generate keys, display recovery key, walk + encrypt files
 - [x] `tansu decrypt`: prompt recovery key, walk + decrypt files, remove crypto.json
@@ -374,6 +386,7 @@ No WebAuthn server library — PRF output is self-authenticating.
 - [x] Tests for encrypt/decrypt round-trip on a temp directory (18 tests total)
 
 ### Step 3: Server lock/unlock lifecycle
+
 - [x] `Option<Vault>` + `Option<SessionState>` in Server
 - [x] Session cookie parsing + validation
 - [x] 24h idle timeout (check on each request)
@@ -384,6 +397,7 @@ No WebAuthn server library — PRF output is self-authenticating.
 - [x] `POST /api/prf/register`, `POST /api/prf/remove`
 
 ### Step 4: Migrate file I/O
+
 - [x] Replace `fs::read_to_string` / `atomic_write` / `fs::write` with vault methods
 - [x] Vault-aware reindex on settings change + unlock
 - [x] SSE `locked` event on re-lock
@@ -391,6 +405,7 @@ No WebAuthn server library — PRF output is self-authenticating.
 - [x] Encrypted image serving (decrypt + serve bytes with cache headers)
 
 ### Step 5: Unlock UI
+
 - [x] Unlock screen: recovery key form, unlock flow, error handling
 - [x] Re-lock SSE handler (`locked` event hides app, shows unlock)
 - [x] Boot-time status check (`/api/status`) gates app init
@@ -398,6 +413,7 @@ No WebAuthn server library — PRF output is self-authenticating.
 - [ ] Setup flow (first visit after `tansu encrypt`) — deferred to WebAuthn step
 
 ### Step 6: WebAuthn PRF
+
 - [x] `POST /api/prf/register`, `POST /api/prf/remove` (server — done in Step 3)
 - [x] Browser WebAuthn registration + PRF extraction (`webauthn.ts`)
 - [x] Face ID / Touch ID unlock flow (auto-trigger on unlock screen)

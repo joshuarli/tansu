@@ -18,7 +18,14 @@ function makeContainer(): HTMLElement {
 // Test 1: showConflictBanner creates banner with correct elements
 {
   const container = makeContainer();
-  showConflictBanner(container, "notes/a.md", "disk content", 1000, () => {}, () => "mine");
+  showConflictBanner(
+    container,
+    "notes/a.md",
+    "disk content",
+    1000,
+    () => {},
+    () => "mine",
+  );
 
   const banner = container.querySelector(".conflict-banner");
   assert(banner !== null, "banner exists");
@@ -65,7 +72,9 @@ function makeContainer(): HTMLElement {
     "notes/c.md",
     "their content",
     1500,
-    (md) => { loadedWith = md; },
+    (md) => {
+      loadedWith = md;
+    },
     () => "my content",
   );
 
@@ -80,8 +89,22 @@ function makeContainer(): HTMLElement {
 // Test 4: calling showConflictBanner twice replaces the previous banner
 {
   const container = makeContainer();
-  showConflictBanner(container, "notes/d.md", "first disk", 1000, () => {}, () => "mine");
-  showConflictBanner(container, "notes/d.md", "second disk", 2000, () => {}, () => "mine");
+  showConflictBanner(
+    container,
+    "notes/d.md",
+    "first disk",
+    1000,
+    () => {},
+    () => "mine",
+  );
+  showConflictBanner(
+    container,
+    "notes/d.md",
+    "second disk",
+    2000,
+    () => {},
+    () => "mine",
+  );
 
   const banners = container.querySelectorAll(".conflict-banner");
   assertEqual(banners.length, 1, "only one banner after calling twice");
@@ -96,7 +119,7 @@ function makeContainer(): HTMLElement {
   const tab = {
     path: "notes/e.md",
     title: "e",
-    content: "a\nb",       // base: what was last known
+    content: "a\nb", // base: what was last known
     mtime: 1000,
     dirty: true,
   };
@@ -105,10 +128,12 @@ function makeContainer(): HTMLElement {
     tab,
     container,
     "notes/e.md",
-    "x\na\nb",             // theirs (disk)
+    "x\na\nb", // theirs (disk)
     2000,
-    (md) => { loadedWith = md; },
-    () => "a\nb\nc",       // ours (editor)
+    (md) => {
+      loadedWith = md;
+    },
+    () => "a\nb\nc", // ours (editor)
   );
 
   assert(container.querySelector(".conflict-banner") === null, "no banner on clean merge");
@@ -133,10 +158,12 @@ function makeContainer(): HTMLElement {
     tab,
     container,
     "notes/f.md",
-    "a\nY",                // theirs: changed line 2 to Y
+    "a\nY", // theirs: changed line 2 to Y
     2000,
-    (md) => { loadedWith = md; },
-    () => "a\nX",          // ours: changed line 2 to X — conflict
+    (md) => {
+      loadedWith = md;
+    },
+    () => "a\nX", // ours: changed line 2 to X — conflict
   );
 
   assert(container.querySelector(".conflict-banner") !== null, "banner shown on conflict");

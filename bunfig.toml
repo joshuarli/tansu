@@ -1,6 +1,6 @@
 [install]
 linker = "isolated"
-minimumReleaseAge = 259200  # three days
+minimumReleaseAge = 259200 # three days
 
 [test]
 coverage = true

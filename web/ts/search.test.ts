@@ -86,8 +86,15 @@ assertEqual(isSearchOpen(), false, "overlay click closes");
 // Use a fresh search instance with a tracked openTab
 let openTabCalled = false;
 let openTabPath = "";
-const { open: openSearch2, close: closeSearch2, isOpen: isSearchOpen2 } = createSearch({
-  openTab: async (path: string) => { openTabCalled = true; openTabPath = path; },
+const {
+  open: openSearch2,
+  close: closeSearch2,
+  isOpen: isSearchOpen2,
+} = createSearch({
+  openTab: async (path: string) => {
+    openTabCalled = true;
+    openTabPath = path;
+  },
   invalidateNoteCache: () => {},
 });
 
@@ -109,14 +116,14 @@ assertContains(firstResult.textContent!, "title:", "score breakdown rendered");
 
 // Create option appears for non-empty query
 const createEl = Array.from(resultsEl.children).find((el) =>
-  el.textContent?.startsWith('Create "')
+  el.textContent?.startsWith('Create "'),
 ) as HTMLElement | undefined;
 assert(createEl !== undefined, "Create option appears");
 assertContains(createEl!.textContent!, "alpha", "Create option contains query");
 
 // Count selected items before navigation — should be exactly one
 const selectedBefore = Array.from(resultsEl.children).filter((el) =>
-  el.classList.contains("selected")
+  el.classList.contains("selected"),
 ).length;
 assertEqual(selectedBefore, 1, "exactly one item selected initially");
 
@@ -124,14 +131,14 @@ assertEqual(selectedBefore, 1, "exactly one item selected initially");
 input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
 // After one ArrowDown from the createSearch2 instance, check exactly one selected item
 const selectedAfterDown = Array.from(resultsEl.children).filter((el) =>
-  el.classList.contains("selected")
+  el.classList.contains("selected"),
 ).length;
 assertEqual(selectedAfterDown, 1, "exactly one item selected after ArrowDown");
 
 // ArrowUp moves selection: still exactly one selected item
 input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }));
 const selectedAfterUp = Array.from(resultsEl.children).filter((el) =>
-  el.classList.contains("selected")
+  el.classList.contains("selected"),
 ).length;
 assertEqual(selectedAfterUp, 1, "exactly one item selected after ArrowUp");
 

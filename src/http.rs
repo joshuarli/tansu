@@ -520,8 +520,14 @@ mod tests {
             name: "X-Custom",
             value: b"hello",
         };
-        assert_eq!(find_header(&headers, "content-type"), Some("application/json"));
-        assert_eq!(find_header(&headers, "CONTENT-TYPE"), Some("application/json"));
+        assert_eq!(
+            find_header(&headers, "content-type"),
+            Some("application/json")
+        );
+        assert_eq!(
+            find_header(&headers, "CONTENT-TYPE"),
+            Some("application/json")
+        );
         assert_eq!(find_header(&headers, "x-custom"), Some("hello"));
         assert_eq!(find_header(&headers, "missing"), None);
     }

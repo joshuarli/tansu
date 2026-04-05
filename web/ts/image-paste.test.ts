@@ -15,7 +15,10 @@ mock.on("POST", "/api/image", { filename: "test-image.webp" });
 
 // Mock OffscreenCanvas — happy-dom's version lacks convertToBlob
 (globalThis as any).OffscreenCanvas = class {
-  constructor(public width: number, public height: number) {}
+  constructor(
+    public width: number,
+    public height: number,
+  ) {}
   getContext() {
     return { drawImage: () => {} };
   }
@@ -48,7 +51,10 @@ function makeItem(file: File | null): DataTransferItem {
   const item = makeItem(new File(["data"], "screenshot.png", { type: "image/png" }));
   execCommandCalls.length = 0;
   await handleImagePaste(item, null);
-  assert(execCommandCalls.includes("insertHTML"), "should call execCommand insertHTML after upload");
+  assert(
+    execCommandCalls.includes("insertHTML"),
+    "should call execCommand insertHTML after upload",
+  );
 }
 
 // Test 2: null file (getAsFile returns null) does nothing
@@ -65,7 +71,11 @@ function makeItem(file: File | null): DataTransferItem {
   const origFetch = globalThis.fetch;
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url =
-      typeof input === "string" ? input : input instanceof URL ? input.toString() : (input as Request).url;
+      typeof input === "string"
+        ? input
+        : input instanceof URL
+          ? input.toString()
+          : (input as Request).url;
     if (url.includes("/api/image") && init?.method === "POST") {
       capturedFilename = (init.headers as Record<string, string>)["X-Filename"] ?? null;
       return new Response(JSON.stringify({ filename: "my-note 20260101120000.webp" }), {

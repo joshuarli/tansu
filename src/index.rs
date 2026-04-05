@@ -849,8 +849,7 @@ mod tests {
 
     #[test]
     fn search_hyphenated_and_underscored() {
-        let dir =
-            std::env::temp_dir().join(format!("tansu_test_hyphen_{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("tansu_test_hyphen_{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         let idx = Index::open_or_create(&dir).unwrap();

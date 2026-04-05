@@ -960,7 +960,8 @@ body {
 .prf-remove:hover {
   background: var(--bg-subtle);
 }
-#prf-add, #lock-now {
+#prf-add,
+#lock-now {
   padding: 6px 12px;
   font-size: 13px;
   border: 1px solid var(--border);
@@ -968,6 +969,7 @@ body {
   background: var(--bg);
   cursor: pointer;
 }
-#prf-add:hover, #lock-now:hover {
+#prf-add:hover,
+#lock-now:hover {
   background: var(--bg-subtle);
 }

@@ -267,7 +267,8 @@ impl Server {
             if path.extension().is_some_and(|e| e == "md") {
                 if let Ok(content) = vault.read_to_string(path) {
                     let rel = path.strip_prefix(&self.dir).unwrap_or(path);
-                    self.index.index_note(&rel.to_string_lossy(), &content, path);
+                    self.index
+                        .index_note(&rel.to_string_lossy(), &content, path);
                 }
             }
         }
@@ -584,11 +585,9 @@ impl Server {
                 Err(_) => return write_error(sock, 403, "Unlock failed"),
             }
         } else if let Some(prf_b64) = req.get("prf_key").and_then(|v| v.as_str()) {
-            let prf_bytes = base64::Engine::decode(
-                &base64::engine::general_purpose::STANDARD,
-                prf_b64,
-            )
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+            let prf_bytes =
+                base64::Engine::decode(&base64::engine::general_purpose::STANDARD, prf_b64)
+                    .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
             match config.unlock_with_prf(&prf_bytes) {
                 Ok(k) => k,
                 Err(_) => return write_error(sock, 403, "Unlock failed"),
@@ -599,9 +598,7 @@ impl Server {
 
         self.vault = Some(Vault::new(master));
         let token_hex = self.create_session();
-        let cookie = format!(
-            "tansu_session={token_hex}; HttpOnly; SameSite=Strict; Path=/"
-        );
+        let cookie = format!("tansu_session={token_hex}; HttpOnly; SameSite=Strict; Path=/");
 
         self.reindex_with_vault();
 
@@ -638,11 +635,9 @@ impl Server {
         let req: PrfRegReq = serde_json::from_slice(&body)
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
 
-        let prf_bytes = base64::Engine::decode(
-            &base64::engine::general_purpose::STANDARD,
-            &req.prf_key,
-        )
-        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+        let prf_bytes =
+            base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &req.prf_key)
+                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
 
         let kek = crypto::kek_from_prf(&prf_bytes);
         let wrapped = vault.wrap_master_key(&kek);
@@ -688,9 +683,7 @@ impl Server {
             None => return write_error(sock, 500, "No crypto config"),
         };
 
-        config
-            .prf_credentials
-            .retain(|c| c.id != req.credential_id);
+        config.prf_credentials.retain(|c| c.id != req.credential_id);
         config.save(&self.dir)?;
 
         write_json(sock, r#"{"ok":true}"#)
@@ -1109,7 +1102,8 @@ impl Server {
             return write_error(sock, 403, "Forbidden");
         }
 
-        let Some(rev_content) = revisions::get_revision(&self.dir, &rel, ts, self.vault.as_ref()) else {
+        let Some(rev_content) = revisions::get_revision(&self.dir, &rel, ts, self.vault.as_ref())
+        else {
             return write_error(sock, 404, "revision not found");
         };
 
@@ -1146,7 +1140,11 @@ fn days_to_ymd(mut days: u64) -> (u64, u64, u64) {
     // Simplified Gregorian calendar calculation
     let mut y = 1970;
     loop {
-        let dy = if y % 4 == 0 && (y % 100 != 0 || y % 400 == 0) { 366 } else { 365 };
+        let dy = if y % 4 == 0 && (y % 100 != 0 || y % 400 == 0) {
+            366
+        } else {
+            365
+        };
         if days < dy {
             break;
         }
@@ -1157,7 +1155,16 @@ fn days_to_ymd(mut days: u64) -> (u64, u64, u64) {
     let month_days = [
         31,
         if leap { 29 } else { 28 },
-        31, 30, 31, 30, 31, 31, 30, 31, 30, 31,
+        31,
+        30,
+        31,
+        30,
+        31,
+        31,
+        30,
+        31,
+        30,
+        31,
     ];
     let mut mo = 0;
     for &md in &month_days {
@@ -1210,7 +1217,9 @@ fn cmd_encrypt(dir: &Path) {
         master_key_recovery: (&wrapped).into(),
         prf_credentials: vec![],
     };
-    config.save(dir).unwrap_or_else(|e| die(&format!("write crypto.json: {e}")));
+    config
+        .save(dir)
+        .unwrap_or_else(|e| die(&format!("write crypto.json: {e}")));
 
     let vault = Vault::from_raw(master);
     master.zeroize();
@@ -1323,10 +1332,14 @@ fn main() {
         match arg.as_str() {
             "-q" => quiet = true,
             "-p" | "--port" => {
-                port = args_iter.next().unwrap_or_else(|| die("-p requires a value"));
+                port = args_iter
+                    .next()
+                    .unwrap_or_else(|| die("-p requires a value"));
             }
             "-b" | "--bind" => {
-                bind = args_iter.next().unwrap_or_else(|| die("-b requires a value"));
+                bind = args_iter
+                    .next()
+                    .unwrap_or_else(|| die("-b requires a value"));
             }
             "-h" | "--help" => {
                 eprintln!(
@@ -1391,7 +1404,10 @@ fn main() {
         TcpListener::bind(&addr).unwrap_or_else(|e| die(&format!("failed to bind {addr}: {e}")));
 
     if encrypted {
-        eprintln!("\ttansu serving {} on http://{addr} (locked)", dir.display());
+        eprintln!(
+            "\ttansu serving {} on http://{addr} (locked)",
+            dir.display()
+        );
     } else {
         eprintln!("\ttansu serving {} on http://{addr}", dir.display());
     }

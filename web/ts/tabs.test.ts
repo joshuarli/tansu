@@ -106,11 +106,7 @@ await tick();
 
 const tabEls = tabBar.querySelectorAll(".tab:not(.tab-new)");
 assertEqual(tabEls.length, 2, "two tab elements rendered");
-assertEqual(
-  emptyState.style.display,
-  "none",
-  "empty-state hidden when tabs exist",
-);
+assertEqual(emptyState.style.display, "none", "empty-state hidden when tabs exist");
 
 // Active tab (index 1, beta) has .active class; alpha does not.
 assert(tabEls[1]!.classList.contains("active"), "second tab has .active class");
@@ -127,22 +123,13 @@ assert(addBtn !== null, '"+" button present with tabs');
 assertEqual(addBtn!.textContent, "+", '"+" button text is "+"');
 
 // Dirty indicator: no dot before markDirty.
-assert(
-  tabEls[0]!.querySelector(".dirty") === null,
-  "no dirty dot before markDirty",
-);
+assert(tabEls[0]!.querySelector(".dirty") === null, "no dirty dot before markDirty");
 markDirty("notes/alpha.md");
 await tick();
 
 const tabElsAfterDirty = tabBar.querySelectorAll(".tab:not(.tab-new)");
-assert(
-  tabElsAfterDirty[0]!.querySelector(".dirty") !== null,
-  "dirty dot appears after markDirty",
-);
-assert(
-  tabElsAfterDirty[1]!.querySelector(".dirty") === null,
-  "clean tab has no dirty dot",
-);
+assert(tabElsAfterDirty[0]!.querySelector(".dirty") !== null, "dirty dot appears after markDirty");
+assert(tabElsAfterDirty[1]!.querySelector(".dirty") === null, "clean tab has no dirty dot");
 
 // Close button triggers closeTab: click the close button on the first tab.
 const closeBtn = tabElsAfterDirty[0]!.querySelector(".close") as HTMLElement;
@@ -203,11 +190,7 @@ while (getTabs().length > 0) {
   await tick();
 }
 
-assertEqual(
-  emptyState.style.display,
-  "flex",
-  "empty-state visible again after all tabs closed",
-);
+assertEqual(emptyState.style.display, "flex", "empty-state visible again after all tabs closed");
 
 mock.restore();
 offChange();
