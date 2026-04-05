@@ -1,5 +1,5 @@
 import { saveNote } from "./api.ts";
-import { merge3 } from "./merge.ts";
+import { merge3 } from "@joshuarli98/md-wysiwyg";
 import { markClean } from "./tabs.ts";
 import type { Tab } from "./tabs.ts";
 

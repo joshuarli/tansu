@@ -1,7 +1,7 @@
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 
-import { computeDiff, renderDiff } from "./diff.ts";
-import type { DiffHunk } from "./diff.ts";
+import { computeDiff, renderDiff } from "../src/diff.ts";
+import type { DiffHunk } from "../src/diff.ts";
 import { setupDOM } from "./test-helper.ts";
 
 describe("computeDiff", () => {

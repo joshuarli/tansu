@@ -3,7 +3,7 @@
 /// with styled elements. Uses execCommand('insertHTML') so transforms
 /// participate in the browser's undo stack.
 
-import { escapeHtml } from "./util.ts";
+import { escapeHtml } from "./util.js";
 
 interface InlinePattern {
   open: string;

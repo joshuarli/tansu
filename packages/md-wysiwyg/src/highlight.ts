@@ -1,7 +1,7 @@
 /// Minimal syntax highlighter for code blocks.
 /// Ported from ~/d/nerv/src/tui/highlight.rs — byte-by-byte highlighter.
 
-import { escapeHtml } from "./util.ts";
+import { escapeHtml } from "./util.js";
 
 const enum Hl {
   Normal,

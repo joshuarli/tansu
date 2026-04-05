@@ -1,6 +1,6 @@
 import { describe, test, expect } from "bun:test";
 
-import { renderMarkdown } from "./markdown.ts";
+import { renderMarkdown } from "../src/markdown.ts";
 
 describe("headings", () => {
   test("h1", () => {

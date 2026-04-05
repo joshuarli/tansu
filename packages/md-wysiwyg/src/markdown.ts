@@ -2,8 +2,8 @@
 /// headings, paragraphs, lists (ul/ol/task), blockquotes, callouts,
 /// fenced code blocks, tables, HR, and inline formatting.
 
-import { highlightCode } from "./highlight.ts";
-import { escapeHtml } from "./util.ts";
+import { highlightCode } from "./highlight.js";
+import { escapeHtml } from "./util.js";
 
 const calloutIcons: Record<string, string> = {
   note: "\u{1F4DD}",

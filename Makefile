@@ -7,14 +7,21 @@ build: check build-ts build-rs
 build-rs:
 	cargo build
 
+publish-pkg:
+	cd packages/md-wysiwyg && bun run build && bunx npm publish --access public
+
 check:
 	bunx tsgo
+	bunx tsgo -p packages/md-wysiwyg/tsconfig.json --noEmit
 	cargo check
 
-test: test-ts test-rs
+test: test-pkg test-ts test-rs
 
 lint-ts:
 	bun run oxlint web/ts/
+
+test-pkg:
+	bun test packages/md-wysiwyg/tests/*.test.ts
 
 test-ts:
 	bun test web/ts/*.test.ts

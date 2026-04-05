@@ -1,6 +1,6 @@
 import { describe, test, expect } from "bun:test";
 
-import { merge3 } from "./merge.ts";
+import { merge3 } from "../src/merge.ts";
 
 describe("merge3", () => {
   test("no changes", () => {

@@ -1,8 +1,6 @@
 /// Block-level markdown transforms for the WYSIWYG editor.
 /// Handles input like "## " → H2, "- " → UL, "```" → code block, etc.
 
-import { markDirty } from "./tabs.ts";
-
 type TransformFn = (block: HTMLElement, text: string) => boolean;
 
 // contentEditable inserts \u00A0 (nbsp) instead of regular spaces in many cases
@@ -229,7 +227,7 @@ export function checkBlockInputTransform(contentEl: HTMLElement): boolean {
 export function handleBlockTransform(
   e: KeyboardEvent,
   contentEl: HTMLElement,
-  currentPath: string | null,
+  onDirty?: () => void,
 ) {
   const sel = window.getSelection();
   if (!sel || sel.rangeCount === 0) return;
@@ -242,7 +240,7 @@ export function handleBlockTransform(
   for (const [pattern, handler] of transforms) {
     if (pattern.test(text) && handler(block, text)) {
       e.preventDefault();
-      if (currentPath) markDirty(currentPath);
+      onDirty?.();
       return;
     }
   }

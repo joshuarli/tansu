@@ -6,8 +6,8 @@ import {
   checkInlineTransform,
   computeReplaceRange,
   buildReplacementHtml,
-} from "./inline-transforms.ts";
-import type { InlinePattern } from "./inline-transforms.ts";
+} from "../src/inline-transforms.ts";
+import type { InlinePattern } from "../src/inline-transforms.ts";
 import { setupDOM } from "./test-helper.ts";
 
 const bold = patterns[0]!;
@@ -199,11 +199,6 @@ describe("buildReplacementHtml", () => {
   });
 });
 
-// checkInlineTransform relies on window.getSelection() and document.execCommand(),
-// both of which are not fully supported by happy-dom. We can test the early-return
-// path (no selection), but the happy path that actually transforms DOM content
-// would require a real browser environment or more extensive mocking than is
-// worthwhile here.
 describe("checkInlineTransform", () => {
   let cleanup: () => void;
 
@@ -216,7 +211,6 @@ describe("checkInlineTransform", () => {
   });
 
   test("returns false when no selection exists", () => {
-    // happy-dom's getSelection returns null or an empty selection
     const result = checkInlineTransform();
     expect(result).toBe(false);
   });

@@ -18,8 +18,8 @@ describe("roundtrip", () => {
 
   beforeAll(async () => {
     cleanup = setupDOM();
-    const mdMod = await import("./markdown.ts");
-    const serMod = await import("./serialize.ts");
+    const mdMod = await import("../src/markdown.ts");
+    const serMod = await import("../src/serialize.ts");
     renderMarkdown = mdMod.renderMarkdown;
     domToMarkdown = serMod.domToMarkdown;
   });
@@ -146,42 +146,36 @@ describe("roundtrip", () => {
   test("complex doc heading", () => {
     const doc =
       "# Title\n\nSome **bold** and *italic* text.\n\n- item 1\n- item 2\n\n```js\nconst x = 1;\n```\n\n> A quote";
-    const rt = roundtrip(doc);
-    expect(rt).toContain("# Title");
+    expect(roundtrip(doc)).toContain("# Title");
   });
 
   test("complex doc bold", () => {
     const doc =
       "# Title\n\nSome **bold** and *italic* text.\n\n- item 1\n- item 2\n\n```js\nconst x = 1;\n```\n\n> A quote";
-    const rt = roundtrip(doc);
-    expect(rt).toContain("**bold**");
+    expect(roundtrip(doc)).toContain("**bold**");
   });
 
   test("complex doc italic", () => {
     const doc =
       "# Title\n\nSome **bold** and *italic* text.\n\n- item 1\n- item 2\n\n```js\nconst x = 1;\n```\n\n> A quote";
-    const rt = roundtrip(doc);
-    expect(rt).toContain("*italic*");
+    expect(roundtrip(doc)).toContain("*italic*");
   });
 
   test("complex doc list", () => {
     const doc =
       "# Title\n\nSome **bold** and *italic* text.\n\n- item 1\n- item 2\n\n```js\nconst x = 1;\n```\n\n> A quote";
-    const rt = roundtrip(doc);
-    expect(rt).toContain("- item 1");
+    expect(roundtrip(doc)).toContain("- item 1");
   });
 
   test("complex doc code", () => {
     const doc =
       "# Title\n\nSome **bold** and *italic* text.\n\n- item 1\n- item 2\n\n```js\nconst x = 1;\n```\n\n> A quote";
-    const rt = roundtrip(doc);
-    expect(rt).toContain("```js");
+    expect(roundtrip(doc)).toContain("```js");
   });
 
   test("complex doc quote", () => {
     const doc =
       "# Title\n\nSome **bold** and *italic* text.\n\n- item 1\n- item 2\n\n```js\nconst x = 1;\n```\n\n> A quote";
-    const rt = roundtrip(doc);
-    expect(rt).toContain("> A quote");
+    expect(roundtrip(doc)).toContain("> A quote");
   });
 });

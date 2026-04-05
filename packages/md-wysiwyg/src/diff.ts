@@ -1,6 +1,6 @@
 /// Line-based diff with compact rendering, like git diff.
 
-import { escapeHtml } from "./util.ts";
+import { escapeHtml } from "./util.js";
 
 export interface DiffLine {
   type: "add" | "del" | "ctx";

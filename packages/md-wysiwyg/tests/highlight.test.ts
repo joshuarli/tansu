@@ -1,6 +1,6 @@
 import { describe, test, expect } from "bun:test";
 
-import { highlightCode } from "./highlight.ts";
+import { highlightCode } from "../src/highlight.ts";
 
 describe("unknown language", () => {
   test("unknown lang escapes html", () => {
@@ -251,3 +251,5 @@ describe("edge cases", () => {
     expect(highlightCode("hello", "")).toBe("hello");
   });
 });
+
+

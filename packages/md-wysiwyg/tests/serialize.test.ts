@@ -1,6 +1,6 @@
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 
-import { domToMarkdown } from "./serialize.ts";
+import { domToMarkdown } from "../src/serialize.ts";
 import { setupDOM } from "./test-helper.ts";
 
 describe("serialize", () => {
@@ -113,7 +113,6 @@ describe("serialize", () => {
   });
 
   test("task list", () => {
-    // Build DOM programmatically to avoid happy-dom querySelector issue
     const root = document.createElement("div");
     const ul = document.createElement("ul");
     const li1 = document.createElement("li");

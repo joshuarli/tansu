@@ -1,5 +1,5 @@
 import { listRevisions, getRevision, restoreRevision } from "./api.ts";
-import { computeDiff, renderDiff } from "./diff.ts";
+import { computeDiff, renderDiff } from "@joshuarli98/md-wysiwyg";
 import { emit } from "./events.ts";
 import { relativeTime } from "./util.ts";
 

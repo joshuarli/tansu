@@ -8,12 +8,9 @@ import { loadBacklinks } from "./backlinks.ts";
 import { showConflictBanner, handleReloadConflict } from "./conflict.ts";
 import { on } from "./events.ts";
 import { handleImagePaste } from "./image-paste.ts";
-import { checkInlineTransform } from "./inline-transforms.ts";
-import { renderMarkdown } from "./markdown.ts";
+import { checkInlineTransform, renderMarkdown, domToMarkdown, checkBlockInputTransform, handleBlockTransform } from "@joshuarli98/md-wysiwyg";
 import { toggleRevisions, hideRevisions, isRevisionsOpen } from "./revisions.ts";
-import { domToMarkdown } from "./serialize.ts";
 import { markDirty, markClean, getActiveTab } from "./tabs.ts";
-import { checkBlockInputTransform, handleBlockTransform } from "./transforms.ts";
 
 let editorArea: HTMLElement;
 let container: HTMLElement | null = null;
@@ -306,7 +303,7 @@ function setupEditorEvents() {
     }
 
     if (e.key === "Enter" && !e.shiftKey) {
-      handleBlockTransform(e, contentEl!, currentPath);
+      handleBlockTransform(e, contentEl!, () => { if (currentPath) markDirty(currentPath); });
     }
   });
 

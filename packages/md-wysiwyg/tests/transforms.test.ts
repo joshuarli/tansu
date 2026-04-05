@@ -1,12 +1,10 @@
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 
-import { setupDOM, mockFetch } from "./test-helper.ts";
+import { setupDOM } from "./test-helper.ts";
+import { handleBlockTransform, checkBlockInputTransform } from "../src/transforms.ts";
 
 describe("transforms", () => {
   let cleanup: () => void;
-  let mock: ReturnType<typeof mockFetch>;
-  let handleBlockTransform: (event: KeyboardEvent, contentEl: HTMLElement, path: string) => void;
-  let checkBlockInputTransform: (contentEl: HTMLElement) => boolean;
 
   function makeContentEl(): HTMLElement {
     const el = document.createElement("div");
@@ -16,12 +14,11 @@ describe("transforms", () => {
     return el;
   }
 
-  function simulateTransform(contentEl: HTMLElement, text: string): { prevented: boolean } {
+  function simulateTransform(contentEl: HTMLElement, text: string): { prevented: boolean; dirty: boolean } {
     const p = document.createElement("p");
     p.textContent = text;
     contentEl.appendChild(p);
 
-    // Place cursor inside the paragraph
     const range = document.createRange();
     const textNode = p.firstChild ?? p;
     range.setStart(textNode, text.length);
@@ -31,14 +28,13 @@ describe("transforms", () => {
     sel.addRange(range);
 
     let prevented = false;
+    let dirty = false;
     const event = new KeyboardEvent("keydown", { key: "Enter", bubbles: true });
     Object.defineProperty(event, "preventDefault", {
-      value: () => {
-        prevented = true;
-      },
+      value: () => { prevented = true; },
     });
-    handleBlockTransform(event, contentEl, "test.md");
-    return { prevented };
+    handleBlockTransform(event, contentEl, () => { dirty = true; });
+    return { prevented, dirty };
   }
 
   function simulateInputTransform(contentEl: HTMLElement, text: string): boolean {
@@ -57,21 +53,11 @@ describe("transforms", () => {
     return checkBlockInputTransform(contentEl);
   }
 
-  beforeAll(async () => {
+  beforeAll(() => {
     cleanup = setupDOM();
-    mock = mockFetch();
-
-    // tabs.ts needs API mocks at import time
-    mock.on("PUT", "/api/state", {});
-    mock.on("GET", "/api/state", { tabs: [], active: -1 });
-
-    const mod = await import("./transforms.ts");
-    handleBlockTransform = mod.handleBlockTransform;
-    checkBlockInputTransform = mod.checkBlockInputTransform;
   });
 
   afterAll(() => {
-    mock.restore();
     cleanup();
   });
 
@@ -82,13 +68,19 @@ describe("transforms", () => {
     el.remove();
   });
 
+  test("heading calls onDirty", () => {
+    const el = makeContentEl();
+    const { dirty } = simulateTransform(el, "## Hello");
+    expect(dirty).toBe(true);
+    el.remove();
+  });
+
   test("h2 created", () => {
     const el = makeContentEl();
     simulateTransform(el, "## Hello");
     const h2 = el.querySelector("h2");
     expect(h2 !== null).toBe(true);
     expect(h2!.textContent).toBe("Hello");
-    // Paragraph added after heading
     const p = h2!.nextElementSibling;
     expect(p !== null && p.tagName === "P").toBe(true);
     el.remove();
@@ -147,8 +139,25 @@ describe("transforms", () => {
 
   test("normal text not prevented", () => {
     const el = makeContentEl();
-    const { prevented } = simulateTransform(el, "just text");
+    const { prevented, dirty } = simulateTransform(el, "just text");
     expect(prevented).toBe(false);
+    expect(dirty).toBe(false);
+    el.remove();
+  });
+
+  test("onDirty optional — no crash without it", () => {
+    const el = makeContentEl();
+    const p = document.createElement("p");
+    p.textContent = "## heading";
+    el.appendChild(p);
+    const range = document.createRange();
+    range.setStart(p.firstChild!, 10);
+    range.collapse(true);
+    window.getSelection()!.removeAllRanges();
+    window.getSelection()!.addRange(range);
+    const event = new KeyboardEvent("keydown", { key: "Enter", bubbles: true });
+    // Should not throw even with no onDirty callback
+    expect(() => handleBlockTransform(event, el)).not.toThrow();
     el.remove();
   });
 
