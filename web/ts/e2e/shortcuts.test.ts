@@ -9,7 +9,7 @@ describe("e2e: keyboard shortcuts", () => {
   let baseUrl: string;
 
   beforeAll(async () => {
-    const ctx = await setup(3096);
+    const ctx = await setup();
     page = ctx.page;
     baseUrl = ctx.baseUrl;
 

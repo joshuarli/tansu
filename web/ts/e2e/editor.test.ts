@@ -9,7 +9,7 @@ describe("e2e: editor", () => {
   let baseUrl: string;
 
   beforeAll(async () => {
-    const ctx = await setup(3095);
+    const ctx = await setup();
     page = ctx.page;
     baseUrl = ctx.baseUrl;
   }, 30_000);

@@ -3,6 +3,7 @@
 
 import { spawn, type ChildProcess } from "child_process";
 import { mkdtempSync, writeFileSync, rmSync } from "fs";
+import { createServer } from "net";
 import { tmpdir } from "os";
 import { join } from "path";
 
@@ -12,12 +13,19 @@ let browser: Browser;
 let server: ChildProcess;
 let notesDir: string;
 let baseUrl: string;
-let activePort: number;
 
-export async function setup(
-  port = 3099,
-): Promise<{ page: Page; baseUrl: string; notesDir: string }> {
-  activePort = port;
+function getFreePort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const srv = createServer();
+    srv.listen(0, "127.0.0.1", () => {
+      const { port } = srv.address() as { port: number };
+      srv.close((err) => (err ? reject(err) : resolve(port)));
+    });
+  });
+}
+
+export async function setup(): Promise<{ page: Page; baseUrl: string; notesDir: string }> {
+  const activePort = await getFreePort();
   // Build frontend
   const build = Bun.spawnSync([
     "bun",

@@ -8,7 +8,7 @@ describe("e2e: block transforms", () => {
   let page: Page;
 
   beforeAll(async () => {
-    const ctx = await setup(3098);
+    const ctx = await setup();
     page = ctx.page;
 
     // Open a note to get an editor

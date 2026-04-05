@@ -9,7 +9,7 @@ describe("e2e: tabs", () => {
   let baseUrl: string;
 
   beforeAll(async () => {
-    const ctx = await setup(3097);
+    const ctx = await setup();
     page = ctx.page;
     baseUrl = ctx.baseUrl;
 

@@ -8,7 +8,7 @@ describe("e2e: autocomplete", () => {
   let page: Page;
 
   beforeAll(async () => {
-    const ctx = await setup(3094);
+    const ctx = await setup();
     page = ctx.page;
 
     await page.goto(ctx.baseUrl);
