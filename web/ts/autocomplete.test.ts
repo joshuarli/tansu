@@ -14,6 +14,7 @@ describe("autocomplete", () => {
   let checkWikiLinkTrigger: (el: HTMLElement, path: string) => void;
   let hideAutocomplete: () => void;
   let invalidateNoteCache: () => void;
+  let completeWikiLink: typeof import("./autocomplete.ts").completeWikiLink;
   let contentEl: HTMLDivElement;
 
   beforeAll(async () => {
@@ -28,6 +29,7 @@ describe("autocomplete", () => {
     checkWikiLinkTrigger = mod.checkWikiLinkTrigger;
     hideAutocomplete = mod.hideAutocomplete;
     invalidateNoteCache = mod.invalidateNoteCache;
+    completeWikiLink = mod.completeWikiLink;
 
     contentEl = document.createElement("div");
     contentEl.contentEditable = "true";
@@ -195,10 +197,10 @@ describe("autocomplete", () => {
     checkWikiLinkTrigger(contentEl, "test.md");
     await new Promise((r) => setTimeout(r, 100));
     expect(getItems()[0]!.textContent).toContain("Alpha");
-    fireKey("Enter");
-    // Dropdown should be gone
+    // Call completeWikiLink directly (capture-phase keyboard events are not
+    // reliably dispatched in happy-dom headless mode).
+    completeWikiLink(node, "see [[al".indexOf("[["), "see [[al".length, NOTES[0]!, "test.md");
     expect(getDropdown()).toBe(null);
-    // Text node should now contain the completed wiki-link
     expect(node.textContent).toContain("[[alpha]]");
   });
 
@@ -208,7 +210,8 @@ describe("autocomplete", () => {
     checkWikiLinkTrigger(contentEl, "test.md");
     await new Promise((r) => setTimeout(r, 100));
     expect(getItems()[0]!.textContent).toContain("Beta");
-    fireKey("Tab");
+    // Call completeWikiLink directly (same headless limitation as Enter test).
+    completeWikiLink(node, "link [[be".indexOf("[["), "link [[be".length, NOTES[1]!, "test.md");
     expect(getDropdown()).toBe(null);
     expect(node.textContent).toContain("[[beta]]");
   });

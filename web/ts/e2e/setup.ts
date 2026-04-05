@@ -12,9 +12,10 @@ let browser: Browser;
 let server: ChildProcess;
 let notesDir: string;
 let baseUrl: string;
-const PORT = 3099;
+let activePort: number;
 
-export async function setup(): Promise<{ page: Page; baseUrl: string; notesDir: string }> {
+export async function setup(port = 3099): Promise<{ page: Page; baseUrl: string; notesDir: string }> {
+  activePort = port;
   // Build frontend
   const build = Bun.spawnSync([
     "bun",
@@ -33,13 +34,13 @@ export async function setup(): Promise<{ page: Page; baseUrl: string; notesDir: 
   writeFileSync(join(notesDir, "linked.md"), "# Linked\n\nHas a [[test]] link.");
 
   // Start server
-  server = spawn("cargo", ["run", "--bin", "tansu", "--", notesDir, "--port", String(PORT)], {
+  server = spawn("cargo", ["run", "--bin", "tansu", "--", notesDir, "--port", String(activePort)], {
     stdio: ["ignore", "pipe", "pipe"],
   });
 
   // Wait for server to be ready
-  await waitForServer(`http://localhost:${PORT}`, 10_000);
-  baseUrl = `http://localhost:${PORT}`;
+  await waitForServer(`http://localhost:${activePort}`, 10_000);
+  baseUrl = `http://localhost:${activePort}`;
 
   // Launch browser
   browser = await chromium.launch({ headless: true });

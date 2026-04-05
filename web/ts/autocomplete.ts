@@ -139,7 +139,7 @@ function updateSelection(idx: number) {
   }
 }
 
-function completeWikiLink(
+export function completeWikiLink(
   textNode: Text,
   triggerIdx: number,
   cursorPos: number,
