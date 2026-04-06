@@ -146,6 +146,7 @@ export async function createNewNote() {
   const path = name.endsWith(".md") ? name : `${name}.md`;
   try {
     await createNote(path);
+    emit("files:changed", undefined);
     await openTab(path);
   } catch (e) {
     console.error("Failed to create note:", e);

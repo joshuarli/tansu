@@ -1,7 +1,7 @@
 /// Tab bar DOM rendering. Re-exports all tab state for backwards compatibility.
 
 import { deleteNote } from "./api.ts";
-import { on } from "./events.ts";
+import { emit, on } from "./events.ts";
 import { getTabs, getActiveIndex, switchTab, closeTab, createNewNote } from "./tab-state.ts";
 
 export {
@@ -116,6 +116,7 @@ function showContextMenu(e: MouseEvent, index: number) {
     if (!confirm(`Delete ${tab.title}?`)) return;
     deleteNote(tab.path).then(() => {
       closeTab(index);
+      emit("files:changed", undefined);
     });
   };
 

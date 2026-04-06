@@ -92,6 +92,29 @@ export async function listNotes(): Promise<NoteEntry[]> {
   return res.json() as Promise<NoteEntry[]>;
 }
 
+export interface FileSearchResult {
+  path: string;
+  title: string;
+}
+
+export interface RecentFileEntry {
+  path: string;
+  title: string;
+  mtime: number;
+}
+
+export async function searchFileNames(q: string): Promise<FileSearchResult[]> {
+  const res = await fetch(`/api/filesearch?q=${encodeURIComponent(q)}`);
+  if (!res.ok) throw new Error(`filesearch failed: ${res.status}`);
+  return res.json() as Promise<FileSearchResult[]>;
+}
+
+export async function getRecentFiles(): Promise<RecentFileEntry[]> {
+  const res = await fetch("/api/recentfiles");
+  if (!res.ok) throw new Error(`recentfiles failed: ${res.status}`);
+  return res.json() as Promise<RecentFileEntry[]>;
+}
+
 export async function getBacklinks(path: string): Promise<string[]> {
   const res = await fetch(`/api/backlinks?path=${encodeURIComponent(path)}`);
   if (!res.ok) throw new Error(`backlinks failed: ${res.status}`);

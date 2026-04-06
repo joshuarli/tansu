@@ -1,3 +1,11 @@
+import {
+  checkInlineTransform,
+  renderMarkdown,
+  domToMarkdown,
+  checkBlockInputTransform,
+  handleBlockTransform,
+} from "@joshuarli98/md-wysiwyg";
+
 import { saveNote } from "./api.ts";
 import {
   checkWikiLinkTrigger,
@@ -8,7 +16,6 @@ import { loadBacklinks } from "./backlinks.ts";
 import { showConflictBanner, handleReloadConflict } from "./conflict.ts";
 import { on } from "./events.ts";
 import { handleImagePaste } from "./image-paste.ts";
-import { checkInlineTransform, renderMarkdown, domToMarkdown, checkBlockInputTransform, handleBlockTransform } from "@joshuarli98/md-wysiwyg";
 import { toggleRevisions, hideRevisions, isRevisionsOpen } from "./revisions.ts";
 import { markDirty, markClean, getActiveTab } from "./tabs.ts";
 
@@ -303,7 +310,9 @@ function setupEditorEvents() {
     }
 
     if (e.key === "Enter" && !e.shiftKey) {
-      handleBlockTransform(e, contentEl!, () => { if (currentPath) markDirty(currentPath); });
+      handleBlockTransform(e, contentEl!, () => {
+        if (currentPath) markDirty(currentPath);
+      });
     }
   });
 

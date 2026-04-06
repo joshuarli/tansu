@@ -11,6 +11,7 @@ use std::{
 use serde::{Deserialize, Serialize};
 
 use tansu::crypto::{self, CryptoConfig, Vault};
+use tansu::filenames::FileNameIndex;
 use tansu::http::*;
 use tansu::index::Index;
 use tansu::revisions;
@@ -115,6 +116,7 @@ struct Server {
     dir: PathBuf,
     quiet: bool,
     index: Index,
+    file_index: FileNameIndex,
     settings: Settings,
     watch_rx: mpsc::Receiver<WatchEvent>,
     self_writes: Arc<Mutex<HashSet<PathBuf>>>,
@@ -195,6 +197,7 @@ impl Server {
                         let rel = path.strip_prefix(&self.dir).unwrap_or(&path);
                         let rel_str = rel.to_string_lossy();
                         self.index.index_note(&rel_str, &content, &path);
+                        self.file_index.index_file(&rel_str, mtime_secs(&path));
                         self.broadcast_sse("changed", &rel_str);
                     }
                 }
@@ -202,6 +205,7 @@ impl Server {
                     let rel = path.strip_prefix(&self.dir).unwrap_or(&path);
                     let rel_str = rel.to_string_lossy();
                     self.index.remove_note(&rel_str);
+                    self.file_index.remove_file(&rel_str);
                     self.broadcast_sse("deleted", &rel_str);
                 }
             }
@@ -280,6 +284,8 @@ impl Server {
             }
         }
         self.index.commit();
+        self.file_index
+            .full_reindex(&self.dir, &self.settings.excluded_folders);
     }
 
     fn handle(&mut self, mut stream: TcpStream) -> io::Result<()> {
@@ -486,6 +492,8 @@ impl Server {
             ("PUT", "/api/state") => self.api_put_state(stream, headers, raw_buf, header_len),
             ("GET", "/api/settings") => self.api_get_settings(stream),
             ("PUT", "/api/settings") => self.api_put_settings(stream, headers, raw_buf, header_len),
+            ("GET", "/api/filesearch") => self.api_filesearch(stream, path_raw),
+            ("GET", "/api/recentfiles") => self.api_recent_files(stream),
             ("GET", "/api/lock") => self.api_lock(stream),
             ("POST", "/api/prf/register") => {
                 self.api_prf_register(stream, headers, raw_buf, header_len)
@@ -812,6 +820,7 @@ impl Server {
         revisions::save_revision(&self.dir, &rel, &full);
         self.write_content(&full, req.content.as_bytes())?;
         self.index.index_note(&rel, &req.content, &full);
+        self.file_index.index_file(&rel, mtime_secs(&full));
 
         respond_json(
             stream,
@@ -855,6 +864,7 @@ impl Server {
 
         self.write_content(&full, content.as_bytes())?;
         self.index.index_note(&rel, &content, &full);
+        self.file_index.index_file(&rel, mtime_secs(&full));
 
         respond_json_status(
             stream,
@@ -879,6 +889,7 @@ impl Server {
         self.mark_self_write(&full);
         fs::remove_file(&full)?;
         self.index.remove_note(&rel);
+        self.file_index.remove_file(&rel);
 
         respond_json(sock, &OkResponse { ok: true })
     }
@@ -915,8 +926,10 @@ impl Server {
         fs::rename(&old_full, &new_full)?;
 
         self.index.remove_note(&req.old_path);
+        self.file_index.remove_file(&req.old_path);
         if let Ok(content) = self.read_content(&new_full) {
             self.index.index_note(&req.new_path, &content, &new_full);
+            self.file_index.index_file(&req.new_path, mtime_secs(&new_full));
         }
 
         let old_stem = Path::new(&req.old_path)
@@ -1099,10 +1112,12 @@ impl Server {
                 self.reindex_with_vault();
             } else {
                 let index = self.index.clone();
+                let file_index = self.file_index.clone();
                 let dir = self.dir.clone();
                 let excluded = self.settings.excluded_folders.clone();
                 std::thread::spawn(move || {
                     index.full_reindex(&dir, &excluded);
+                    file_index.full_reindex(&dir, &excluded);
                 });
             }
         }
@@ -1131,6 +1146,7 @@ impl Server {
         revisions::save_revision(&self.dir, &rel, &full);
         self.write_content(&full, rev_content.as_bytes())?;
         self.index.index_note(&rel, &rev_content, &full);
+        self.file_index.index_file(&rel, mtime_secs(&full));
 
         respond_json(
             sock,
@@ -1138,6 +1154,43 @@ impl Server {
                 mtime: mtime_secs(&full),
             },
         )
+    }
+
+    fn api_filesearch(&self, sock: &TcpStream, path_raw: &str) -> io::Result<()> {
+        let q = query_param(path_raw, "q").unwrap_or_default();
+        if q.is_empty() {
+            return write_json(sock, "[]");
+        }
+        let results = self.file_index.search_names(&q, 30);
+        let hits: Vec<serde_json::Value> = results
+            .iter()
+            .map(|r| {
+                serde_json::json!({
+                    "path": r.path,
+                    "title": r.title,
+                })
+            })
+            .collect();
+        let json = serde_json::to_string(&hits)
+            .unwrap_or_else(|_| "[]".to_string());
+        write_json(sock, &json)
+    }
+
+    fn api_recent_files(&self, sock: &TcpStream) -> io::Result<()> {
+        let results = self.file_index.recent(50);
+        let entries: Vec<serde_json::Value> = results
+            .iter()
+            .map(|r| {
+                serde_json::json!({
+                    "path": r.path,
+                    "title": r.title,
+                    "mtime": r.mtime,
+                })
+            })
+            .collect();
+        let json = serde_json::to_string(&entries)
+            .unwrap_or_else(|_| "[]".to_string());
+        write_json(sock, &json)
     }
 }
 
@@ -1405,13 +1458,21 @@ fn main() {
     let index =
         Index::open_or_create(&index_dir).unwrap_or_else(|e| die(&format!("open index: {e}")));
 
+    let names_dir = dir.join(".tansu/names-index");
+    fs::create_dir_all(&names_dir)
+        .unwrap_or_else(|e| die(&format!("create names index dir: {e}")));
+    let file_index = FileNameIndex::open_or_create(&names_dir)
+        .unwrap_or_else(|e| die(&format!("open names index: {e}")));
+
     // Only reindex at startup in plaintext mode; encrypted mode rebuilds on unlock
     if !encrypted {
         let index_clone = index.clone();
+        let file_index_clone = file_index.clone();
         let dir_clone = dir.clone();
         let excluded = settings.excluded_folders.clone();
         std::thread::spawn(move || {
             index_clone.full_reindex(&dir_clone, &excluded);
+            file_index_clone.full_reindex(&dir_clone, &excluded);
         });
     }
 
@@ -1437,6 +1498,7 @@ fn main() {
         dir,
         quiet,
         index,
+        file_index,
         settings,
         watch_rx,
         self_writes,

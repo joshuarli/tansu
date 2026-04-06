@@ -1,4 +1,5 @@
 pub mod crypto;
+pub mod filenames;
 pub mod http;
 pub mod index;
 pub mod revisions;

@@ -15,7 +15,8 @@ import {
   reloadFromDisk,
   invalidateNoteCache,
 } from "./editor.ts";
-import { on } from "./events.ts";
+import { emit, on } from "./events.ts";
+import { initFileNav } from "./filenav.ts";
 import { createPalette, matchesKey } from "./palette.ts";
 import { createSearch } from "./search.ts";
 import { createSettings } from "./settings.ts";
@@ -141,6 +142,7 @@ function startApp() {
 
 function initApp() {
   initEditor();
+  initFileNav();
   const palette = createPalette();
   const settings = createSettings();
   const search = createSearch({ openTab, invalidateNoteCache });
@@ -277,6 +279,7 @@ function initApp() {
     try {
       const result = await renameNote(oldPath, newPath);
       invalidateNoteCache();
+      emit("files:changed", undefined);
       updateTabPath(oldPath, newPath);
 
       await Promise.all(
@@ -330,6 +333,7 @@ function connectSSE() {
 
   es.addEventListener("changed", async (e) => {
     const path = e.data;
+    emit("files:changed", undefined);
     const active = getActiveTab();
     if (active && active.path === path) {
       try {
@@ -344,6 +348,7 @@ function connectSSE() {
   es.addEventListener("deleted", (e) => {
     const path = e.data;
     invalidateNoteCache();
+    emit("files:changed", undefined);
     const active = getActiveTab();
     if (active && active.path === path) {
       alert(`"${stemFromPath(path)}" was deleted externally.`);
