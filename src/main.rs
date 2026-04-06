@@ -17,6 +17,13 @@ use tansu::revisions;
 use tansu::settings::Settings;
 use tansu::watcher::{self, WatchEvent};
 
+#[cfg(feature = "embed")]
+static EMBED_APP_JS: &[u8] = include_bytes!("../web/static/app.js");
+#[cfg(feature = "embed")]
+static EMBED_STYLE_CSS: &[u8] = include_bytes!("../web/static/style.css");
+#[cfg(feature = "embed")]
+static EMBED_INDEX_HTML: &[u8] = include_bytes!("../web/index.html");
+
 const SESSION_TIMEOUT_SECS: u64 = 24 * 60 * 60; // 24 hours
 
 #[derive(Serialize)]
@@ -375,14 +382,23 @@ impl Server {
         // Static assets are always served (needed for unlock page)
         if path.starts_with("/static/") && method == "GET" {
             let decoded = percent_decode(path);
-            let static_dir = self.static_dir();
-            if !normalize_into(&static_dir, &decoded.replacen("/static/", "/", 1), &mut fp) {
-                return write_error(stream, 403, "Forbidden");
-            }
-            return match fs::metadata(&fp) {
-                Ok(m) if m.is_file() => serve_file_cached(stream, &fp, m.len(), mime(&fp)),
+            #[cfg(feature = "embed")]
+            return match decoded.strip_prefix("/static/").unwrap_or("") {
+                "app.js" => write_body_cached(stream, "application/javascript", EMBED_APP_JS),
+                "style.css" => write_body_cached(stream, "text/css", EMBED_STYLE_CSS),
                 _ => write_error(stream, 404, "Not Found"),
             };
+            #[cfg(not(feature = "embed"))]
+            {
+                let static_dir = self.static_dir();
+                if !normalize_into(&static_dir, &decoded.replacen("/static/", "/", 1), &mut fp) {
+                    return write_error(stream, 403, "Forbidden");
+                }
+                return match fs::metadata(&fp) {
+                    Ok(m) if m.is_file() => serve_file_cached(stream, &fp, m.len(), mime(&fp)),
+                    _ => write_error(stream, 404, "Not Found"),
+                };
+            }
         }
 
         // Index page always served (it handles locked state client-side)
@@ -493,18 +509,23 @@ impl Server {
     }
 
     fn serve_index(&mut self, sock: &TcpStream) -> io::Result<()> {
-        let exe = env::current_exe().unwrap_or_default();
-        let exe_dir = exe.parent().unwrap_or(Path::new("."));
-        for candidate in [
-            exe_dir.join("web/index.html"),
-            PathBuf::from("web/index.html"),
-        ] {
-            if candidate.is_file() {
-                let meta = fs::metadata(&candidate)?;
-                return serve_file(sock, &candidate, meta.len(), "text/html; charset=utf-8");
+        #[cfg(feature = "embed")]
+        return write_body(sock, "text/html; charset=utf-8", EMBED_INDEX_HTML);
+        #[cfg(not(feature = "embed"))]
+        {
+            let exe = env::current_exe().unwrap_or_default();
+            let exe_dir = exe.parent().unwrap_or(Path::new("."));
+            for candidate in [
+                exe_dir.join("web/index.html"),
+                PathBuf::from("web/index.html"),
+            ] {
+                if candidate.is_file() {
+                    let meta = fs::metadata(&candidate)?;
+                    return serve_file(sock, &candidate, meta.len(), "text/html; charset=utf-8");
+                }
             }
+            write_error(sock, 404, "index.html not found")
         }
-        write_error(sock, 404, "index.html not found")
     }
 
     fn handle_sse(&self, stream: &mut TcpStream) -> io::Result<()> {

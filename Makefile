@@ -48,6 +48,16 @@ bench:
 bench-quick:
 	cargo run --bin bench -- $(NOTES_DIR)
 
+release-linux-amd64:
+	bun build web/ts/main.ts --outfile web/static/app.js --minify
+	cargo zigbuild --release --features embed --target x86_64-unknown-linux-gnu
+	TARGET=x86_64-unknown-linux-gnu ARCH=amd64 bash scripts/make-deb.sh
+
+setup-cross:
+	brew install zig dpkg
+	cargo install cargo-zigbuild
+	rustup target add x86_64-unknown-linux-gnu
+
 setup:
 	prek install --install-hooks
 

@@ -18,6 +18,9 @@ rand = "0.8"
 base64 = "0.22"
 subtle = "2"
 
+[features]
+embed = []
+
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
 

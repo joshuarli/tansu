@@ -1,0 +1,13 @@
+[Unit]
+Description=Tansu note server
+After=network.target
+
+[Service]
+Type=simple
+# Notes are stored in /var/lib/tansu/notes by default; edit to taste
+ExecStart=/usr/local/bin/tansu /var/lib/tansu/notes --port 3000 -b 0.0.0.0
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target
