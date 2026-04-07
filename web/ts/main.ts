@@ -30,11 +30,14 @@ import {
   updateTabContent,
   restoreSession,
   createNewNote,
+  reopenClosedTab,
+  syncToServer,
 } from "./tabs.ts";
 import type { Tab } from "./tabs.ts";
 import { stemFromPath } from "./util.ts";
 import { isPrfLikelySupported, getPrfKey } from "./webauthn.ts";
 import { registerWikiLinkClickHandler } from "./wikilinks.ts";
+import { openStore } from "./local-store.ts";
 
 const appEl = document.getElementById("app")!;
 let sse: EventSource | null = null;
@@ -131,11 +134,12 @@ function showUnlockScreen(status?: AppStatus) {
   });
 }
 
-function startApp() {
+async function startApp() {
   if (!appInitialized) {
     initApp();
     appInitialized = true;
   }
+  await openStore();
   connectSSE();
   restoreSession();
 }
@@ -202,6 +206,12 @@ function initApp() {
       shortcut: "\u2318T",
       keys: { key: "t", meta: true },
       action: () => createNewNote(),
+    },
+    {
+      label: "Reopen closed tab",
+      shortcut: "\u21e7\u2318T",
+      keys: { key: "t", meta: true, shift: true },
+      action: () => reopenClosedTab(),
     },
     {
       label: "Save",
@@ -329,6 +339,7 @@ function connectSSE() {
   es.addEventListener("connected", () => {
     sseBackoff = 1000;
     notif.className = "notification hidden";
+    syncToServer();
   });
 
   es.addEventListener("changed", async (e) => {

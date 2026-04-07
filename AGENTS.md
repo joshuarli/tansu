@@ -31,7 +31,7 @@ All paths are relative to the notes directory passed as a CLI argument.
     revisions/<stem>/      # per-note revision history
       <timestamp_ms>.md    # snapshot of note content before each save
     settings.json          # search/index settings (weights, fuzzy distance, excluded folders)
-    state.json             # session state (open tabs, active tab index)
+    state.json             # session state (open tabs, active tab index, closed-tab stack)
 ```
 
 ## Rust crate structure
@@ -57,7 +57,9 @@ All source in `web/ts/`, bundled to `web/static/app.js`:
 
 - **main.ts** -- Entry point. Wires up editor, tabs, search, SSE, keyboard shortcuts, wiki-link click handler, rename handler.
 - **editor.ts** -- WYSIWYG editor. `contenteditable` div + hidden textarea for source mode. Handles save (with mtime-based conflict detection), reload-from-disk (with 3-way merge for dirty tabs), image paste (converts to WebP via OffscreenCanvas, uploads), inline formatting (bold/italic), backlinks display.
-- **tabs.ts** -- Tab state management. Open/close/switch/reorder tabs. Persists session to server via `/api/state`. Context menu (right-click) for rename/delete/close.
+- **tab-state.ts** -- Pure tab state logic (no DOM). Open/close/switch tabs, closed-tab stack (bounded LIFO, max 20), session persistence (dual-write to IDB + server), offline note fetching via `fetchNote()` (try server → cache to IDB → fall back to IDB). Exports `reopenClosedTab()`, `syncToServer()`, `clearClosedTabs()`.
+- **tabs.ts** -- Tab bar DOM rendering. Re-exports all tab-state functions. Context menu (right-click) for rename/delete/close.
+- **local-store.ts** -- IndexedDB wrapper for offline resilience. Database `"tansu"` with three stores: `kv` (session state), `notes` (cached content), `queue` (reserved for future write queue). All ops gracefully no-op when store isn't opened. See `docs/offline-resilience.md`.
 - **search.ts** -- Search modal (Cmd+K). Debounced search with arrow key navigation. Supports scoped search (Cmd+F searches within current note). "Create note" option at bottom of results.
 - **api.ts** -- Typed fetch wrappers for all API endpoints.
 - **serialize.ts** -- `domToMarkdown`: DOM-to-markdown serializer for the WYSIWYG editor. Handles headings, lists, blockquotes, code blocks, tables, inline formatting, wiki-links, image embeds.
@@ -80,6 +82,7 @@ All source in `web/ts/`, bundled to `web/static/app.js`:
 - **Serde for all JSON**: request/response types are `#[derive(Serialize)]` / `#[derive(Deserialize)]` structs in `main.rs`. No manual JSON construction.
 - **No async runtime**: everything is synchronous std. The server handles one request at a time on the main thread.
 - **Encryption is opt-in**: `tansu encrypt <dir>` to enable, `tansu decrypt <dir>` to revert. Plaintext mode (no crypto.json) = no auth, no sessions.
+- **Offline resilience**: session state and note content are cached in IndexedDB via `local-store.ts`. All note fetches go through `fetchNote()` which tries server first, falls back to IDB cache. Session state is dual-written to IDB and server; on SSE reconnect, `syncToServer()` flushes cached state. See `docs/offline-resilience.md` for full architecture.
 - **Minimal dependencies**: 6 runtime crates (httparse, tantivy, notify, serde, serde_json, pulldown-cmark). Dev-only: criterion for benchmarks.
 - **Wiki-link resolution**: links are matched by filename stem (case-insensitive). Backlinks are indexed in tantivy via the `links_to` field. Rename updates all referencing notes.
 - **Image handling**: paste triggers WebP conversion client-side, uploads raw blob to `/api/image`, server stores in `z-images/` with dedup naming.
@@ -101,7 +104,7 @@ All source in `web/ts/`, bundled to `web/static/app.js`:
 | GET    | `/api/revisions?path=`    | List revision timestamps                                   |
 | GET    | `/api/revision?path=&ts=` | Get revision content                                       |
 | POST   | `/api/restore?path=&ts=`  | Restore a revision                                         |
-| GET    | `/api/state`              | Get session state (open tabs)                              |
+| GET    | `/api/state`              | Get session state (open tabs, closed-tab stack)            |
 | PUT    | `/api/state`              | Save session state                                         |
 | GET    | `/api/settings`           | Get search/index settings                                  |
 | PUT    | `/api/settings`           | Update settings (excluded_folders change triggers reindex) |
@@ -145,7 +148,7 @@ The server binary expects `web/index.html` and `web/static/` to be next to the e
 
 - **crypto.rs**: encryption/decryption round-trip, key wrapping, recovery key parsing, PRF unlock, tampered ciphertext rejection
 
-TypeScript tests: `bun test` runs 22 test files with coverage enforcement (79% line/function threshold).
+TypeScript tests: `bun test` runs 25 test files with coverage enforcement (79% line/function threshold). `fake-indexeddb` provides in-memory IDB for testing offline resilience paths.
 
 Type checking: `bunx tsgo` (strict mode, `noEmit`).
 

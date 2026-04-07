@@ -21,6 +21,9 @@ export {
   updateTabPath,
   createNewNote,
   restoreSession,
+  reopenClosedTab,
+  clearClosedTabs,
+  syncToServer,
 } from "./tab-state.ts";
 
 let contextMenuEl: HTMLElement | null = null;

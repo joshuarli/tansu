@@ -156,11 +156,12 @@ export async function restoreRevision(path: string, ts: number): Promise<{ mtime
 export interface SessionState {
   tabs?: string[];
   active?: number;
+  closed?: string[];
 }
 
 export async function getState(): Promise<SessionState> {
   const res = await fetch("/api/state");
-  if (!res.ok) return {};
+  if (!res.ok) throw new Error(`state failed: ${res.status}`);
   return res.json() as Promise<SessionState>;
 }
 
