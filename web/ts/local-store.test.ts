@@ -1,6 +1,6 @@
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
-import "fake-indexeddb/auto";
 
+import "fake-indexeddb/auto";
 import { openStore, closeStore, kvGet, kvPut, noteGet, notePut, noteDel } from "./local-store.ts";
 
 describe("local-store", () => {

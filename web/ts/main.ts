@@ -17,6 +17,7 @@ import {
 } from "./editor.ts";
 import { emit, on } from "./events.ts";
 import { initFileNav } from "./filenav.ts";
+import { openStore } from "./local-store.ts";
 import { createPalette, matchesKey } from "./palette.ts";
 import { createSearch } from "./search.ts";
 import { createSettings } from "./settings.ts";
@@ -37,7 +38,6 @@ import type { Tab } from "./tabs.ts";
 import { stemFromPath } from "./util.ts";
 import { isPrfLikelySupported, getPrfKey } from "./webauthn.ts";
 import { registerWikiLinkClickHandler } from "./wikilinks.ts";
-import { openStore } from "./local-store.ts";
 
 const appEl = document.getElementById("app")!;
 let sse: EventSource | null = null;

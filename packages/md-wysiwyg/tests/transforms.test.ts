@@ -1,7 +1,7 @@
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 
-import { setupDOM } from "./test-helper.ts";
 import { handleBlockTransform, checkBlockInputTransform } from "../src/transforms.ts";
+import { setupDOM } from "./test-helper.ts";
 
 describe("transforms", () => {
   let cleanup: () => void;
@@ -14,7 +14,10 @@ describe("transforms", () => {
     return el;
   }
 
-  function simulateTransform(contentEl: HTMLElement, text: string): { prevented: boolean; dirty: boolean } {
+  function simulateTransform(
+    contentEl: HTMLElement,
+    text: string,
+  ): { prevented: boolean; dirty: boolean } {
     const p = document.createElement("p");
     p.textContent = text;
     contentEl.appendChild(p);
@@ -31,9 +34,13 @@ describe("transforms", () => {
     let dirty = false;
     const event = new KeyboardEvent("keydown", { key: "Enter", bubbles: true });
     Object.defineProperty(event, "preventDefault", {
-      value: () => { prevented = true; },
+      value: () => {
+        prevented = true;
+      },
     });
-    handleBlockTransform(event, contentEl, () => { dirty = true; });
+    handleBlockTransform(event, contentEl, () => {
+      dirty = true;
+    });
     return { prevented, dirty };
   }
 

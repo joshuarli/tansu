@@ -2,9 +2,23 @@
   "name": "@joshuarli98/md-wysiwyg",
   "version": "0.1.0",
   "description": "Markdown rendering, WYSIWYG serialization, diff, merge, and syntax highlighting for browser editors",
-  "keywords": ["markdown", "wysiwyg", "editor", "diff", "merge", "highlight"],
+  "keywords": [
+    "diff",
+    "editor",
+    "highlight",
+    "markdown",
+    "merge",
+    "wysiwyg"
+  ],
   "license": "MIT",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
   "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
     ".": {
       "bun": "./src/index.ts",
@@ -13,13 +27,6 @@
       "default": "./dist/index.js"
     }
   },
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
-  "files": [
-    "dist",
-    "README.md",
-    "LICENSE"
-  ],
   "scripts": {
     "build": "tsgo -p tsconfig.build.json",
     "test": "bun test tests/*.test.ts",

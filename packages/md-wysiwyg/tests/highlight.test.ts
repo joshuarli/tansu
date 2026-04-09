@@ -251,5 +251,3 @@ describe("edge cases", () => {
     expect(highlightCode("hello", "")).toBe("hello");
   });
 });
-
-

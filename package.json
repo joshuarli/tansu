@@ -1,8 +1,10 @@
 {
   "name": "tansu",
   "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
   "type": "module",
-  "workspaces": ["packages/*"],
   "scripts": {
     "test": "bun test web/ts/*.test.ts"
   },

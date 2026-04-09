@@ -31,5 +31,5 @@
       "@joshuarli98/md-wysiwyg": ["./packages/md-wysiwyg/src/index.ts"]
     }
   },
-  "include": ["web/ts"],
+  "include": ["web/ts"]
 }

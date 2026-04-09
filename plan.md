@@ -2,13 +2,13 @@
 
 ## Final decisions
 
-| Decision | Choice |
-|---|---|
-| Location | `packages/md-wysiwyg/` in this repo |
-| Package name | `@tansu/md-wysiwyg` |
-| Import path | Bun workspace + package name |
-| Existing web/ts/ tests for moved modules | Deleted — tests live only in the package |
-| transforms.ts decoupling | `onDirty?: () => void` callback param; `web/ts/` gets a thin adapter shim |
+| Decision                                 | Choice                                                                    |
+| ---------------------------------------- | ------------------------------------------------------------------------- |
+| Location                                 | `packages/md-wysiwyg/` in this repo                                       |
+| Package name                             | `@tansu/md-wysiwyg`                                                       |
+| Import path                              | Bun workspace + package name                                              |
+| Existing web/ts/ tests for moved modules | Deleted — tests live only in the package                                  |
+| transforms.ts decoupling                 | `onDirty?: () => void` callback param; `web/ts/` gets a thin adapter shim |
 
 ---
 
@@ -16,16 +16,16 @@
 
 ### Files that move into the package (pure WYSIWYG concerns)
 
-| File | Role | Coupling issues |
-|---|---|---|
-| `markdown.ts` | Markdown → HTML renderer | imports `highlight.ts`, `util.ts` — both move |
-| `highlight.ts` | Syntax highlighter (wraps highlight.js) | imports `util.ts` — moves |
-| `serialize.ts` | DOM → Markdown serializer | no tansu deps |
-| `transforms.ts` | Block-level input transforms | imports `markDirty` from `tabs.ts` — **fixed with callback** |
-| `inline-transforms.ts` | Inline pattern transforms | no tansu deps |
-| `diff.ts` | Line diff algorithm + HTML renderer | imports `util.ts` — moves |
-| `merge.ts` | 3-way line merge | no tansu deps |
-| `util.ts` (subset) | `escapeHtml`, `stemFromPath` | `debounce`/`relativeTime` stay in `web/ts/util.ts` |
+| File                   | Role                                    | Coupling issues                                              |
+| ---------------------- | --------------------------------------- | ------------------------------------------------------------ |
+| `markdown.ts`          | Markdown → HTML renderer                | imports `highlight.ts`, `util.ts` — both move                |
+| `highlight.ts`         | Syntax highlighter (wraps highlight.js) | imports `util.ts` — moves                                    |
+| `serialize.ts`         | DOM → Markdown serializer               | no tansu deps                                                |
+| `transforms.ts`        | Block-level input transforms            | imports `markDirty` from `tabs.ts` — **fixed with callback** |
+| `inline-transforms.ts` | Inline pattern transforms               | no tansu deps                                                |
+| `diff.ts`              | Line diff algorithm + HTML renderer     | imports `util.ts` — moves                                    |
+| `merge.ts`             | 3-way line merge                        | no tansu deps                                                |
+| `util.ts` (subset)     | `escapeHtml`, `stemFromPath`            | `debounce`/`relativeTime` stay in `web/ts/util.ts`           |
 
 ### Files that stay in `web/ts/` (tansu-specific)
 
@@ -116,6 +116,7 @@ export { escapeHtml, stemFromPath } from "./util.ts";
 ## The `transforms.ts` API change
 
 **Before** (in `web/ts/transforms.ts`):
+
 ```ts
 import { markDirty } from "./tabs.ts";
 
@@ -130,6 +131,7 @@ export function handleBlockTransform(
 ```
 
 **After** (in `packages/md-wysiwyg/src/transforms.ts`):
+
 ```ts
 export function handleBlockTransform(
   e: KeyboardEvent,
@@ -142,6 +144,7 @@ export function handleBlockTransform(
 ```
 
 **Adapter shim** at `web/ts/transforms.ts` (replaces the original file entirely):
+
 ```ts
 export { handleBlockTransform as _handleBlockTransform } from "@tansu/md-wysiwyg";
 import { handleBlockTransform as _handleBlockTransform } from "@tansu/md-wysiwyg";
@@ -226,6 +229,7 @@ The `coveragePathIgnorePatterns` currently lists `web/ts/webauthn.ts` and `web/t
 ## Files deleted from `web/ts/` after extraction
 
 **Source files** (functionality now comes from package imports):
+
 - `web/ts/markdown.ts`
 - `web/ts/highlight.ts`
 - `web/ts/serialize.ts`
@@ -235,6 +239,7 @@ The `coveragePathIgnorePatterns` currently lists `web/ts/webauthn.ts` and `web/t
 - `web/ts/transforms.ts` → replaced by the adapter shim (same filename, new content — not deleted)
 
 **Test files** (migrated into package):
+
 - `web/ts/markdown.test.ts`
 - `web/ts/serialize.test.ts`
 - `web/ts/transforms.test.ts`

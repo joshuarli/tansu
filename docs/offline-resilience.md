@@ -8,11 +8,11 @@ Tansu uses IndexedDB as a local cache so the frontend can survive hours-long ser
 
 Database `"tansu"`, version 1. Three object stores:
 
-| Store     | Key              | Value                      | Purpose                                  |
-| --------- | ---------------- | -------------------------- | ---------------------------------------- |
-| **kv**    | string           | any                        | Session state (key `"session"`)          |
-| **notes** | path (string)    | `{ content, mtime }`      | Cached note content                      |
-| **queue** | auto-increment   | *(reserved)*               | Future: offline write queue              |
+| Store     | Key            | Value                | Purpose                         |
+| --------- | -------------- | -------------------- | ------------------------------- |
+| **kv**    | string         | any                  | Session state (key `"session"`) |
+| **notes** | path (string)  | `{ content, mtime }` | Cached note content             |
+| **queue** | auto-increment | _(reserved)_         | Future: offline write queue     |
 
 All public functions (`kvGet`, `kvPut`, `noteGet`, `notePut`, `noteDel`) gracefully no-op when the store hasn't been opened (i.e. `openStore()` was never called or `closeStore()` was called). This means the rest of the app doesn't need to know or care whether IDB is available.
 
@@ -29,6 +29,7 @@ Single function implementing the cache-aside pattern:
 All note-reading paths (`openTab`, `switchTab`, `restoreSession`) go through `fetchNote`.
 
 Note content is written to IDB on four occasions:
+
 - **Fetch**: `fetchNote()` caches every successful server response
 - **Save**: `markClean()` caches the content after a successful PUT
 - **Close**: `closeTab()` caches the tab's current content (ensures reopen works offline)
@@ -90,6 +91,7 @@ When the app locks (encrypted vault), `closeStore()` should be called to close t
 ## Future work
 
 See `TODO.md` for planned extensions:
+
 - **Write queue**: queue note saves/creates/deletes in the `queue` IDB store during offline, drain on reconnect with mtime-based conflict detection
 - **Action-level undo**: delete (cache content + grace-period toast), rename (complex due to backlink updates)
 - **Proactive caching**: cache all notes on first load, not just ones the user has opened

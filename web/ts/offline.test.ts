@@ -2,12 +2,12 @@
 /// Uses fake-indexeddb so the full IDB paths are exercised.
 
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
-import "fake-indexeddb/auto";
 
-import { setupDOM, mockFetch } from "./test-helper.ts";
+import "fake-indexeddb/auto";
+import type { SessionState } from "./api.ts";
 import { on } from "./events.ts";
 import { openStore, closeStore, kvGet, kvPut, noteGet, notePut } from "./local-store.ts";
-import type { SessionState } from "./api.ts";
+import { setupDOM, mockFetch } from "./test-helper.ts";
 
 describe("offline resilience", () => {
   let cleanup: () => void;
