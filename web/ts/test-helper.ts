@@ -36,6 +36,17 @@ export type MockBody =
 const TANSU_HTML = `<!doctype html>
 <html><head></head><body>
 <div id="app">
+  <div id="sidebar">
+    <div id="sidebar-header">
+      <input id="sidebar-search" type="text">
+      <div id="sidebar-toolbar">
+        <button id="sidebar-recent-btn">Recent</button>
+        <button id="sidebar-pinned-btn">Pinned</button>
+        <button id="sidebar-sort-btn">Name</button>
+      </div>
+    </div>
+    <div id="sidebar-tree"></div>
+  </div>
   <div id="notification" class="notification hidden"></div>
   <div id="tab-bar"></div>
   <div id="editor-area">
@@ -124,7 +135,7 @@ export function setupDOM(): () => void {
 export function mockFetch(): MockFetch {
   const handlers: Array<{
     match: (url: string, init?: RequestInit) => boolean;
-    respond: () => Response;
+    respond: () => Response | Promise<Response>;
   }> = [];
   const origFetch = globalThis.fetch;
 
@@ -141,6 +152,29 @@ export function mockFetch(): MockFetch {
             status,
             headers: { "Content-Type": "application/json" },
           }),
+      });
+      return mock;
+    },
+    onDelayed(method: string, urlPattern: string | RegExp, body: MockBody, delayMs: number, status = 200) {
+      handlers.push({
+        match: (url, init) => {
+          const m = (init?.method ?? "GET").toUpperCase() === method.toUpperCase();
+          if (typeof urlPattern === "string") return m && url.includes(urlPattern);
+          return m && urlPattern.test(url);
+        },
+        respond: () =>
+          new Promise((resolve) =>
+            setTimeout(
+              () =>
+                resolve(
+                  new Response(JSON.stringify(body), {
+                    status,
+                    headers: { "Content-Type": "application/json" },
+                  }),
+                ),
+              delayMs,
+            ),
+          ),
       });
       return mock;
     },
@@ -164,5 +198,6 @@ export function mockFetch(): MockFetch {
 
 export interface MockFetch {
   on(method: string, urlPattern: string | RegExp, body: MockBody, status?: number): MockFetch;
+  onDelayed(method: string, urlPattern: string | RegExp, body: MockBody, delayMs: number, status?: number): MockFetch;
   restore(): void;
 }
