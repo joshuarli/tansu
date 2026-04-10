@@ -78,6 +78,9 @@ let currentMode: "tree" | "recent" | "pinned" | "search" = "tree";
 let allNotes: { path: string; title: string }[] = [];
 let pinnedPaths = new Set<string>();
 let currentQuery = "";
+// Prevents a queued files:changed render from being dropped when one is already in-flight.
+let renderQueued = false;
+let renderInFlight = false;
 
 export async function initFileNav(): Promise<void> {
   await Promise.all([refreshNotes(), refreshPinned()]);
@@ -146,10 +149,26 @@ export async function initFileNav(): Promise<void> {
   // Re-render on tab changes to update active file highlight and scroll
   on("tab:change", () => onTabChange());
 
-  // Refresh file list whenever files are mutated
+  // Refresh file list whenever files are mutated. Guard prevents stale double-renders
+  // when both the local save and SSE fire files:changed within the same tick.
   on<undefined>("files:changed", async () => {
-    await Promise.all([refreshNotes(), refreshPinned()]);
-    render();
+    if (renderInFlight) {
+      renderQueued = true;
+      return;
+    }
+    renderInFlight = true;
+    try {
+      await Promise.all([refreshNotes(), refreshPinned()]);
+      render();
+      if (renderQueued) {
+        renderQueued = false;
+        await Promise.all([refreshNotes(), refreshPinned()]);
+        render();
+      }
+    } finally {
+      renderInFlight = false;
+      renderQueued = false;
+    }
   });
 
   // Refresh pinned state when changed from tab context menu
@@ -188,26 +207,22 @@ async function refreshPinned(): Promise<void> {
 
 // Update active highlight and scroll into view on tab change — no network calls.
 function onTabChange(): void {
-  const active = getActiveTab();
   const container = getContainer();
   if (!container) return;
 
-  // Update .active class on all nav-file elements in place
+  if (currentMode === "tree") {
+    // Re-render so the active file's parent dir is visible and `.active` is set correctly.
+    renderTree();
+    container.querySelector<HTMLElement>(".nav-file.active")?.scrollIntoView({ block: "center" });
+    return;
+  }
+
+  // For non-tree modes: update `.active` in-place (no re-render needed).
+  const active = getActiveTab();
   for (const el of container.querySelectorAll<HTMLElement>(".nav-file")) {
     el.classList.toggle("active", el.title === active?.path);
   }
-
-  // Scroll the newly active element into view
-  const activeEl = container.querySelector<HTMLElement>(".nav-file.active");
-  activeEl?.scrollIntoView({ block: "center" });
-
-  // Tree mode needs a full re-render because the active file may not be visible
-  // (collapsed parent dir). Re-render expands nothing automatically, but the
-  // highlight + scroll still apply after the DOM is rebuilt.
-  if (currentMode === "tree") {
-    renderTree();
-    container.querySelector<HTMLElement>(".nav-file.active")?.scrollIntoView({ block: "center" });
-  }
+  container.querySelector<HTMLElement>(".nav-file.active")?.scrollIntoView({ block: "center" });
 }
 
 async function render(): Promise<void> {
