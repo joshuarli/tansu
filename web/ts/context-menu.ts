@@ -23,7 +23,9 @@ export function showContextMenu(items: MenuItem[], x: number, y: number): void {
     el.textContent = item.label;
     el.onclick = () => {
       hide();
-      item.onclick();
+      // Defer so the click event finishes propagating before any DOM mutations
+      // triggered by the action (e.g. tab re-renders, nested dispatchEvent).
+      setTimeout(() => item.onclick(), 0);
     };
     menu.appendChild(el);
   }
@@ -31,11 +33,12 @@ export function showContextMenu(items: MenuItem[], x: number, y: number): void {
   document.body.appendChild(menu);
   active = menu;
 
-  dismissHandler = () => {
-    hide();
-    document.removeEventListener("click", dismissHandler!);
-  };
-  setTimeout(() => document.addEventListener("click", dismissHandler!), 0);
+  const handler = () => hide();
+  dismissHandler = handler;
+  setTimeout(() => {
+    // Only register if hide() hasn't been called since this menu was shown.
+    if (dismissHandler === handler) document.addEventListener("click", handler);
+  }, 0);
 }
 
 export function hide(): void {

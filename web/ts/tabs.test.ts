@@ -21,6 +21,9 @@ describe("tabs", () => {
     mock.on("GET", "/api/state", { tabs: [], active: -1 });
     mock.on("DELETE", "/api/note", {});
     mock.on("POST", "/api/note", { mtime: 2000 });
+    mock.on("GET", "/api/pinned", []);
+    mock.on("POST", "/api/pin", {});
+    mock.on("DELETE", "/api/pin", {});
 
     const mod = await import("./tabs.ts");
     openTab = mod.openTab;
@@ -120,7 +123,7 @@ describe("tabs", () => {
     while (getTabs().length > 0) closeTab(0);
   });
 
-  test("context menu appears on right-click with Rename / Delete / Close", async () => {
+  test("context menu appears on right-click with Rename / Pin / Delete / Close", async () => {
     while (getTabs().length > 0) closeTab(0);
     await openTab("notes/gamma.md");
     await tick();
@@ -133,10 +136,11 @@ describe("tabs", () => {
     const menu = document.body.querySelector(".context-menu");
     expect(menu !== null).toBe(true);
     const items = menu!.querySelectorAll(".context-menu-item");
-    expect(items.length).toBe(3);
+    expect(items.length).toBe(4);
     expect(items[0]!.textContent).toBe("Rename...");
-    expect(items[1]!.textContent).toBe("Delete");
-    expect(items[2]!.textContent).toBe("Close");
+    expect(items[1]!.textContent).toBe("Pin");
+    expect(items[2]!.textContent).toBe("Delete");
+    expect(items[3]!.textContent).toBe("Close");
     while (getTabs().length > 0) closeTab(0);
   });
 
@@ -153,7 +157,7 @@ describe("tabs", () => {
     );
     await tick();
     const items = document.body.querySelectorAll(".context-menu-item");
-    (items[2] as HTMLElement).click();
+    (items[3] as HTMLElement).click();
     await tick();
     expect(document.body.querySelector(".context-menu")).toBe(null);
     expect(tabBar.querySelectorAll(".tab:not(.tab-new)").length).toBe(countBefore - 1);
@@ -178,9 +182,9 @@ describe("tabs", () => {
     await tick();
     const menu = document.body.querySelector(".context-menu");
     const items = menu!.querySelectorAll(".context-menu-item");
-    expect(items[1]!.textContent).toBe("Delete");
-    expect(items[1]!.classList.contains("danger")).toBe(true);
-    (items[1] as HTMLElement).click();
+    expect(items[2]!.textContent).toBe("Delete");
+    expect(items[2]!.classList.contains("danger")).toBe(true);
+    (items[2] as HTMLElement).click();
     await tick();
     await new Promise((r) => setTimeout(r, 50));
     expect(getTabs().length).toBe(countBefore - 1);

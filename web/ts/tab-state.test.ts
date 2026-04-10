@@ -21,6 +21,7 @@ describe("tab-state", () => {
   let updateTabContent: (path: string, content: string, mtime: number) => void;
   let updateTabPath: (oldPath: string, newPath: string) => void;
   let closeActiveTab: () => void;
+  let closeTabByPath: (path: string) => void;
   let titleFromPath: (path: string) => string;
   let createNewNote: () => Promise<void>;
   let restoreSession: () => Promise<void>;
@@ -51,6 +52,7 @@ describe("tab-state", () => {
     updateTabContent = mod.updateTabContent;
     updateTabPath = mod.updateTabPath;
     closeActiveTab = mod.closeActiveTab;
+    closeTabByPath = mod.closeTabByPath;
     titleFromPath = mod.titleFromPath;
     createNewNote = mod.createNewNote;
     restoreSession = mod.restoreSession;
@@ -292,6 +294,34 @@ describe("tab-state", () => {
 
     (globalThis as any).prompt = origPrompt;
     mock.on("POST", "/api/note", { mtime: 2000 });
+  });
+
+  test("closeTabByPath closes the tab matching the given path", async () => {
+    while (getTabs().length > 0) closeTab(0);
+
+    mock.on("GET", "/api/note", { content: "# X", mtime: 1000 });
+    await openTab("notes/x.md");
+    await openTab("notes/y.md");
+    expect(getTabs().length).toBe(2);
+
+    closeTabByPath("notes/x.md");
+    expect(getTabs().length).toBe(1);
+    expect(getTabs()[0]!.path).toBe("notes/y.md");
+
+    while (getTabs().length > 0) closeTab(0);
+  });
+
+  test("closeTabByPath does nothing when path not open", async () => {
+    while (getTabs().length > 0) closeTab(0);
+
+    mock.on("GET", "/api/note", { content: "# X", mtime: 1000 });
+    await openTab("notes/x.md");
+    expect(getTabs().length).toBe(1);
+
+    closeTabByPath("notes/not-open.md");
+    expect(getTabs().length).toBe(1);
+
+    while (getTabs().length > 0) closeTab(0);
   });
 
   test("restoreSession getNote failure: tab created with empty content", async () => {
