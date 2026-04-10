@@ -199,14 +199,14 @@ function onTabChange(): void {
 
   // Scroll the newly active element into view
   const activeEl = container.querySelector<HTMLElement>(".nav-file.active");
-  activeEl?.scrollIntoView({ block: "nearest" });
+  activeEl?.scrollIntoView({ block: "center" });
 
   // Tree mode needs a full re-render because the active file may not be visible
   // (collapsed parent dir). Re-render expands nothing automatically, but the
   // highlight + scroll still apply after the DOM is rebuilt.
   if (currentMode === "tree") {
     renderTree();
-    container.querySelector<HTMLElement>(".nav-file.active")?.scrollIntoView({ block: "nearest" });
+    container.querySelector<HTMLElement>(".nav-file.active")?.scrollIntoView({ block: "center" });
   }
 }
 
