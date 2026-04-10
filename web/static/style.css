@@ -827,6 +827,7 @@ body {
   background: rgba(0, 0, 0, 0.3);
   display: flex;
   justify-content: center;
+  align-items: flex-start;
   padding-top: 20vh;
   z-index: 200;
 }
