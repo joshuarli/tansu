@@ -6,6 +6,7 @@ import type {
   Note,
   SaveResult,
   NoteEntry,
+  RecentFileEntry,
   SearchResult,
   SessionState,
   Settings,
@@ -19,6 +20,7 @@ export type MockBody =
   | Note
   | SaveResult
   | NoteEntry[]
+  | RecentFileEntry[]
   | SearchResult[]
   | SessionState
   | Settings
@@ -155,7 +157,13 @@ export function mockFetch(): MockFetch {
       });
       return mock;
     },
-    onDelayed(method: string, urlPattern: string | RegExp, body: MockBody, delayMs: number, status = 200) {
+    onDelayed(
+      method: string,
+      urlPattern: string | RegExp,
+      body: MockBody,
+      delayMs: number,
+      status = 200,
+    ) {
       handlers.push({
         match: (url, init) => {
           const m = (init?.method ?? "GET").toUpperCase() === method.toUpperCase();
@@ -198,6 +206,12 @@ export function mockFetch(): MockFetch {
 
 export interface MockFetch {
   on(method: string, urlPattern: string | RegExp, body: MockBody, status?: number): MockFetch;
-  onDelayed(method: string, urlPattern: string | RegExp, body: MockBody, delayMs: number, status?: number): MockFetch;
+  onDelayed(
+    method: string,
+    urlPattern: string | RegExp,
+    body: MockBody,
+    delayMs: number,
+    status?: number,
+  ): MockFetch;
   restore(): void;
 }

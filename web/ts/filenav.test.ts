@@ -1,10 +1,11 @@
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 
-import { setupDOM, mockFetch, type MockFetch } from "./test-helper.ts";
-import { emit, clearAll } from "./events.ts";
+import { emit } from "./events.ts";
+import { setupDOM, mockFetch } from "./test-helper.ts";
 
 describe("filenav", () => {
   let cleanup: () => void;
+  let navCleanup: () => void;
   let mock: ReturnType<typeof mockFetch>;
   let openTab: (path: string) => Promise<unknown>;
   let closeTab: (i: number) => void;
@@ -43,11 +44,11 @@ describe("filenav", () => {
     while (getTabs().length > 0) closeTab(0);
 
     const navMod = await import("./filenav.ts");
-    await navMod.initFileNav();
+    navCleanup = await navMod.initFileNav();
   });
 
   afterAll(() => {
-    clearAll();
+    navCleanup();
     mock.restore();
     cleanup();
   });
@@ -130,7 +131,7 @@ describe("filenav", () => {
     // Fire many events in rapid succession: save + SSE + tab switch all at once
     emit("files:changed", undefined); // local save
     emit("files:changed", undefined); // SSE
-    await openTab("notes/beta.md");   // tab switch triggers tab:change
+    await openTab("notes/beta.md"); // tab switch triggers tab:change
     emit("files:changed", undefined); // extra SSE (e.g. second watcher event)
 
     await drain();
@@ -148,10 +149,15 @@ describe("filenav", () => {
     // Simulate network lag on the SECOND files:changed by overriding /api/notes to be slow.
     // The first emit completes fast; the second (SSE) triggers a slow refresh.
     // Meanwhile, tab:change also fires. Check for no duplicates.
-    mock.onDelayed("GET", "/api/notes", [
-      { path: "notes/alpha.md", title: "alpha" },
-      { path: "notes/beta.md", title: "beta" },
-    ], 10);
+    mock.onDelayed(
+      "GET",
+      "/api/notes",
+      [
+        { path: "notes/alpha.md", title: "alpha" },
+        { path: "notes/beta.md", title: "beta" },
+      ],
+      10,
+    );
 
     emit("files:changed", undefined);
     emit("files:changed", undefined);

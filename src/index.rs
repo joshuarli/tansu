@@ -401,7 +401,15 @@ impl Index {
             let Ok(store_reader) = segment_reader.get_store_reader(64) else {
                 continue;
             };
-            for doc_id in 0..segment_reader.num_docs() {
+            // alive_bitset() is None when no docs in this segment are deleted.
+            // Must use max_doc() (not num_docs()) as the upper bound: num_docs() is
+            // the live count, but doc IDs are not compacted — iterating 0..num_docs()
+            // visits deleted docs at low IDs and skips live docs at high IDs.
+            let alive = segment_reader.alive_bitset();
+            for doc_id in 0..segment_reader.max_doc() {
+                if alive.is_some_and(|b| !b.is_alive(doc_id)) {
+                    continue;
+                }
                 let Ok(doc) = store_reader.get::<TantivyDocument>(doc_id) else {
                     continue;
                 };

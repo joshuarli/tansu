@@ -82,7 +82,7 @@ let currentQuery = "";
 let renderQueued = false;
 let renderInFlight = false;
 
-export async function initFileNav(): Promise<void> {
+export async function initFileNav(): Promise<() => void> {
   await Promise.all([refreshNotes(), refreshPinned()]);
   render();
 
@@ -147,11 +147,11 @@ export async function initFileNav(): Promise<void> {
   updateButtons(recentBtn, pinnedBtn, sortBtn);
 
   // Re-render on tab changes to update active file highlight and scroll
-  on("tab:change", () => onTabChange());
+  const offTabChange = on("tab:change", () => onTabChange());
 
   // Refresh file list whenever files are mutated. Guard prevents stale double-renders
   // when both the local save and SSE fire files:changed within the same tick.
-  on<undefined>("files:changed", async () => {
+  const offFilesChanged = on<undefined>("files:changed", async () => {
     if (renderInFlight) {
       renderQueued = true;
       return;
@@ -172,10 +172,16 @@ export async function initFileNav(): Promise<void> {
   });
 
   // Refresh pinned state when changed from tab context menu
-  on<undefined>("pinned:changed", async () => {
+  const offPinnedChanged = on<undefined>("pinned:changed", async () => {
     await refreshPinned();
     render();
   });
+
+  return () => {
+    offTabChange();
+    offFilesChanged();
+    offPinnedChanged();
+  };
 }
 
 function updateButtons(
