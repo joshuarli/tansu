@@ -122,6 +122,11 @@ export function closeActiveTab() {
   if (activeIndex >= 0) closeTab(activeIndex);
 }
 
+export function closeTabByPath(path: string) {
+  const index = tabs.findIndex((t) => t.path === path);
+  if (index >= 0) closeTab(index);
+}
+
 export function clearClosedTabs() {
   closedTabs.length = 0;
 }

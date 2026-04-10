@@ -1,6 +1,7 @@
 /// Tab bar DOM rendering. Re-exports all tab state for backwards compatibility.
 
-import { deleteNote } from "./api.ts";
+import { deleteNote, pinFile, unpinFile, getPinnedFiles } from "./api.ts";
+import { showContextMenu } from "./context-menu.ts";
 import { emit, on } from "./events.ts";
 import { getTabs, getActiveIndex, switchTab, closeTab, createNewNote } from "./tab-state.ts";
 
@@ -13,6 +14,7 @@ export {
   switchTab,
   closeTab,
   closeActiveTab,
+  closeTabByPath,
   nextTab,
   prevTab,
   markDirty,
@@ -25,8 +27,6 @@ export {
   clearClosedTabs,
   syncToServer,
 } from "./tab-state.ts";
-
-let contextMenuEl: HTMLElement | null = null;
 
 on("tab:render", render);
 
@@ -63,7 +63,7 @@ function render() {
     el.appendChild(closeBtn);
 
     el.onclick = () => switchTab(i);
-    el.oncontextmenu = (e) => showContextMenu(e, i);
+    el.oncontextmenu = (e) => showTabContextMenu(e, i);
     el.onauxclick = (e) => {
       if (e.button === 1) {
         e.preventDefault();
@@ -82,69 +82,52 @@ function render() {
   tabBar.appendChild(addBtn);
 }
 
-function showContextMenu(e: MouseEvent, index: number) {
+async function showTabContextMenu(e: MouseEvent, index: number) {
   e.preventDefault();
-  hideContextMenu();
-
   const tabs = getTabs();
-  const menu = document.createElement("div");
-  menu.className = "context-menu";
-  menu.style.left = `${e.clientX}px`;
-  menu.style.top = `${e.clientY}px`;
+  const tab = tabs[index];
+  if (!tab) return;
 
-  const rename = document.createElement("div");
-  rename.className = "context-menu-item";
-  rename.textContent = "Rename...";
-  rename.onclick = () => {
-    hideContextMenu();
-    const tab = tabs[index];
-    if (!tab) return;
-    const newName = prompt("New name:", tab.title);
-    if (newName && newName !== tab.title) {
-      window.dispatchEvent(
-        new CustomEvent("tansu:rename", {
-          detail: { path: tab.path, newName },
-        }),
-      );
-    }
-  };
+  const pinned = await getPinnedFiles();
+  const isPinned = pinned.some((f) => f.path === tab.path);
 
-  const del = document.createElement("div");
-  del.className = "context-menu-item danger";
-  del.textContent = "Delete";
-  del.onclick = () => {
-    hideContextMenu();
-    const tab = tabs[index];
-    if (!tab) return;
-    if (!confirm(`Delete ${tab.title}?`)) return;
-    deleteNote(tab.path).then(() => {
-      closeTab(index);
-      emit("files:changed", undefined);
-    });
-  };
-
-  const close = document.createElement("div");
-  close.className = "context-menu-item";
-  close.textContent = "Close";
-  close.onclick = () => {
-    hideContextMenu();
-    closeTab(index);
-  };
-
-  menu.append(rename, del, close);
-  document.body.appendChild(menu);
-  contextMenuEl = menu;
-
-  const dismiss = () => {
-    hideContextMenu();
-    document.removeEventListener("click", dismiss);
-  };
-  setTimeout(() => document.addEventListener("click", dismiss), 0);
-}
-
-function hideContextMenu() {
-  if (contextMenuEl) {
-    contextMenuEl.remove();
-    contextMenuEl = null;
-  }
+  showContextMenu(
+    [
+      {
+        label: "Rename...",
+        onclick: () => {
+          const newName = prompt("New name:", tab.title);
+          if (newName && newName !== tab.title) {
+            window.dispatchEvent(
+              new CustomEvent("tansu:rename", { detail: { path: tab.path, newName } }),
+            );
+          }
+        },
+      },
+      {
+        label: isPinned ? "Unpin" : "Pin",
+        onclick: () => {
+          const action = isPinned ? unpinFile(tab.path) : pinFile(tab.path);
+          action.then(() => emit("pinned:changed", undefined));
+        },
+      },
+      {
+        label: "Delete",
+        danger: true,
+        onclick: () => {
+          if (!confirm(`Delete ${tab.title}?`)) return;
+          deleteNote(tab.path).then(() => {
+            closeTab(index);
+            emit("files:changed", undefined);
+          });
+        },
+      },
+      {
+        label: "Close",
+        onclick: () => closeTab(index),
+      },
+    ],
+    e.clientX,
+    e.clientY,
+  );
 }

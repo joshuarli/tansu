@@ -115,6 +115,35 @@ export async function getRecentFiles(): Promise<RecentFileEntry[]> {
   return res.json() as Promise<RecentFileEntry[]>;
 }
 
+export interface PinnedFileEntry {
+  path: string;
+  title: string;
+}
+
+export async function getPinnedFiles(): Promise<PinnedFileEntry[]> {
+  const res = await fetch("/api/pinned");
+  if (!res.ok) throw new Error(`pinned failed: ${res.status}`);
+  return res.json() as Promise<PinnedFileEntry[]>;
+}
+
+export async function pinFile(path: string): Promise<void> {
+  const res = await fetch("/api/pin", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path }),
+  });
+  if (!res.ok) throw new Error(`pin failed: ${res.status}`);
+}
+
+export async function unpinFile(path: string): Promise<void> {
+  const res = await fetch("/api/pin", {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path }),
+  });
+  if (!res.ok) throw new Error(`unpin failed: ${res.status}`);
+}
+
 export async function getBacklinks(path: string): Promise<string[]> {
   const res = await fetch(`/api/backlinks?path=${encodeURIComponent(path)}`);
   if (!res.ok) throw new Error(`backlinks failed: ${res.status}`);

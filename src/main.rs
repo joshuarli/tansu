@@ -107,6 +107,11 @@ struct RenameRequest {
     new_path: String,
 }
 
+#[derive(Deserialize)]
+struct PinRequest {
+    path: String,
+}
+
 struct SessionState {
     token: [u8; 32],
     last_activity: Instant,
@@ -494,6 +499,9 @@ impl Server {
             ("PUT", "/api/settings") => self.api_put_settings(stream, headers, raw_buf, header_len),
             ("GET", "/api/filesearch") => self.api_filesearch(stream, path_raw),
             ("GET", "/api/recentfiles") => self.api_recent_files(stream),
+            ("GET", "/api/pinned") => self.api_get_pinned(stream),
+            ("POST", "/api/pin") => self.api_pin(stream, headers, raw_buf, header_len),
+            ("DELETE", "/api/pin") => self.api_unpin(stream, headers, raw_buf, header_len),
             ("GET", "/api/lock") => self.api_lock(stream),
             ("POST", "/api/prf/register") => {
                 self.api_prf_register(stream, headers, raw_buf, header_len)
@@ -891,6 +899,14 @@ impl Server {
         self.index.remove_note(&rel);
         self.file_index.remove_file(&rel);
 
+        // Remove from pinned list if present
+        let mut pinned = self.load_pinned();
+        let before = pinned.len();
+        pinned.retain(|p| p != &rel);
+        if pinned.len() != before {
+            let _ = self.save_pinned(&pinned);
+        }
+
         respond_json(sock, &OkResponse { ok: true })
     }
 
@@ -965,6 +981,13 @@ impl Server {
         // Single commit for all backlink updates
         if !updated.is_empty() {
             self.index.commit();
+        }
+
+        // Update pinned paths if the renamed file was pinned
+        let mut pinned = self.load_pinned();
+        if let Some(slot) = pinned.iter_mut().find(|p| *p == &req.old_path) {
+            *slot = req.new_path.clone();
+            let _ = self.save_pinned(&pinned);
         }
 
         respond_json(stream, &RenameResponse { updated })
@@ -1191,6 +1214,77 @@ impl Server {
         let json = serde_json::to_string(&entries)
             .unwrap_or_else(|_| "[]".to_string());
         write_json(sock, &json)
+    }
+
+    fn pinned_path(&self) -> PathBuf {
+        self.dir.join(".tansu/pinned.json")
+    }
+
+    fn load_pinned(&self) -> Vec<String> {
+        match fs::read_to_string(self.pinned_path()) {
+            Ok(json) => serde_json::from_str::<Vec<String>>(&json).unwrap_or_default(),
+            Err(_) => Vec::new(),
+        }
+    }
+
+    fn save_pinned(&self, paths: &[String]) -> io::Result<()> {
+        let json = serde_json::to_string(paths)
+            .map_err(|e| io::Error::other(e.to_string()))?;
+        fs::write(self.pinned_path(), json)
+    }
+
+    fn api_get_pinned(&self, sock: &TcpStream) -> io::Result<()> {
+        let paths = self.load_pinned();
+        let entries: Vec<serde_json::Value> = paths
+            .iter()
+            .map(|p| {
+                let title = self.file_index.lookup_path(p)
+                    .unwrap_or_else(|| {
+                        Path::new(p)
+                            .file_stem()
+                            .and_then(|s| s.to_str())
+                            .unwrap_or(p)
+                            .to_string()
+                    });
+                serde_json::json!({ "path": p, "title": title })
+            })
+            .collect();
+        let json = serde_json::to_string(&entries)
+            .unwrap_or_else(|_| "[]".to_string());
+        write_json(sock, &json)
+    }
+
+    fn api_pin(
+        &self,
+        stream: &mut TcpStream,
+        headers: &[httparse::Header<'_>],
+        raw_buf: &[u8],
+        header_len: usize,
+    ) -> io::Result<()> {
+        let req: PinRequest = parse_body(stream, headers, raw_buf, header_len)?;
+        let mut paths = self.load_pinned();
+        if !paths.contains(&req.path) {
+            paths.push(req.path);
+            self.save_pinned(&paths)?;
+        }
+        respond_json(stream, &OkResponse { ok: true })
+    }
+
+    fn api_unpin(
+        &self,
+        stream: &mut TcpStream,
+        headers: &[httparse::Header<'_>],
+        raw_buf: &[u8],
+        header_len: usize,
+    ) -> io::Result<()> {
+        let req: PinRequest = parse_body(stream, headers, raw_buf, header_len)?;
+        let mut paths = self.load_pinned();
+        let before = paths.len();
+        paths.retain(|p| p != &req.path);
+        if paths.len() != before {
+            self.save_pinned(&paths)?;
+        }
+        respond_json(stream, &OkResponse { ok: true })
     }
 }
 

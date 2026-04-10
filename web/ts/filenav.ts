@@ -1,7 +1,59 @@
-import { listNotes, searchFileNames, getRecentFiles } from "./api.ts";
+import {
+  listNotes,
+  searchFileNames,
+  getRecentFiles,
+  getPinnedFiles,
+  pinFile,
+  unpinFile,
+  deleteNote,
+} from "./api.ts";
+import { showContextMenu } from "./context-menu.ts";
 import { on, emit } from "./events.ts";
-import { openTab, getActiveTab } from "./tab-state.ts";
+import { openTab, getActiveTab, closeTabByPath } from "./tab-state.ts";
 import { stemFromPath, debounce } from "./util.ts";
+
+function showNavContextMenu(e: MouseEvent, path: string, title: string): void {
+  e.preventDefault();
+  const isPinned = pinnedPaths.has(path);
+
+  showContextMenu(
+    [
+      {
+        label: "Rename...",
+        onclick: () => {
+          const newName = prompt("New name:", title);
+          if (newName && newName !== title) {
+            window.dispatchEvent(new CustomEvent("tansu:rename", { detail: { path, newName } }));
+          }
+        },
+      },
+      {
+        label: isPinned ? "Unpin" : "Pin",
+        onclick: () => {
+          const action = isPinned ? unpinFile(path) : pinFile(path);
+          action.then(async () => {
+            await refreshPinned();
+            render();
+            emit("pinned:changed", undefined);
+          });
+        },
+      },
+      {
+        label: "Delete",
+        danger: true,
+        onclick: () => {
+          if (!confirm(`Delete ${title}?`)) return;
+          deleteNote(path).then(() => {
+            closeTabByPath(path);
+            emit("files:changed", undefined);
+          });
+        },
+      },
+    ],
+    e.clientX,
+    e.clientY,
+  );
+}
 
 interface DirNode {
   type: "dir";
@@ -21,16 +73,18 @@ type TreeNode = DirNode | FileNode;
 
 const collapsed = new Set<string>();
 let sortByName = true;
-let currentMode: "tree" | "recent" | "search" = "tree";
+let currentMode: "tree" | "recent" | "pinned" | "search" = "tree";
 let allNotes: { path: string; title: string }[] = [];
+let pinnedPaths = new Set<string>();
 let currentQuery = "";
 
 export async function initFileNav(): Promise<void> {
-  await refreshNotes();
+  await Promise.all([refreshNotes(), refreshPinned()]);
   render();
 
   const searchInput = document.getElementById("sidebar-search") as HTMLInputElement;
   const recentBtn = document.getElementById("sidebar-recent-btn") as HTMLButtonElement;
+  const pinnedBtn = document.getElementById("sidebar-pinned-btn") as HTMLButtonElement;
   const sortBtn = document.getElementById("sidebar-sort-btn") as HTMLButtonElement;
 
   const handleSearch = debounce((q: string) => {
@@ -64,36 +118,68 @@ export async function initFileNav(): Promise<void> {
       searchInput.value = "";
       currentQuery = "";
     }
-    updateButtons(recentBtn, sortBtn);
+    updateButtons(recentBtn, pinnedBtn, sortBtn);
+    render();
+  });
+
+  pinnedBtn.addEventListener("click", () => {
+    if (currentMode === "pinned") {
+      currentMode = "tree";
+    } else {
+      currentMode = "pinned";
+      searchInput.value = "";
+      currentQuery = "";
+    }
+    updateButtons(recentBtn, pinnedBtn, sortBtn);
     render();
   });
 
   sortBtn.addEventListener("click", () => {
     sortByName = !sortByName;
-    updateButtons(recentBtn, sortBtn);
+    updateButtons(recentBtn, pinnedBtn, sortBtn);
     if (currentMode === "tree") render();
   });
 
-  updateButtons(recentBtn, sortBtn);
+  updateButtons(recentBtn, pinnedBtn, sortBtn);
 
   // Re-render on tab changes to update active file highlight
   on("tab:change", () => renderTreeIfActive());
 
   // Refresh file list whenever files are mutated
   on<undefined>("files:changed", async () => {
-    await refreshNotes();
+    await Promise.all([refreshNotes(), refreshPinned()]);
+    render();
+  });
+
+  // Refresh pinned state when changed from tab context menu
+  on<undefined>("pinned:changed", async () => {
+    await refreshPinned();
     render();
   });
 }
 
-function updateButtons(recentBtn: HTMLButtonElement, sortBtn: HTMLButtonElement): void {
+function updateButtons(
+  recentBtn: HTMLButtonElement,
+  pinnedBtn: HTMLButtonElement,
+  sortBtn: HTMLButtonElement,
+): void {
   recentBtn.classList.toggle("active", currentMode === "recent");
+  pinnedBtn.classList.toggle("active", currentMode === "pinned");
   sortBtn.classList.toggle("active", sortByName);
 }
 
 async function refreshNotes(): Promise<void> {
   try {
     allNotes = await listNotes();
+  } catch {
+    // keep stale data on failure
+  }
+}
+
+async function refreshPinned(): Promise<void> {
+  try {
+    const files = await getPinnedFiles();
+    pinnedPaths = new Set(files.map((f) => f.path));
   } catch {
     // keep stale data on failure
   }
@@ -107,6 +193,8 @@ function renderTreeIfActive(): void {
 async function render(): Promise<void> {
   if (currentMode === "recent") {
     await renderRecent();
+  } else if (currentMode === "pinned") {
+    await renderPinned();
   } else if (currentMode === "search" && currentQuery.trim()) {
     await renderSearch(currentQuery);
   } else {
@@ -135,6 +223,29 @@ async function renderRecent(): Promise<void> {
   }
 }
 
+async function renderPinned(): Promise<void> {
+  const container = getContainer();
+  if (!container) return;
+  let files: { path: string; title: string }[];
+  try {
+    files = await getPinnedFiles();
+  } catch {
+    container.innerHTML = '<div class="nav-empty">Failed to load</div>';
+    return;
+  }
+  // Sync local set too
+  pinnedPaths = new Set(files.map((f) => f.path));
+  const active = getActiveTab();
+  container.innerHTML = "";
+  if (files.length === 0) {
+    container.innerHTML = '<div class="nav-empty">No pinned files</div>';
+    return;
+  }
+  for (const file of files) {
+    container.appendChild(makeFileRow(file.path, file.title, 0, active?.path, false));
+  }
+}
+
 async function renderSearch(q: string): Promise<void> {
   const container = getContainer();
   if (!container) return;
@@ -152,24 +263,24 @@ async function renderSearch(q: string): Promise<void> {
     return;
   }
   for (const r of results) {
-    const el = document.createElement("div");
-    el.className = "nav-file" + (active?.path === r.path ? " active" : "");
-
-    const nameLine = document.createElement("div");
-    nameLine.className = "nav-file-name";
-    nameLine.textContent = r.title;
-    el.appendChild(nameLine);
+    const el = makeFileRow(r.path, r.title, 0, active?.path, false);
 
     const dir = r.path.includes("/") ? r.path.substring(0, r.path.lastIndexOf("/")) : "";
     if (dir) {
+      // Wrap the text node in a name div so the dir line can sit below it
+      const nameNode = el.firstChild;
+      if (nameNode) {
+        const nameDiv = document.createElement("div");
+        nameDiv.className = "nav-file-name";
+        nameDiv.textContent = nameNode.textContent;
+        el.replaceChild(nameDiv, nameNode);
+      }
       const dirLine = document.createElement("div");
       dirLine.className = "nav-file-dir";
       dirLine.textContent = dir;
       el.appendChild(dirLine);
     }
 
-    el.title = r.path;
-    el.addEventListener("click", () => openTab(r.path));
     container.appendChild(el);
   }
 }
@@ -297,6 +408,9 @@ function makeFileRow(
   el.textContent = title || stemFromPath(path);
   el.title = path;
   el.addEventListener("click", () => openTab(path));
+  el.addEventListener("contextmenu", (e) =>
+    showNavContextMenu(e, path, title || stemFromPath(path)),
+  );
   return el;
 }
 

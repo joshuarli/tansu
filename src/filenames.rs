@@ -171,6 +171,20 @@ impl FileNameIndex {
             .collect()
     }
 
+    /// Look up a single file by exact path, returning its title (stem) if found.
+    pub fn lookup_path(&self, rel_path: &str) -> Option<String> {
+        self.ensure_committed();
+        self.reload_if_dirty();
+        let searcher = self.inner.reader.searcher();
+        let f = &self.inner.fields;
+        let term = tantivy::Term::from_field_text(f.path, rel_path);
+        let query = TermQuery::new(term, IndexRecordOption::Basic);
+        let top_docs = searcher.search(&query, &TopDocs::with_limit(1)).ok()?;
+        let (_, addr) = top_docs.into_iter().next()?;
+        let doc = searcher.doc::<TantivyDocument>(addr).ok()?;
+        Some(doc.get_first(f.stem)?.as_str()?.to_string())
+    }
+
     /// Return the N most recently modified files, sorted by mtime descending.
     pub fn recent(&self, n: usize) -> Vec<NameEntry> {
         self.ensure_committed();
