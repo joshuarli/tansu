@@ -143,8 +143,8 @@ export async function initFileNav(): Promise<void> {
 
   updateButtons(recentBtn, pinnedBtn, sortBtn);
 
-  // Re-render on tab changes to update active file highlight
-  on("tab:change", () => renderTreeIfActive());
+  // Re-render on tab changes to update active file highlight and scroll
+  on("tab:change", () => onTabChange());
 
   // Refresh file list whenever files are mutated
   on<undefined>("files:changed", async () => {
@@ -186,9 +186,28 @@ async function refreshPinned(): Promise<void> {
   }
 }
 
-// Only re-render tree synchronously (no network calls) — used for tab change events
-function renderTreeIfActive(): void {
-  if (currentMode === "tree") renderTree();
+// Update active highlight and scroll into view on tab change — no network calls.
+function onTabChange(): void {
+  const active = getActiveTab();
+  const container = getContainer();
+  if (!container) return;
+
+  // Update .active class on all nav-file elements in place
+  for (const el of container.querySelectorAll<HTMLElement>(".nav-file")) {
+    el.classList.toggle("active", el.title === active?.path);
+  }
+
+  // Scroll the newly active element into view
+  const activeEl = container.querySelector<HTMLElement>(".nav-file.active");
+  activeEl?.scrollIntoView({ block: "nearest" });
+
+  // Tree mode needs a full re-render because the active file may not be visible
+  // (collapsed parent dir). Re-render expands nothing automatically, but the
+  // highlight + scroll still apply after the DOM is rebuilt.
+  if (currentMode === "tree") {
+    renderTree();
+    container.querySelector<HTMLElement>(".nav-file.active")?.scrollIntoView({ block: "nearest" });
+  }
 }
 
 async function render(): Promise<void> {
