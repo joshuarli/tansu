@@ -14,7 +14,7 @@ import {
 } from "./autocomplete.ts";
 import { loadBacklinks } from "./backlinks.ts";
 import { showConflictBanner, handleReloadConflict } from "./conflict.ts";
-import { on } from "./events.ts";
+import { on, emit } from "./events.ts";
 import { handleImagePaste } from "./image-paste.ts";
 import { toggleRevisions, hideRevisions, isRevisionsOpen } from "./revisions.ts";
 import { markDirty, markClean, getActiveTab } from "./tabs.ts";
@@ -191,10 +191,12 @@ async function _doSave() {
   switch (action.type) {
     case "clean":
       markClean(currentPath, action.content, action.mtime);
+      emit("files:changed", undefined);
       break;
     case "false-conflict": {
       const retry = await saveNote(currentPath, content, 0);
       markClean(currentPath, content, retry.mtime);
+      emit("files:changed", undefined);
       break;
     }
     case "real-conflict":
