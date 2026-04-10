@@ -4,7 +4,13 @@ import { deleteNote, pinFile, unpinFile, getPinnedFiles } from "./api.ts";
 import { showContextMenu } from "./context-menu.ts";
 import { emit, on } from "./events.ts";
 import { showInputDialog } from "./input-dialog.ts";
-import { getTabs, getActiveIndex, switchTab, closeTab, createNewNote as _createNewNote } from "./tab-state.ts";
+import {
+  getTabs,
+  getActiveIndex,
+  switchTab,
+  closeTab,
+  createNewNote as _createNewNote,
+} from "./tab-state.ts";
 
 export {
   type Tab,

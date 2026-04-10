@@ -215,7 +215,9 @@ describe("tabs", () => {
     // context-menu defers onclick via setTimeout; after tick the dialog is open
     await tick();
     const dialogInput = document.getElementById("input-dialog-input") as HTMLInputElement;
-    expect(document.getElementById("input-dialog-overlay")!.classList.contains("hidden")).toBe(false);
+    expect(document.getElementById("input-dialog-overlay")!.classList.contains("hidden")).toBe(
+      false,
+    );
     dialogInput.value = "renamed-note";
     dialogInput.dispatchEvent(
       new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }),

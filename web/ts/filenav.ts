@@ -8,8 +8,8 @@ import {
   deleteNote,
 } from "./api.ts";
 import { showContextMenu } from "./context-menu.ts";
-import { showInputDialog } from "./input-dialog.ts";
 import { on, emit } from "./events.ts";
+import { showInputDialog } from "./input-dialog.ts";
 import { openTab, getActiveTab, closeTabByPath } from "./tab-state.ts";
 import { stemFromPath, debounce } from "./util.ts";
 
