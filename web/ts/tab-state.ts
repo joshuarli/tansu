@@ -188,9 +188,7 @@ export function updateTabPath(oldPath: string, newPath: string) {
   }
 }
 
-export async function createNewNote() {
-  const name = prompt("New note name:");
-  if (!name) return;
+export async function createNewNote(name: string) {
   const path = name.endsWith(".md") ? name : `${name}.md`;
   try {
     await createNote(path);

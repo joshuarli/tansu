@@ -23,7 +23,7 @@ describe("tab-state", () => {
   let closeActiveTab: () => void;
   let closeTabByPath: (path: string) => void;
   let titleFromPath: (path: string) => string;
-  let createNewNote: () => Promise<void>;
+  let createNewNote: (name: string) => Promise<void>;
   let restoreSession: () => Promise<void>;
   let switchTab: (index: number) => Promise<void>;
   let offRender: () => void;
@@ -146,34 +146,27 @@ describe("tab-state", () => {
     offC();
   });
 
-  test("createNewNote creates and opens tab when prompt returns a name", async () => {
-    // Clean state
+  test("createNewNote creates and opens tab for the given name", async () => {
     while (getTabs().length > 0) closeTab(0);
 
-    const origPrompt = globalThis.prompt;
-    (globalThis as any).prompt = () => "My Note";
-
-    await createNewNote();
+    await createNewNote("My Note");
 
     expect(getTabs().length).toBe(1);
     expect(getTabs()[0]!.path).toBe("My Note.md");
     expect(getTabs()[0]!.title).toBe("My Note");
 
-    (globalThis as any).prompt = origPrompt;
     while (getTabs().length > 0) closeTab(0);
   });
 
-  test("createNewNote does nothing when prompt is cancelled", async () => {
+  test("createNewNote accepts a path that already ends in .md", async () => {
     while (getTabs().length > 0) closeTab(0);
 
-    const origPrompt = globalThis.prompt;
-    (globalThis as any).prompt = () => null;
+    await createNewNote("already.md");
 
-    await createNewNote();
+    expect(getTabs().length).toBe(1);
+    expect(getTabs()[0]!.path).toBe("already.md");
 
-    expect(getTabs().length).toBe(0);
-
-    (globalThis as any).prompt = origPrompt;
+    while (getTabs().length > 0) closeTab(0);
   });
 
   test("restoreSession restores tabs from saved state", async () => {
@@ -284,7 +277,7 @@ describe("tab-state", () => {
       errorCalled = true;
     };
 
-    await createNewNote();
+    await createNewNote("Failing Note");
 
     console.error = errorSpy;
 

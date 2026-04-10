@@ -8,6 +8,7 @@ import {
   deleteNote,
 } from "./api.ts";
 import { showContextMenu } from "./context-menu.ts";
+import { showInputDialog } from "./input-dialog.ts";
 import { on, emit } from "./events.ts";
 import { openTab, getActiveTab, closeTabByPath } from "./tab-state.ts";
 import { stemFromPath, debounce } from "./util.ts";
@@ -20,8 +21,8 @@ function showNavContextMenu(e: MouseEvent, path: string, title: string): void {
     [
       {
         label: "Rename...",
-        onclick: () => {
-          const newName = prompt("New name:", title);
+        onclick: async () => {
+          const newName = await showInputDialog("Rename to...", title);
           if (newName && newName !== title) {
             window.dispatchEvent(new CustomEvent("tansu:rename", { detail: { path, newName } }));
           }

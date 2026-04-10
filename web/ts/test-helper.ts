@@ -50,6 +50,11 @@ const TANSU_HTML = `<!doctype html>
   <div id="settings-overlay" class="hidden">
     <div id="settings-panel"></div>
   </div>
+  <div id="input-dialog-overlay" class="hidden">
+    <div id="input-dialog">
+      <input id="input-dialog-input" type="text">
+    </div>
+  </div>
   <div id="palette-overlay" class="hidden">
     <div id="palette-modal">
       <input id="palette-input" type="text">

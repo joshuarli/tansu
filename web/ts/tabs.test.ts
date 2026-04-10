@@ -191,7 +191,7 @@ describe("tabs", () => {
     expect(document.body.querySelector(".context-menu")).toBe(null);
   });
 
-  test("context menu Rename dispatches tansu:rename event", async () => {
+  test("context menu Rename dispatches tansu:rename event via input dialog", async () => {
     while (getTabs().length > 0) closeTab(0);
     await openTab("notes/to-rename.md");
     await tick();
@@ -205,22 +205,26 @@ describe("tabs", () => {
     window.addEventListener("tansu:rename", handler);
 
     (tabEl as HTMLElement).dispatchEvent(
-      new MouseEvent("contextmenu", {
-        bubbles: true,
-        cancelable: true,
-        clientX: 100,
-        clientY: 100,
-      }),
+      new MouseEvent("contextmenu", { bubbles: true, cancelable: true }),
     );
     await tick();
     const items = document.body.querySelectorAll(".context-menu-item");
     expect(items[0]!.textContent).toBe("Rename...");
     (items[0] as HTMLElement).click();
+
+    // context-menu defers onclick via setTimeout; after tick the dialog is open
+    await tick();
+    const dialogInput = document.getElementById("input-dialog-input") as HTMLInputElement;
+    expect(document.getElementById("input-dialog-overlay")!.classList.contains("hidden")).toBe(false);
+    dialogInput.value = "renamed-note";
+    dialogInput.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }),
+    );
     await tick();
 
     expect(renameDetail !== null).toBe(true);
     expect(renameDetail.path).toBe("notes/to-rename.md");
-    expect(renameDetail.newName).toBe("test");
+    expect(renameDetail.newName).toBe("renamed-note");
 
     window.removeEventListener("tansu:rename", handler);
     while (getTabs().length > 0) closeTab(0);

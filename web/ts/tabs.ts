@@ -3,7 +3,8 @@
 import { deleteNote, pinFile, unpinFile, getPinnedFiles } from "./api.ts";
 import { showContextMenu } from "./context-menu.ts";
 import { emit, on } from "./events.ts";
-import { getTabs, getActiveIndex, switchTab, closeTab, createNewNote } from "./tab-state.ts";
+import { showInputDialog } from "./input-dialog.ts";
+import { getTabs, getActiveIndex, switchTab, closeTab, createNewNote as _createNewNote } from "./tab-state.ts";
 
 export {
   type Tab,
@@ -21,12 +22,17 @@ export {
   markClean,
   updateTabContent,
   updateTabPath,
-  createNewNote,
   restoreSession,
   reopenClosedTab,
   clearClosedTabs,
   syncToServer,
 } from "./tab-state.ts";
+
+export async function createNewNote(): Promise<void> {
+  const name = await showInputDialog("New note name...");
+  if (!name) return;
+  await _createNewNote(name);
+}
 
 on("tab:render", render);
 
@@ -95,8 +101,8 @@ async function showTabContextMenu(e: MouseEvent, index: number) {
     [
       {
         label: "Rename...",
-        onclick: () => {
-          const newName = prompt("New name:", tab.title);
+        onclick: async () => {
+          const newName = await showInputDialog("Rename to...", tab.title);
           if (newName && newName !== tab.title) {
             window.dispatchEvent(
               new CustomEvent("tansu:rename", { detail: { path: tab.path, newName } }),

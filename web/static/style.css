@@ -821,6 +821,45 @@ body {
 }
 
 /* Settings panel */
+#input-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.3);
+  display: flex;
+  justify-content: center;
+  padding-top: 20vh;
+  z-index: 200;
+}
+
+#input-dialog-overlay.hidden {
+  display: none;
+}
+
+#input-dialog {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  width: 400px;
+  box-shadow: 0 16px 70px rgba(0, 0, 0, 0.15);
+  overflow: hidden;
+}
+
+#input-dialog-input {
+  display: block;
+  width: 100%;
+  border: none;
+  padding: 14px 18px;
+  font-size: 15px;
+  font-family: var(--font);
+  background: transparent;
+  color: var(--fg);
+  box-sizing: border-box;
+}
+
+#input-dialog-input:focus {
+  outline: none;
+}
+
 #settings-overlay {
   position: fixed;
   inset: 0;
