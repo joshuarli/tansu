@@ -887,4 +887,120 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
         let _ = fs::remove_file(&tmp);
     }
+
+    #[test]
+    fn get_all_notes_no_duplicates_after_update() {
+        // Regression: get_all_notes() used to iterate 0..num_docs() (the live count)
+        // instead of 0..max_doc(). Tantivy doc IDs are not compacted after soft
+        // deletes, so the two ranges differ once a doc is deleted.
+        //
+        // Concretely: segment A has alpha.md at doc_id=0, beta.md at doc_id=1.
+        // After updating alpha.md, doc_id=0 is soft-deleted and the new alpha.md
+        // lands in segment B. Segment A now has num_docs()=1, max_doc()=2.
+        // The old 0..num_docs() loop visited deleted alpha at doc_id=0 (no alive
+        // check) and skipped live beta at doc_id=1, returning stale+duplicate entries.
+        let dir = std::env::temp_dir().join(format!("tansu_test_dedup_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let idx = Index::open_or_create(&dir).unwrap();
+
+        let alpha = std::env::temp_dir().join(format!("tansu_alpha_{}.md", std::process::id()));
+        let beta = std::env::temp_dir().join(format!("tansu_beta_{}.md", std::process::id()));
+
+        // Index alpha then beta in the same batch → segment A: alpha=doc_id=0, beta=doc_id=1.
+        fs::write(&alpha, "alpha v1").unwrap();
+        idx.index_note("alpha.md", "alpha v1", &alpha);
+        fs::write(&beta, "beta content").unwrap();
+        idx.index_note("beta.md", "beta content", &beta);
+        let _ = idx.get_all_notes(); // ensure_committed → flushes segment A
+
+        // Update alpha: delete_term marks doc_id=0 in segment A as deleted.
+        // new alpha goes into segment B at doc_id=0.
+        // Segment A: max_doc=2, num_docs=1; deleted doc is at the LOWER id (0),
+        // live beta is at the HIGHER id (1) — this is what triggers the old bug.
+        fs::write(&alpha, "alpha v2").unwrap();
+        idx.index_note("alpha.md", "alpha v2", &alpha);
+
+        let notes = idx.get_all_notes();
+        let paths: Vec<&str> = notes.iter().map(|n| n.path.as_str()).collect();
+        assert_eq!(notes.len(), 2, "expected 2 notes, got {:?}", paths);
+        assert!(paths.contains(&"alpha.md"), "missing alpha.md in {:?}", paths);
+        assert!(paths.contains(&"beta.md"), "missing beta.md in {:?}", paths);
+
+        let _ = fs::remove_dir_all(&dir);
+        let _ = fs::remove_file(&alpha);
+        let _ = fs::remove_file(&beta);
+    }
+
+    /// Regression test: get_all_notes() must use max_doc() (not num_docs()) and check
+    /// alive_bitset() to skip soft-deleted docs. Tantivy doc IDs are not compacted after
+    /// soft deletes, so iterating 0..num_docs() visits the wrong doc IDs.
+    ///
+    /// Uses a single-threaded writer so alpha and beta land in one segment on commit 1.
+    /// After updating alpha in commit 2, segment A has alpha(deleted,doc_id=0) and
+    /// beta(live,doc_id=1), num_docs=1, max_doc=2.
+    ///
+    /// Old bug: loop 0..num_docs (0..1) visits deleted alpha, misses live beta.
+    /// Returns [alpha_v1, alpha_v2] — beta missing.
+    ///
+    /// Fixed: loop 0..max_doc (0..2), skip dead doc_id=0, return beta from seg A and
+    /// alpha_v2 from seg B.
+    #[test]
+    fn get_all_notes_no_duplicates_after_update_raw() {
+        let dir = std::env::temp_dir().join(format!("tansu_test_raw_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+
+        // Build the bug scenario using a single-threaded raw Tantivy writer so both
+        // initial docs are guaranteed to land in one segment. Schema must match
+        // Index::open_or_create field order exactly (path=0, title=1, ...) so that
+        // get_all_notes() reads the correct field IDs when we re-open below.
+        {
+            let mut sb = Schema::builder();
+            let path_field = sb.add_text_field("path", STRING | STORED);
+            let title_field = sb.add_text_field("title", TEXT | STORED);
+            // Remaining fields maintain production field-ID order; get_all_notes()
+            // only reads path and title, so their stored values don't matter here.
+            let _ = sb.add_text_field("content", TEXT | STORED);
+            let _ = sb.add_text_field("headings", TEXT | STORED);
+            let _ = sb.add_text_field("tags", TEXT | STORED);
+            let _ = sb.add_u64_field("mtime", STORED | FAST);
+            let _ = sb.add_text_field("links_to", TEXT | STORED);
+
+            let raw_index = TantivyIndex::create_in_dir(&dir, sb.build()).unwrap();
+            let mut writer = raw_index.writer_with_num_threads(1, 15_000_000).unwrap();
+
+            let make_doc = |path: &str, title: &str| {
+                let mut doc = TantivyDocument::new();
+                doc.add_text(path_field, path);
+                doc.add_text(title_field, title);
+                doc
+            };
+
+            // Commit 1: alpha + beta into one segment (single-thread writer).
+            writer.delete_term(tantivy::Term::from_field_text(path_field, "alpha.md"));
+            let _ = writer.add_document(make_doc("alpha.md", "alpha v1"));
+            writer.delete_term(tantivy::Term::from_field_text(path_field, "beta.md"));
+            let _ = writer.add_document(make_doc("beta.md", "beta"));
+            writer.commit().unwrap();
+
+            // Commit 2: update alpha → seg A: alpha(deleted,doc_id=0), beta(live,doc_id=1),
+            // num_docs=1, max_doc=2. New alpha lands in seg B.
+            writer.delete_term(tantivy::Term::from_field_text(path_field, "alpha.md"));
+            let _ = writer.add_document(make_doc("alpha.md", "alpha v2"));
+            writer.commit().unwrap();
+            // writer + raw_index dropped here, releasing the lock file.
+        }
+
+        // Open via the production path and call the production get_all_notes().
+        // open_or_create detects meta.json and calls open_in_dir, reusing the on-disk schema.
+        let idx = Index::open_or_create(&dir).unwrap();
+        let notes = idx.get_all_notes();
+        let paths: Vec<&str> = notes.iter().map(|n| n.path.as_str()).collect();
+        assert_eq!(notes.len(), 2, "expected 2 notes, got {:?}", paths);
+        assert!(paths.contains(&"alpha.md"), "missing alpha.md in {:?}", paths);
+        assert!(paths.contains(&"beta.md"), "missing beta.md in {:?}", paths);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
 }
