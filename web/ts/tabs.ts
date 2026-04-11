@@ -42,10 +42,28 @@ export async function createNewNote(): Promise<void> {
 
 on("tab:render", render);
 
+let hoveredTabIndex = -1;
+
+document.addEventListener("keydown", (e) => {
+  if (hoveredTabIndex === -1) return;
+  if (e.key !== "x" && e.key !== "X") return;
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  const target = e.target as Element;
+  if (
+    target.closest("[contenteditable]") ||
+    target.tagName === "INPUT" ||
+    target.tagName === "TEXTAREA"
+  )
+    return;
+  e.preventDefault();
+  closeTab(hoveredTabIndex);
+});
+
 function render() {
   const tabBar = document.getElementById("tab-bar")!;
   const emptyState = document.getElementById("empty-state")!;
   tabBar.innerHTML = "";
+  hoveredTabIndex = -1;
   const tabs = getTabs();
   const activeIndex = getActiveIndex();
   emptyState.style.display = tabs.length === 0 ? "flex" : "none";
@@ -74,6 +92,12 @@ function render() {
     };
     el.appendChild(closeBtn);
 
+    el.addEventListener("mouseenter", () => {
+      hoveredTabIndex = i;
+    });
+    el.addEventListener("mouseleave", () => {
+      hoveredTabIndex = -1;
+    });
     el.onclick = () => switchTab(i);
     el.oncontextmenu = (e) => showTabContextMenu(e, i);
     el.onauxclick = (e) => {
