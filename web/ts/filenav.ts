@@ -11,7 +11,7 @@ import { showContextMenu } from "./context-menu.ts";
 import { on, emit } from "./events.ts";
 import { showInputDialog } from "./input-dialog.ts";
 import { openTab, getActiveTab, closeTabByPath } from "./tab-state.ts";
-import { stemFromPath, debounce } from "./util.ts";
+import { stemFromPath } from "./util.ts";
 
 function showNavContextMenu(e: MouseEvent, path: string, title: string): void {
   e.preventDefault();
@@ -91,7 +91,8 @@ export async function initFileNav(): Promise<() => void> {
   const pinnedBtn = document.getElementById("sidebar-pinned-btn") as HTMLButtonElement;
   const sortBtn = document.getElementById("sidebar-sort-btn") as HTMLButtonElement;
 
-  const handleSearch = debounce((q: string) => {
+  searchInput.addEventListener("input", (e) => {
+    const q = (e.target as HTMLInputElement).value;
     currentQuery = q;
     if (q.trim()) {
       currentMode = "search";
@@ -99,10 +100,6 @@ export async function initFileNav(): Promise<() => void> {
       currentMode = "tree";
     }
     render();
-  }, 150);
-
-  searchInput.addEventListener("input", (e) => {
-    handleSearch((e.target as HTMLInputElement).value);
   });
 
   searchInput.addEventListener("keydown", (e) => {

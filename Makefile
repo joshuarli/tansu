@@ -2,6 +2,9 @@
 AGENT = 1
 export AGENT
 
+dev: ts
+	cargo run --bin tansu -- $(NOTES_DIR) --port 3000
+
 build: check build-ts build-rs
 
 build-rs:
@@ -34,10 +37,7 @@ ts: lint-ts
 	bunx tsgo --noEmit --pretty false
 	bun build web/ts/main.ts --outfile web/static/app.js --minify
 
-dev: ts
-	cargo run --bin tansu -- $(NOTES_DIR) --port 3000
-
-NOTES_DIR ?= ~/notes
+NOTES_DIR ?= '/Users/josh/Library/Mobile Documents/iCloud~md~obsidian/Documents/Notes'
 
 test-rs:
 	cargo test -- --test-threads=4

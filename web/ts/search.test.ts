@@ -118,7 +118,7 @@ describe("search", () => {
     const input = document.getElementById("search-input")! as HTMLInputElement;
     const resultsEl = document.getElementById("search-results")!;
 
-    // Type in search box → results render after debounce
+    // Type in search box → results render
     openSearch2();
     input.value = "alpha";
     input.dispatchEvent(new Event("input"));

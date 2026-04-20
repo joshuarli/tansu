@@ -1,6 +1,5 @@
 import { searchNotes, createNote, getSettings } from "./api.ts";
 import type { SearchResult } from "./api.ts";
-import { debounce } from "./util.ts";
 
 export interface Search {
   toggle(): void;
@@ -64,7 +63,7 @@ export function createSearch(deps: SearchDeps): Search {
     else open();
   }
 
-  const doSearch = debounce(async () => {
+  async function doSearch() {
     const q = input.value.trim();
     if (q.length < 2) {
       results = [];
@@ -79,7 +78,7 @@ export function createSearch(deps: SearchDeps): Search {
     }
     selectedIndex = 0;
     renderResults(q);
-  }, 150);
+  }
 
   input.addEventListener("input", doSearch);
 
