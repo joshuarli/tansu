@@ -25,3 +25,10 @@ repos:
         language: system
         types: [ts]
         pass_filenames: false
+      - id: knip
+        name: knip
+        entry: bunx knip
+        language: system
+        files: \.(ts|js|tsx|jsx|mjs)$
+        pass_filenames: false
+        stages: [pre-push]
