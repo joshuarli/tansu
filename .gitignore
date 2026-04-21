@@ -2,4 +2,3 @@ target
 web/static/app.js
 node_modules
 .env
-.envrc

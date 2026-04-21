@@ -2,6 +2,9 @@
 AGENT = 1
 export AGENT
 
+NAME       := tansu
+TARGET     := $(shell rustc -vV | awk '/^host:/ {print $$2}')
+
 dev: ts
 	cargo run --bin tansu -- $(NOTES_DIR) --port 3000
 
@@ -9,6 +12,14 @@ build: check build-ts build-rs
 
 build-rs:
 	cargo build
+
+release-rs:
+	cargo clean -p $(NAME) --release --target $(TARGET)
+	RUSTFLAGS="-Zlocation-detail=none -Zunstable-options -Cpanic=immediate-abort" \
+	cargo build --release \
+	  -Z build-std=std \
+	  -Z build-std-features= \
+	  --target $(TARGET)
 
 publish-pkg:
 	cd packages/md-wysiwyg && bun run build && bunx npm publish --access public
@@ -40,7 +51,7 @@ ts: lint-ts
 NOTES_DIR ?= '/Users/josh/Library/Mobile Documents/iCloud~md~obsidian/Documents/Notes'
 
 test-rs:
-	cargo test -- --test-threads=4
+	cargo test
 
 bench:
 	cargo bench --bench index
