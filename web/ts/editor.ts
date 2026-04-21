@@ -301,7 +301,7 @@ function restoreCursorOffset(offset: number, scroll = false) {
       range.collapse(true);
       sel.removeAllRanges();
       sel.addRange(range);
-      if (scroll) node.parentElement?.scrollIntoView({ block: "nearest", behavior: "instant" });
+      if (scroll) node.parentElement?.scrollIntoView({ block: "center", behavior: "instant" });
       return;
     }
     remaining -= node.length;
