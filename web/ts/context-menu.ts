@@ -1,6 +1,6 @@
 /// Singleton context menu — only one may be visible at a time.
 
-export interface MenuItem {
+interface MenuItem {
   label: string;
   danger?: boolean;
   onclick: () => void;
@@ -41,7 +41,7 @@ export function showContextMenu(items: MenuItem[], x: number, y: number): void {
   }, 0);
 }
 
-export function hide(): void {
+function hide(): void {
   if (active) {
     active.remove();
     active = null;

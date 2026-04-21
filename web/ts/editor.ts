@@ -216,7 +216,7 @@ async function _doSave() {
   }
 }
 
-export type ReloadAction = { type: "load" } | { type: "conflict" };
+type ReloadAction = { type: "load" } | { type: "conflict" };
 
 /// Pure decision: determine how to handle a disk reload.
 export function classifyReload(isDirty: boolean): ReloadAction {

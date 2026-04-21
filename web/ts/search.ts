@@ -1,14 +1,14 @@
 import { searchNotes, createNote, getSettings } from "./api.ts";
 import type { SearchResult } from "./api.ts";
 
-export interface Search {
+interface Search {
   toggle(): void;
   open(filterPath?: string): void;
   close(): void;
   isOpen(): boolean;
 }
 
-export interface SearchDeps {
+interface SearchDeps {
   openTab: (path: string) => Promise<unknown>;
   invalidateNoteCache: () => void;
 }

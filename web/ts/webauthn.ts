@@ -32,7 +32,7 @@ export function base64urlToBuf(b64: string): ArrayBuffer {
   return buf.buffer;
 }
 
-export interface PrfRegistrationResult {
+interface PrfRegistrationResult {
   credentialId: string;
   prfKeyB64: string;
 }

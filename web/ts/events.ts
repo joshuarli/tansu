@@ -16,8 +16,3 @@ export function on<T = unknown>(event: string, handler: Handler<T>): () => void 
 export function emit<T = unknown>(event: string, data: T): void {
   for (const h of listeners.get(event) ?? []) h(data);
 }
-
-/// Remove all listeners (useful for testing).
-export function clearAll(): void {
-  listeners.clear();
-}

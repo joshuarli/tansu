@@ -1,4 +1,4 @@
-/// Tab bar DOM rendering. Re-exports all tab state for backwards compatibility.
+/// Tab bar DOM rendering.
 
 import { deleteNote, pinFile, unpinFile, getPinnedFiles } from "./api.ts";
 import { showContextMenu } from "./context-menu.ts";
@@ -16,12 +16,9 @@ export {
   type Tab,
   getTabs,
   getActiveTab,
-  getActiveIndex,
   openTab,
-  switchTab,
   closeTab,
   closeActiveTab,
-  closeTabByPath,
   nextTab,
   prevTab,
   markDirty,
@@ -30,7 +27,6 @@ export {
   updateTabPath,
   restoreSession,
   reopenClosedTab,
-  clearClosedTabs,
   syncToServer,
 } from "./tab-state.ts";
 

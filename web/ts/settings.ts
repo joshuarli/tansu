@@ -2,7 +2,7 @@ import { getSettings, saveSettings, getStatus, registerPrf, removePrf, lockApp }
 import type { Settings, AppStatus } from "./api.ts";
 import { isPrfLikelySupported, createPrfCredential } from "./webauthn.ts";
 
-export interface SettingsPanel {
+interface SettingsPanel {
   toggle(): void;
   open(): Promise<void>;
   close(): void;

@@ -451,8 +451,3 @@ function makeFileRow(
   );
   return el;
 }
-
-// Exported so main.ts can emit on creates/deletes that don't go through SSE
-export function notifyFilesChanged(): void {
-  emit("files:changed", undefined);
-}

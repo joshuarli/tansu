@@ -62,7 +62,7 @@ export function kvPut(key: string, value: unknown): Promise<void> {
   return idbPut("kv", key, value);
 }
 
-export interface CachedNote {
+interface CachedNote {
   content: string;
   mtime: number;
 }

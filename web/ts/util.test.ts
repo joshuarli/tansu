@@ -1,6 +1,6 @@
 import { describe, test, expect } from "bun:test";
 
-import { escapeHtml, relativeTime, stemFromPath, debounce } from "./util.ts";
+import { escapeHtml, relativeTime, stemFromPath } from "./util.ts";
 
 describe("escapeHtml", () => {
   test("escape ampersand", () => {
@@ -78,20 +78,5 @@ describe("relativeTime", () => {
   // Still works without explicit now (backwards compat)
   test("default now works", () => {
     expect(typeof relativeTime(Date.now())).toBe("string");
-  });
-});
-
-describe("debounce", () => {
-  test("debounce calls once after delay", async () => {
-    let callCount = 0;
-    const debounced = debounce(() => {
-      callCount++;
-    }, 10);
-    debounced();
-    debounced();
-    debounced();
-    expect(callCount).toBe(0);
-    await new Promise((r) => setTimeout(r, 50));
-    expect(callCount).toBe(1);
   });
 });

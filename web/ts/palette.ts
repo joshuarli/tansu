@@ -1,10 +1,10 @@
-export interface KeyBinding {
+interface KeyBinding {
   key: string;
   meta?: boolean;
   shift?: boolean;
 }
 
-export interface Command {
+interface Command {
   label: string;
   shortcut: string;
   keys?: KeyBinding;
@@ -21,7 +21,7 @@ export function matchesKey(e: KeyboardEvent, k: KeyBinding): boolean {
   return e.key === k.key;
 }
 
-export interface Palette {
+interface Palette {
   toggle(): void;
   open(): void;
   close(): void;

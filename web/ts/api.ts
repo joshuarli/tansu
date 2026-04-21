@@ -92,7 +92,7 @@ export async function listNotes(): Promise<NoteEntry[]> {
   return res.json() as Promise<NoteEntry[]>;
 }
 
-export interface FileSearchResult {
+interface FileSearchResult {
   path: string;
   title: string;
 }
@@ -115,7 +115,7 @@ export async function getRecentFiles(): Promise<RecentFileEntry[]> {
   return res.json() as Promise<RecentFileEntry[]>;
 }
 
-export interface PinnedFileEntry {
+interface PinnedFileEntry {
   path: string;
   title: string;
 }
