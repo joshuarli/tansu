@@ -19,7 +19,7 @@ import { handleImagePaste } from "./image-paste.ts";
 import { initImageResize } from "./image-resize.ts";
 import { registerLinkHover } from "./link-hover.ts";
 import { toggleRevisions, hideRevisions, isRevisionsOpen } from "./revisions.ts";
-import { markDirty, markClean, getActiveTab, setCursor, getCursor } from "./tabs.ts";
+import { markDirty, markClean, getActiveTab, getTabs, setCursor, getCursor } from "./tabs.ts";
 
 let editorArea: HTMLElement;
 let container: HTMLElement | null = null;
@@ -45,6 +45,11 @@ export function initEditor() {
 }
 
 export function showEditor(path: string, content: string) {
+  if (autosaveTimer !== null) {
+    clearTimeout(autosaveTimer);
+    autosaveTimer = null;
+    void saveCurrentNote({ silent: true });
+  }
   currentPath = path;
   isSourceMode = false;
   hideRevisions();
@@ -126,6 +131,7 @@ export function hideEditor() {
   if (autosaveTimer !== null) {
     clearTimeout(autosaveTimer);
     autosaveTimer = null;
+    void saveCurrentNote({ silent: true });
   }
   currentPath = null;
   hideRevisions();
@@ -204,13 +210,14 @@ export async function saveCurrentNote(opts?: { silent?: boolean }) {
 }
 
 async function _doSave(silent: boolean) {
-  const tab = getActiveTab();
-  if (!tab || !currentPath) return;
+  if (!currentPath) return;
+  const savePath = currentPath;
+  const tab = getTabs().find((t) => t.path === savePath) ?? getActiveTab();
+  if (!tab) return;
 
   const content = getCurrentContent();
   // Capture cursor synchronously before the first await
   const cursorOffset = isSourceMode ? -1 : saveCursorOffset();
-  const savePath = currentPath;
 
   const result = await saveNote(savePath, content, tab.mtime);
   const action = classifySaveResult(result, content, tab.content);
