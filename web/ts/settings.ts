@@ -34,6 +34,7 @@ export function createSettings(): SettingsPanel {
         weight_tags: 2,
         weight_content: 1,
         fuzzy_distance: 1,
+        recency_boost: 2,
         result_limit: 20,
         show_score_breakdown: true,
         excluded_folders: [],
@@ -77,6 +78,15 @@ export function createSettings(): SettingsPanel {
             <option value="0"${s.fuzzy_distance === 0 ? " selected" : ""}>0 (exact only)</option>
             <option value="1"${s.fuzzy_distance === 1 ? " selected" : ""}>1</option>
             <option value="2"${s.fuzzy_distance === 2 ? " selected" : ""}>2</option>
+          </select>
+        </label>
+        <label class="settings-row">
+          <span>Recency boost</span>
+          <select data-key="recency_boost">
+            <option value="0"${s.recency_boost === 0 ? " selected" : ""}>Disabled</option>
+            <option value="1"${s.recency_boost === 1 ? " selected" : ""}>24 hours</option>
+            <option value="2"${s.recency_boost === 2 ? " selected" : ""}>7 days</option>
+            <option value="3"${s.recency_boost === 3 ? " selected" : ""}>30 days</option>
           </select>
         </label>
         <label class="settings-row">

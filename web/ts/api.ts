@@ -209,6 +209,7 @@ export interface Settings {
   weight_tags: number;
   weight_content: number;
   fuzzy_distance: number;
+  recency_boost: number;
   result_limit: number;
   show_score_breakdown: boolean;
   excluded_folders: string[];

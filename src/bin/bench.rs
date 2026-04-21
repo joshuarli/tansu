@@ -36,7 +36,15 @@ fn main() {
     let idx = Index::open_or_create(&index_dir).expect("failed to open index");
 
     // Warm up reader
-    idx.search("warmup", limit, None, fuzzy, weights, false);
+    idx.search(
+        "warmup",
+        limit,
+        None,
+        fuzzy,
+        settings.recency_boost,
+        weights,
+        false,
+    );
 
     // 1. get_all_notes
     bench("get_all_notes", 50, || {
@@ -49,7 +57,15 @@ fn main() {
     for q in common_queries {
         let label = format!("search exact '{q}'");
         bench(&label, 100, || {
-            let r = idx.search(q, limit, None, fuzzy, weights, false);
+            let r = idx.search(
+                q,
+                limit,
+                None,
+                fuzzy,
+                settings.recency_boost,
+                weights,
+                false,
+            );
             std::hint::black_box(r.len());
         });
     }
@@ -59,7 +75,15 @@ fn main() {
     for q in fuzzy_queries {
         let label = format!("search fuzzy '{q}'");
         bench(&label, 100, || {
-            let r = idx.search(q, limit, None, fuzzy, weights, false);
+            let r = idx.search(
+                q,
+                limit,
+                None,
+                fuzzy,
+                settings.recency_boost,
+                weights,
+                false,
+            );
             std::hint::black_box(r.len());
         });
     }
@@ -69,14 +93,30 @@ fn main() {
     for q in multi {
         let label = format!("search multi '{q}'");
         bench(&label, 100, || {
-            let r = idx.search(q, limit, None, fuzzy, weights, false);
+            let r = idx.search(
+                q,
+                limit,
+                None,
+                fuzzy,
+                settings.recency_boost,
+                weights,
+                false,
+            );
             std::hint::black_box(r.len());
         });
     }
 
     // 5. Search: no results (worst case — runs both phases)
     bench("search miss 'xyzzyplugh'", 100, || {
-        let r = idx.search("xyzzyplugh", limit, None, fuzzy, weights, false);
+        let r = idx.search(
+            "xyzzyplugh",
+            limit,
+            None,
+            fuzzy,
+            settings.recency_boost,
+            weights,
+            false,
+        );
         std::hint::black_box(r.len());
     });
 

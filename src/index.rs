@@ -5,12 +5,13 @@ use std::{
         Arc, Mutex, RwLock,
         atomic::{AtomicBool, Ordering},
     },
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 use tantivy::{
     Index as TantivyIndex, IndexReader, IndexWriter, TantivyDocument,
     collector::TopDocs,
-    query::{BooleanQuery, FuzzyTermQuery, Occur, TermQuery},
+    query::{BooleanQuery, FuzzyTermQuery, Occur, PhrasePrefixQuery, TermQuery},
     schema::*,
 };
 
@@ -28,6 +29,8 @@ pub struct SearchResult {
     pub title: String,
     pub excerpt: String,
     pub score: f32,
+    pub mtime: u64,
+    pub recency_multiplier: f32,
     pub field_scores: FieldScores,
 }
 
@@ -191,7 +194,7 @@ impl Index {
         *self.inner.notes_cache.lock().unwrap() = None;
     }
 
-    /// Two-phase search: exact first, fuzzy fallback if <5 results.
+    /// Two-phase search: exact + prefix first, fuzzy fallback if <5 results.
     /// `weights` order: [title, headings, tags, content].
     pub fn search(
         &self,
@@ -199,6 +202,7 @@ impl Index {
         limit: usize,
         filter_path: Option<&str>,
         fuzzy_distance: u8,
+        recency_boost: u8,
         weights: SearchWeights,
         score_breakdown: bool,
     ) -> Vec<SearchResult> {
@@ -223,6 +227,7 @@ impl Index {
             &phase1_query,
             limit,
             &terms,
+            recency_boost,
             weights,
             score_breakdown,
         );
@@ -238,6 +243,7 @@ impl Index {
             &phase2_query,
             limit,
             &terms,
+            recency_boost,
             weights,
             score_breakdown,
         )
@@ -274,6 +280,15 @@ impl Index {
                     Box::new(tantivy::query::BoostQuery::new(Box::new(exact), boost)),
                 ));
 
+                let prefix = PhrasePrefixQuery::new(vec![term.clone()]);
+                field_queries.push((
+                    Occur::Should,
+                    Box::new(tantivy::query::BoostQuery::new(
+                        Box::new(prefix),
+                        boost * 0.8,
+                    )),
+                ));
+
                 if fuzzy && fuzzy_distance > 0 && field == f.content {
                     let fuzzy_q = FuzzyTermQuery::new(term, fuzzy_distance, true);
                     field_queries.push((
@@ -305,6 +320,7 @@ impl Index {
         query: &BooleanQuery,
         limit: usize,
         terms: &[&str],
+        recency_boost: u8,
         weights: SearchWeights,
         score_breakdown: bool,
     ) -> Vec<SearchResult> {
@@ -312,6 +328,13 @@ impl Index {
         let Ok(top_docs) = searcher.search(query, &TopDocs::with_limit(limit)) else {
             return Vec::new();
         };
+        let recency_decay = match recency_boost {
+            1 => Some(-3.0_f32),
+            2 => Some(-0.3_f32),
+            3 => Some(-0.1_f32),
+            _ => None,
+        };
+        let now = now_epoch_secs();
 
         // Pre-lowercase terms as bytes once for all results
         let lower_terms: Vec<Vec<u8>> = terms
@@ -335,6 +358,7 @@ impl Index {
                 .and_then(|v| v.as_str())
                 .unwrap_or("")
                 .to_string();
+            let mtime = doc.get_first(f.mtime).and_then(|v| v.as_u64()).unwrap_or(0);
             let content = doc
                 .get_first(f.content)
                 .and_then(|v| v.as_str())
@@ -346,14 +370,25 @@ impl Index {
             } else {
                 FieldScores::default()
             };
+            let recency_multiplier = recency_decay
+                .map(|decay| {
+                    let days = (now.saturating_sub(mtime) as f32) / (24.0 * 3600.0);
+                    1.0 + (decay * days / 1000.0).exp()
+                })
+                .unwrap_or(1.0);
 
             results.push(SearchResult {
                 path,
                 title,
                 excerpt,
-                score,
+                score: score * recency_multiplier,
+                mtime,
+                recency_multiplier,
                 field_scores,
             });
+        }
+        if recency_decay.is_some() {
+            results.sort_by(|a, b| b.score.total_cmp(&a.score));
         }
         results
     }
@@ -459,6 +494,8 @@ fn compute_field_scores(
             for term in terms {
                 if ascii_eq_ignore_case(word, term) {
                     scores[i] += boost;
+                } else if starts_with_ci(word, term) {
+                    scores[i] += boost * 0.8;
                 } else if edit_distance_one_ci(word, term) {
                     scores[i] += boost * 0.6;
                 }
@@ -564,6 +601,15 @@ fn ascii_eq_ignore_case(a: &[u8], b: &[u8]) -> bool {
     a.len() == b.len() && a.iter().zip(b).all(|(x, y)| x.eq_ignore_ascii_case(y))
 }
 
+/// Check if `word` begins with `prefix` (case-insensitive ASCII), excluding exact matches.
+fn starts_with_ci(word: &[u8], prefix: &[u8]) -> bool {
+    word.len() > prefix.len()
+        && word
+            .iter()
+            .zip(prefix)
+            .all(|(word, prefix)| word.eq_ignore_ascii_case(prefix))
+}
+
 /// Check if two byte slices have edit distance exactly 1 (case-insensitive ASCII).
 fn edit_distance_one_ci(a: &[u8], b: &[u8]) -> bool {
     let (la, lb) = (a.len(), b.len());
@@ -605,11 +651,21 @@ fn edit_distance_one_ci(a: &[u8], b: &[u8]) -> bool {
 /// Check if a word matches any term (exact or edit distance 1), case-insensitive.
 fn matches_any_term(word: &[u8], terms: &[&[u8]]) -> bool {
     for term in terms {
-        if ascii_eq_ignore_case(word, term) || edit_distance_one_ci(word, term) {
+        if ascii_eq_ignore_case(word, term)
+            || starts_with_ci(word, term)
+            || edit_distance_one_ci(word, term)
+        {
             return true;
         }
     }
     false
+}
+
+fn now_epoch_secs() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
 }
 
 fn escape_html(s: &str) -> String {
@@ -709,6 +765,14 @@ mod tests {
     fn edit_distance_one_case_insensitive() {
         assert!(edit_distance_one_ci(b"Cat", b"bat"));
         assert!(edit_distance_one_ci(b"FOO", b"fob"));
+    }
+
+    #[test]
+    fn starts_with_case_insensitive() {
+        assert!(starts_with_ci(b"groats", b"groat"));
+        assert!(starts_with_ci(b"Groats", b"groat"));
+        assert!(!starts_with_ci(b"groat", b"groat"));
+        assert!(!starts_with_ci(b"great", b"groat"));
     }
 
     fn term_bytes(strs: &[&str]) -> Vec<Vec<u8>> {
@@ -845,7 +909,7 @@ mod tests {
             tags: 2.0,
             content: 1.0,
         };
-        let results = idx.search("findme", 10, None, 0, w, false);
+        let results = idx.search("findme", 10, None, 0, 0, w, false);
         assert!(!results.is_empty());
 
         let _ = fs::remove_dir_all(&dir);
@@ -870,19 +934,110 @@ mod tests {
         };
 
         // "jpeg-xl" should find the document (hyphen treated as separator)
-        let r = idx.search("jpeg-xl", 10, None, 0, w, false);
+        let r = idx.search("jpeg-xl", 10, None, 0, 0, w, false);
         assert!(!r.is_empty(), "jpeg-xl should match JPEG-XL");
 
         // "JPEG-XL" should also work (case insensitive)
-        let r = idx.search("JPEG-XL", 10, None, 0, w, false);
+        let r = idx.search("JPEG-XL", 10, None, 0, 0, w, false);
         assert!(!r.is_empty(), "JPEG-XL should match");
 
         // "some_function" should find the document (underscore treated as separator)
-        let r = idx.search("some_function", 10, None, 0, w, false);
+        let r = idx.search("some_function", 10, None, 0, 0, w, false);
         assert!(!r.is_empty(), "some_function should match");
 
         let _ = fs::remove_dir_all(&dir);
         let _ = fs::remove_file(&tmp);
+    }
+
+    #[test]
+    fn search_prefers_prefix_match_over_fuzzy() {
+        let dir = std::env::temp_dir().join(format!("tansu_test_prefix_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let idx = Index::open_or_create(&dir).unwrap();
+
+        let groats = std::env::temp_dir().join(format!("tansu_groats_{}.md", std::process::id()));
+        let great = std::env::temp_dir().join(format!("tansu_great_{}.md", std::process::id()));
+        fs::write(&groats, "A note about groats and porridge").unwrap();
+        fs::write(&great, "A note about great porridge").unwrap();
+
+        idx.index_note("groats.md", "A note about groats and porridge", &groats);
+        idx.index_note("great.md", "A note about great porridge", &great);
+
+        let w = SearchWeights {
+            title: 10.0,
+            headings: 5.0,
+            tags: 2.0,
+            content: 1.0,
+        };
+        let results = idx.search("groat", 10, None, 1, 0, w, true);
+        assert!(!results.is_empty(), "expected results for groat");
+        assert_eq!(results[0].path, "groats.md");
+        assert!(
+            results[0].excerpt.contains("<b>groats</b>"),
+            "expected prefix-highlighted excerpt, got: {}",
+            results[0].excerpt
+        );
+        assert!(
+            results[0].field_scores.content >= 0.8,
+            "expected prefix score in content, got {}",
+            results[0].field_scores.content
+        );
+
+        let _ = fs::remove_dir_all(&dir);
+        let _ = fs::remove_file(&groats);
+        let _ = fs::remove_file(&great);
+    }
+
+    #[test]
+    fn search_applies_recency_boost() {
+        let dir = std::env::temp_dir().join(format!("tansu_test_mtime_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let idx = Index::open_or_create(&dir).unwrap();
+        let now = now_epoch_secs();
+        let older_mtime = now - 30 * 24 * 3600;
+        let newer_mtime = now;
+
+        let f = &idx.inner.fields;
+        let writer = idx.inner.writer.write().unwrap();
+
+        let mut older = TantivyDocument::new();
+        older.add_text(f.path, "older.md");
+        older.add_text(f.title, "older");
+        older.add_text(f.content, "groats");
+        older.add_text(f.headings, "");
+        older.add_text(f.tags, "");
+        older.add_u64(f.mtime, older_mtime);
+        older.add_text(f.links_to, "");
+        let _ = writer.add_document(older);
+
+        let mut newer = TantivyDocument::new();
+        newer.add_text(f.path, "newer.md");
+        newer.add_text(f.title, "newer");
+        newer.add_text(f.content, "groats");
+        newer.add_text(f.headings, "");
+        newer.add_text(f.tags, "");
+        newer.add_u64(f.mtime, newer_mtime);
+        newer.add_text(f.links_to, "");
+        let _ = writer.add_document(newer);
+        drop(writer);
+        idx.commit();
+
+        let w = SearchWeights {
+            title: 10.0,
+            headings: 5.0,
+            tags: 2.0,
+            content: 1.0,
+        };
+        let results = idx.search("groat", 10, None, 1, 2, w, false);
+        assert!(results.len() >= 2, "expected tied results for groat");
+        assert_eq!(results[0].path, "newer.md");
+        assert_eq!(results[1].path, "older.md");
+        assert!(results[0].score > results[1].score);
+        assert!(results[0].recency_multiplier > results[1].recency_multiplier);
+
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]

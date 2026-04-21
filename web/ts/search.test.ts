@@ -25,6 +25,7 @@ describe("search", () => {
       weight_tags: 2,
       weight_content: 1,
       fuzzy_distance: 1,
+      recency_boost: 2,
       result_limit: 20,
       show_score_breakdown: true,
       excluded_folders: [],

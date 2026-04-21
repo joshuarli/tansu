@@ -11,6 +11,7 @@ pub struct Settings {
     pub weight_tags: f32,
     pub weight_content: f32,
     pub fuzzy_distance: u8,
+    pub recency_boost: u8,
     pub result_limit: usize,
     pub show_score_breakdown: bool,
     pub excluded_folders: Vec<String>,
@@ -24,6 +25,7 @@ impl Default for Settings {
             weight_tags: 2.0,
             weight_content: 1.0,
             fuzzy_distance: 1,
+            recency_boost: 2,
             result_limit: 20,
             show_score_breakdown: true,
             excluded_folders: Vec::new(),
@@ -69,6 +71,7 @@ mod tests {
         assert_eq!(s.weight_tags, 2.0);
         assert_eq!(s.weight_content, 1.0);
         assert_eq!(s.fuzzy_distance, 1);
+        assert_eq!(s.recency_boost, 2);
         assert_eq!(s.result_limit, 20);
         assert!(s.show_score_breakdown);
         assert!(s.excluded_folders.is_empty());

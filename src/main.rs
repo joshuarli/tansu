@@ -738,6 +738,7 @@ impl Server {
             s.result_limit,
             filter_path.as_deref(),
             s.fuzzy_distance,
+            s.recency_boost,
             s.weights(),
             s.show_score_breakdown,
         );
