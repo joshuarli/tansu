@@ -27,11 +27,7 @@ function getFreePort(): Promise<number> {
 export async function setup(): Promise<{ page: Page; baseUrl: string; notesDir: string }> {
   const activePort = await getFreePort();
   // Build frontend
-  const build = spawnSync(
-    "./node_modules/.bin/esbuild",
-    ["web/ts/main.ts", "--bundle", "--outfile=web/static/app.js", "--minify", "--format=esm"],
-    { stdio: "inherit" },
-  );
+  const build = spawnSync("pnpm", ["run", "bundle"], { stdio: "inherit" });
   if (build.status !== 0) throw new Error("Frontend build failed");
 
   // Create temp notes dir with test notes

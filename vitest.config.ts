@@ -11,6 +11,8 @@ export default defineConfig({
   test: {
     environment: "happy-dom",
     include: ["web/ts/*.test.ts"],
+    reporters: ["agent"],
+    silent: "passed-only",
     sequence: { shuffle: true },
     coverage: {
       provider: "v8",

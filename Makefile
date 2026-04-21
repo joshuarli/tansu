@@ -28,7 +28,7 @@ check:
 test: test-pkg test-ts test-rs
 
 lint-ts:
-	oxlint web/ts/
+	oxlint --quiet web/ts/
 
 test-pkg:
 	cd packages/md-wysiwyg && vitest run
@@ -42,12 +42,12 @@ test-e2e:
 ts: lint-ts
 	oxfmt web/ts/
 	tsgo --noEmit --pretty false
-	esbuild web/ts/main.ts --bundle --outfile=web/static/app.js --minify --format=esm
+	pnpm run bundle
 
 NOTES_DIR ?= '/Users/josh/Library/Mobile Documents/iCloud~md~obsidian/Documents/Notes'
 
 test-rs:
-	cargo test
+	cargo test -q
 
 bench:
 	cargo bench --bench index
@@ -56,7 +56,7 @@ bench-quick:
 	cargo run --bin bench -- $(NOTES_DIR)
 
 release-linux-amd64:
-	esbuild web/ts/main.ts --bundle --outfile=web/static/app.js --minify --format=esm
+	pnpm run bundle
 	cargo zigbuild --release --features embed --target x86_64-unknown-linux-gnu
 	TARGET=x86_64-unknown-linux-gnu ARCH=amd64 bash scripts/make-deb.sh
 

@@ -175,7 +175,7 @@ Static files are served from `/static/*` and images from `/z-images/*`. All othe
 
 ```sh
 tsgo --noEmit    # type-check TypeScript (TS7 native, no emit)
-esbuild web/ts/main.ts --bundle --outfile=web/static/app.js --minify --format=esm   # bundle frontend
+pnpm run bundle   # bundle frontend
 vitest run        # run all TypeScript tests
 cargo build       # build Rust server (never use --release)
 cargo test        # run Rust tests

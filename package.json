@@ -6,6 +6,7 @@
   ],
   "type": "module",
   "scripts": {
+    "bundle": "esbuild web/ts/main.ts --bundle --outfile=web/static/app.js --minify --format=esm",
     "test": "vitest run"
   },
   "dependencies": {
