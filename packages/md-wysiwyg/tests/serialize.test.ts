@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+import { describe, test, expect, beforeAll, afterAll } from "vitest";
 
 import { domToMarkdown } from "../src/serialize.ts";
 import { setupDOM } from "./test-helper.ts";

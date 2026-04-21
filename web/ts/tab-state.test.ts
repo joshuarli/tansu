@@ -1,7 +1,7 @@
 /// Tests for tab-state.ts — pure data logic, but needs DOM because
 /// tabs.ts registers a render listener on the shared event bus.
 
-import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+import { describe, test, expect, beforeAll, afterAll } from "vitest";
 
 import { on } from "./events.ts";
 import { setupDOM, mockFetch } from "./test-helper.ts";

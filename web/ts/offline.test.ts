@@ -1,8 +1,7 @@
 /// Tests for offline resilience: closed-tab stack, IDB caching, and offline fallback.
 /// Uses fake-indexeddb so the full IDB paths are exercised.
 
-import { describe, test, expect, beforeAll, afterAll } from "bun:test";
-
+import { describe, test, expect, beforeAll, afterAll } from "vitest";
 import "fake-indexeddb/auto";
 import type { SessionState } from "./api.ts";
 import { on } from "./events.ts";

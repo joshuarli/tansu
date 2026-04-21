@@ -1,6 +1,5 @@
-import { describe, test, expect, beforeAll, afterAll } from "bun:test";
-
 import type { Page } from "playwright";
+import { describe, test, expect, beforeAll, afterAll } from "vitest";
 
 import { setup, teardown } from "./setup.ts";
 

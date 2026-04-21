@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+import { describe, test, expect, beforeAll, afterAll } from "vitest";
 
 import { emit } from "./events.ts";
 import { setupDOM, mockFetch } from "./test-helper.ts";

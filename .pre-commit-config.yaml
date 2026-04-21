@@ -15,19 +15,19 @@ repos:
         pass_filenames: false
       - id: oxfmt
         name: oxfmt
-        entry: bun run oxfmt
+        entry: ./node_modules/.bin/oxfmt
         language: system
         types: [ts]
         pass_filenames: false
       - id: oxlint
         name: oxlint
-        entry: bun run oxlint
+        entry: ./node_modules/.bin/oxlint
         language: system
         types: [ts]
         pass_filenames: false
       - id: knip
         name: knip
-        entry: bunx knip
+        entry: ./node_modules/.bin/knip
         language: system
         files: \.(ts|js|tsx|jsx|mjs)$
         pass_filenames: false

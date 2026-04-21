@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+import { describe, test, expect, beforeAll, afterAll } from "vitest";
 
 import { computeDiff, renderDiff } from "../src/diff.ts";
 import type { DiffHunk } from "../src/diff.ts";

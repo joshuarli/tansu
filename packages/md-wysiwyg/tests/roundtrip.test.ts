@@ -1,7 +1,7 @@
 /// Roundtrip tests: markdown → HTML → markdown.
 /// Verifies that domToMarkdown(renderMarkdown(md)) produces equivalent output.
 
-import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+import { describe, test, expect, beforeAll, afterAll } from "vitest";
 
 import { setupDOM } from "./test-helper.ts";
 

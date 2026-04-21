@@ -1,0 +1,25 @@
+import { resolve } from "path";
+
+import { defineConfig } from "vitest/config";
+
+export default defineConfig({
+  resolve: {
+    alias: {
+      "@joshuarli98/md-wysiwyg": resolve(__dirname, "packages/md-wysiwyg/src/index.ts"),
+    },
+  },
+  test: {
+    environment: "happy-dom",
+    include: ["web/ts/*.test.ts"],
+    sequence: { shuffle: true },
+    coverage: {
+      provider: "v8",
+      include: ["web/ts/**/*.ts"],
+      exclude: ["web/ts/webauthn.ts", "web/ts/e2e/**", "web/ts/**/*.test.ts"],
+      thresholds: {
+        lines: 92,
+        functions: 92,
+      },
+    },
+  },
+});

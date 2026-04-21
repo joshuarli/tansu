@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+import { describe, test, expect, beforeAll, afterAll } from "vitest";
 
 import { classifySaveResult, classifyReload } from "./editor.ts";
 import type { SaveAction } from "./editor.ts";

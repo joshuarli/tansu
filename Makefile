@@ -1,7 +1,3 @@
-# bun quiet output
-AGENT = 1
-export AGENT
-
 NAME       := tansu
 TARGET     := $(shell rustc -vV | awk '/^host:/ {print $$2}')
 
@@ -22,31 +18,31 @@ release-rs:
 	  --target $(TARGET)
 
 publish-pkg:
-	cd packages/md-wysiwyg && bun run build && bunx npm publish --access public
+	cd packages/md-wysiwyg && pnpm run build && pnpm publish --access public
 
 check:
-	bunx tsgo
-	bunx tsgo -p packages/md-wysiwyg/tsconfig.json --noEmit
+	tsgo
+	tsgo -p packages/md-wysiwyg/tsconfig.json --noEmit
 	cargo check
 
 test: test-pkg test-ts test-rs
 
 lint-ts:
-	bun run oxlint web/ts/
+	oxlint web/ts/
 
 test-pkg:
-	bun test packages/md-wysiwyg/tests/*.test.ts
+	cd packages/md-wysiwyg && vitest run
 
 test-ts:
-	bun test web/ts/*.test.ts
+	vitest run
 
 test-e2e:
-	bun test web/ts/e2e/
+	vitest run web/ts/e2e/
 
 ts: lint-ts
-	bun run oxfmt web/ts/
-	bunx tsgo --noEmit --pretty false
-	bun build web/ts/main.ts --outfile web/static/app.js --minify
+	oxfmt web/ts/
+	tsgo --noEmit --pretty false
+	esbuild web/ts/main.ts --bundle --outfile=web/static/app.js --minify --format=esm
 
 NOTES_DIR ?= '/Users/josh/Library/Mobile Documents/iCloud~md~obsidian/Documents/Notes'
 
@@ -60,7 +56,7 @@ bench-quick:
 	cargo run --bin bench -- $(NOTES_DIR)
 
 release-linux-amd64:
-	bun build web/ts/main.ts --outfile web/static/app.js --minify
+	esbuild web/ts/main.ts --bundle --outfile=web/static/app.js --minify --format=esm
 	cargo zigbuild --release --features embed --target x86_64-unknown-linux-gnu
 	TARGET=x86_64-unknown-linux-gnu ARCH=amd64 bash scripts/make-deb.sh
 
@@ -70,6 +66,8 @@ setup-cross:
 	rustup target add x86_64-unknown-linux-gnu
 
 setup:
+	npm install -g $(shell node -p "require('./package.json').packageManager")
+	pnpm install
 	prek install --prepare-hooks -f
 
 pc:
