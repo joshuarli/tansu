@@ -114,9 +114,11 @@ export function showEditor(path: string, content: string) {
   editorArea.appendChild(backlinksEl);
 
   loadContent(content);
-  pendingCursorRestore = getCursor(path) ?? -1;
   setupEditorEvents();
   loadBacklinks(backlinksEl, path);
+  contentEl.focus();
+  const cursor = getCursor(path);
+  if (cursor !== undefined) restoreCursorOffset(cursor);
 }
 
 export function hideEditor() {
@@ -124,7 +126,6 @@ export function hideEditor() {
     clearTimeout(autosaveTimer);
     autosaveTimer = null;
   }
-  pendingCursorRestore = -1;
   currentPath = null;
   hideRevisions();
   hideAutocomplete();
@@ -178,7 +179,6 @@ export function classifySaveResult(
 
 let saving = false;
 let autosaveTimer: ReturnType<typeof setTimeout> | null = null;
-let pendingCursorRestore = -1;
 
 function scheduleAutosave() {
   if (autosaveTimer !== null) clearTimeout(autosaveTimer);
@@ -301,6 +301,7 @@ function restoreCursorOffset(offset: number) {
       range.collapse(true);
       sel.removeAllRanges();
       sel.addRange(range);
+      node.parentElement?.scrollIntoView({ block: "nearest", behavior: "instant" });
       return;
     }
     remaining -= node.length;
@@ -319,7 +320,8 @@ function loadContent(markdown: string) {
     sourceEl.value = markdown;
     sourceEl.selectionStart = sourceEl.selectionEnd = pos;
   } else if (contentEl) {
-    const focused = contentEl === document.activeElement || contentEl.contains(document.activeElement);
+    const focused =
+      contentEl === document.activeElement || contentEl.contains(document.activeElement);
     const offset = focused ? saveCursorOffset() : -1;
     contentEl.innerHTML = renderMarkdown(markdown);
     if (offset >= 0) restoreCursorOffset(offset);
@@ -349,14 +351,6 @@ function toggleSourceMode() {
 
 function setupEditorEvents() {
   if (!contentEl || !sourceEl) return;
-
-  contentEl.addEventListener("mousedown", () => { pendingCursorRestore = -1; });
-  contentEl.addEventListener("focus", () => {
-    if (pendingCursorRestore >= 0) {
-      restoreCursorOffset(pendingCursorRestore);
-      pendingCursorRestore = -1;
-    }
-  });
 
   contentEl.addEventListener("input", () => {
     if (currentPath) markDirty(currentPath);
