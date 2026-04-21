@@ -3,6 +3,10 @@ import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { emit } from "./events.ts";
 import { setupDOM, mockFetch } from "./test-helper.ts";
 
+const tick = () => new Promise<void>((r) => setTimeout(r, 0));
+const drain = () => new Promise<void>((r) => setTimeout(r, 50));
+const activeCount = () => document.querySelectorAll(".nav-file.active").length;
+
 describe("filenav", () => {
   let cleanup: () => void;
   let navCleanup: () => void;
@@ -10,9 +14,6 @@ describe("filenav", () => {
   let openTab: (path: string) => Promise<unknown>;
   let closeTab: (i: number) => void;
   let getTabs: () => unknown[];
-
-  const tick = () => new Promise<void>((r) => setTimeout(r, 0));
-  const drain = () => new Promise<void>((r) => setTimeout(r, 50));
 
   beforeAll(async () => {
     cleanup = setupDOM();
@@ -52,10 +53,6 @@ describe("filenav", () => {
     mock.restore();
     cleanup();
   });
-
-  function activeCount() {
-    return document.querySelectorAll(".nav-file.active").length;
-  }
 
   test("tree: no duplicate .active after two rapid files:changed (save + SSE pattern)", async () => {
     while (getTabs().length > 0) closeTab(0);

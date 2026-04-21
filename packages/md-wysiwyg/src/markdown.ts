@@ -275,13 +275,18 @@ function inline(text: string): string {
       }
     }
 
-    // Wiki-image: ![[target]]
+    // Wiki-image: ![[target]] or ![[target|width]]
     if (ch === "!" && text[i + 1] === "[" && text[i + 2] === "[") {
       const end = text.indexOf("]]", i + 3);
       if (end !== -1) {
-        const target = text.slice(i + 3, end);
-        const src = `/z-images/${encodeURIComponent(target)}`;
-        out += `<img src="${src}" alt="${escapeHtml(target)}" data-wiki-image="${escapeHtml(target)}" loading="lazy">`;
+        const inner = text.slice(i + 3, end);
+        const pipe = inner.indexOf("|");
+        const imageName = pipe !== -1 ? inner.slice(0, pipe).trim() : inner.trim();
+        const widthStr = pipe !== -1 ? inner.slice(pipe + 1).trim() : "";
+        const width = /^\d+$/.test(widthStr) ? widthStr : "";
+        const src = `/z-images/${encodeURIComponent(imageName)}`;
+        const widthAttr = width ? ` width="${width}"` : "";
+        out += `<img src="${src}" alt="${escapeHtml(imageName)}" data-wiki-image="${escapeHtml(imageName)}"${widthAttr} loading="lazy">`;
         i = end + 2;
         continue;
       }

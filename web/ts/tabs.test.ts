@@ -2,6 +2,8 @@ import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 
 import { setupDOM, mockFetch } from "./test-helper.ts";
 
+const tick = () => new Promise<void>((r) => setTimeout(r, 0));
+
 describe("tabs", () => {
   let cleanup: () => void;
   let mock: ReturnType<typeof mockFetch>;
@@ -9,8 +11,6 @@ describe("tabs", () => {
   let closeTab: (i: number) => void;
   let getTabs: () => any[];
   let markDirty: (path: string) => void;
-
-  const tick = () => new Promise<void>((r) => setTimeout(r, 0));
 
   beforeAll(async () => {
     cleanup = setupDOM();

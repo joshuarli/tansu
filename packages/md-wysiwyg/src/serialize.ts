@@ -130,7 +130,8 @@ function inlineToMd(el: HTMLElement): string {
       } else if (childTag === "IMG") {
         const wikiImage = child.getAttribute("data-wiki-image");
         if (wikiImage) {
-          md += `![[${wikiImage}]]`;
+          const width = child.getAttribute("width");
+          md += width ? `![[${wikiImage}|${width}]]` : `![[${wikiImage}]]`;
         } else {
           const src = child.getAttribute("src") ?? "";
           const alt = child.getAttribute("alt") ?? "";

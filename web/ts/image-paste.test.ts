@@ -2,21 +2,21 @@ import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 
 import { setupDOM, mockFetch } from "./test-helper.ts";
 
+function makeItem(file: File | null): DataTransferItem {
+  return {
+    type: "image/png",
+    kind: "file",
+    getAsFile: () => file,
+    getAsString: () => {},
+    webkitGetAsEntry: () => null,
+  } as DataTransferItem;
+}
+
 describe("image-paste", () => {
   let cleanup: () => void;
   let mock: ReturnType<typeof mockFetch>;
   let handleImagePaste: (item: DataTransferItem, currentPath: string | null) => Promise<void>;
   const execCommandCalls: string[] = [];
-
-  function makeItem(file: File | null): DataTransferItem {
-    return {
-      type: "image/png",
-      kind: "file",
-      getAsFile: () => file,
-      getAsString: () => {},
-      webkitGetAsEntry: () => null,
-    } as DataTransferItem;
-  }
 
   beforeAll(async () => {
     cleanup = setupDOM();

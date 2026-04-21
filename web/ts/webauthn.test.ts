@@ -197,7 +197,11 @@ describe("createPrfCredential / getPrfKey", () => {
   });
 
   test("supported when globals exist", () => {
-    (globalThis as Record<string, unknown>)["PublicKeyCredential"] = class {};
+    (globalThis as Record<string, unknown>)["PublicKeyCredential"] = class {
+      isUserVerifyingPlatformAuthenticatorAvailable() {
+        return Promise.resolve(true);
+      }
+    };
     const restore = mockCredentials({});
     expect(isPrfLikelySupported()).toBe(true);
     restore();

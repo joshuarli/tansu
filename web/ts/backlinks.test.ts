@@ -2,16 +2,16 @@ import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 
 import { setupDOM, mockFetch } from "./test-helper.ts";
 
+function makeEl(): HTMLElement {
+  const el = document.createElement("div");
+  document.body.appendChild(el);
+  return el;
+}
+
 describe("backlinks", () => {
   let cleanup: () => void;
   let mock: ReturnType<typeof mockFetch>;
   let loadBacklinks: (el: HTMLElement, path: string) => Promise<void>;
-
-  function makeEl(): HTMLElement {
-    const el = document.createElement("div");
-    document.body.appendChild(el);
-    return el;
-  }
 
   beforeAll(async () => {
     cleanup = setupDOM();

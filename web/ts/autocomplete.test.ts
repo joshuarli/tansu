@@ -8,6 +8,10 @@ const NOTES = [
   { path: "notes/gamma.md", title: "Gamma" },
 ];
 
+function getDropdown() {
+  return document.querySelector(".autocomplete");
+}
+
 describe("autocomplete", () => {
   let cleanup: () => void;
   let mock: ReturnType<typeof mockFetch>;
@@ -60,10 +64,6 @@ describe("autocomplete", () => {
     // Dispatch on contentEl so the event bubbles up through the capture phase
     // on document, where the autocomplete keydown handler is registered.
     contentEl.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
-  }
-
-  function getDropdown() {
-    return document.querySelector(".autocomplete");
   }
 
   function getItems() {

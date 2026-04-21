@@ -2,6 +2,12 @@ import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 
 import { setupDOM, mockFetch } from "./test-helper.ts";
 
+function makeContainer(): HTMLElement {
+  const div = document.createElement("div");
+  document.body.appendChild(div);
+  return div;
+}
+
 describe("conflict", () => {
   let cleanup: () => void;
   let mock: ReturnType<typeof mockFetch>;
@@ -22,12 +28,6 @@ describe("conflict", () => {
     loadContent: (md: string) => void,
     getCurrentContent: () => string,
   ) => void;
-
-  function makeContainer(): HTMLElement {
-    const div = document.createElement("div");
-    document.body.appendChild(div);
-    return div;
-  }
 
   beforeAll(async () => {
     cleanup = setupDOM();

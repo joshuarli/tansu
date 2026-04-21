@@ -16,6 +16,7 @@ import { loadBacklinks } from "./backlinks.ts";
 import { showConflictBanner, handleReloadConflict } from "./conflict.ts";
 import { on, emit } from "./events.ts";
 import { handleImagePaste } from "./image-paste.ts";
+import { initImageResize } from "./image-resize.ts";
 import { registerLinkHover } from "./link-hover.ts";
 import { toggleRevisions, hideRevisions, isRevisionsOpen } from "./revisions.ts";
 import { markDirty, markClean, getActiveTab, setCursor, getCursor } from "./tabs.ts";
@@ -407,6 +408,11 @@ function setupEditorEvents() {
 
     const text = clipData.getData("text/plain");
     document.execCommand("insertText", false, text);
+  });
+
+  initImageResize(contentEl, () => {
+    if (currentPath) markDirty(currentPath);
+    scheduleAutosave();
   });
 
   sourceEl.addEventListener("keydown", (e) => {
