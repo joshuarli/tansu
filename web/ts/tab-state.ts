@@ -16,6 +16,7 @@ export interface Tab {
 let tabs: Tab[] = [];
 let activeIndex = -1;
 let closedTabs: string[] = [];
+let cursors: Record<string, number> = {};
 const MAX_CLOSED = 20;
 
 export function getTabs(): Tab[] {
@@ -33,9 +34,19 @@ function persistState() {
     tabs: tabs.map((t) => t.path),
     active: activeIndex,
     closed: closedTabs,
+    cursors,
   };
   kvPut("session", state).catch(() => {});
   saveState(state).catch(() => {});
+}
+
+export function setCursor(path: string, offset: number) {
+  cursors[path] = offset;
+  persistState();
+}
+
+export function getCursor(path: string): number | undefined {
+  return cursors[path];
 }
 
 /// Push cached session state to the server. Call on SSE reconnect.
@@ -210,6 +221,7 @@ export async function restoreSession() {
 
   closedTabs.length = 0;
   if (state.closed?.length) closedTabs.push(...state.closed.slice(-MAX_CLOSED));
+  if (state.cursors) cursors = { ...state.cursors };
   if (!state.tabs?.length) return;
 
   const activeIdx =

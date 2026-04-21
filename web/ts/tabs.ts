@@ -28,6 +28,8 @@ export {
   restoreSession,
   reopenClosedTab,
   syncToServer,
+  setCursor,
+  getCursor,
 } from "./tab-state.ts";
 
 export async function createNewNote(): Promise<void> {

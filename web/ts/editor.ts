@@ -18,7 +18,7 @@ import { on, emit } from "./events.ts";
 import { handleImagePaste } from "./image-paste.ts";
 import { registerLinkHover } from "./link-hover.ts";
 import { toggleRevisions, hideRevisions, isRevisionsOpen } from "./revisions.ts";
-import { markDirty, markClean, getActiveTab } from "./tabs.ts";
+import { markDirty, markClean, getActiveTab, setCursor, getCursor } from "./tabs.ts";
 
 let editorArea: HTMLElement;
 let container: HTMLElement | null = null;
@@ -114,12 +114,17 @@ export function showEditor(path: string, content: string) {
   editorArea.appendChild(backlinksEl);
 
   loadContent(content);
+  pendingCursorRestore = getCursor(path) ?? -1;
   setupEditorEvents();
   loadBacklinks(backlinksEl, path);
 }
 
 export function hideEditor() {
-  if (autosaveTimer !== null) { clearTimeout(autosaveTimer); autosaveTimer = null; }
+  if (autosaveTimer !== null) {
+    clearTimeout(autosaveTimer);
+    autosaveTimer = null;
+  }
+  pendingCursorRestore = -1;
   currentPath = null;
   hideRevisions();
   hideAutocomplete();
@@ -173,6 +178,7 @@ export function classifySaveResult(
 
 let saving = false;
 let autosaveTimer: ReturnType<typeof setTimeout> | null = null;
+let pendingCursorRestore = -1;
 
 function scheduleAutosave() {
   if (autosaveTimer !== null) clearTimeout(autosaveTimer);
@@ -184,7 +190,10 @@ function scheduleAutosave() {
 
 export async function saveCurrentNote(opts?: { silent?: boolean }) {
   if (saving) return;
-  if (autosaveTimer !== null) { clearTimeout(autosaveTimer); autosaveTimer = null; }
+  if (autosaveTimer !== null) {
+    clearTimeout(autosaveTimer);
+    autosaveTimer = null;
+  }
   saving = true;
   try {
     await _doSave(opts?.silent ?? false);
@@ -198,17 +207,23 @@ async function _doSave(silent: boolean) {
   if (!tab || !currentPath) return;
 
   const content = getCurrentContent();
-  const result = await saveNote(currentPath, content, tab.mtime);
+  // Capture cursor synchronously before the first await
+  const cursorOffset = isSourceMode ? -1 : saveCursorOffset();
+  const savePath = currentPath;
+
+  const result = await saveNote(savePath, content, tab.mtime);
   const action = classifySaveResult(result, content, tab.content);
 
   switch (action.type) {
     case "clean":
-      markClean(currentPath, action.content, action.mtime);
+      markClean(savePath, action.content, action.mtime);
+      if (cursorOffset >= 0) setCursor(savePath, cursorOffset);
       emit("files:changed", undefined);
       break;
     case "false-conflict": {
-      const retry = await saveNote(currentPath, content, 0);
-      markClean(currentPath, content, retry.mtime);
+      const retry = await saveNote(savePath, content, 0);
+      markClean(savePath, content, retry.mtime);
+      if (cursorOffset >= 0) setCursor(savePath, cursorOffset);
       emit("files:changed", undefined);
       break;
     }
@@ -260,11 +275,54 @@ export function reloadFromDisk(content: string, mtime: number) {
   }
 }
 
+function saveCursorOffset(): number {
+  if (!contentEl) return -1;
+  const sel = window.getSelection();
+  if (!sel || !sel.rangeCount) return -1;
+  const range = sel.getRangeAt(0);
+  if (!contentEl.contains(range.startContainer)) return -1;
+  const pre = range.cloneRange();
+  pre.selectNodeContents(contentEl);
+  pre.setEnd(range.startContainer, range.startOffset);
+  return pre.toString().length;
+}
+
+function restoreCursorOffset(offset: number) {
+  if (!contentEl || offset < 0) return;
+  const sel = window.getSelection();
+  if (!sel) return;
+  const walker = document.createTreeWalker(contentEl, NodeFilter.SHOW_TEXT);
+  let remaining = offset;
+  while (walker.nextNode()) {
+    const node = walker.currentNode as Text;
+    if (remaining <= node.length) {
+      const range = document.createRange();
+      range.setStart(node, remaining);
+      range.collapse(true);
+      sel.removeAllRanges();
+      sel.addRange(range);
+      return;
+    }
+    remaining -= node.length;
+  }
+  // Offset beyond content: place at end
+  const range = document.createRange();
+  range.selectNodeContents(contentEl);
+  range.collapse(false);
+  sel.removeAllRanges();
+  sel.addRange(range);
+}
+
 function loadContent(markdown: string) {
   if (isSourceMode && sourceEl) {
+    const pos = sourceEl.selectionStart;
     sourceEl.value = markdown;
+    sourceEl.selectionStart = sourceEl.selectionEnd = pos;
   } else if (contentEl) {
+    const focused = contentEl === document.activeElement || contentEl.contains(document.activeElement);
+    const offset = focused ? saveCursorOffset() : -1;
     contentEl.innerHTML = renderMarkdown(markdown);
+    if (offset >= 0) restoreCursorOffset(offset);
   }
 }
 
@@ -291,6 +349,14 @@ function toggleSourceMode() {
 
 function setupEditorEvents() {
   if (!contentEl || !sourceEl) return;
+
+  contentEl.addEventListener("mousedown", () => { pendingCursorRestore = -1; });
+  contentEl.addEventListener("focus", () => {
+    if (pendingCursorRestore >= 0) {
+      restoreCursorOffset(pendingCursorRestore);
+      pendingCursorRestore = -1;
+    }
+  });
 
   contentEl.addEventListener("input", () => {
     if (currentPath) markDirty(currentPath);

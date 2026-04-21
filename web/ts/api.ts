@@ -186,6 +186,7 @@ export interface SessionState {
   tabs?: string[];
   active?: number;
   closed?: string[];
+  cursors?: Record<string, number>;
 }
 
 export async function getState(): Promise<SessionState> {
