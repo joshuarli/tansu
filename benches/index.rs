@@ -1,7 +1,7 @@
 use std::{
     alloc::{GlobalAlloc, Layout, System},
     fs,
-    path::{Path, PathBuf},
+    path::PathBuf,
     sync::atomic::{AtomicU64, Ordering::Relaxed},
 };
 

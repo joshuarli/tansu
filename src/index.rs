@@ -142,10 +142,10 @@ impl Index {
         doc.add_text(f.path, rel_path);
         doc.add_text(f.title, &title);
         doc.add_text(f.content, &stripped);
-        doc.add_text(f.headings, &scan.headings.join(" "));
-        doc.add_text(f.tags, &scan.tags.join(" "));
+        doc.add_text(f.headings, scan.headings.join(" "));
+        doc.add_text(f.tags, scan.tags.join(" "));
         doc.add_u64(f.mtime, mtime);
-        doc.add_text(f.links_to, &scan.links.join(" "));
+        doc.add_text(f.links_to, scan.links.join(" "));
 
         let _ = writer.add_document(doc);
     }
@@ -561,10 +561,7 @@ impl Iterator for WordIter<'_> {
 
 /// Case-insensitive ASCII equality (zero alloc).
 fn ascii_eq_ignore_case(a: &[u8], b: &[u8]) -> bool {
-    a.len() == b.len()
-        && a.iter()
-            .zip(b)
-            .all(|(x, y)| x.to_ascii_lowercase() == y.to_ascii_lowercase())
+    a.len() == b.len() && a.iter().zip(b).all(|(x, y)| x.eq_ignore_ascii_case(y))
 }
 
 /// Check if two byte slices have edit distance exactly 1 (case-insensitive ASCII).
@@ -576,7 +573,7 @@ fn edit_distance_one_ci(a: &[u8], b: &[u8]) -> bool {
     if la == lb {
         let mut diffs = 0;
         for i in 0..la {
-            if a[i].to_ascii_lowercase() != b[i].to_ascii_lowercase() {
+            if !a[i].eq_ignore_ascii_case(&b[i]) {
                 diffs += 1;
                 if diffs > 1 {
                     return false;
@@ -590,7 +587,7 @@ fn edit_distance_one_ci(a: &[u8], b: &[u8]) -> bool {
         let mut li = 0;
         let mut diffs = 0;
         while si < short.len() && li < long.len() {
-            if short[si].to_ascii_lowercase() != long[li].to_ascii_lowercase() {
+            if !short[si].eq_ignore_ascii_case(&long[li]) {
                 diffs += 1;
                 if diffs > 1 {
                     return false;

@@ -8,13 +8,11 @@ pub fn strip_markdown(markdown: &str) -> String {
 
     for event in parser {
         match event {
-            Event::Text(text) => {
-                if !in_code_block {
-                    if !out.is_empty() && !out.ends_with(' ') && !out.ends_with('\n') {
-                        out.push(' ');
-                    }
-                    out.push_str(&text);
+            Event::Text(text) if !in_code_block => {
+                if !out.is_empty() && !out.ends_with(' ') && !out.ends_with('\n') {
+                    out.push(' ');
                 }
+                out.push_str(&text);
             }
             Event::Code(code) => {
                 if !out.is_empty() && !out.ends_with(' ') && !out.ends_with('\n') {
@@ -31,10 +29,8 @@ pub fn strip_markdown(markdown: &str) -> String {
             Event::End(TagEnd::CodeBlock) => {
                 in_code_block = false;
             }
-            Event::Start(Tag::Paragraph) => {
-                if !out.is_empty() {
-                    out.push('\n');
-                }
+            Event::Start(Tag::Paragraph) if !out.is_empty() => {
+                out.push('\n');
             }
             _ => {}
         }

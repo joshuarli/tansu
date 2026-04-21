@@ -280,12 +280,12 @@ impl Server {
         };
         let files = crypto::collect_content_files(&self.dir);
         for path in &files {
-            if path.extension().is_some_and(|e| e == "md") {
-                if let Ok(content) = vault.read_to_string(path) {
-                    let rel = path.strip_prefix(&self.dir).unwrap_or(path);
-                    self.index
-                        .index_note(&rel.to_string_lossy(), &content, path);
-                }
+            if path.extension().is_some_and(|e| e == "md")
+                && let Ok(content) = vault.read_to_string(path)
+            {
+                let rel = path.strip_prefix(&self.dir).unwrap_or(path);
+                self.index
+                    .index_note(&rel.to_string_lossy(), &content, path);
             }
         }
         self.index.commit();
@@ -330,7 +330,7 @@ impl Server {
                             &mut stream,
                             &method,
                             &path_raw,
-                            &req.headers,
+                            req.headers,
                             &buf[..pos],
                             header_len,
                         );
@@ -350,7 +350,7 @@ impl Server {
                         }
 
                         // Carry over any pipelined bytes past this request
-                        let body_len = content_length(&req.headers);
+                        let body_len = content_length(req.headers);
                         let consumed = header_len + body_len;
                         if consumed < pos {
                             buf.copy_within(consumed..pos, 0);
@@ -548,11 +548,11 @@ impl Server {
         let mut guard = self.sse_client.lock().unwrap();
         // If an existing client is held, probe it with a comment line.
         // If the write fails, the old connection is dead — replace it.
-        if let Some(ref mut old) = *guard {
-            if old.write_all(b": ping\n\n").is_ok() {
-                drop(guard);
-                return write_error(stream, 409, "Conflict: another client is connected");
-            }
+        if let Some(ref mut old) = *guard
+            && old.write_all(b": ping\n\n").is_ok()
+        {
+            drop(guard);
+            return write_error(stream, 409, "Conflict: another client is connected");
         }
         let header = "HTTP/1.1 200 OK\r\n\
                       Content-Type: text/event-stream\r\n\
@@ -1601,10 +1601,10 @@ fn main() {
     for stream in listener.incoming() {
         match stream {
             Ok(s) => {
-                if let Err(e) = srv.handle(s) {
-                    if !quiet {
-                        eprintln!("error: {e}");
-                    }
+                if let Err(e) = srv.handle(s)
+                    && !quiet
+                {
+                    eprintln!("error: {e}");
                 }
             }
             Err(e) => {

@@ -288,8 +288,7 @@ impl CryptoConfig {
     pub fn save(&self, dir: &Path) -> io::Result<()> {
         let path = dir.join(".tansu/crypto.json");
         fs::create_dir_all(path.parent().unwrap())?;
-        let json = serde_json::to_string_pretty(self)
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+        let json = serde_json::to_string_pretty(self).map_err(io::Error::other)?;
         atomic_write(&path, json.as_bytes())
     }
 
@@ -359,10 +358,11 @@ fn collect_recursive(root: &Path, dir: &Path, out: &mut Vec<PathBuf>) {
         }
         // Skip hidden dirs other than .tansu
         if path.is_dir() {
-            if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                if name.starts_with('.') && name != ".tansu" {
-                    continue;
-                }
+            if let Some(name) = path.file_name().and_then(|n| n.to_str())
+                && name.starts_with('.')
+                && name != ".tansu"
+            {
+                continue;
             }
             collect_recursive(root, &path, out);
             continue;
