@@ -9,9 +9,11 @@ use std::{
 };
 
 use tantivy::{
-    Index as TantivyIndex, IndexReader, IndexWriter, TantivyDocument,
+    DocAddress, Index as TantivyIndex, IndexReader, IndexWriter, TantivyDocument,
     collector::TopDocs,
-    query::{BooleanQuery, FuzzyTermQuery, Occur, PhrasePrefixQuery, TermQuery},
+    query::{
+        BooleanQuery, FuzzyTermQuery, Occur, PhrasePrefixQuery, PhraseQuery, Query, TermQuery,
+    },
     schema::*,
 };
 
@@ -72,6 +74,11 @@ struct IndexInner {
     dirty: AtomicBool,
     uncommitted: AtomicBool,
     notes_cache: Mutex<Option<Vec<NoteEntry>>>,
+}
+
+struct ParsedQuery {
+    terms: Vec<String>,
+    phrases: Vec<Vec<String>>,
 }
 
 impl Index {
@@ -210,23 +217,21 @@ impl Index {
         self.reload_if_dirty();
         let searcher = self.inner.reader.searcher();
 
-        // Split on non-alphanumeric chars to match tantivy's default tokenizer,
-        // so "jpeg-xl" and "some_function" match indexed tokens
-        let terms: Vec<&str> = query
-            .split(|c: char| !c.is_alphanumeric())
-            .filter(|s| !s.is_empty())
-            .collect();
-        if terms.is_empty() {
+        let parsed = parse_query(query);
+        if parsed.terms.is_empty() && parsed.phrases.is_empty() {
             return Vec::new();
         }
 
-        // Phase 1: exact
-        let phase1_query = self.build_query(&terms, false, filter_path, fuzzy_distance, weights);
+        // Phase 1: exact + prefix + phrase
+        let phase1_query = self.build_query(&parsed, false, filter_path, fuzzy_distance, weights);
         let results = self.execute_search(
             &searcher,
             &phase1_query,
             limit,
-            &terms,
+            &parsed.terms,
+            &parsed.phrases,
+            false,
+            fuzzy_distance,
             recency_boost,
             weights,
             score_breakdown,
@@ -237,12 +242,15 @@ impl Index {
         }
 
         // Phase 2: add fuzzy
-        let phase2_query = self.build_query(&terms, true, filter_path, fuzzy_distance, weights);
+        let phase2_query = self.build_query(&parsed, true, filter_path, fuzzy_distance, weights);
         self.execute_search(
             &searcher,
             &phase2_query,
             limit,
-            &terms,
+            &parsed.terms,
+            &parsed.phrases,
+            true,
+            fuzzy_distance,
             recency_boost,
             weights,
             score_breakdown,
@@ -251,7 +259,7 @@ impl Index {
 
     fn build_query(
         &self,
-        terms: &[&str],
+        parsed: &ParsedQuery,
         fuzzy: bool,
         filter_path: Option<&str>,
         fuzzy_distance: u8,
@@ -267,12 +275,11 @@ impl Index {
 
         let mut term_queries: Vec<(Occur, Box<dyn tantivy::query::Query>)> = Vec::new();
 
-        for &word in terms {
-            let word_lower = word.to_lowercase();
+        for word in &parsed.terms {
             let mut field_queries: Vec<(Occur, Box<dyn tantivy::query::Query>)> = Vec::new();
 
             for &(field, boost) in &search_fields {
-                let term = tantivy::Term::from_field_text(field, &word_lower);
+                let term = tantivy::Term::from_field_text(field, word);
 
                 let exact = TermQuery::new(term.clone(), IndexRecordOption::WithFreqs);
                 field_queries.push((
@@ -305,6 +312,22 @@ impl Index {
             term_queries.push((Occur::Must, Box::new(word_query)));
         }
 
+        for phrase_words in &parsed.phrases {
+            let mut field_queries: Vec<(Occur, Box<dyn tantivy::query::Query>)> = Vec::new();
+            for &(field, boost) in &search_fields {
+                let phrase_terms = phrase_words
+                    .iter()
+                    .map(|word| tantivy::Term::from_field_text(field, word))
+                    .collect();
+                let phrase = PhraseQuery::new(phrase_terms);
+                field_queries.push((
+                    Occur::Should,
+                    Box::new(tantivy::query::BoostQuery::new(Box::new(phrase), boost)),
+                ));
+            }
+            term_queries.push((Occur::Must, Box::new(BooleanQuery::new(field_queries))));
+        }
+
         if let Some(path) = filter_path {
             let path_term = tantivy::Term::from_field_text(f.path, path);
             let path_query = TermQuery::new(path_term, IndexRecordOption::Basic);
@@ -319,7 +342,10 @@ impl Index {
         searcher: &tantivy::Searcher,
         query: &BooleanQuery,
         limit: usize,
-        terms: &[&str],
+        terms: &[String],
+        phrases: &[Vec<String>],
+        fuzzy: bool,
+        fuzzy_distance: u8,
         recency_boost: u8,
         weights: SearchWeights,
         score_breakdown: bool,
@@ -342,6 +368,19 @@ impl Index {
             .map(|t| t.bytes().map(|b| b.to_ascii_lowercase()).collect())
             .collect();
         let term_refs: Vec<&[u8]> = lower_terms.iter().map(|t| t.as_slice()).collect();
+        let lower_phrases: Vec<Vec<Vec<u8>>> = phrases
+            .iter()
+            .map(|phrase| {
+                phrase
+                    .iter()
+                    .map(|word| word.bytes().map(|b| b.to_ascii_lowercase()).collect())
+                    .collect()
+            })
+            .collect();
+        let phrase_refs: Vec<Vec<&[u8]>> = lower_phrases
+            .iter()
+            .map(|phrase| phrase.iter().map(|word| word.as_slice()).collect())
+            .collect();
 
         let mut results = Vec::with_capacity(top_docs.len());
         for (score, doc_address) in top_docs {
@@ -363,10 +402,19 @@ impl Index {
                 .get_first(f.content)
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
-            let excerpt = make_snippet(content, &term_refs, 160);
+            let excerpt = make_snippet(content, &term_refs, &phrase_refs, 160);
 
             let field_scores = if score_breakdown {
-                compute_field_scores(&doc, f, &term_refs, weights)
+                explain_field_scores(
+                    searcher,
+                    doc_address,
+                    f,
+                    terms,
+                    phrases,
+                    fuzzy,
+                    fuzzy_distance,
+                    weights,
+                )
             } else {
                 FieldScores::default()
             };
@@ -469,38 +517,73 @@ impl Index {
     }
 }
 
-/// Compute per-field scores by counting term matches (exact + fuzzy) against stored values.
-fn compute_field_scores(
-    doc: &TantivyDocument,
+/// Compute per-field scores using Tantivy's explain API on each individual sub-query.
+fn explain_field_scores(
+    searcher: &tantivy::Searcher,
+    addr: DocAddress,
     f: &Fields,
-    terms: &[&[u8]],
+    terms: &[String],
+    phrases: &[Vec<String>],
+    fuzzy: bool,
+    fuzzy_distance: u8,
     weights: SearchWeights,
 ) -> FieldScores {
-    let get =
-        |field: Field| -> &str { doc.get_first(field).and_then(|v| v.as_str()).unwrap_or("") };
-
     let fields = [
-        (get(f.title), weights.title),
-        (get(f.headings), weights.headings),
-        (get(f.tags), weights.tags),
-        (get(f.content), weights.content),
+        (f.title, weights.title),
+        (f.headings, weights.headings),
+        (f.tags, weights.tags),
+        (f.content, weights.content),
     ];
-
     let mut scores = [0.0f32; 4];
 
-    for (i, &(text, boost)) in fields.iter().enumerate() {
-        for (start, end) in WordIter::new(text) {
-            let word = &text.as_bytes()[start..end];
-            for term in terms {
-                if ascii_eq_ignore_case(word, term) {
-                    scores[i] += boost;
-                } else if starts_with_ci(word, term) {
-                    scores[i] += boost * 0.8;
-                } else if edit_distance_one_ci(word, term) {
-                    scores[i] += boost * 0.6;
+    for (i, &(field, boost)) in fields.iter().enumerate() {
+        let mut field_score = 0.0f32;
+
+        for word in terms {
+            let term = tantivy::Term::from_field_text(field, word);
+
+            let exact: Box<dyn Query> = Box::new(tantivy::query::BoostQuery::new(
+                Box::new(TermQuery::new(term.clone(), IndexRecordOption::WithFreqs)),
+                boost,
+            ));
+            if let Ok(expl) = exact.explain(searcher, addr) {
+                field_score += expl.value();
+            }
+
+            let prefix: Box<dyn Query> = Box::new(tantivy::query::BoostQuery::new(
+                Box::new(PhrasePrefixQuery::new(vec![term.clone()])),
+                boost * 0.8,
+            ));
+            if let Ok(expl) = prefix.explain(searcher, addr) {
+                field_score += expl.value();
+            }
+
+            if fuzzy && fuzzy_distance > 0 && field == f.content {
+                let fuzzy_q: Box<dyn Query> = Box::new(tantivy::query::BoostQuery::new(
+                    Box::new(FuzzyTermQuery::new(term, fuzzy_distance, true)),
+                    boost * 0.6,
+                ));
+                if let Ok(expl) = fuzzy_q.explain(searcher, addr) {
+                    field_score += expl.value();
                 }
             }
         }
+
+        for phrase_words in phrases {
+            let phrase_terms = phrase_words
+                .iter()
+                .map(|word| tantivy::Term::from_field_text(field, word))
+                .collect();
+            let phrase: Box<dyn Query> = Box::new(tantivy::query::BoostQuery::new(
+                Box::new(PhraseQuery::new(phrase_terms)),
+                boost,
+            ));
+            if let Ok(expl) = phrase.explain(searcher, addr) {
+                field_score += expl.value();
+            }
+        }
+
+        scores[i] = field_score;
     }
 
     FieldScores {
@@ -512,14 +595,20 @@ fn compute_field_scores(
 }
 
 /// Build a snippet from content with highlighted query terms (supports fuzzy matching).
-fn make_snippet(content: &str, terms: &[&[u8]], max_len: usize) -> String {
+fn make_snippet(content: &str, terms: &[&[u8]], phrases: &[Vec<&[u8]>], max_len: usize) -> String {
     if content.is_empty() || terms.is_empty() {
         return String::new();
     }
+    let phrase_mode = !phrases.is_empty();
 
-    // Find the first matching word to anchor the window
-    let first_match = WordIter::new(content)
-        .find(|&(start, end)| matches_any_term(&content.as_bytes()[start..end], terms));
+    let phrase_match = phrases
+        .iter()
+        .find_map(|phrase| find_phrase_in_content(content, phrase));
+    let first_match = phrase_match.or_else(|| {
+        WordIter::new(content).find(|&(start, end)| {
+            matches_any_term_for_snippet(&content.as_bytes()[start..end], terms, phrase_mode)
+        })
+    });
 
     let Some((first_start, _)) = first_match else {
         return escape_html(content.truncate_bytes(max_len));
@@ -546,7 +635,8 @@ fn make_snippet(content: &str, terms: &[&[u8]], max_len: usize) -> String {
     for (ws, we) in WordIter::new(&content[window_start..window_end]) {
         let abs_start = window_start + ws;
         let abs_end = window_start + we;
-        if matches_any_term(&content.as_bytes()[abs_start..abs_end], terms) {
+        if matches_any_term_for_snippet(&content.as_bytes()[abs_start..abs_end], terms, phrase_mode)
+        {
             if abs_start > pos {
                 escape_html_into(&mut out, &content[pos..abs_start]);
             }
@@ -563,6 +653,28 @@ fn make_snippet(content: &str, terms: &[&[u8]], max_len: usize) -> String {
     out
 }
 
+fn find_phrase_in_content(content: &str, phrase: &[&[u8]]) -> Option<(usize, usize)> {
+    if phrase.is_empty() {
+        return None;
+    }
+
+    let words: Vec<(usize, usize)> = WordIter::new(content).collect();
+    if words.len() < phrase.len() {
+        return None;
+    }
+
+    for window in words.windows(phrase.len()) {
+        let matches = window.iter().zip(phrase).all(|(&(start, end), term)| {
+            ascii_eq_ignore_case(&content.as_bytes()[start..end], term)
+        });
+        if matches {
+            return Some(window[0]);
+        }
+    }
+
+    None
+}
+
 /// Zero-alloc word boundary iterator over ASCII alphanumeric words.
 struct WordIter<'a> {
     bytes: &'a [u8],
@@ -576,6 +688,43 @@ impl<'a> WordIter<'a> {
             pos: 0,
         }
     }
+}
+
+fn parse_query(query: &str) -> ParsedQuery {
+    let mut parsed = ParsedQuery {
+        terms: Vec::new(),
+        phrases: Vec::new(),
+    };
+    let mut buf = String::new();
+    let mut in_quotes = false;
+
+    for ch in query.chars() {
+        if ch == '"' {
+            if in_quotes {
+                let phrase_terms = tokenize_query_text(&buf);
+                if !phrase_terms.is_empty() {
+                    parsed.terms.extend(phrase_terms.iter().cloned());
+                    parsed.phrases.push(phrase_terms);
+                }
+            } else {
+                parsed.terms.extend(tokenize_query_text(&buf));
+            }
+            buf.clear();
+            in_quotes = !in_quotes;
+            continue;
+        }
+        buf.push(ch);
+    }
+
+    parsed.terms.extend(tokenize_query_text(&buf));
+    parsed
+}
+
+fn tokenize_query_text(text: &str) -> Vec<String> {
+    text.split(|c: char| !c.is_alphanumeric())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_lowercase())
+        .collect()
 }
 
 impl Iterator for WordIter<'_> {
@@ -648,13 +797,12 @@ fn edit_distance_one_ci(a: &[u8], b: &[u8]) -> bool {
     }
 }
 
-/// Check if a word matches any term (exact or edit distance 1), case-insensitive.
-fn matches_any_term(word: &[u8], terms: &[&[u8]]) -> bool {
+fn matches_any_term_for_snippet(word: &[u8], terms: &[&[u8]], phrase_mode: bool) -> bool {
     for term in terms {
-        if ascii_eq_ignore_case(word, term)
-            || starts_with_ci(word, term)
-            || edit_distance_one_ci(word, term)
-        {
+        if ascii_eq_ignore_case(word, term) || starts_with_ci(word, term) {
+            return true;
+        }
+        if !phrase_mode && edit_distance_one_ci(word, term) {
             return true;
         }
     }
@@ -783,31 +931,74 @@ mod tests {
         terms.iter().map(|t| t.as_slice()).collect()
     }
 
+    fn phrase_bytes(phrases: &[&[&str]]) -> Vec<Vec<Vec<u8>>> {
+        phrases
+            .iter()
+            .map(|phrase| {
+                phrase
+                    .iter()
+                    .map(|word| word.bytes().collect())
+                    .collect::<Vec<Vec<u8>>>()
+            })
+            .collect()
+    }
+
+    fn phrase_refs(phrases: &[Vec<Vec<u8>>]) -> Vec<Vec<&[u8]>> {
+        phrases
+            .iter()
+            .map(|phrase| phrase.iter().map(|word| word.as_slice()).collect())
+            .collect()
+    }
+
+    #[test]
+    fn parse_query_extracts_terms_and_phrases() {
+        let parsed = parse_query(r#"groat "oat groats" steel-cut"#);
+        assert_eq!(parsed.terms, vec!["groat", "oat", "groats", "steel", "cut"]);
+        assert_eq!(
+            parsed.phrases,
+            vec![vec!["oat".to_string(), "groats".to_string()]]
+        );
+    }
+
     #[test]
     fn snippet_exact_match() {
         let t = term_bytes(&["fox"]);
-        let s = make_snippet("the quick brown fox jumps", &term_refs(&t), 160);
+        let p = phrase_bytes(&[]);
+        let s = make_snippet(
+            "the quick brown fox jumps",
+            &term_refs(&t),
+            &phrase_refs(&p),
+            160,
+        );
         assert!(s.contains("<b>fox</b>"), "got: {s}");
     }
 
     #[test]
     fn snippet_fuzzy_match() {
         let t = term_bytes(&["lunchctl"]);
-        let s = make_snippet("use launchctl to reboot", &term_refs(&t), 160);
+        let p = phrase_bytes(&[]);
+        let s = make_snippet(
+            "use launchctl to reboot",
+            &term_refs(&t),
+            &phrase_refs(&p),
+            160,
+        );
         assert!(s.contains("<b>launchctl</b>"), "got: {s}");
     }
 
     #[test]
     fn snippet_no_match() {
         let t = term_bytes(&["zzz"]);
-        let s = make_snippet("hello world", &term_refs(&t), 160);
+        let p = phrase_bytes(&[]);
+        let s = make_snippet("hello world", &term_refs(&t), &phrase_refs(&p), 160);
         assert_eq!(s, "hello world");
     }
 
     #[test]
     fn snippet_escapes_html() {
         let t = term_bytes(&["tag"]);
-        let s = make_snippet("a <b>tag</b> here", &term_refs(&t), 160);
+        let p = phrase_bytes(&[]);
+        let s = make_snippet("a <b>tag</b> here", &term_refs(&t), &phrase_refs(&p), 160);
         assert!(s.contains("&lt;b&gt;"), "should escape html: {s}");
         assert!(s.contains("<b>tag</b>"), "should highlight match: {s}");
     }
@@ -815,15 +1006,17 @@ mod tests {
     #[test]
     fn snippet_case_insensitive() {
         let t = term_bytes(&["hello"]);
-        let s = make_snippet("Hello World", &term_refs(&t), 160);
+        let p = phrase_bytes(&[]);
+        let s = make_snippet("Hello World", &term_refs(&t), &phrase_refs(&p), 160);
         assert!(s.contains("<b>Hello</b>"), "got: {s}");
     }
 
     #[test]
     fn snippet_multibyte_no_panic() {
         let t = term_bytes(&["hello"]);
+        let p = phrase_bytes(&[]);
         let content = "📖📖📖📖📖📖📖📖📖📖 hello 📖📖📖📖📖";
-        let s = make_snippet(content, &term_refs(&t), 160);
+        let s = make_snippet(content, &term_refs(&t), &phrase_refs(&p), 160);
         assert!(s.contains("<b>hello</b>"), "got: {s}");
     }
 
@@ -859,10 +1052,28 @@ mod tests {
     #[test]
     fn snippet_no_match_multibyte() {
         let t = term_bytes(&["zzz"]);
+        let p = phrase_bytes(&[]);
         let content = "📖 intro text about things";
-        let s = make_snippet(content, &term_refs(&t), 10);
+        let s = make_snippet(content, &term_refs(&t), &phrase_refs(&p), 10);
         // Should not panic, just truncate safely
         assert!(!s.is_empty());
+    }
+
+    #[test]
+    fn snippet_prefers_exact_phrase_anchor() {
+        let t = term_bytes(&["oat", "groats"]);
+        let p = phrase_bytes(&[&["oat", "groats"]]);
+        let s = make_snippet(
+            "eat beans first. later there are oat groats for breakfast",
+            &term_refs(&t),
+            &phrase_refs(&p),
+            160,
+        );
+        assert!(s.contains("<b>oat</b> <b>groats</b>"), "got: {s}");
+        assert!(
+            !s.starts_with("<b>eat</b>"),
+            "should anchor on exact phrase: {s}"
+        );
     }
 
     #[test]
@@ -987,6 +1198,38 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
         let _ = fs::remove_file(&groats);
         let _ = fs::remove_file(&great);
+    }
+
+    #[test]
+    fn search_quoted_phrase_requires_literal_order() {
+        let dir = std::env::temp_dir().join(format!("tansu_test_phrase_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let idx = Index::open_or_create(&dir).unwrap();
+
+        let exact =
+            std::env::temp_dir().join(format!("tansu_phrase_exact_{}.md", std::process::id()));
+        let reordered =
+            std::env::temp_dir().join(format!("tansu_phrase_reordered_{}.md", std::process::id()));
+        fs::write(&exact, "fresh oat groats for breakfast").unwrap();
+        fs::write(&reordered, "fresh groats oat for breakfast").unwrap();
+
+        idx.index_note("exact.md", "fresh oat groats for breakfast", &exact);
+        idx.index_note("reordered.md", "fresh groats oat for breakfast", &reordered);
+
+        let w = SearchWeights {
+            title: 10.0,
+            headings: 5.0,
+            tags: 2.0,
+            content: 1.0,
+        };
+        let results = idx.search(r#""oat groats""#, 10, None, 1, 0, w, false);
+        assert_eq!(results.len(), 1, "expected only exact phrase match");
+        assert_eq!(results[0].path, "exact.md");
+
+        let _ = fs::remove_dir_all(&dir);
+        let _ = fs::remove_file(&exact);
+        let _ = fs::remove_file(&reordered);
     }
 
     #[test]

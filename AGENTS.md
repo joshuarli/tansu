@@ -30,7 +30,7 @@ All paths are relative to the notes directory passed as a CLI argument.
     index/                 # tantivy search index files
     revisions/<stem>/      # per-note revision history
       <timestamp_ms>.md    # snapshot of note content before each save
-    settings.json          # search/index settings (weights, fuzzy distance, excluded folders)
+    settings.json          # search/index settings (weights, fuzzy distance, recency boost, excluded folders)
     state.json             # session state (open tabs, active tab index, closed-tab stack)
 ```
 
@@ -42,11 +42,11 @@ Dual-target crate: `src/lib.rs` exports all modules, `src/main.rs` is the server
 - **main.rs** -- `Server` struct, CLI arg parsing, TCP accept loop, request dispatch, all API handler methods, session management, encryption lifecycle. Defines serde request/response types inline.
 - **crypto.rs** -- AES-256-GCM encryption, key wrapping, recovery keys, vault I/O. See `SECURITY.md` for design doc.
 - **http.rs** -- HTTP primitives: `percent_decode`, `query_param`, `mime`, `write_headers`/`write_error`/`write_body`/`write_json`/`respond_json`, `serve_file` (uses `sendfile(2)` on macOS/Linux), `read_body`/`parse_body`, `normalize_into` (path traversal prevention), `mtime_secs`.
-- **index.rs** -- `Index` (tantivy wrapper). Schema: `path` (STRING), `title` (TEXT), `content` (TEXT), `headings` (TEXT), `tags` (TEXT), `mtime` (u64), `links_to` (TEXT). Methods: `index_note`, `remove_note`, `search` (two-phase: exact then fuzzy fallback), `get_backlinks`, `get_all_notes`, `full_reindex`. Uses lazy commits (`ensure_committed` before reads) and a `notes_cache` (`Mutex<Option<Vec<...>>>`) invalidated on writes/commits.
+- **index.rs** -- `Index` (tantivy wrapper). Schema: `path` (STRING), `title` (TEXT), `content` (TEXT), `headings` (TEXT), `tags` (TEXT), `mtime` (u64), `links_to` (TEXT). Methods: `index_note`, `remove_note`, `search` (two-phase: exact/prefix/phrase first, fuzzy fallback), `get_backlinks`, `get_all_notes`, `full_reindex`. Uses lazy commits (`ensure_committed` before reads) and a `notes_cache` (`Mutex<Option<Vec<...>>>`) invalidated on writes/commits.
 - **scanner.rs** -- Single-pass extraction of `#headings`, `#tags`, and `[[wiki-links]]` from raw markdown. Returns `ScanResult { title, headings, tags, links }`. Normalizes link targets (lowercase, strip path/extension).
 - **strip.rs** -- `strip_markdown`: uses `pulldown-cmark` to convert markdown to plain text for search indexing. Skips code blocks.
 - **revisions.rs** -- `save_revision` (copies current file content to `.tansu/revisions/<stem>/<timestamp_ms>.md`), `list_revisions` (sorted descending), `get_revision`.
-- **settings.rs** -- `Settings` struct for search configuration, persisted to `.tansu/settings.json`. Fields: weight_title/headings/tags/content (f32), fuzzy_distance (u8), result_limit (usize), show_score_breakdown (bool), excluded_folders (Vec<String>). All fields have serde defaults. Changing `excluded_folders` triggers a full reindex.
+- **settings.rs** -- `Settings` struct for search configuration, persisted to `.tansu/settings.json`. Fields: weight_title/headings/tags/content (f32), fuzzy_distance (u8), recency_boost (u8: 0=off, 1=day, 2=week, 3=month), result_limit (usize), show_score_breakdown (bool), excluded_folders (Vec<String>). All fields have serde defaults. Changing `excluded_folders` triggers a full reindex.
 - **watcher.rs** -- `start_watcher`: sets up `notify::RecommendedWatcher`, filters to `.md` files only, ignores `.tansu/` directory, checks `self_writes` set to filter out server's own writes.
 - **util.rs** -- `StrExt` trait: `truncate_chars` (by Unicode scalar count), `truncate_bytes` (snaps to `floor_char_boundary`).
 - **bin/bench.rs** -- Quick ad-hoc benchmark binary (avg/p50/p99/min/max). Run with `make bench-quick`.
@@ -70,7 +70,7 @@ All source in `web/ts/`, bundled to `web/static/app.js`:
 - **merge.ts** -- Line-based 3-way merge (LCS diff). Returns merged string or null on conflict.
 - **revisions.ts** -- Revisions side panel. Lists timestamps, preview on click, restore with confirmation.
 - **palette.ts** -- Command palette modal (Cmd+P). Filterable list of all commands with shortcut hints. `registerCommands()` called from main.ts.
-- **settings.ts** -- Settings modal (Cmd+Shift+S). Sliders for search weights, dropdown for fuzzy distance, checkbox for score breakdown, text input for excluded folders. Security section for PRF credential management and lock. Saves to server via PUT `/api/settings`.
+- **settings.ts** -- Settings modal (Cmd+Shift+S). Sliders for search weights, dropdowns for fuzzy distance and recency boost, checkbox for score breakdown, text input for excluded folders. Security section for PRF credential management and lock. Saves to server via PUT `/api/settings`.
 - **webauthn.ts** -- WebAuthn PRF extension for biometric unlock (Face ID / Touch ID).
 - **util.ts** -- `escapeHtml`, `relativeTime`, `stemFromPath`.
 
@@ -86,7 +86,23 @@ All source in `web/ts/`, bundled to `web/static/app.js`:
 - **Minimal dependencies**: 6 runtime crates (httparse, tantivy, notify, serde, serde_json, pulldown-cmark). Dev-only: criterion for benchmarks.
 - **Wiki-link resolution**: links are matched by filename stem (case-insensitive). Backlinks are indexed in tantivy via the `links_to` field. Rename updates all referencing notes.
 - **Image handling**: paste triggers WebP conversion client-side, uploads raw blob to `/api/image`, server stores in `z-images/` with dedup naming.
-- **Custom snippet generator**: tantivy's `SnippetGenerator` cannot highlight fuzzy-matched terms because `FuzzyTermQuery` doesn't implement `query_terms()` (the expanded terms exist inside `AutomatonWeight` but aren't publicly exposed). Our `make_snippet` in `index.rs` tokenizes stored content, matches query terms within edit distance 1, and wraps matches in `<b>` tags. Do not replace this with tantivy's built-in snippet generator.
+- **Custom snippet generator**: tantivy's `SnippetGenerator` cannot highlight fuzzy-matched terms because `FuzzyTermQuery` doesn't implement `query_terms()` (the expanded terms exist inside `AutomatonWeight` but aren't publicly exposed). Our `make_snippet` in `index.rs` tokenizes stored content, prefers exact quoted-phrase anchors when present, highlights exact/prefix matches, and only highlights edit-distance-1 fuzzy matches for non-quoted searches. Do not replace this with tantivy's built-in snippet generator.
+
+## Search model
+
+- **Indexed fields**: search operates on `title`, `headings`, `tags`, and stripped `content`. `path` is not part of full-text scoring; it is only used as an exact filter for scoped in-note search.
+- **Field weights**: `weight_title`, `weight_headings`, `weight_tags`, and `weight_content` are multiplicative boosts applied at query-build time. Defaults are title `10.0`, headings `5.0`, tags `2.0`, content `1.0`.
+- **Tokenization**: query text is split on non-alphanumeric characters to mirror Tantivy's default tokenizer. That means `jpeg-xl` searches as `jpeg` + `xl`, and `some_function` searches as `some` + `function`.
+- **Quoted queries**: double-quoted text adds a literal phrase constraint. Example: `"oat groats"` still contributes `oat` and `groats` as normal terms, but also requires those tokens to appear adjacent and in order via `PhraseQuery`.
+- **Phase 1 query strategy**: each non-quoted term becomes a MUST clause. Within each term, all search fields are OR'd together with:
+  exact term match at `1.0x` the field weight
+  prefix match via `PhrasePrefixQuery` at `0.8x` the field weight
+- **Phrase strategy**: each quoted phrase becomes an additional MUST clause. Within that clause, the phrase can match any of the four search fields, boosted by that field's full weight.
+- **Phase 2 fuzzy fallback**: if phase 1 returns fewer than 5 results and `fuzzy_distance > 0`, the search is re-run with the same exact/prefix/phrase clauses plus fuzzy matching on `content` only, boosted at `0.6x` content weight. `fuzzy_distance` is a raw Tantivy edit distance (`0`, `1`, or `2` in the UI).
+- **Recency boost**: after Tantivy returns scored hits, Tansu applies a ferrisearch-style post-hoc multiplier based on indexed file `mtime`. Setting values are `0=disabled`, `1=24 hours`, `2=7 days`, `3=30 days`; default is `2` (week). The multiplier is `1 + exp(decay * days / 1000)`, with decay constants `-3.0`, `-0.3`, and `-0.1` respectively. This boosts newer files without changing which textual clauses matched.
+- **Result ordering**: when recency boost is enabled, final ordering is by the boosted score after the post-hoc multiplier. When disabled, results stay in Tantivy's native score order.
+- **Score breakdown**: the UI's per-field breakdown uses Tantivy `Query::explain()` on each individual sub-query, mirroring ferrisearch's strategy. For each field, Tansu separately explains the exact term query, prefix query, fuzzy query (content only, fuzzy phase only), and phrase query, then sums those explanation values. The breakdown excludes the post-hoc recency multiplier, so it explains textual relevance only.
+- **Snippet behavior**: snippets are built from stored stripped content, not raw markdown. For quoted searches, snippet anchoring prefers the first exact phrase occurrence; for normal searches, it anchors on the first exact/prefix/fuzzy-matching token.
 
 ## Save flow
 
