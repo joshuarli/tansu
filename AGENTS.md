@@ -56,11 +56,11 @@ Dual-target crate: `src/lib.rs` exports all modules, `src/main.rs` is the server
 All source in `web/ts/`, bundled to `web/static/app.js`:
 
 - **main.ts** -- Entry point. Wires up editor, tabs, search, SSE, keyboard shortcuts, wiki-link click handler, rename handler.
-- **editor.ts** -- WYSIWYG editor. `contenteditable` div + hidden textarea for source mode. Handles save (with mtime-based conflict detection), reload-from-disk (with 3-way merge for dirty tabs), image paste (converts to WebP via OffscreenCanvas, uploads), inline formatting (bold/italic), backlinks display.
+- **editor.ts** -- WYSIWYG editor. `contenteditable` div + hidden textarea for source mode. Autosaves 1.5 s after last keystroke (silent: skips conflict banner); ^S saves immediately. Handles conflict detection (mtime-based), reload-from-disk (3-way merge for dirty tabs), image paste (converts to WebP via OffscreenCanvas, uploads), inline formatting (bold/italic), backlinks display.
 - **tab-state.ts** -- Pure tab state logic (no DOM). Open/close/switch tabs, closed-tab stack (bounded LIFO, max 20), session persistence (dual-write to IDB + server), offline note fetching via `fetchNote()` (try server → cache to IDB → fall back to IDB). Exports `reopenClosedTab()`, `syncToServer()`, `clearClosedTabs()`.
 - **tabs.ts** -- Tab bar DOM rendering. Re-exports all tab-state functions. Context menu (right-click) for rename/delete/close.
 - **local-store.ts** -- IndexedDB wrapper for offline resilience. Database `"tansu"` with three stores: `kv` (session state), `notes` (cached content), `queue` (reserved for future write queue). All ops gracefully no-op when store isn't opened. See `docs/offline-resilience.md`.
-- **search.ts** -- Search modal (Cmd+K). Debounced search with arrow key navigation. Supports scoped search (Cmd+F searches within current note). "Create note" option at bottom of results.
+- **search.ts** -- Search modal (Cmd+K). Arrow key navigation, fires on every keystroke. Supports scoped search (Cmd+F searches within current note). "Create note" option at bottom of results.
 - **api.ts** -- Typed fetch wrappers for all API endpoints.
 - **serialize.ts** -- `domToMarkdown`: DOM-to-markdown serializer for the WYSIWYG editor. Handles headings, lists, blockquotes, code blocks, tables, inline formatting, wiki-links, image embeds.
 - **transforms.ts** -- Block-level transforms on Enter: typing `## ` converts to H2, `- ` to UL, ` ``` ` to code block, `---` to HR, etc.
@@ -72,7 +72,7 @@ All source in `web/ts/`, bundled to `web/static/app.js`:
 - **palette.ts** -- Command palette modal (Cmd+P). Filterable list of all commands with shortcut hints. `registerCommands()` called from main.ts.
 - **settings.ts** -- Settings modal (Cmd+Shift+S). Sliders for search weights, dropdown for fuzzy distance, checkbox for score breakdown, text input for excluded folders. Security section for PRF credential management and lock. Saves to server via PUT `/api/settings`.
 - **webauthn.ts** -- WebAuthn PRF extension for biometric unlock (Face ID / Touch ID).
-- **util.ts** -- `debounce`, `escapeHtml`, `relativeTime`, `stemFromPath`.
+- **util.ts** -- `escapeHtml`, `relativeTime`, `stemFromPath`.
 
 ## Key conventions
 
@@ -87,6 +87,59 @@ All source in `web/ts/`, bundled to `web/static/app.js`:
 - **Wiki-link resolution**: links are matched by filename stem (case-insensitive). Backlinks are indexed in tantivy via the `links_to` field. Rename updates all referencing notes.
 - **Image handling**: paste triggers WebP conversion client-side, uploads raw blob to `/api/image`, server stores in `z-images/` with dedup naming.
 - **Custom snippet generator**: tantivy's `SnippetGenerator` cannot highlight fuzzy-matched terms because `FuzzyTermQuery` doesn't implement `query_terms()` (the expanded terms exist inside `AutomatonWeight` but aren't publicly exposed). Our `make_snippet` in `index.rs` tokenizes stored content, matches query terms within edit distance 1, and wraps matches in `<b>` tags. Do not replace this with tantivy's built-in snippet generator.
+
+## Save flow
+
+```
+User types in editor
+       │
+       ├─► markDirty(path) ──► emit("tab:render") ──► dirty dot appears in tab
+       │
+       └─► scheduleAutosave()  [resets 1.5 s debounce timer]
+                │
+                │ 1.5 s idle          ^S pressed
+                ▼                         │
+        autosave fires            clearTimer (if pending)
+                │                         │
+                └──────────┬──────────────┘
+                           ▼
+                   saveCurrentNote()
+                    silent=true          silent=false (^S)
+                           │
+                           ▼
+                       _doSave()
+                           │
+                  GET getCurrentContent()
+                  PUT /api/note  { expected_mtime }
+                           │
+                           ▼
+                  classifySaveResult()
+                           │
+             ┌─────────────┼──────────────────┐
+             ▼             ▼                  ▼
+          "clean"   "false-conflict"    "real-conflict"
+             │             │                  │
+        markClean()   PUT mtime=0        silent? skip
+        emit(            markClean()     : showConflictBanner()
+         "files:changed") emit(
+             │            "files:changed")
+             ▼
+    filenav re-renders
+    server reindexes note
+
+
+SSE live-reload path (external edit):
+
+  Disk change ──► watcher thread ──► SSE "changed" / "deleted"
+                                              │
+                                    frontend SSE handler
+                                              │
+                                   tab dirty? ─────────────┐
+                                      │ no                 │ yes
+                                      ▼                    ▼
+                               loadContent()     showConflictBanner()
+                               markClean()       "Keep mine" / "Take theirs"
+```
 
 ## API surface
 

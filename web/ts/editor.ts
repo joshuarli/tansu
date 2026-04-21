@@ -119,6 +119,7 @@ export function showEditor(path: string, content: string) {
 }
 
 export function hideEditor() {
+  if (autosaveTimer !== null) { clearTimeout(autosaveTimer); autosaveTimer = null; }
   currentPath = null;
   hideRevisions();
   hideAutocomplete();
@@ -171,18 +172,28 @@ export function classifySaveResult(
 }
 
 let saving = false;
+let autosaveTimer: ReturnType<typeof setTimeout> | null = null;
 
-export async function saveCurrentNote() {
+function scheduleAutosave() {
+  if (autosaveTimer !== null) clearTimeout(autosaveTimer);
+  autosaveTimer = setTimeout(() => {
+    autosaveTimer = null;
+    saveCurrentNote({ silent: true });
+  }, 1500);
+}
+
+export async function saveCurrentNote(opts?: { silent?: boolean }) {
   if (saving) return;
+  if (autosaveTimer !== null) { clearTimeout(autosaveTimer); autosaveTimer = null; }
   saving = true;
   try {
-    await _doSave();
+    await _doSave(opts?.silent ?? false);
   } finally {
     saving = false;
   }
 }
 
-async function _doSave() {
+async function _doSave(silent: boolean) {
   const tab = getActiveTab();
   if (!tab || !currentPath) return;
 
@@ -202,7 +213,8 @@ async function _doSave() {
       break;
     }
     case "real-conflict":
-      if (container) {
+      // Suppress banner for background autosaves; next manual save will surface it.
+      if (!silent && container) {
         showConflictBanner(
           container,
           currentPath,
@@ -282,6 +294,7 @@ function setupEditorEvents() {
 
   contentEl.addEventListener("input", () => {
     if (currentPath) markDirty(currentPath);
+    scheduleAutosave();
     if (contentEl && checkBlockInputTransform(contentEl)) return;
     checkInlineTransform();
     if (contentEl) checkWikiLinkTrigger(contentEl, currentPath);
@@ -289,6 +302,7 @@ function setupEditorEvents() {
 
   sourceEl.addEventListener("input", () => {
     if (currentPath) markDirty(currentPath);
+    scheduleAutosave();
   });
 
   contentEl.addEventListener("keydown", (e) => {
