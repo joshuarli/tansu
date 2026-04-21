@@ -118,7 +118,7 @@ export function showEditor(path: string, content: string) {
   loadBacklinks(backlinksEl, path);
   contentEl.focus();
   const cursor = getCursor(path);
-  if (cursor !== undefined) restoreCursorOffset(cursor);
+  if (cursor !== undefined) restoreCursorOffset(cursor, true);
 }
 
 export function hideEditor() {
@@ -287,7 +287,7 @@ function saveCursorOffset(): number {
   return pre.toString().length;
 }
 
-function restoreCursorOffset(offset: number) {
+function restoreCursorOffset(offset: number, scroll = false) {
   if (!contentEl || offset < 0) return;
   const sel = window.getSelection();
   if (!sel) return;
@@ -301,7 +301,7 @@ function restoreCursorOffset(offset: number) {
       range.collapse(true);
       sel.removeAllRanges();
       sel.addRange(range);
-      node.parentElement?.scrollIntoView({ block: "nearest", behavior: "instant" });
+      if (scroll) node.parentElement?.scrollIntoView({ block: "nearest", behavior: "instant" });
       return;
     }
     remaining -= node.length;
