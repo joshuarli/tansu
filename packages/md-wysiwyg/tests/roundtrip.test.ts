@@ -61,6 +61,12 @@ describe("roundtrip", () => {
   test("link roundtrip", () => {
     expect(roundtrip("[text](http://url)")).toBe("[text](http://url)");
   });
+  test("bare https url roundtrip", () => {
+    expect(roundtrip("https://example.com")).toBe("https://example.com");
+  });
+  test("bare url in sentence roundtrip", () => {
+    expect(roundtrip("Visit https://example.com today")).toBe("Visit https://example.com today");
+  });
   test("wiki-link roundtrip", () => {
     expect(roundtrip("[[my note]]")).toBe("[[my note]]");
   });

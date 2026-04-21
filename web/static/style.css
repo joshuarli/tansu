@@ -533,6 +533,20 @@ body {
   color: var(--danger);
 }
 
+/* Link hover tooltip */
+.link-hover-tooltip {
+  position: absolute;
+  z-index: 200;
+  background: var(--fg);
+  color: var(--bg);
+  font-size: 11px;
+  padding: 2px 7px;
+  border-radius: 4px;
+  pointer-events: none;
+  white-space: nowrap;
+  opacity: 0.85;
+}
+
 /* Search modal */
 #search-overlay {
   position: fixed;

@@ -16,6 +16,7 @@ import { loadBacklinks } from "./backlinks.ts";
 import { showConflictBanner, handleReloadConflict } from "./conflict.ts";
 import { on, emit } from "./events.ts";
 import { handleImagePaste } from "./image-paste.ts";
+import { registerLinkHover } from "./link-hover.ts";
 import { toggleRevisions, hideRevisions, isRevisionsOpen } from "./revisions.ts";
 import { markDirty, markClean, getActiveTab } from "./tabs.ts";
 
@@ -32,6 +33,7 @@ export { _invalidateNoteCache as invalidateNoteCache };
 
 export function initEditor() {
   editorArea = document.getElementById("editor-area")!;
+  registerLinkHover();
 
   on<{ content: string; mtime: number }>("revision:restore", ({ content, mtime }) => {
     if (currentPath) {

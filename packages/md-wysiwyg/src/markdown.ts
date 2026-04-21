@@ -361,6 +361,17 @@ function inline(text: string): string {
       }
     }
 
+    // Bare URL: http:// or https://
+    if (ch === "h" && (text.slice(i, i + 7) === "http://" || text.slice(i, i + 8) === "https://")) {
+      let end = i;
+      while (end < len && !" \n\t<>\"'`".includes(text[end]!)) end++;
+      while (end > i && ".,)!?;:".includes(text[end - 1]!)) end--;
+      const url = text.slice(i, end);
+      out += `<a href="${escapeHtml(url)}">${escapeHtml(url)}</a>`;
+      i = end;
+      continue;
+    }
+
     // Line break
     if (ch === "\n") {
       out += "<br>";

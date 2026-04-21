@@ -119,7 +119,13 @@ function inlineToMd(el: HTMLElement): string {
           }
         } else {
           const href = child.getAttribute("href") ?? "";
-          md += `[${child.textContent ?? ""}](${href})`;
+          const text = child.textContent ?? "";
+          // Bare autolinked URL: preserve as plain text so it round-trips
+          if (text === href && /^https?:\/\//.test(href)) {
+            md += href;
+          } else {
+            md += `[${text}](${href})`;
+          }
         }
       } else if (childTag === "IMG") {
         const wikiImage = child.getAttribute("data-wiki-image");

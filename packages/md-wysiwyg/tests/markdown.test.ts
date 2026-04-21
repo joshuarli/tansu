@@ -83,6 +83,26 @@ describe("links and images", () => {
   });
 });
 
+describe("bare URL autolink", () => {
+  test("https link rendered", () => {
+    expect(renderMarkdown("https://example.com")).toContain('<a href="https://example.com">https://example.com</a>');
+  });
+  test("http link rendered", () => {
+    expect(renderMarkdown("http://example.com")).toContain('<a href="http://example.com">http://example.com</a>');
+  });
+  test("trailing period stripped", () => {
+    expect(renderMarkdown("See https://example.com.")).toContain('<a href="https://example.com">');
+  });
+  test("url mid-sentence", () => {
+    expect(renderMarkdown("Visit https://example.com today")).toContain('<a href="https://example.com">');
+  });
+  test("markdown link not double-linked", () => {
+    const out = renderMarkdown("[text](https://example.com)");
+    expect(out).toContain('<a href="https://example.com">text</a>');
+    expect((out.match(/<a /g) ?? []).length).toBe(1);
+  });
+});
+
 describe("code blocks", () => {
   test("code block lang", () => {
     const code = renderMarkdown("```js\nconst x = 1;\n```");
