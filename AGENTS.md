@@ -8,7 +8,7 @@ Tansu is a local-first note-taking app (Obsidian alternative). Notes are plain m
 
 **Rust server** (no async runtime): raw TCP accept loop using `httparse` for HTTP parsing, `tantivy` for full-text search, `notify` for filesystem watching, `pulldown-cmark` for markdown stripping. All request/response types use `serde` JSON serialization.
 
-**Frontend**: vanilla TypeScript compiled and bundled with `bun build`. WYSIWYG editing via `contenteditable` with a source-mode toggle. Custom markdown renderer (`markdown.ts`) converts markdown to HTML — no external markdown library. `highlight.js` for code block syntax highlighting. No framework, no CSS framework.
+**Frontend**: vanilla TypeScript compiled and bundled with `esbuild`. WYSIWYG editing via `contenteditable` with a source-mode toggle. Custom markdown renderer (`markdown.ts`) converts markdown to HTML — no external markdown library. `highlight.js` for code block syntax highlighting. No framework, no CSS framework.
 
 **SSE live reload**: single EventSource connection at `/events`. Server holds one SSE client at a time. File watcher events trigger `changed`/`deleted` SSE messages to the browser, which reloads or merges content.
 
@@ -174,15 +174,15 @@ Static files are served from `/static/*` and images from `/z-images/*`. All othe
 ## Build commands
 
 ```sh
-bunx tsgo --noEmit    # type-check TypeScript (TS7 native, no emit)
-bun build web/ts/main.ts --outfile web/static/app.js --minify   # bundle frontend
-bun test              # run all TypeScript tests
-cargo build           # build Rust server (never use --release)
-cargo test            # run Rust tests
-make build            # all of the above
-make dev              # TS build + run server
-make bench            # criterion benchmarks (baselines in target/criterion/)
-make bench-quick      # ad-hoc bench binary against ~/notes
+tsgo --noEmit    # type-check TypeScript (TS7 native, no emit)
+esbuild web/ts/main.ts --bundle --outfile=web/static/app.js --minify --format=esm   # bundle frontend
+vitest run        # run all TypeScript tests
+cargo build       # build Rust server (never use --release)
+cargo test        # run Rust tests
+make build        # all of the above
+make dev          # TS build + run server
+make bench        # criterion benchmarks (baselines in target/criterion/)
+make bench-quick  # ad-hoc bench binary against ~/notes
 ```
 
 The server binary expects `web/index.html` and `web/static/` to be next to the executable or in the current directory.
@@ -201,9 +201,9 @@ The server binary expects `web/index.html` and `web/static/` to be next to the e
 
 - **crypto.rs**: encryption/decryption round-trip, key wrapping, recovery key parsing, PRF unlock, tampered ciphertext rejection
 
-TypeScript tests: `bun test` runs 25 test files with coverage enforcement (79% line/function threshold). `fake-indexeddb` provides in-memory IDB for testing offline resilience paths.
+TypeScript tests: `vitest run` runs 25 test files with coverage enforcement (79% line/function threshold). `fake-indexeddb` provides in-memory IDB for testing offline resilience paths.
 
-Type checking: `bunx tsgo` (strict mode, `noEmit`).
+Type checking: `tsgo` (strict mode, `noEmit`).
 
 ## Benchmarking
 

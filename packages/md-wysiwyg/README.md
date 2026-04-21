@@ -14,14 +14,6 @@ Zero-dependency markdown rendering, WYSIWYG DOM serialization, diff/merge, and s
 - **`escapeHtml(s)`** — escapes `&`, `<`, `>`, `"`.
 - **`stemFromPath(path)`** — returns the filename stem from a path.
 
-## Install
-
-```sh
-npm install @joshuarli98/md-wysiwyg
-# or
-bun add @joshuarli98/md-wysiwyg
-```
-
 ## Usage
 
 ```ts

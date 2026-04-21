@@ -84,13 +84,6 @@ describe("getPrfSalt", () => {
   });
 });
 
-describe("isPrfLikelySupported", () => {
-  test("isPrfLikelySupported returns boolean", () => {
-    // In Bun there's no PublicKeyCredential, so should be false
-    expect(typeof isPrfLikelySupported()).toBe("boolean");
-  });
-});
-
 describe("createPrfCredential / getPrfKey", () => {
   const fakePrfOutput = crypto.getRandomValues(new Uint8Array(32));
   const fakeRawId = crypto.getRandomValues(new Uint8Array(16));
