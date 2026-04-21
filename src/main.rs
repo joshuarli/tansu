@@ -945,7 +945,8 @@ impl Server {
         self.file_index.remove_file(&req.old_path);
         if let Ok(content) = self.read_content(&new_full) {
             self.index.index_note(&req.new_path, &content, &new_full);
-            self.file_index.index_file(&req.new_path, mtime_secs(&new_full));
+            self.file_index
+                .index_file(&req.new_path, mtime_secs(&new_full));
         }
 
         let old_stem = Path::new(&req.old_path)
@@ -1194,8 +1195,7 @@ impl Server {
                 })
             })
             .collect();
-        let json = serde_json::to_string(&hits)
-            .unwrap_or_else(|_| "[]".to_string());
+        let json = serde_json::to_string(&hits).unwrap_or_else(|_| "[]".to_string());
         write_json(sock, &json)
     }
 
@@ -1211,8 +1211,7 @@ impl Server {
                 })
             })
             .collect();
-        let json = serde_json::to_string(&entries)
-            .unwrap_or_else(|_| "[]".to_string());
+        let json = serde_json::to_string(&entries).unwrap_or_else(|_| "[]".to_string());
         write_json(sock, &json)
     }
 
@@ -1228,8 +1227,7 @@ impl Server {
     }
 
     fn save_pinned(&self, paths: &[String]) -> io::Result<()> {
-        let json = serde_json::to_string(paths)
-            .map_err(|e| io::Error::other(e.to_string()))?;
+        let json = serde_json::to_string(paths).map_err(|e| io::Error::other(e.to_string()))?;
         fs::write(self.pinned_path(), json)
     }
 
@@ -1238,19 +1236,17 @@ impl Server {
         let entries: Vec<serde_json::Value> = paths
             .iter()
             .map(|p| {
-                let title = self.file_index.lookup_path(p)
-                    .unwrap_or_else(|| {
-                        Path::new(p)
-                            .file_stem()
-                            .and_then(|s| s.to_str())
-                            .unwrap_or(p)
-                            .to_string()
-                    });
+                let title = self.file_index.lookup_path(p).unwrap_or_else(|| {
+                    Path::new(p)
+                        .file_stem()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or(p)
+                        .to_string()
+                });
                 serde_json::json!({ "path": p, "title": title })
             })
             .collect();
-        let json = serde_json::to_string(&entries)
-            .unwrap_or_else(|_| "[]".to_string());
+        let json = serde_json::to_string(&entries).unwrap_or_else(|_| "[]".to_string());
         write_json(sock, &json)
     }
 
@@ -1553,8 +1549,7 @@ fn main() {
         Index::open_or_create(&index_dir).unwrap_or_else(|e| die(&format!("open index: {e}")));
 
     let names_dir = dir.join(".tansu/names-index");
-    fs::create_dir_all(&names_dir)
-        .unwrap_or_else(|e| die(&format!("create names index dir: {e}")));
+    fs::create_dir_all(&names_dir).unwrap_or_else(|e| die(&format!("create names index dir: {e}")));
     let file_index = FileNameIndex::open_or_create(&names_dir)
         .unwrap_or_else(|e| die(&format!("open names index: {e}")));
 

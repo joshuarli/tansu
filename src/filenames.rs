@@ -148,8 +148,14 @@ impl FileNameIndex {
             let exact = TermQuery::new(term.clone(), IndexRecordOption::WithFreqs);
             let fuzzy = FuzzyTermQuery::new(term, 1, true);
             let word_q = BooleanQuery::new(vec![
-                (Occur::Should, Box::new(exact) as Box<dyn tantivy::query::Query>),
-                (Occur::Should, Box::new(fuzzy) as Box<dyn tantivy::query::Query>),
+                (
+                    Occur::Should,
+                    Box::new(exact) as Box<dyn tantivy::query::Query>,
+                ),
+                (
+                    Occur::Should,
+                    Box::new(fuzzy) as Box<dyn tantivy::query::Query>,
+                ),
             ]);
             term_queries.push((Occur::Must, Box::new(word_q)));
         }
@@ -250,8 +256,8 @@ mod tests {
     use super::*;
 
     fn make_idx(suffix: &str) -> (FileNameIndex, std::path::PathBuf) {
-        let dir = std::env::temp_dir()
-            .join(format!("tansu_names_{}_{}", suffix, std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("tansu_names_{}_{}", suffix, std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         let idx = FileNameIndex::open_or_create(&dir).unwrap();

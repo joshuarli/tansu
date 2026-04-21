@@ -13,11 +13,12 @@ export function registerLinkHover() {
   let hideTimer: ReturnType<typeof setTimeout> | null = null;
 
   document.addEventListener("mouseover", (e) => {
-    const anchor = (e.target as HTMLElement).closest<HTMLAnchorElement>(
-      ".editor-content a[href]",
-    );
+    const anchor = (e.target as HTMLElement).closest<HTMLAnchorElement>(".editor-content a[href]");
     if (!anchor) return;
-    if (hideTimer !== null) { clearTimeout(hideTimer); hideTimer = null; }
+    if (hideTimer !== null) {
+      clearTimeout(hideTimer);
+      hideTimer = null;
+    }
     const rect = anchor.getBoundingClientRect();
     tooltip.style.display = "block";
     tooltip.style.top = `${rect.bottom + window.scrollY + 4}px`;
@@ -26,14 +27,14 @@ export function registerLinkHover() {
 
   document.addEventListener("mouseout", (e) => {
     if ((e.target as HTMLElement).closest(".editor-content a[href]")) {
-      hideTimer = setTimeout(() => { tooltip.style.display = "none"; }, 100);
+      hideTimer = setTimeout(() => {
+        tooltip.style.display = "none";
+      }, 100);
     }
   });
 
   document.addEventListener("click", (e) => {
-    const anchor = (e.target as HTMLElement).closest<HTMLAnchorElement>(
-      ".editor-content a[href]",
-    );
+    const anchor = (e.target as HTMLElement).closest<HTMLAnchorElement>(".editor-content a[href]");
     if (!anchor) return;
     if (e.metaKey || e.ctrlKey) {
       e.preventDefault();

@@ -59,7 +59,7 @@ setup-cross:
 	rustup target add x86_64-unknown-linux-gnu
 
 setup:
-	prek install --install-hooks
+	prek install --prepare-hooks -f
 
 pc:
 	prek run --all-files

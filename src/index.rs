@@ -924,7 +924,11 @@ mod tests {
         let notes = idx.get_all_notes();
         let paths: Vec<&str> = notes.iter().map(|n| n.path.as_str()).collect();
         assert_eq!(notes.len(), 2, "expected 2 notes, got {:?}", paths);
-        assert!(paths.contains(&"alpha.md"), "missing alpha.md in {:?}", paths);
+        assert!(
+            paths.contains(&"alpha.md"),
+            "missing alpha.md in {:?}",
+            paths
+        );
         assert!(paths.contains(&"beta.md"), "missing beta.md in {:?}", paths);
 
         let _ = fs::remove_dir_all(&dir);
@@ -998,7 +1002,11 @@ mod tests {
         let notes = idx.get_all_notes();
         let paths: Vec<&str> = notes.iter().map(|n| n.path.as_str()).collect();
         assert_eq!(notes.len(), 2, "expected 2 notes, got {:?}", paths);
-        assert!(paths.contains(&"alpha.md"), "missing alpha.md in {:?}", paths);
+        assert!(
+            paths.contains(&"alpha.md"),
+            "missing alpha.md in {:?}",
+            paths
+        );
         assert!(paths.contains(&"beta.md"), "missing beta.md in {:?}", paths);
 
         let _ = fs::remove_dir_all(&dir);

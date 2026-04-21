@@ -1,10 +1,5 @@
 {
-  "entry": [
-    "web/ts/main.ts",
-    "web/ts/search-cli.ts",
-    "web/ts/**/*.test.ts",
-    "web/ts/e2e/**/*.ts"
-  ],
+  "entry": ["web/ts/main.ts", "web/ts/search-cli.ts", "web/ts/**/*.test.ts", "web/ts/e2e/**/*.ts"],
   "project": ["web/ts/**/*.ts"],
   "ignore": ["web/ts/test-helper.ts"],
   "ignoreDependencies": ["oxfmt", "oxlint"]
