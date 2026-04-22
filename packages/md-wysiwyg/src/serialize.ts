@@ -1,23 +1,40 @@
 /// DOM → Markdown serialization for the WYSIWYG editor.
 
-export function domToMarkdown(root: HTMLElement): string {
-  const blocks: string[] = [];
-  for (const child of root.children) {
-    const md = blockToMd(child as HTMLElement);
-    if (md !== null) blocks.push(md);
-  }
-  return blocks.join("\n\n");
+const BLANK_LINE_SENTINEL = "\u0000";
+type BlockKind =
+  | "blank"
+  | "paragraph"
+  | "heading"
+  | "list"
+  | "blockquote"
+  | "code"
+  | "table"
+  | "hr"
+  | "other";
+
+interface SerializedBlock {
+  md: string;
+  kind: BlockKind;
 }
 
-function blockToMd(el: HTMLElement): string | null {
+export function domToMarkdown(root: HTMLElement): string {
+  const blocks: SerializedBlock[] = [];
+  for (const child of root.children) {
+    const block = blockToMd(child as HTMLElement);
+    if (block !== null && block.md !== "") blocks.push(block);
+  }
+  return joinBlocks(blocks);
+}
+
+function blockToMd(el: HTMLElement): SerializedBlock | null {
   const tag = el.tagName;
 
-  if (tag === "H1") return `# ${inlineToMd(el)}`;
-  if (tag === "H2") return `## ${inlineToMd(el)}`;
-  if (tag === "H3") return `### ${inlineToMd(el)}`;
-  if (tag === "H4") return `#### ${inlineToMd(el)}`;
-  if (tag === "H5") return `##### ${inlineToMd(el)}`;
-  if (tag === "H6") return `###### ${inlineToMd(el)}`;
+  if (tag === "H1") return { md: `# ${inlineToMd(el)}`, kind: "heading" };
+  if (tag === "H2") return { md: `## ${inlineToMd(el)}`, kind: "heading" };
+  if (tag === "H3") return { md: `### ${inlineToMd(el)}`, kind: "heading" };
+  if (tag === "H4") return { md: `#### ${inlineToMd(el)}`, kind: "heading" };
+  if (tag === "H5") return { md: `##### ${inlineToMd(el)}`, kind: "heading" };
+  if (tag === "H6") return { md: `###### ${inlineToMd(el)}`, kind: "heading" };
   if (el.classList.contains("callout")) {
     const type = el.getAttribute("data-callout") ?? "note";
     const titleEl = el.querySelector(".callout-title");
@@ -28,57 +45,86 @@ function blockToMd(el: HTMLElement): string | null {
     const titleSuffix = titleText && titleText !== defaultTitle ? ` ${titleText}` : "";
     let lines = `> [!${type}]${titleSuffix}`;
     if (bodyEl) {
+      const bodyBlocks: SerializedBlock[] = [];
       for (const child of bodyEl.children) {
-        const inner = blockToMd(child as HTMLElement) ?? "";
-        lines +=
-          "\n" +
-          inner
-            .split("\n")
-            .map((l) => `> ${l}`)
-            .join("\n");
+        const inner = blockToMd(child as HTMLElement);
+        if (inner !== null && inner.md !== "") bodyBlocks.push(inner);
       }
+      const bodyMd = joinBlocks(bodyBlocks);
+      if (bodyMd !== "") lines += "\n" + quoteMarkdown(bodyMd);
     }
-    return lines;
+    return { md: lines, kind: "blockquote" };
   }
 
-  if (tag === "P" || tag === "DIV") return inlineToMd(el);
-  if (tag === "HR") return "---";
+  if (tag === "P" || tag === "DIV") {
+    if (isBlankLineBlock(el)) return { md: BLANK_LINE_SENTINEL, kind: "blank" };
+    return {
+      md: hasDirectBlockChildren(el) ? containerToMd(el) : inlineToMd(el),
+      kind: "paragraph",
+    };
+  }
+  if (tag === "HR") return { md: "---", kind: "hr" };
 
   if (tag === "UL") {
-    return listToMd(el, 0, false);
+    return { md: listToMd(el, 0, false), kind: "list" };
   }
 
   if (tag === "OL") {
-    return listToMd(el, 0, true);
+    return { md: listToMd(el, 0, true), kind: "list" };
   }
 
   if (tag === "BLOCKQUOTE") {
-    const inner = Array.from(el.children)
-      .map((child) => blockToMd(child as HTMLElement) ?? "")
-      .join("\n\n");
-    return inner
-      .split("\n")
-      .map((line) => `> ${line}`)
-      .join("\n");
+    const innerBlocks: SerializedBlock[] = [];
+    for (const child of el.children) {
+      const md = blockToMd(child as HTMLElement);
+      if (md !== null && md.md !== "") innerBlocks.push(md);
+    }
+    return { md: quoteMarkdown(joinBlocks(innerBlocks)), kind: "blockquote" };
   }
 
   if (tag === "PRE") {
     const code = el.querySelector("code");
     const text = code?.textContent ?? el.textContent ?? "";
     const lang = code?.className?.match(/language-(\S+)/)?.[1] ?? "";
-    return "```" + lang + "\n" + text.replace(/\n$/, "") + "\n```";
+    return { md: "```" + lang + "\n" + text.replace(/\n$/, "") + "\n```", kind: "code" };
   }
 
   if (tag === "TABLE") {
-    return tableToMd(el);
+    return { md: tableToMd(el), kind: "table" };
   }
 
   // Fallback
-  return inlineToMd(el);
+  return { md: inlineToMd(el), kind: "other" };
 }
 
 function inlineToMd(el: HTMLElement): string {
   return inlineNodesToMd(el.childNodes);
+}
+
+function containerToMd(el: HTMLElement): string {
+  const blocks: SerializedBlock[] = [];
+  const inlineNodes: Node[] = [];
+
+  const flushInline = () => {
+    if (inlineNodes.length === 0) return;
+    const inline = inlineNodesToMd(inlineNodes).replace(/^\n+|\n+$/g, "");
+    if (inline !== "") blocks.push({ md: inline, kind: "paragraph" });
+    inlineNodes.length = 0;
+  };
+
+  for (const child of el.childNodes) {
+    if (child instanceof HTMLElement && isBlockElement(child)) {
+      flushInline();
+      const block = blockToMd(child);
+      if (block !== null && block.md !== "") blocks.push(block);
+      continue;
+    }
+
+    inlineNodes.push(child);
+  }
+
+  flushInline();
+  return joinBlocks(blocks);
 }
 
 function inlineNodesToMd(nodes: Iterable<Node>, skip?: (node: Node) => boolean): string {
@@ -146,19 +192,32 @@ function inlineNodesToMd(nodes: Iterable<Node>, skip?: (node: Node) => boolean):
 function listToMd(listEl: HTMLElement, depth: number, ordered: boolean): string {
   const indent = "  ".repeat(depth);
   const lines: string[] = [];
+  let hasListItem = false;
 
   Array.from(listEl.children).forEach((child, i) => {
-    if (!(child instanceof HTMLElement) || child.tagName !== "LI") return;
+    if (!(child instanceof HTMLElement)) return;
 
-    const checkbox = getDirectCheckbox(child);
-    const text = inlineNodesToMd(child.childNodes, isNestedListOrCheckbox).trim();
-    const prefix =
-      checkbox && !ordered ? `- [${checkbox.checked ? "x" : " "}] ` : ordered ? `${i + 1}. ` : "- ";
+    if (child.tagName === "LI") {
+      hasListItem = true;
+      const checkbox = getDirectCheckbox(child);
+      const text = normalizeListItemText(inlineNodesToMd(child.childNodes, isNestedListOrCheckbox));
+      const prefix =
+        checkbox && !ordered
+          ? `- [${checkbox.checked ? "x" : " "}] `
+          : ordered
+            ? `${i + 1}. `
+            : "- ";
 
-    lines.push(indent + prefix + text);
+      lines.push(indent + prefix + text);
 
-    for (const nested of getDirectNestedLists(child)) {
-      lines.push(listToMd(nested, depth + 1, nested.tagName === "OL"));
+      for (const nested of getDirectNestedLists(child)) {
+        lines.push(listToMd(nested, depth + 1, nested.tagName === "OL"));
+      }
+      return;
+    }
+
+    if (child.tagName === "UL" || child.tagName === "OL") {
+      lines.push(listToMd(child, depth + (hasListItem ? 1 : 0), child.tagName === "OL"));
     }
   });
 
@@ -183,6 +242,93 @@ function isNestedListOrCheckbox(node: Node): boolean {
   if (!(node instanceof HTMLElement)) return false;
   return node.tagName === "UL" || node.tagName === "OL" || node.tagName === "INPUT";
 }
+
+function normalizeListItemText(text: string): string {
+  const stripped = text.replace(/\u200B/g, "");
+  if (stripped.trim() === "") return "";
+  return stripped.replace(/^\n+|\n+$/g, "");
+}
+
+function joinBlocks(blocks: readonly SerializedBlock[]): string {
+  let out = "";
+
+  for (let i = 0; i < blocks.length; i++) {
+    const block = blocks[i]!;
+    if (i > 0) {
+      const previous = blocks[i - 1]!;
+      out += blockSeparator(previous, block);
+    }
+    if (block.md !== BLANK_LINE_SENTINEL) out += block.md;
+  }
+
+  return out;
+}
+
+function blockSeparator(previous: SerializedBlock, current: SerializedBlock): string {
+  if (previous.md === BLANK_LINE_SENTINEL || current.md === BLANK_LINE_SENTINEL) return "\n";
+  if (
+    (previous.kind === "paragraph" && current.kind === "list") ||
+    (previous.kind === "list" && current.kind === "paragraph")
+  ) {
+    return "\n";
+  }
+  return "\n\n";
+}
+
+function quoteMarkdown(md: string): string {
+  return md
+    .split("\n")
+    .map((line) => (line === "" ? ">" : `> ${line}`))
+    .join("\n");
+}
+
+function hasDirectBlockChildren(el: HTMLElement): boolean {
+  return Array.from(el.children).some(isBlockElement);
+}
+
+function isBlankLineBlock(el: HTMLElement): boolean {
+  if (el.getAttribute("data-md-blank") === "true") return true;
+
+  let sawBreak = false;
+  for (const child of el.childNodes) {
+    if (child.nodeType === Node.TEXT_NODE) {
+      if ((child.textContent ?? "").replace(/\u200B/g, "").trim() !== "") return false;
+      continue;
+    }
+
+    if (!(child instanceof HTMLElement)) return false;
+    if (child.tagName === "BR") {
+      sawBreak = true;
+      continue;
+    }
+    return false;
+  }
+
+  return sawBreak;
+}
+
+function isBlockElement(el: Element): el is HTMLElement {
+  if (!(el instanceof HTMLElement)) return false;
+  if (el.classList.contains("callout")) return true;
+  return BLOCK_TAGS.has(el.tagName);
+}
+
+const BLOCK_TAGS = new Set([
+  "P",
+  "DIV",
+  "H1",
+  "H2",
+  "H3",
+  "H4",
+  "H5",
+  "H6",
+  "UL",
+  "OL",
+  "BLOCKQUOTE",
+  "PRE",
+  "TABLE",
+  "HR",
+]);
 
 function tableToMd(table: HTMLElement): string {
   const rows: string[][] = [];

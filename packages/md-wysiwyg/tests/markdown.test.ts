@@ -24,6 +24,14 @@ describe("paragraphs", () => {
   test("para 2", () => {
     expect(renderMarkdown("First\n\nSecond")).toContain("<p>Second</p>");
   });
+  test("extra blank line renders placeholder paragraph", () => {
+    const html = renderMarkdown("First\n\n\nSecond");
+    expect((html.match(/data-md-blank="true"/g) ?? []).length).toBe(2);
+  });
+  test("leading and trailing blank lines render placeholders", () => {
+    const html = renderMarkdown("\nFirst\n");
+    expect((html.match(/data-md-blank="true"/g) ?? []).length).toBe(2);
+  });
 });
 
 describe("inline formatting", () => {
@@ -157,6 +165,12 @@ describe("lists", () => {
   test("nested ul handles tab indentation", () => {
     const html = renderMarkdown("- parent\n\t- child");
     expect(html).toContain("<li>child</li>");
+  });
+  test("empty list item renders with placeholder", () => {
+    expect(renderMarkdown("- one\n- ")).toContain("<li><br></li>");
+  });
+  test("bare empty list marker renders as empty list item", () => {
+    expect(renderMarkdown("- one\n-")).toContain("<li><br></li>");
   });
 });
 

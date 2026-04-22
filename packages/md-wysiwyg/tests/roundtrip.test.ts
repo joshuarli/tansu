@@ -43,6 +43,15 @@ describe("roundtrip", () => {
   test("two paragraphs", () => {
     expect(roundtrip("First\n\nSecond")).toBe("First\n\nSecond");
   });
+  test("extra blank line between paragraphs", () => {
+    expect(roundtrip("First\n\n\nSecond")).toBe("First\n\n\nSecond");
+  });
+  test("leading and trailing blank lines", () => {
+    expect(roundtrip("\nFirst\n\nSecond\n")).toBe("\nFirst\n\nSecond\n");
+  });
+  test("multiple trailing blank lines", () => {
+    expect(roundtrip("First\n\n\n")).toBe("First\n\n\n");
+  });
   test("bold roundtrip", () => {
     expect(roundtrip("**bold**")).toBe("**bold**");
   });
@@ -85,8 +94,17 @@ describe("roundtrip", () => {
   test("ul roundtrip", () => {
     expect(roundtrip("- one\n- two\n- three")).toBe("- one\n- two\n- three");
   });
+  test("paragraph followed by list stays tight", () => {
+    expect(roundtrip("foo:\n- one")).toBe("foo:\n- one");
+  });
+  test("empty list item followed by paragraph stays tight", () => {
+    expect(roundtrip("foo:\n- one\n-\ndsf")).toBe("foo:\n- one\n- \ndsf");
+  });
   test("nested ul roundtrip", () => {
     expect(roundtrip("- parent\n  - child")).toBe("- parent\n  - child");
+  });
+  test("empty list item roundtrip", () => {
+    expect(roundtrip("- one\n- ")).toBe("- one\n- ");
   });
   test("ol roundtrip", () => {
     expect(roundtrip("1. first\n2. second")).toBe("1. first\n2. second");

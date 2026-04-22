@@ -118,6 +118,44 @@ describe("serialize", () => {
     );
   });
 
+  test("browser-style sibling nested ul", () => {
+    expect(domToMarkdown(html("<ul><li>parent</li><ul><li><br></li></ul></ul>"))).toBe(
+      "- parent\n  - ",
+    );
+  });
+
+  test("empty top-level list item", () => {
+    expect(domToMarkdown(html("<ul><li>one</li><li><br></li></ul>"))).toBe("- one\n- ");
+  });
+
+  test("malformed paragraph wrapping a list", () => {
+    expect(domToMarkdown(html("<p><ul><li>a</li></ul></p>"))).toBe("- a");
+  });
+
+  test("blank paragraph marker preserves extra blank line", () => {
+    expect(domToMarkdown(html('<p>First</p><p data-md-blank="true"><br></p><p>Second</p>'))).toBe(
+      "First\n\nSecond",
+    );
+  });
+
+  test("blank paragraph marker preserves leading and trailing blank lines", () => {
+    expect(
+      domToMarkdown(
+        html('<p data-md-blank="true"><br></p><p>First</p><p data-md-blank="true"><br></p>'),
+      ),
+    ).toBe("\nFirst\n");
+  });
+
+  test("paragraph followed by list uses a single newline", () => {
+    expect(domToMarkdown(html("<p>foo:</p><ul><li>one</li></ul>"))).toBe("foo:\n- one");
+  });
+
+  test("list followed by paragraph uses a single newline", () => {
+    expect(domToMarkdown(html("<ul><li>one</li><li><br></li></ul><p>dsf</p>"))).toBe(
+      "- one\n- \ndsf",
+    );
+  });
+
   test("task list", () => {
     const root = document.createElement("div");
     const ul = document.createElement("ul");

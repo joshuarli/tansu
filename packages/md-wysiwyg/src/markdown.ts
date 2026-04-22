@@ -31,6 +31,7 @@ const calloutIcons: Record<string, string> = {
 };
 
 export function renderMarkdown(src: string): string {
+  if (src === "") return "";
   const lines = src.split("\n");
   const blocks = parseBlocks(lines);
   return blocks.map(renderBlock).join("\n");
@@ -39,6 +40,7 @@ export function renderMarkdown(src: string): string {
 type Block =
   | { type: "heading"; level: number; text: string }
   | { type: "paragraph"; text: string }
+  | { type: "blank" }
   | { type: "code"; lang: string; text: string }
   | { type: "hr" }
   | { type: "list"; ordered: boolean; items: ListItem[] }
@@ -65,6 +67,7 @@ function parseBlocks(lines: string[]): Block[] {
 
     // Blank line
     if (line.trim() === "") {
+      blocks.push({ type: "blank" });
       i++;
       continue;
     }
@@ -173,6 +176,8 @@ function renderBlock(block: Block): string {
       return `<h${block.level}>${inline(block.text)}</h${block.level}>`;
     case "paragraph":
       return `<p>${inline(block.text)}</p>`;
+    case "blank":
+      return '<p data-md-blank="true"><br></p>';
     case "hr":
       return "<hr>";
     case "code": {
@@ -229,7 +234,8 @@ function renderListNode(list: ListNode): string {
           ? `<input type="checkbox"${item.checked ? " checked disabled" : " disabled"}> ${inline(item.text)}`
           : inline(item.text);
       const nestedHtml = item.nested?.map(renderListNode).join("\n") ?? "";
-      return nestedHtml ? `<li>${textHtml}\n${nestedHtml}</li>` : `<li>${textHtml}</li>`;
+      const contentHtml = textHtml || nestedHtml ? textHtml : "<br>";
+      return nestedHtml ? `<li>${contentHtml}\n${nestedHtml}</li>` : `<li>${contentHtml}</li>`;
     })
     .join("\n");
   return `<${tag}>\n${items}\n</${tag}>`;
@@ -276,10 +282,10 @@ function parseList(
 function parseListLine(
   line: string,
 ): { indent: number; ordered: boolean; text: string; checked: boolean | null } | null {
-  const match = line.match(/^([ \t]*)([-*+]|\d+\.)\s(.*)$/);
+  const match = line.match(/^([ \t]*)([-*+]|\d+\.)(?:\s(.*))?$/);
   if (!match) return null;
 
-  let text = match[3]!;
+  let text = match[3] ?? "";
   let checked: boolean | null = null;
   const taskMatch = text.match(/^\[([ xX])\]\s(.*)/);
   if (taskMatch) {

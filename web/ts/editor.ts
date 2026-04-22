@@ -281,7 +281,7 @@ export function reloadFromDisk(content: string, mtime: number) {
   const action = classifyReload(tab.dirty);
 
   if (action.type === "load") {
-    loadContent(content);
+    if (getCurrentContent() !== content) loadContent(content);
     markClean(currentPath, content, mtime);
     return;
   }
@@ -307,7 +307,7 @@ function saveCursorOffset(): number {
   if (!contentEl.contains(range.startContainer)) return -1;
   const pre = range.cloneRange();
   pre.selectNodeContents(contentEl);
-  pre.setEnd(range.startContainer, range.startOffset);
+  pre.setEnd(range.startContainer, clampNodeOffset(range.startContainer, range.startOffset));
   return pre.toString().length;
 }
 
@@ -413,6 +413,10 @@ function setupEditorEvents() {
 
     if (e.key === "Tab") {
       if (handleContentTabKey(e)) return;
+    }
+
+    if (e.key === "Backspace") {
+      if (handleEmptyListItemBackspace(e)) return;
     }
 
     if (e.key === "Enter" && !e.shiftKey) {
@@ -547,6 +551,31 @@ function handleContentTabKey(e: KeyboardEvent): boolean {
   return true;
 }
 
+function handleEmptyListItemBackspace(e: KeyboardEvent): boolean {
+  if (!contentEl) return false;
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0 || !sel.isCollapsed) return false;
+
+  const range = sel.getRangeAt(0);
+  if (!contentEl.contains(range.startContainer)) return false;
+
+  const listItem = getListItemBlock(range.startContainer);
+  if (!listItem) return false;
+  if (!isRangeAtStartOfBlock(range, listItem)) return false;
+  if (!isListItemEmpty(listItem)) return false;
+
+  e.preventDefault();
+  if (isNestedListItem(listItem)) {
+    const marker = insertMarker(range);
+    dedentListItems([listItem]);
+    restoreCollapsedSelection(marker);
+  } else {
+    removeEmptyTopLevelListItem(listItem);
+  }
+  onEditorTabMutation();
+  return true;
+}
+
 function onEditorTabMutation() {
   if (currentPath) markDirty(currentPath);
   scheduleAutosave();
@@ -584,6 +613,10 @@ function isListItemBlock(el: HTMLElement): boolean {
     el.tagName === "LI" &&
     (el.parentElement?.tagName === "UL" || el.parentElement?.tagName === "OL")
   );
+}
+
+function isNestedListItem(el: HTMLElement): boolean {
+  return isListItemBlock(el) && el.parentElement?.parentElement?.tagName === "LI";
 }
 
 function getIndentableBlock(node: Node): HTMLElement | null {
@@ -649,6 +682,16 @@ function dedentBlock(block: HTMLElement) {
 
   const match = text.match(/^[ \u00A0]{1,4}/);
   if (match) first.textContent = text.slice(match[0].length);
+}
+
+function isListItemEmpty(item: HTMLElement): boolean {
+  const clone = item.cloneNode(true) as HTMLElement;
+  for (const nested of clone.querySelectorAll("ul, ol")) nested.remove();
+  const text = (clone.textContent ?? "")
+    .replace(/\u200B/g, "")
+    .replace(/\u00A0/g, " ")
+    .trim();
+  return text === "";
 }
 
 function indentListItems(items: readonly HTMLElement[]) {
@@ -759,6 +802,76 @@ function getNextListElementSibling(node: Node): HTMLElement | null {
   return null;
 }
 
+function getPreviousListElementSibling(node: Node): HTMLElement | null {
+  let current = node.previousSibling;
+  while (current) {
+    if (current instanceof HTMLElement) return current;
+    current = current.previousSibling;
+  }
+  return null;
+}
+
+function removeEmptyTopLevelListItem(item: HTMLElement) {
+  const parentList = item.parentElement;
+  if (
+    !(parentList instanceof HTMLElement) ||
+    (parentList.tagName !== "UL" && parentList.tagName !== "OL")
+  ) {
+    return;
+  }
+
+  const previous = getPreviousListElementSibling(item);
+  const next = getNextListElementSibling(item);
+  item.remove();
+
+  if (parentList.children.length === 0) {
+    const paragraph = document.createElement("p");
+    paragraph.appendChild(document.createElement("br"));
+    parentList.replaceWith(paragraph);
+    placeCursorAtBlockStart(paragraph);
+    return;
+  }
+
+  if (previous) {
+    placeCursorAtBlockEnd(previous);
+    return;
+  }
+
+  if (next) {
+    placeCursorAtBlockStart(next);
+    return;
+  }
+
+  placeCursorAtBlockEnd(parentList);
+}
+
+function placeCursorAtBlockStart(block: HTMLElement) {
+  const sel = window.getSelection();
+  if (!sel) return;
+  const range = document.createRange();
+  range.selectNodeContents(block);
+  range.collapse(true);
+  sel.removeAllRanges();
+  sel.addRange(range);
+}
+
+function placeCursorAtBlockEnd(block: HTMLElement) {
+  const sel = window.getSelection();
+  if (!sel) return;
+  const range = document.createRange();
+  range.selectNodeContents(block);
+  range.collapse(false);
+  sel.removeAllRanges();
+  sel.addRange(range);
+}
+
+function isRangeAtStartOfBlock(range: Range, block: HTMLElement): boolean {
+  const before = range.cloneRange();
+  before.selectNodeContents(block);
+  before.setEnd(range.startContainer, clampNodeOffset(range.startContainer, range.startOffset));
+  return before.toString().replace(/\u200B/g, "") === "";
+}
+
 function createMarker(kind: "start" | "end" | "cursor"): HTMLSpanElement {
   const marker = document.createElement("span");
   marker.setAttribute("data-tab-marker", kind);
@@ -806,4 +919,12 @@ function dedentLine(line: string): string {
   if (line.startsWith(INDENT_UNIT)) return line.slice(INDENT_UNIT.length);
   const match = line.match(/^[ ]{1,4}/);
   return match ? line.slice(match[0].length) : line;
+}
+
+function clampNodeOffset(node: Node, offset: number): number {
+  if (offset < 0) return 0;
+  if (node.nodeType === Node.TEXT_NODE) {
+    return Math.min(offset, node.textContent?.length ?? 0);
+  }
+  return Math.min(offset, node.childNodes.length);
 }

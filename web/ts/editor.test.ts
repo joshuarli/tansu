@@ -291,7 +291,9 @@ describe("editor", () => {
     await new Promise((r) => setTimeout(r, 50));
 
     const contentEl = document.querySelector(".editor-content") as HTMLElement;
-    const paragraphs = contentEl.querySelectorAll("p");
+    const paragraphs = Array.from(contentEl.querySelectorAll("p")).filter(
+      (p) => (p.textContent ?? "").trim() !== "",
+    );
     const startNode = paragraphs[0]!.firstChild as Text;
     const endNode = paragraphs[1]!.firstChild as Text;
     const range = document.createRange();
@@ -363,6 +365,52 @@ describe("editor", () => {
     const preserved = window.getSelection()!;
     expect(preserved.rangeCount).toBe(1);
     expect(preserved.isCollapsed).toBe(false);
+
+    hideEditor();
+  });
+
+  test("WYSIWYG: Backspace on empty nested bullet outdents instead of flattening the list", async () => {
+    showEditor("nested-empty-backspace.md", "- one\n  - ");
+    await new Promise((r) => setTimeout(r, 50));
+
+    const contentEl = document.querySelector(".editor-content") as HTMLElement;
+    const items = contentEl.querySelectorAll("li");
+    const emptyNested = items[1] as HTMLElement;
+    const range = document.createRange();
+    range.setStart(emptyNested, 0);
+    range.collapse(true);
+    const sel = window.getSelection()!;
+    sel.removeAllRanges();
+    sel.addRange(range);
+
+    contentEl.dispatchEvent(new KeyboardEvent("keydown", { key: "Backspace", bubbles: true }));
+
+    expect(getCurrentContent()).toBe("- one\n- ");
+    const topList = contentEl.firstElementChild as HTMLElement;
+    expect(topList.tagName).toBe("UL");
+    expect(topList.children.length).toBe(2);
+
+    hideEditor();
+  });
+
+  test("WYSIWYG: Backspace on empty top-level bullet removes only that bullet", async () => {
+    showEditor("top-level-empty-backspace.md", "- a\n- ");
+    await new Promise((r) => setTimeout(r, 50));
+
+    const contentEl = document.querySelector(".editor-content") as HTMLElement;
+    const items = contentEl.querySelectorAll("li");
+    const emptyItem = items[1] as HTMLElement;
+    const range = document.createRange();
+    range.setStart(emptyItem, 0);
+    range.collapse(true);
+    const sel = window.getSelection()!;
+    sel.removeAllRanges();
+    sel.addRange(range);
+
+    contentEl.dispatchEvent(new KeyboardEvent("keydown", { key: "Backspace", bubbles: true }));
+
+    expect(getCurrentContent()).toBe("- a");
+    expect(contentEl.querySelectorAll("li")).toHaveLength(1);
 
     hideEditor();
   });
@@ -439,6 +487,38 @@ describe("editor", () => {
     expect(tab!.mtime).toBe(5000);
     expect(tab!.dirty).toBe(false);
     expect(document.querySelector(".conflict-banner")).toBe(null);
+
+    hideEditor();
+    while (getTabs().length > 0) closeTab(0);
+    mock.on("GET", "/api/note", { content: "# Test", mtime: 1000 });
+  });
+
+  test("reloadFromDisk on unchanged clean tab preserves selection", async () => {
+    const { openTab, getTabs, getActiveTab, closeTab } = await import("./tab-state.ts");
+    const content = "foo:\n- one\nx\ndsf";
+    mock.on("GET", "/api/note", { content, mtime: 1000 });
+    await openTab("reload-same-selection.md");
+    showEditor("reload-same-selection.md", content);
+    await new Promise((r) => setTimeout(r, 50));
+
+    const contentEl = document.querySelector(".editor-content") as HTMLElement;
+    const paragraph = contentEl.querySelectorAll("p")[1] as HTMLElement;
+    const textNode = paragraph.firstChild as Text;
+    const range = document.createRange();
+    range.setStart(textNode, 1);
+    range.collapse(true);
+    const sel = window.getSelection()!;
+    sel.removeAllRanges();
+    sel.addRange(range);
+
+    reloadFromDisk(content, 5000);
+
+    const preserved = window.getSelection()!;
+    expect(preserved.rangeCount).toBe(1);
+    expect(preserved.getRangeAt(0).startContainer).toBe(textNode);
+    expect(preserved.getRangeAt(0).startOffset).toBe(1);
+    expect(getActiveTab()!.mtime).toBe(5000);
+    expect(contentEl.querySelectorAll("li")).toHaveLength(1);
 
     hideEditor();
     while (getTabs().length > 0) closeTab(0);
