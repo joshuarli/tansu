@@ -50,7 +50,7 @@ export function checkInlineTransform(): boolean {
   if (!node || node.nodeType !== Node.TEXT_NODE) return false;
 
   const text = node.textContent ?? "";
-  const pos = sel.anchorOffset;
+  const pos = clampNodeOffset(node, sel.anchorOffset);
 
   for (const pat of patterns) {
     const m = matchPattern(text, pos, pat);
@@ -82,7 +82,7 @@ export function checkInlineTransform(): boolean {
         const after = (cursor as HTMLElement).nextSibling;
         if (after && after.nodeType === Node.TEXT_NODE) {
           const nr = document.createRange();
-          nr.setStart(after, after.textContent!.length);
+          nr.setStart(after, clampNodeOffset(after, after.textContent?.length ?? 0));
           nr.collapse(true);
           newSel.removeAllRanges();
           newSel.addRange(nr);
@@ -145,4 +145,12 @@ export function matchPattern(
   }
 
   return null;
+}
+
+function clampNodeOffset(node: Node, offset: number): number {
+  if (offset < 0) return 0;
+  if (node.nodeType === Node.TEXT_NODE) {
+    return Math.min(offset, node.textContent?.length ?? 0);
+  }
+  return Math.min(offset, node.childNodes.length);
 }

@@ -214,4 +214,28 @@ describe("checkInlineTransform", () => {
     const result = checkInlineTransform();
     expect(result).toBe(false);
   });
+
+  test("clamps stale selection offsets after DOM mutation", () => {
+    const host = document.createElement("div");
+    const text = document.createTextNode("plain");
+    host.appendChild(text);
+    document.body.appendChild(host);
+
+    const sel = window.getSelection()!;
+    const range = document.createRange();
+    range.setStart(text, text.length);
+    range.collapse(true);
+    sel.removeAllRanges();
+    sel.addRange(range);
+
+    Object.defineProperty(sel, "anchorOffset", {
+      configurable: true,
+      get: () => 999,
+    });
+
+    expect(() => checkInlineTransform()).not.toThrow();
+    expect(checkInlineTransform()).toBe(false);
+
+    host.remove();
+  });
 });

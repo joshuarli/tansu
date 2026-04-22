@@ -34,7 +34,7 @@ export function checkWikiLinkTrigger(contentEl: HTMLElement, currentPath: string
   }
 
   const text = node.textContent ?? "";
-  const pos = range.startOffset;
+  const pos = clampNodeOffset(node, range.startOffset);
 
   const before = text.slice(0, pos);
   const triggerIdx = before.lastIndexOf("[[");
@@ -164,4 +164,12 @@ export function completeWikiLink(
 
   hideAutocomplete();
   if (currentPath) markDirty(currentPath);
+}
+
+function clampNodeOffset(node: Node, offset: number): number {
+  if (offset < 0) return 0;
+  if (node.nodeType === Node.TEXT_NODE) {
+    return Math.min(offset, node.textContent?.length ?? 0);
+  }
+  return Math.min(offset, node.childNodes.length);
 }

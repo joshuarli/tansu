@@ -180,7 +180,7 @@ export function checkBlockInputTransform(contentEl: HTMLElement): boolean {
     p.appendChild(anchor);
     // Restore cursor inside the new wrapper
     const range = document.createRange();
-    range.setStart(anchor, sel.anchorOffset);
+    range.setStart(anchor, clampNodeOffset(anchor, sel.anchorOffset));
     range.collapse(true);
     sel.removeAllRanges();
     sel.addRange(range);
@@ -282,4 +282,12 @@ function setCursorStart(el: Node) {
   range.collapse(true);
   sel.removeAllRanges();
   sel.addRange(range);
+}
+
+function clampNodeOffset(node: Node, offset: number): number {
+  if (offset < 0) return 0;
+  if (node.nodeType === Node.TEXT_NODE) {
+    return Math.min(offset, node.textContent?.length ?? 0);
+  }
+  return Math.min(offset, node.childNodes.length);
 }
