@@ -318,6 +318,29 @@ describe("editor", () => {
     hideEditor();
   });
 
+  test("WYSIWYG: Cmd/Ctrl+H wraps selection in mark and preserves markdown", async () => {
+    showEditor("highlight-shortcut.md", "hello world");
+    await new Promise((r) => setTimeout(r, 50));
+
+    const contentEl = document.querySelector(".editor-content") as HTMLElement;
+    const textNode = contentEl.querySelector("p")!.firstChild as Text;
+    const range = document.createRange();
+    range.setStart(textNode, 0);
+    range.setEnd(textNode, 5);
+    const sel = window.getSelection()!;
+    sel.removeAllRanges();
+    sel.addRange(range);
+
+    contentEl.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "h", ctrlKey: true, bubbles: true }),
+    );
+
+    expect(getCurrentContent()).toBe("==hello== world");
+    expect(contentEl.querySelector("mark")?.textContent).toBe("hello");
+
+    hideEditor();
+  });
+
   test("WYSIWYG: Tab and Shift+Tab indent and dedent selected blocks", async () => {
     showEditor("tab-wysiwyg-blocks.md", "alpha\n\nbeta");
     await new Promise((r) => setTimeout(r, 50));

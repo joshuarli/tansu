@@ -411,6 +411,12 @@ function setupEditorEvents() {
       return;
     }
 
+    if (meta && e.key === "h") {
+      e.preventDefault();
+      if (applyHighlightToSelection()) onEditorTabMutation();
+      return;
+    }
+
     if (e.key === "Tab") {
       if (handleContentTabKey(e)) return;
     }
@@ -580,6 +586,28 @@ function onEditorTabMutation() {
   if (currentPath) markDirty(currentPath);
   scheduleAutosave();
   if (contentEl && !isSourceMode) checkWikiLinkTrigger(contentEl, currentPath);
+}
+
+function applyHighlightToSelection(): boolean {
+  if (!contentEl) return false;
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return false;
+
+  const range = sel.getRangeAt(0);
+  if (!contentEl.contains(range.startContainer) || !contentEl.contains(range.endContainer)) {
+    return false;
+  }
+
+  const mark = document.createElement("mark");
+  const contents = range.extractContents();
+  mark.appendChild(contents);
+  range.insertNode(mark);
+
+  const nextRange = document.createRange();
+  nextRange.selectNodeContents(mark);
+  sel.removeAllRanges();
+  sel.addRange(nextRange);
+  return true;
 }
 
 function createTabNode(): HTMLSpanElement {
