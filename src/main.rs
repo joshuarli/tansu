@@ -2,7 +2,7 @@ use std::{
     collections::HashSet,
     env, fs,
     io::{self, Read, Write},
-    net::{TcpListener, TcpStream},
+    net::{Shutdown, TcpListener, TcpStream},
     path::{Path, PathBuf},
     sync::{Arc, Mutex, mpsc},
     time::Instant,
@@ -546,13 +546,10 @@ impl Server {
 
     fn handle_sse(&self, stream: &mut TcpStream) -> io::Result<()> {
         let mut guard = self.sse_client.lock().unwrap();
-        // If an existing client is held, probe it with a comment line.
-        // If the write fails, the old connection is dead — replace it.
-        if let Some(ref mut old) = *guard
-            && old.write_all(b": ping\n\n").is_ok()
-        {
-            drop(guard);
-            return write_error(stream, 409, "Conflict: another client is connected");
+        // Reloads/open-tab replacement should not surface a client-visible 409.
+        // Keep only the newest SSE connection and close the old one best-effort.
+        if let Some(old) = guard.take() {
+            let _ = old.shutdown(Shutdown::Both);
         }
         let header = "HTTP/1.1 200 OK\r\n\
                       Content-Type: text/event-stream\r\n\

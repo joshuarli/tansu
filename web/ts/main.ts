@@ -42,6 +42,8 @@ import { registerWikiLinkClickHandler } from "./wikilinks.ts";
 const appEl = document.getElementById("app")!;
 let sse: EventSource | null = null;
 let appInitialized = false;
+let sseReconnectTimer: ReturnType<typeof setTimeout> | null = null;
+let pageUnloading = false;
 
 function showUnlockScreen(status?: AppStatus) {
   appEl.style.display = "none";
@@ -333,6 +335,11 @@ function connectSSE() {
     sse.close();
     sse = null;
   }
+  if (sseReconnectTimer) {
+    clearTimeout(sseReconnectTimer);
+    sseReconnectTimer = null;
+  }
+  if (pageUnloading) return;
   const es = new EventSource("/events");
   sse = es;
 
@@ -376,11 +383,30 @@ function connectSSE() {
   es.onerror = () => {
     es.close();
     sse = null;
+    if (pageUnloading) return;
     showNotification(`Live reload disconnected — retrying in ${Math.round(sseBackoff / 1000)}s...`);
-    setTimeout(connectSSE, sseBackoff);
+    sseReconnectTimer = setTimeout(() => {
+      sseReconnectTimer = null;
+      connectSSE();
+    }, sseBackoff);
     sseBackoff = Math.min(sseBackoff * 2, 30000);
   };
 }
+
+function closeSSEForUnload() {
+  pageUnloading = true;
+  if (sseReconnectTimer) {
+    clearTimeout(sseReconnectTimer);
+    sseReconnectTimer = null;
+  }
+  if (sse) {
+    sse.close();
+    sse = null;
+  }
+}
+
+window.addEventListener("pagehide", closeSSEForUnload);
+window.addEventListener("beforeunload", closeSSEForUnload);
 
 // Boot: check if encrypted + locked, show unlock or start app
 (async () => {

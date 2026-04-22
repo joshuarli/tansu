@@ -37,7 +37,7 @@ test-ts:
 	vitest run
 
 test-e2e:
-	vitest run web/ts/e2e/
+	pnpm run test-e2e
 
 ts: lint-ts
 	oxfmt web/ts/

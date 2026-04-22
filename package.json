@@ -7,7 +7,8 @@
   "type": "module",
   "scripts": {
     "bundle": "esbuild web/ts/main.ts --bundle --outfile=web/static/app.js --minify --format=esm",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test-e2e": "vitest run --config vitest.e2e.config.ts"
   },
   "dependencies": {
     "@joshuarli98/md-wysiwyg": "workspace:*"

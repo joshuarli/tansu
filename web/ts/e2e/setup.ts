@@ -1,5 +1,5 @@
-/// E2E test setup: launches Tansu server + headless Chromium.
-/// Shares a single browser instance across all e2e tests.
+/// E2E test setup: launches Tansu server + a headless browser.
+/// Shares a single browser instance across all e2e tests in a file.
 
 import { spawn, spawnSync, type ChildProcess } from "child_process";
 import { mkdtempSync, writeFileSync, rmSync } from "fs";
@@ -7,7 +7,9 @@ import { createServer } from "net";
 import { tmpdir } from "os";
 import { join } from "path";
 
-import { chromium, type Browser, type Page } from "playwright";
+import { chromium, firefox, type Browser, type Page } from "playwright";
+
+type BrowserName = "chromium" | "firefox";
 
 let browser: Browser;
 let server: ChildProcess;
@@ -24,7 +26,9 @@ function getFreePort(): Promise<number> {
   });
 }
 
-export async function setup(): Promise<{ page: Page; baseUrl: string; notesDir: string }> {
+export async function setup(opts?: {
+  browserName?: BrowserName;
+}): Promise<{ page: Page; baseUrl: string; notesDir: string }> {
   const activePort = await getFreePort();
   // Build frontend
   const build = spawnSync("pnpm", ["run", "bundle"], { stdio: "inherit" });
@@ -46,7 +50,11 @@ export async function setup(): Promise<{ page: Page; baseUrl: string; notesDir: 
   baseUrl = `http://localhost:${activePort}`;
 
   // Launch browser
-  browser = await chromium.launch({ headless: true });
+  const browserName = opts?.browserName ?? "chromium";
+  browser =
+    browserName === "firefox"
+      ? await firefox.launch({ headless: true })
+      : await chromium.launch({ headless: true });
   const page = await browser.newPage();
 
   return { page, baseUrl, notesDir };
