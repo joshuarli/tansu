@@ -319,7 +319,7 @@ function initApp() {
 const notif = document.getElementById("notification")!;
 let notifTimer: ReturnType<typeof setTimeout> | null = null;
 
-function showNotification(msg: string, type: "error" | "info" = "error") {
+function showNotification(msg: string, type: "error" | "info" | "success" = "error") {
   notif.textContent = msg;
   notif.className = `notification ${type}`;
   if (notifTimer) clearTimeout(notifTimer);
@@ -328,7 +328,28 @@ function showNotification(msg: string, type: "error" | "info" = "error") {
   }, 5000);
 }
 
-let sseBackoff = 1000;
+let sseWasUnavailable = false;
+let sseRetryAttempt = 0;
+
+function nextSseRetryDelay(): number {
+  const delays = [250, 250, 500, 1000, 1000, 2000, 5000];
+  const delay = delays[Math.min(sseRetryAttempt, delays.length - 1)]!;
+  sseRetryAttempt++;
+  return delay;
+}
+
+function formatRetryDelay(delay: number): string {
+  return delay < 1000 ? `${delay}ms` : `${Math.round(delay / 1000)}s`;
+}
+
+function requestImmediateSSEReconnect() {
+  if (pageUnloading || sse) return;
+  if (sseReconnectTimer) {
+    clearTimeout(sseReconnectTimer);
+    sseReconnectTimer = null;
+  }
+  connectSSE();
+}
 
 function connectSSE() {
   if (sse) {
@@ -344,8 +365,13 @@ function connectSSE() {
   sse = es;
 
   es.addEventListener("connected", () => {
-    sseBackoff = 1000;
-    notif.className = "notification hidden";
+    sseRetryAttempt = 0;
+    if (sseWasUnavailable) {
+      sseWasUnavailable = false;
+      showNotification("Server connection restored.", "success");
+    } else {
+      notif.className = "notification hidden";
+    }
     syncToServer();
   });
 
@@ -384,12 +410,13 @@ function connectSSE() {
     es.close();
     sse = null;
     if (pageUnloading) return;
-    showNotification(`Live reload disconnected — retrying in ${Math.round(sseBackoff / 1000)}s...`);
+    sseWasUnavailable = true;
+    const delay = nextSseRetryDelay();
+    showNotification(`Server unavailable — retrying in ${formatRetryDelay(delay)}...`);
     sseReconnectTimer = setTimeout(() => {
       sseReconnectTimer = null;
       connectSSE();
-    }, sseBackoff);
-    sseBackoff = Math.min(sseBackoff * 2, 30000);
+    }, delay);
   };
 }
 
@@ -407,6 +434,10 @@ function closeSSEForUnload() {
 
 window.addEventListener("pagehide", closeSSEForUnload);
 window.addEventListener("beforeunload", closeSSEForUnload);
+window.addEventListener("focus", requestImmediateSSEReconnect);
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") requestImmediateSSEReconnect();
+});
 
 // Boot: check if encrypted + locked, show unlock or start app
 (async () => {

@@ -1078,6 +1078,10 @@ body {
   background: var(--fg-muted);
   color: white;
 }
+.notification.success {
+  background: #1a7f37;
+  color: white;
+}
 
 #unlock-screen {
   display: flex;
