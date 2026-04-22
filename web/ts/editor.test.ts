@@ -148,6 +148,38 @@ describe("editor", () => {
     hideEditor();
   });
 
+  test("showEditor restores saved cursor inside a paragraph after a list", async () => {
+    const { setCursor } = await import("./tab-state.ts");
+    const content = "foo:\n- one\nx\ndsf";
+    setCursor("cursor-paragraph.md", content.indexOf("x") + 1);
+
+    showEditor("cursor-paragraph.md", content);
+    await new Promise((r) => setTimeout(r, 50));
+
+    const sel = window.getSelection()!;
+    expect(sel.rangeCount).toBe(1);
+    expect(sel.getRangeAt(0).startContainer.textContent).toContain("x");
+    expect(sel.getRangeAt(0).startOffset).toBe(1);
+
+    hideEditor();
+  });
+
+  test("showEditor restores saved cursor inside a list item", async () => {
+    const { setCursor } = await import("./tab-state.ts");
+    const content = "foo:\n- one\n- x\ndsf";
+    setCursor("cursor-list.md", content.indexOf("x") + 1);
+
+    showEditor("cursor-list.md", content);
+    await new Promise((r) => setTimeout(r, 50));
+
+    const sel = window.getSelection()!;
+    expect(sel.rangeCount).toBe(1);
+    expect(sel.getRangeAt(0).startContainer.textContent).toBe("x");
+    expect(sel.getRangeAt(0).startOffset).toBe(1);
+
+    hideEditor();
+  });
+
   test("hideEditor removes editor elements and shows empty state", () => {
     showEditor("test.md", "# X");
     hideEditor();

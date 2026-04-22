@@ -1,6 +1,7 @@
 import {
   checkInlineTransform,
   renderMarkdown,
+  renderMarkdownWithCursor,
   domToMarkdown,
   checkBlockInputTransform,
   handleBlockTransform,
@@ -135,12 +136,11 @@ export function showEditor(path: string, content: string) {
   editorArea.appendChild(container);
   editorArea.appendChild(backlinksEl);
 
-  loadContent(content);
+  const cursor = getCursor(path);
+  loadContent(content, cursor);
   setupEditorEvents();
   loadBacklinks(backlinksEl, path);
   contentEl.focus();
-  const cursor = getCursor(path);
-  if (cursor !== undefined) restoreCursorOffset(cursor, true);
 }
 
 export function hideEditor() {
@@ -308,37 +308,37 @@ function saveCursorOffset(): number {
   const pre = range.cloneRange();
   pre.selectNodeContents(contentEl);
   pre.setEnd(range.startContainer, clampNodeOffset(range.startContainer, range.startOffset));
-  return pre.toString().length;
+  const fragment = pre.cloneContents();
+  const container = document.createElement("div");
+  container.appendChild(fragment);
+  return domToMarkdown(container).length;
 }
 
-function restoreCursorOffset(offset: number, scroll = false) {
+function restoreCursorOffset(offset: number, markdown: string, scroll = false) {
   if (!contentEl || offset < 0) return;
+  contentEl.innerHTML = renderMarkdownWithCursor(markdown, offset);
+  restoreCursorMarker(scroll);
+}
+
+function restoreCursorMarker(scroll = false) {
+  if (!contentEl) return;
   const sel = window.getSelection();
   if (!sel) return;
-  const walker = document.createTreeWalker(contentEl, NodeFilter.SHOW_TEXT);
-  let remaining = offset;
-  while (walker.nextNode()) {
-    const node = walker.currentNode as Text;
-    if (remaining <= node.length) {
-      const range = document.createRange();
-      range.setStart(node, remaining);
-      range.collapse(true);
-      sel.removeAllRanges();
-      sel.addRange(range);
-      if (scroll) node.parentElement?.scrollIntoView({ block: "center", behavior: "instant" });
-      return;
-    }
-    remaining -= node.length;
+  const marker = contentEl.querySelector('[data-md-cursor="true"]');
+  if (!(marker instanceof HTMLElement)) {
+    placeCursorAtEnd();
+    return;
   }
-  // Offset beyond content: place at end
   const range = document.createRange();
-  range.selectNodeContents(contentEl);
-  range.collapse(false);
+  range.setStartBefore(marker);
+  range.collapse(true);
   sel.removeAllRanges();
   sel.addRange(range);
+  if (scroll) marker.parentElement?.scrollIntoView({ block: "center", behavior: "instant" });
+  marker.remove();
 }
 
-function loadContent(markdown: string) {
+function loadContent(markdown: string, explicitOffset?: number) {
   if (isSourceMode && sourceEl) {
     const pos = sourceEl.selectionStart;
     sourceEl.value = markdown;
@@ -346,9 +346,9 @@ function loadContent(markdown: string) {
   } else if (contentEl) {
     const focused =
       contentEl === document.activeElement || contentEl.contains(document.activeElement);
-    const offset = focused ? saveCursorOffset() : -1;
-    contentEl.innerHTML = renderMarkdown(markdown);
-    if (offset >= 0) restoreCursorOffset(offset);
+    const offset = explicitOffset ?? (focused ? saveCursorOffset() : -1);
+    if (offset >= 0) restoreCursorOffset(offset, markdown, explicitOffset !== undefined);
+    else contentEl.innerHTML = renderMarkdown(markdown);
   }
 }
 
@@ -860,6 +860,17 @@ function placeCursorAtBlockEnd(block: HTMLElement) {
   if (!sel) return;
   const range = document.createRange();
   range.selectNodeContents(block);
+  range.collapse(false);
+  sel.removeAllRanges();
+  sel.addRange(range);
+}
+
+function placeCursorAtEnd() {
+  if (!contentEl) return;
+  const sel = window.getSelection();
+  if (!sel) return;
+  const range = document.createRange();
+  range.selectNodeContents(contentEl);
   range.collapse(false);
   sel.removeAllRanges();
   sel.addRange(range);

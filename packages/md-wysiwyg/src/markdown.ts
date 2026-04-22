@@ -30,11 +30,18 @@ const calloutIcons: Record<string, string> = {
   missing: "\u274C",
 };
 
+const CURSOR_SENTINEL = "\uFDD0";
+
 export function renderMarkdown(src: string): string {
   if (src === "") return "";
   const lines = src.split("\n");
   const blocks = parseBlocks(lines);
   return blocks.map(renderBlock).join("\n");
+}
+
+export function renderMarkdownWithCursor(src: string, offset: number): string {
+  const clamped = Math.max(0, Math.min(offset, src.length));
+  return renderMarkdown(src.slice(0, clamped) + CURSOR_SENTINEL + src.slice(clamped));
 }
 
 type Block =
@@ -335,6 +342,12 @@ function inline(text: string): string {
         i += 2;
         continue;
       }
+    }
+
+    if (ch === CURSOR_SENTINEL) {
+      out += '<span data-md-cursor="true"></span>';
+      i++;
+      continue;
     }
 
     // Inline code (backtick) — no nesting

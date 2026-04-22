@@ -1,6 +1,7 @@
 /// DOM → Markdown serialization for the WYSIWYG editor.
 
 const BLANK_LINE_SENTINEL = "\u0000";
+const CURSOR_SENTINEL = "\uFDD0";
 type BlockKind =
   | "blank"
   | "paragraph"
@@ -137,6 +138,11 @@ function inlineNodesToMd(nodes: Iterable<Node>, skip?: (node: Node) => boolean):
     } else if (node.nodeType === Node.ELEMENT_NODE) {
       const child = node as HTMLElement;
       const childTag = child.tagName;
+
+      if (child.getAttribute("data-md-cursor") === "true") {
+        md += CURSOR_SENTINEL;
+        continue;
+      }
 
       if (childTag === "STRONG" || childTag === "B") {
         md += `**${inlineToMd(child)}**`;

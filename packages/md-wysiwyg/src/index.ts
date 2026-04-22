@@ -1,4 +1,4 @@
-export { renderMarkdown } from "./markdown.js";
+export { renderMarkdown, renderMarkdownWithCursor } from "./markdown.js";
 export { highlightCode } from "./highlight.js";
 export { domToMarkdown } from "./serialize.js";
 export { checkBlockInputTransform, handleBlockTransform } from "./transforms.js";
