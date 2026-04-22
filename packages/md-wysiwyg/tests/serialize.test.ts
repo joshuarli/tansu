@@ -112,6 +112,12 @@ describe("serialize", () => {
     );
   });
 
+  test("nested ul", () => {
+    expect(domToMarkdown(html("<ul><li>parent<ul><li>child</li></ul></li></ul>"))).toBe(
+      "- parent\n  - child",
+    );
+  });
+
   test("task list", () => {
     const root = document.createElement("div");
     const ul = document.createElement("ul");

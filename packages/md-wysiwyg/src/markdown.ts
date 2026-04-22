@@ -48,6 +48,12 @@ type Block =
 interface ListItem {
   text: string;
   checked: boolean | null; // null = not a task item
+  nested?: ListNode[];
+}
+
+interface ListNode {
+  ordered: boolean;
+  items: ListItem[];
 }
 
 function parseBlocks(lines: string[]): Block[] {
@@ -112,24 +118,11 @@ function parseBlocks(lines: string[]): Block[] {
     }
 
     // List (unordered, ordered, or task)
-    if (/^(\s*[-*+]\s|[0-9]+\.\s)/.test(line)) {
-      const ordered = /^[0-9]+\./.test(line.trimStart());
-      const items: ListItem[] = [];
-      while (i < lines.length) {
-        const l = lines[i]!;
-        const listMatch = ordered ? l.match(/^\s*[0-9]+\.\s(.*)/) : l.match(/^\s*[-*+]\s(.*)/);
-        if (!listMatch) break;
-        let text = listMatch[1]!;
-        let checked: boolean | null = null;
-        const taskMatch = text.match(/^\[([ xX])\]\s(.*)/);
-        if (taskMatch) {
-          checked = taskMatch[1] !== " ";
-          text = taskMatch[2]!;
-        }
-        items.push({ text, checked });
-        i++;
-      }
-      blocks.push({ type: "list", ordered, items });
+    const listStart = parseListLine(line);
+    if (listStart) {
+      const parsed = parseList(lines, i, listStart.indent);
+      blocks.push({ type: "list", ordered: parsed.list.ordered, items: parsed.list.items });
+      i = parsed.nextIndex;
       continue;
     }
 
@@ -156,7 +149,7 @@ function parseBlocks(lines: string[]): Block[] {
       const l = lines[i]!;
       if (l.trim() === "") break;
       if (/^(#{1,6}\s|```|~~~|>|(-{3,}|\*{3,}|_{3,})\s*$)/.test(l)) break;
-      if (/^(\s*[-*+]\s|[0-9]+\.\s)/.test(l)) break;
+      if (parseListLine(l)) break;
       if (
         l.trimStart().startsWith("|") &&
         i + 1 < lines.length &&
@@ -190,17 +183,7 @@ function renderBlock(block: Block): string {
       return `<pre><code${cls}>${highlighted}</code></pre>`;
     }
     case "list": {
-      const tag = block.ordered ? "ol" : "ul";
-      const items = block.items
-        .map((item) => {
-          if (item.checked !== null) {
-            const attr = item.checked ? " checked disabled" : " disabled";
-            return `<li><input type="checkbox"${attr}> ${inline(item.text)}</li>`;
-          }
-          return `<li>${inline(item.text)}</li>`;
-        })
-        .join("\n");
-      return `<${tag}>\n${items}\n</${tag}>`;
+      return renderListNode({ ordered: block.ordered, items: block.items });
     }
     case "blockquote":
       return renderBlockquote(block.lines);
@@ -235,6 +218,89 @@ function renderBlockquote(bqLines: string[]): string {
   // Regular blockquote: recursively parse inner content
   const innerBlocks = parseBlocks(bqLines);
   return `<blockquote>${innerBlocks.map(renderBlock).join("\n")}</blockquote>`;
+}
+
+function renderListNode(list: ListNode): string {
+  const tag = list.ordered ? "ol" : "ul";
+  const items = list.items
+    .map((item) => {
+      const textHtml =
+        item.checked !== null
+          ? `<input type="checkbox"${item.checked ? " checked disabled" : " disabled"}> ${inline(item.text)}`
+          : inline(item.text);
+      const nestedHtml = item.nested?.map(renderListNode).join("\n") ?? "";
+      return nestedHtml ? `<li>${textHtml}\n${nestedHtml}</li>` : `<li>${textHtml}</li>`;
+    })
+    .join("\n");
+  return `<${tag}>\n${items}\n</${tag}>`;
+}
+
+function parseList(
+  lines: readonly string[],
+  startIndex: number,
+  baseIndent: number,
+): { list: ListNode; nextIndex: number } {
+  const first = parseListLine(lines[startIndex]!);
+  if (!first) {
+    return { list: { ordered: false, items: [] }, nextIndex: startIndex };
+  }
+
+  const items: ListItem[] = [];
+  let i = startIndex;
+
+  while (i < lines.length) {
+    const parsed = parseListLine(lines[i]!);
+    if (!parsed) break;
+
+    if (parsed.indent < baseIndent) break;
+
+    if (parsed.indent > baseIndent) {
+      const lastItem = items[items.length - 1];
+      if (!lastItem) break;
+      const nested = parseList(lines, i, parsed.indent);
+      lastItem.nested ??= [];
+      lastItem.nested.push(nested.list);
+      i = nested.nextIndex;
+      continue;
+    }
+
+    if (parsed.ordered !== first.ordered) break;
+
+    items.push({ text: parsed.text, checked: parsed.checked });
+    i++;
+  }
+
+  return { list: { ordered: first.ordered, items }, nextIndex: i };
+}
+
+function parseListLine(
+  line: string,
+): { indent: number; ordered: boolean; text: string; checked: boolean | null } | null {
+  const match = line.match(/^([ \t]*)([-*+]|\d+\.)\s(.*)$/);
+  if (!match) return null;
+
+  let text = match[3]!;
+  let checked: boolean | null = null;
+  const taskMatch = text.match(/^\[([ xX])\]\s(.*)/);
+  if (taskMatch) {
+    checked = taskMatch[1] !== " ";
+    text = taskMatch[2]!;
+  }
+
+  return {
+    indent: countIndent(match[1]!),
+    ordered: /\d+\./.test(match[2]!),
+    text,
+    checked,
+  };
+}
+
+function countIndent(indent: string): number {
+  let width = 0;
+  for (const ch of indent) {
+    width += ch === "\t" ? 2 : 1;
+  }
+  return width;
 }
 
 function parseTableRow(line: string): string[] {
@@ -380,6 +446,12 @@ function inline(text: string): string {
     // Line break
     if (ch === "\n") {
       out += "<br>";
+      i++;
+      continue;
+    }
+
+    if (ch === "\t") {
+      out += '<span class="md-tab">\t</span>';
       i++;
       continue;
     }

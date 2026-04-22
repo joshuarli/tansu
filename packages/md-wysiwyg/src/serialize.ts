@@ -45,23 +45,11 @@ function blockToMd(el: HTMLElement): string | null {
   if (tag === "HR") return "---";
 
   if (tag === "UL") {
-    return Array.from(el.children)
-      .map((li) => {
-        const checkbox = li.querySelector('input[type="checkbox"]');
-        if (checkbox) {
-          const checked = (checkbox as HTMLInputElement).checked;
-          const text = inlineToMd(li as HTMLElement);
-          return `- [${checked ? "x" : " "}] ${text}`;
-        }
-        return `- ${inlineToMd(li as HTMLElement)}`;
-      })
-      .join("\n");
+    return listToMd(el, 0, false);
   }
 
   if (tag === "OL") {
-    return Array.from(el.children)
-      .map((li, i) => `${i + 1}. ${inlineToMd(li as HTMLElement)}`)
-      .join("\n");
+    return listToMd(el, 0, true);
   }
 
   if (tag === "BLOCKQUOTE") {
@@ -90,8 +78,14 @@ function blockToMd(el: HTMLElement): string | null {
 }
 
 function inlineToMd(el: HTMLElement): string {
+  return inlineNodesToMd(el.childNodes);
+}
+
+function inlineNodesToMd(nodes: Iterable<Node>, skip?: (node: Node) => boolean): string {
   let md = "";
-  for (const node of el.childNodes) {
+  for (const node of nodes) {
+    if (skip?.(node)) continue;
+
     if (node.nodeType === Node.TEXT_NODE) {
       md += (node.textContent ?? "").replace(/\u200B/g, "");
     } else if (node.nodeType === Node.ELEMENT_NODE) {
@@ -147,6 +141,47 @@ function inlineToMd(el: HTMLElement): string {
     }
   }
   return md;
+}
+
+function listToMd(listEl: HTMLElement, depth: number, ordered: boolean): string {
+  const indent = "  ".repeat(depth);
+  const lines: string[] = [];
+
+  Array.from(listEl.children).forEach((child, i) => {
+    if (!(child instanceof HTMLElement) || child.tagName !== "LI") return;
+
+    const checkbox = getDirectCheckbox(child);
+    const text = inlineNodesToMd(child.childNodes, isNestedListOrCheckbox).trim();
+    const prefix =
+      checkbox && !ordered ? `- [${checkbox.checked ? "x" : " "}] ` : ordered ? `${i + 1}. ` : "- ";
+
+    lines.push(indent + prefix + text);
+
+    for (const nested of getDirectNestedLists(child)) {
+      lines.push(listToMd(nested, depth + 1, nested.tagName === "OL"));
+    }
+  });
+
+  return lines.join("\n");
+}
+
+function getDirectCheckbox(li: HTMLElement): HTMLInputElement | null {
+  for (const child of li.children) {
+    if (child instanceof HTMLInputElement && child.type === "checkbox") return child;
+  }
+  return null;
+}
+
+function getDirectNestedLists(li: HTMLElement): HTMLElement[] {
+  return Array.from(li.children).filter(
+    (child): child is HTMLElement =>
+      child instanceof HTMLElement && (child.tagName === "UL" || child.tagName === "OL"),
+  );
+}
+
+function isNestedListOrCheckbox(node: Node): boolean {
+  if (!(node instanceof HTMLElement)) return false;
+  return node.tagName === "UL" || node.tagName === "OL" || node.tagName === "INPUT";
 }
 
 function tableToMd(table: HTMLElement): string {

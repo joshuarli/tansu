@@ -379,6 +379,10 @@ body {
   border-radius: var(--radius);
   font-size: 0.85em;
 }
+.editor-content .md-tab {
+  white-space: pre;
+  tab-size: 4;
+}
 .editor-content pre {
   background: var(--bg-subtle);
   padding: 16px;

@@ -85,6 +85,9 @@ describe("roundtrip", () => {
   test("ul roundtrip", () => {
     expect(roundtrip("- one\n- two\n- three")).toBe("- one\n- two\n- three");
   });
+  test("nested ul roundtrip", () => {
+    expect(roundtrip("- parent\n  - child")).toBe("- parent\n  - child");
+  });
   test("ol roundtrip", () => {
     expect(roundtrip("1. first\n2. second")).toBe("1. first\n2. second");
   });

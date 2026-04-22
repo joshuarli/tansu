@@ -149,6 +149,15 @@ describe("lists", () => {
   test("task unchecked text", () => {
     expect(renderMarkdown("- [ ] todo\n- [x] done")).toContain("todo");
   });
+  test("nested ul renders nested list", () => {
+    const html = renderMarkdown("- parent\n  - child");
+    expect((html.match(/<ul>/g) ?? []).length).toBeGreaterThan(1);
+    expect(html).toContain("<li>child</li>");
+  });
+  test("nested ul handles tab indentation", () => {
+    const html = renderMarkdown("- parent\n\t- child");
+    expect(html).toContain("<li>child</li>");
+  });
 });
 
 describe("blockquotes", () => {

@@ -213,6 +213,160 @@ describe("editor", () => {
     hideEditor();
   });
 
+  test("source mode: Tab inserts a tab character at the caret", async () => {
+    showEditor("tab-source.md", "# Tab");
+    await new Promise((r) => setTimeout(r, 50));
+
+    const sourceBtn = Array.from(document.querySelectorAll(".editor-toolbar button")).find(
+      (b) => b.textContent === "Source",
+    ) as HTMLButtonElement;
+    sourceBtn.click();
+
+    const sourceEl = document.querySelector(".editor-source") as HTMLTextAreaElement;
+    sourceEl.value = "hello";
+    sourceEl.selectionStart = 2;
+    sourceEl.selectionEnd = 2;
+    sourceEl.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true }));
+
+    expect(sourceEl.value).toBe("he\tllo");
+    expect(sourceEl.selectionStart).toBe(3);
+    expect(sourceEl.selectionEnd).toBe(3);
+
+    hideEditor();
+  });
+
+  test("source mode: Tab indents all selected lines and Shift+Tab dedents them", async () => {
+    showEditor("tab-source-lines.md", "# Tab");
+    await new Promise((r) => setTimeout(r, 50));
+
+    const sourceBtn = Array.from(document.querySelectorAll(".editor-toolbar button")).find(
+      (b) => b.textContent === "Source",
+    ) as HTMLButtonElement;
+    sourceBtn.click();
+
+    const sourceEl = document.querySelector(".editor-source") as HTMLTextAreaElement;
+    sourceEl.value = "alpha\nbeta";
+    sourceEl.selectionStart = 0;
+    sourceEl.selectionEnd = sourceEl.value.length;
+    sourceEl.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true }));
+
+    expect(sourceEl.value).toBe("\talpha\n\tbeta");
+    expect(sourceEl.selectionStart).toBe(0);
+    expect(sourceEl.selectionEnd).toBe(sourceEl.value.length);
+
+    sourceEl.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Tab", shiftKey: true, bubbles: true }),
+    );
+
+    expect(sourceEl.value).toBe("alpha\nbeta");
+    expect(sourceEl.selectionStart).toBe(0);
+    expect(sourceEl.selectionEnd).toBe(sourceEl.value.length);
+
+    hideEditor();
+  });
+
+  test("WYSIWYG: Tab inserts a visible tab and preserves markdown", async () => {
+    showEditor("tab-wysiwyg.md", "hello");
+    await new Promise((r) => setTimeout(r, 50));
+
+    const contentEl = document.querySelector(".editor-content") as HTMLElement;
+    const textNode = contentEl.querySelector("p")!.firstChild as Text;
+    const range = document.createRange();
+    range.setStart(textNode, 2);
+    range.collapse(true);
+    const sel = window.getSelection()!;
+    sel.removeAllRanges();
+    sel.addRange(range);
+
+    contentEl.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true }));
+
+    expect(getCurrentContent()).toBe("he\tllo");
+    expect(contentEl.querySelector(`.${"md-tab"}`)).not.toBe(null);
+
+    hideEditor();
+  });
+
+  test("WYSIWYG: Tab and Shift+Tab indent and dedent selected blocks", async () => {
+    showEditor("tab-wysiwyg-blocks.md", "alpha\n\nbeta");
+    await new Promise((r) => setTimeout(r, 50));
+
+    const contentEl = document.querySelector(".editor-content") as HTMLElement;
+    const paragraphs = contentEl.querySelectorAll("p");
+    const startNode = paragraphs[0]!.firstChild as Text;
+    const endNode = paragraphs[1]!.firstChild as Text;
+    const range = document.createRange();
+    range.setStart(startNode, 1);
+    range.setEnd(endNode, 3);
+    const sel = window.getSelection()!;
+    sel.removeAllRanges();
+    sel.addRange(range);
+
+    contentEl.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true }));
+    expect(getCurrentContent()).toBe("\talpha\n\n\tbeta");
+
+    contentEl.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Tab", shiftKey: true, bubbles: true }),
+    );
+    expect(getCurrentContent()).toBe("alpha\n\nbeta");
+    const preserved = window.getSelection()!;
+    expect(preserved.rangeCount).toBe(1);
+    expect(preserved.isCollapsed).toBe(false);
+
+    hideEditor();
+  });
+
+  test("WYSIWYG: Tab on bullet list nests under previous item", async () => {
+    showEditor("list-indent.md", "- one\n- two");
+    await new Promise((r) => setTimeout(r, 50));
+
+    const contentEl = document.querySelector(".editor-content") as HTMLElement;
+    const items = contentEl.querySelectorAll("li");
+    const textNode = items[1]!.firstChild as Text;
+    const range = document.createRange();
+    range.setStart(textNode, 1);
+    range.collapse(true);
+    const sel = window.getSelection()!;
+    sel.removeAllRanges();
+    sel.addRange(range);
+
+    contentEl.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true }));
+    expect(getCurrentContent()).toBe("- one\n  - two");
+
+    contentEl.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Tab", shiftKey: true, bubbles: true }),
+    );
+    expect(getCurrentContent()).toBe("- one\n- two");
+
+    hideEditor();
+  });
+
+  test("WYSIWYG: Shift+Tab on multi-item nested bullet selection preserves selection", async () => {
+    showEditor("list-dedent-selection.md", "- one\n  - two\n  - three");
+    await new Promise((r) => setTimeout(r, 50));
+
+    const contentEl = document.querySelector(".editor-content") as HTMLElement;
+    const items = contentEl.querySelectorAll("li");
+    const startNode = items[1]!.firstChild as Text;
+    const endNode = items[2]!.firstChild as Text;
+    const range = document.createRange();
+    range.setStart(startNode, 1);
+    range.setEnd(endNode, 3);
+    const sel = window.getSelection()!;
+    sel.removeAllRanges();
+    sel.addRange(range);
+
+    contentEl.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Tab", shiftKey: true, bubbles: true }),
+    );
+
+    expect(getCurrentContent()).toBe("- one\n- two\n- three");
+    const preserved = window.getSelection()!;
+    expect(preserved.rangeCount).toBe(1);
+    expect(preserved.isCollapsed).toBe(false);
+
+    hideEditor();
+  });
+
   test("saveCurrentNote success: tab marked clean with new mtime", async () => {
     const { openTab, getTabs, getActiveTab, closeTab } = await import("./tab-state.ts");
     mock.on("GET", "/api/note", { content: "# Save Test", mtime: 1000 });

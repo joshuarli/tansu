@@ -29,6 +29,22 @@ let backlinksEl: HTMLElement | null = null;
 let revisionsEl: HTMLElement | null = null;
 let isSourceMode = false;
 let currentPath: string | null = null;
+const INDENT_UNIT = "\t";
+const TAB_CLASS = "md-tab";
+const INDENTABLE_BLOCKS = new Set([
+  "P",
+  "DIV",
+  "LI",
+  "H1",
+  "H2",
+  "H3",
+  "H4",
+  "H5",
+  "H6",
+  "TD",
+  "TH",
+  "CODE",
+]);
 
 export { _invalidateNoteCache as invalidateNoteCache };
 
@@ -395,6 +411,10 @@ function setupEditorEvents() {
       return;
     }
 
+    if (e.key === "Tab") {
+      if (handleContentTabKey(e)) return;
+    }
+
     if (e.key === "Enter" && !e.shiftKey) {
       handleBlockTransform(e, contentEl!, () => {
         if (currentPath) markDirty(currentPath);
@@ -428,6 +448,362 @@ function setupEditorEvents() {
       e.preventDefault();
       e.stopPropagation();
       saveCurrentNote();
+      return;
     }
+
+    if (e.key === "Tab") handleSourceTabKey(e);
   });
+}
+
+function handleSourceTabKey(e: KeyboardEvent): boolean {
+  if (!sourceEl) return false;
+
+  e.preventDefault();
+  const value = sourceEl.value;
+  const start = sourceEl.selectionStart;
+  const end = sourceEl.selectionEnd;
+
+  if (!e.shiftKey && start === end) {
+    sourceEl.value = value.slice(0, start) + INDENT_UNIT + value.slice(end);
+    sourceEl.selectionStart = start + INDENT_UNIT.length;
+    sourceEl.selectionEnd = start + INDENT_UNIT.length;
+    onEditorTabMutation();
+    return true;
+  }
+
+  const lineStart = value.lastIndexOf("\n", Math.max(0, start - 1)) + 1;
+  const adjustedEnd = end > start && value[end - 1] === "\n" ? end - 1 : end;
+  const nextNewline = value.indexOf("\n", adjustedEnd);
+  const lineEnd = nextNewline === -1 ? value.length : nextNewline;
+  const lines = value.slice(lineStart, lineEnd).split("\n");
+  const transformed = e.shiftKey ? lines.map(dedentLine) : lines.map((line) => INDENT_UNIT + line);
+
+  sourceEl.setRangeText(transformed.join("\n"), lineStart, lineEnd, "select");
+  sourceEl.selectionStart = lineStart;
+  sourceEl.selectionEnd = lineStart + transformed.join("\n").length;
+  onEditorTabMutation();
+  return true;
+}
+
+function handleContentTabKey(e: KeyboardEvent): boolean {
+  if (!contentEl) return false;
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0) return false;
+  const range = sel.getRangeAt(0);
+  if (!contentEl.contains(range.startContainer) || !contentEl.contains(range.endContainer)) {
+    return false;
+  }
+
+  e.preventDefault();
+
+  const listItem = getListItemBlock(range.startContainer);
+  if (range.collapsed && listItem) {
+    const marker = insertMarker(range);
+    if (e.shiftKey) dedentListItems([listItem]);
+    else indentListItems([listItem]);
+    restoreCollapsedSelection(marker);
+    onEditorTabMutation();
+    return true;
+  }
+
+  if (range.collapsed && !e.shiftKey) {
+    insertTabAtRange(range);
+    onEditorTabMutation();
+    return true;
+  }
+
+  const targetRange = range.cloneRange();
+  const blocks = getSelectedBlocks(targetRange);
+  if (blocks.length === 0) {
+    if (e.shiftKey) return true;
+    insertTabAtRange(range);
+    onEditorTabMutation();
+    return true;
+  }
+
+  if (blocks.every(isListItemBlock)) {
+    const endMarker = insertBoundaryMarker(range, "end");
+    const startMarker = insertBoundaryMarker(range, "start");
+    if (e.shiftKey) dedentListItems(blocks);
+    else indentListItems(blocks);
+    restoreSelectionFromMarkers(startMarker, endMarker);
+    onEditorTabMutation();
+    return true;
+  }
+
+  if (e.shiftKey) {
+    const endMarker = insertBoundaryMarker(range, "end");
+    const startMarker = insertBoundaryMarker(range, "start");
+    for (const block of blocks) dedentBlock(block);
+    restoreSelectionFromMarkers(startMarker, endMarker);
+  } else {
+    const endMarker = insertBoundaryMarker(range, "end");
+    const startMarker = insertBoundaryMarker(range, "start");
+    for (const block of blocks) indentBlock(block);
+    restoreSelectionFromMarkers(startMarker, endMarker);
+  }
+
+  onEditorTabMutation();
+  return true;
+}
+
+function onEditorTabMutation() {
+  if (currentPath) markDirty(currentPath);
+  scheduleAutosave();
+  if (contentEl && !isSourceMode) checkWikiLinkTrigger(contentEl, currentPath);
+}
+
+function createTabNode(): HTMLSpanElement {
+  const tab = document.createElement("span");
+  tab.className = TAB_CLASS;
+  tab.textContent = INDENT_UNIT;
+  return tab;
+}
+
+function insertTabAtRange(range: Range) {
+  const tab = createTabNode();
+  range.deleteContents();
+  range.insertNode(tab);
+  const sel = window.getSelection();
+  if (!sel) return;
+  const next = document.createRange();
+  next.setStartAfter(tab);
+  next.collapse(true);
+  sel.removeAllRanges();
+  sel.addRange(next);
+}
+
+function isIndentableBlock(el: HTMLElement): boolean {
+  if (el === contentEl) return false;
+  if (!INDENTABLE_BLOCKS.has(el.tagName)) return false;
+  return el.tagName !== "CODE" || el.parentElement?.tagName === "PRE";
+}
+
+function isListItemBlock(el: HTMLElement): boolean {
+  return (
+    el.tagName === "LI" &&
+    (el.parentElement?.tagName === "UL" || el.parentElement?.tagName === "OL")
+  );
+}
+
+function getIndentableBlock(node: Node): HTMLElement | null {
+  let current: Node | null = node;
+  while (current && current !== contentEl) {
+    if (current instanceof HTMLElement && isIndentableBlock(current)) return current;
+    current = current.parentNode;
+  }
+  return null;
+}
+
+function getSelectedBlocks(range: Range): HTMLElement[] {
+  if (!contentEl) return [];
+
+  const blocks: HTMLElement[] = [];
+  const seen = new Set<HTMLElement>();
+  const walker = document.createTreeWalker(contentEl, NodeFilter.SHOW_ELEMENT);
+  let node: Node | null = walker.currentNode;
+  while (node) {
+    if (node instanceof HTMLElement && isIndentableBlock(node) && range.intersectsNode(node)) {
+      if (!seen.has(node)) {
+        seen.add(node);
+        blocks.push(node);
+      }
+    }
+    node = walker.nextNode();
+  }
+
+  if (blocks.length > 0) return blocks;
+  const block = getIndentableBlock(range.startContainer);
+  return block ? [block] : [];
+}
+
+function getListItemBlock(node: Node): HTMLElement | null {
+  const block = getIndentableBlock(node);
+  return block && isListItemBlock(block) ? block : null;
+}
+
+function indentBlock(block: HTMLElement) {
+  block.insertBefore(createTabNode(), block.firstChild);
+}
+
+function dedentBlock(block: HTMLElement) {
+  const first = block.firstChild;
+  if (!first) return;
+
+  if (
+    first instanceof HTMLElement &&
+    first.classList.contains(TAB_CLASS) &&
+    (first.textContent ?? "") === INDENT_UNIT
+  ) {
+    first.remove();
+    return;
+  }
+
+  if (first.nodeType !== Node.TEXT_NODE) return;
+
+  const text = first.textContent ?? "";
+  if (text.startsWith(INDENT_UNIT)) {
+    first.textContent = text.slice(INDENT_UNIT.length);
+    return;
+  }
+
+  const match = text.match(/^[ \u00A0]{1,4}/);
+  if (match) first.textContent = text.slice(match[0].length);
+}
+
+function indentListItems(items: readonly HTMLElement[]) {
+  const groups = groupSiblingListItems(items);
+
+  for (const group of groups) {
+    const first = group.items[0];
+    if (!first) continue;
+
+    const previous = first.previousElementSibling;
+    if (!(previous instanceof HTMLElement) || previous.tagName !== "LI") continue;
+
+    const nestedList = ensureNestedList(previous, group.parent.tagName);
+    for (const item of group.items) nestedList.appendChild(item);
+  }
+}
+
+function dedentListItems(items: readonly HTMLElement[]) {
+  const groups = groupSiblingListItems(items);
+
+  for (const group of groups) {
+    const parentList = group.parent;
+    const parentItem = parentList.parentElement;
+    if (!(parentItem instanceof HTMLElement) || parentItem.tagName !== "LI") continue;
+
+    const grandList = parentItem.parentElement;
+    if (
+      !(grandList instanceof HTMLElement) ||
+      (grandList.tagName !== "UL" && grandList.tagName !== "OL")
+    ) {
+      continue;
+    }
+
+    const lastSelected = group.items[group.items.length - 1];
+    if (!lastSelected) continue;
+    const trailingSiblings = collectTrailingListSiblings(lastSelected);
+    let insertAfter: HTMLElement = parentItem;
+
+    for (const item of group.items) {
+      insertAfter.insertAdjacentElement("afterend", item);
+      insertAfter = item;
+    }
+
+    if (trailingSiblings.length > 0) {
+      const nestedList = ensureNestedList(insertAfter, parentList.tagName);
+      for (const sibling of trailingSiblings) nestedList.appendChild(sibling);
+    }
+
+    if (!parentList.children.length) parentList.remove();
+  }
+}
+
+function groupSiblingListItems(
+  items: readonly HTMLElement[],
+): Array<{ parent: HTMLElement; items: HTMLElement[] }> {
+  const groups: Array<{ parent: HTMLElement; items: HTMLElement[] }> = [];
+  let current: { parent: HTMLElement; items: HTMLElement[] } | null = null;
+
+  for (const item of items) {
+    const parent = item.parentElement;
+    if (!(parent instanceof HTMLElement) || (parent.tagName !== "UL" && parent.tagName !== "OL"))
+      continue;
+
+    const previous: HTMLElement | null = current
+      ? (current.items[current.items.length - 1] ?? null)
+      : null;
+    if (current && current.parent === parent && isAdjacentSibling(previous, item)) {
+      current.items.push(item);
+      continue;
+    }
+
+    current = { parent, items: [item] };
+    groups.push(current);
+  }
+
+  return groups;
+}
+
+function ensureNestedList(parentItem: HTMLElement, tagName: string): HTMLElement {
+  const last = parentItem.lastElementChild;
+  if (last instanceof HTMLElement && last.tagName === tagName) return last;
+  const list = document.createElement(tagName.toLowerCase());
+  parentItem.appendChild(list);
+  return list;
+}
+
+function collectTrailingListSiblings(item: HTMLElement): HTMLElement[] {
+  const trailing: HTMLElement[] = [];
+  let current = item.nextElementSibling;
+  while (current) {
+    const next = current.nextElementSibling;
+    if (current instanceof HTMLElement && current.tagName === "LI") trailing.push(current);
+    current = next;
+  }
+  return trailing;
+}
+
+function isAdjacentSibling(previous: HTMLElement | null, item: HTMLElement): boolean {
+  return previous !== null && getNextListElementSibling(previous) === item;
+}
+
+function getNextListElementSibling(node: Node): HTMLElement | null {
+  let current = node.nextSibling;
+  while (current) {
+    if (current instanceof HTMLElement) return current;
+    current = current.nextSibling;
+  }
+  return null;
+}
+
+function createMarker(kind: "start" | "end" | "cursor"): HTMLSpanElement {
+  const marker = document.createElement("span");
+  marker.setAttribute("data-tab-marker", kind);
+  return marker;
+}
+
+function insertMarker(range: Range): HTMLSpanElement {
+  const marker = createMarker("cursor");
+  range.insertNode(marker);
+  return marker;
+}
+
+function insertBoundaryMarker(range: Range, kind: "start" | "end"): HTMLSpanElement {
+  const marker = createMarker(kind);
+  const boundary = range.cloneRange();
+  boundary.collapse(kind === "start");
+  boundary.insertNode(marker);
+  return marker;
+}
+
+function restoreCollapsedSelection(marker: HTMLElement) {
+  const sel = window.getSelection();
+  if (!sel) return;
+  const range = document.createRange();
+  range.setStartAfter(marker);
+  range.collapse(true);
+  sel.removeAllRanges();
+  sel.addRange(range);
+  marker.remove();
+}
+
+function restoreSelectionFromMarkers(startMarker: HTMLElement, endMarker: HTMLElement) {
+  const sel = window.getSelection();
+  if (!sel) return;
+  const range = document.createRange();
+  range.setStartAfter(startMarker);
+  range.setEndBefore(endMarker);
+  sel.removeAllRanges();
+  sel.addRange(range);
+  startMarker.remove();
+  endMarker.remove();
+}
+
+function dedentLine(line: string): string {
+  if (line.startsWith(INDENT_UNIT)) return line.slice(INDENT_UNIT.length);
+  const match = line.match(/^[ ]{1,4}/);
+  return match ? line.slice(match[0].length) : line;
 }
