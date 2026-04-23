@@ -247,9 +247,35 @@ describe("HTML escaping", () => {
   });
 });
 
-describe("line breaks", () => {
-  test("line break", () => {
-    expect(renderMarkdown("line1\nline2")).toContain("<br>");
+describe("line model", () => {
+  test("adjacent lines render as separate paragraphs", () => {
+    const html = renderMarkdown("line1\nline2");
+    expect(html).toContain("<p>line1</p>");
+    expect(html).toContain("<p>line2</p>");
+  });
+  test("adjacent lines do not produce a br", () => {
+    expect(renderMarkdown("line1\nline2")).not.toContain("<br>");
+  });
+  test("three consecutive lines become three paragraphs", () => {
+    const html = renderMarkdown("a\nb\nc");
+    expect(html).toContain("<p>a</p>");
+    expect(html).toContain("<p>b</p>");
+    expect(html).toContain("<p>c</p>");
+  });
+  test("blank line between paragraphs renders placeholder", () => {
+    expect(renderMarkdown("foo\n\nbar")).toContain('data-md-blank="true"');
+  });
+  test("blank line placeholder has br inside", () => {
+    expect(renderMarkdown("foo\n\nbar")).toContain('data-md-blank="true"><br>');
+  });
+  test("two blank lines produce two placeholders", () => {
+    const html = renderMarkdown("foo\n\n\nbar");
+    expect((html.match(/data-md-blank/g) ?? []).length).toBe(2);
+  });
+  test("text before heading becomes its own paragraph", () => {
+    const html = renderMarkdown("intro\n## Heading");
+    expect(html).toContain("<p>intro</p>");
+    expect(html).toContain("<h2>Heading</h2>");
   });
 });
 

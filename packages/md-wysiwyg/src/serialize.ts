@@ -18,6 +18,53 @@ interface SerializedBlock {
   kind: BlockKind;
 }
 
+/// Compute the character offset of the cursor (described by `range`) within the
+/// markdown string that `domToMarkdown(contentEl)` would produce.
+///
+/// Uses a sentinel-insert approach: temporarily inserts a [data-md-cursor] span
+/// at the cursor position, serializes the full document to find where the sentinel
+/// lands, then removes the span and restores the selection. This correctly handles
+/// cursors inside inline elements (e.g. inside <strong>) where a naive
+/// clone-up-to-cursor approach would overcount due to artificially closed markers.
+export function getCursorMarkdownOffset(contentEl: HTMLElement, range: Range): number {
+  const anchor = range.startContainer;
+  const anchorOffset = range.startOffset;
+
+  const marker = document.createElement("span");
+  marker.setAttribute("data-md-cursor", "true");
+  range.insertNode(marker);
+
+  const md = domToMarkdown(contentEl);
+  const offset = md.indexOf(CURSOR_SENTINEL);
+
+  const parent = marker.parentNode;
+  marker.remove();
+  // Re-merge any text nodes that insertNode split
+  parent?.normalize();
+
+  // Restore the selection. After insertNode, anchor (a text node) may have been
+  // split; after normalize it is extended back to its full content, so the saved
+  // offset is still valid.
+  const sel = window.getSelection();
+  if (sel) {
+    try {
+      const r = document.createRange();
+      const safeOffset =
+        anchor.nodeType === Node.TEXT_NODE
+          ? Math.min(anchorOffset, (anchor as Text).length)
+          : Math.min(anchorOffset, anchor.childNodes.length);
+      r.setStart(anchor, safeOffset);
+      r.collapse(true);
+      sel.removeAllRanges();
+      sel.addRange(r);
+    } catch {
+      // If the anchor was removed from the DOM, leave selection as-is
+    }
+  }
+
+  return offset >= 0 ? offset : domToMarkdown(contentEl).length;
+}
+
 export function domToMarkdown(root: HTMLElement): string {
   const blocks: SerializedBlock[] = [];
   for (const child of root.children) {

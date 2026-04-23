@@ -40,6 +40,24 @@ describe("serialize", () => {
     expect(domToMarkdown(html("<h1>Title</h1><p>Body</p>"))).toBe("# Title\n\nBody");
   });
 
+  test("two adjacent paragraphs use single newline", () => {
+    expect(domToMarkdown(html("<p>foo</p><p>bar</p>"))).toBe("foo\nbar");
+  });
+  test("three adjacent paragraphs", () => {
+    expect(domToMarkdown(html("<p>a</p><p>b</p><p>c</p>"))).toBe("a\nb\nc");
+  });
+  test("h2 + paragraph uses double newline", () => {
+    expect(domToMarkdown(html("<h2>Title</h2><p>Body</p>"))).toBe("## Title\n\nBody");
+  });
+  test("paragraph + h2 uses double newline", () => {
+    expect(domToMarkdown(html("<p>intro</p><h2>Title</h2>"))).toBe("intro\n\n## Title");
+  });
+  test("paragraph + code block uses double newline", () => {
+    expect(domToMarkdown(html('<p>before</p><pre><code class="language-js">x</code></pre>'))).toBe(
+      "before\n\n```js\nx\n```",
+    );
+  });
+
   test("bold", () => {
     expect(domToMarkdown(html("<p><strong>bold</strong></p>"))).toBe("**bold**");
   });

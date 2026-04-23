@@ -3,6 +3,7 @@ import {
   renderMarkdown,
   renderMarkdownWithCursor,
   domToMarkdown,
+  getCursorMarkdownOffset,
   checkBlockInputTransform,
   handleBlockTransform,
 } from "@joshuarli98/md-wysiwyg";
@@ -305,13 +306,7 @@ function saveCursorOffset(): number {
   if (!sel || !sel.rangeCount) return -1;
   const range = sel.getRangeAt(0);
   if (!contentEl.contains(range.startContainer)) return -1;
-  const pre = range.cloneRange();
-  pre.selectNodeContents(contentEl);
-  pre.setEnd(range.startContainer, clampNodeOffset(range.startContainer, range.startOffset));
-  const fragment = pre.cloneContents();
-  const container = document.createElement("div");
-  container.appendChild(fragment);
-  return domToMarkdown(container).length;
+  return getCursorMarkdownOffset(contentEl, range);
 }
 
 function restoreCursorOffset(offset: number, markdown: string, scroll = false) {

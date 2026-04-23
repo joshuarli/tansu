@@ -40,8 +40,31 @@ describe("roundtrip", () => {
   test("paragraph roundtrip", () => {
     expect(roundtrip("Hello world")).toBe("Hello world");
   });
+  test("single newline is preserved", () => {
+    expect(roundtrip("foo\nbar")).toBe("foo\nbar");
+  });
+  test("three consecutive lines", () => {
+    expect(roundtrip("a\nb\nc")).toBe("a\nb\nc");
+  });
   test("two paragraphs", () => {
     expect(roundtrip("First\n\nSecond")).toBe("First\n\nSecond");
+  });
+  test("single newline vs double newline are distinct", () => {
+    const single = roundtrip("foo\nbar");
+    const double = roundtrip("foo\n\nbar");
+    expect(single).toBe("foo\nbar");
+    expect(double).toBe("foo\n\nbar");
+    expect(single).not.toBe(double);
+  });
+  test("mixed lines and blank lines", () => {
+    expect(roundtrip("a\nb\n\nc\nd")).toBe("a\nb\n\nc\nd");
+  });
+  test("text before heading gains blank line on roundtrip", () => {
+    // Serializer always puts \n\n between non-para block types
+    expect(roundtrip("intro\n## Heading")).toBe("intro\n\n## Heading");
+  });
+  test("text after heading is stable", () => {
+    expect(roundtrip("## Heading\n\ntext")).toBe("## Heading\n\ntext");
   });
   test("extra blank line between paragraphs", () => {
     expect(roundtrip("First\n\n\nSecond")).toBe("First\n\n\nSecond");
