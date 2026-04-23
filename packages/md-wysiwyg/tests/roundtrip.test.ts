@@ -229,3 +229,159 @@ describe("roundtrip", () => {
     expect(roundtrip(doc)).toContain("> A quote");
   });
 });
+
+// Deterministic LCG pseudo-random number generator — no external dependency.
+function lcg(seed: number): number {
+  return ((1664525 * seed + 1013904223) >>> 0);
+}
+function pick<T>(arr: readonly T[], seed: number): T {
+  return arr[seed % arr.length]!;
+}
+
+const WORDS = ["alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta"] as const;
+const INLINES = [
+  "plain text",
+  "**bold text**",
+  "*italic text*",
+  "~~struck text~~",
+  "==marked text==",
+] as const;
+
+describe("fuzz roundtrip", () => {
+  let cleanup: () => void;
+  let renderMarkdown: (md: string) => string;
+  let domToMarkdown: (el: HTMLElement) => string;
+
+  function roundtrip(md: string): string {
+    const el = document.createElement("div");
+    el.innerHTML = renderMarkdown(md);
+    return domToMarkdown(el);
+  }
+
+  beforeAll(async () => {
+    cleanup = setupDOM();
+    const mdMod = await import("../src/markdown.ts");
+    const serMod = await import("../src/serialize.ts");
+    renderMarkdown = mdMod.renderMarkdown;
+    domToMarkdown = serMod.domToMarkdown;
+  });
+
+  afterAll(() => {
+    cleanup();
+  });
+
+  test("paragraph-only sequences with single newlines", () => {
+    for (let i = 0; i < 60; i++) {
+      let seed = lcg(i + 1);
+      const count = 2 + (seed % 4);
+      const lines: string[] = [];
+      for (let j = 0; j < count; j++) {
+        seed = lcg(seed);
+        lines.push(pick(WORDS, seed));
+      }
+      const md = lines.join("\n");
+      expect(roundtrip(md), `iteration ${i}: ${JSON.stringify(md)}`).toBe(md);
+    }
+  });
+
+  test("paragraph-only sequences with double newlines", () => {
+    for (let i = 0; i < 60; i++) {
+      let seed = lcg(i + 100);
+      const count = 2 + (seed % 3);
+      const paras: string[] = [];
+      for (let j = 0; j < count; j++) {
+        seed = lcg(seed);
+        paras.push(pick(WORDS, seed));
+      }
+      const md = paras.join("\n\n");
+      expect(roundtrip(md), `iteration ${i}: ${JSON.stringify(md)}`).toBe(md);
+    }
+  });
+
+  test("paragraphs with inline formatting roundtrip", () => {
+    for (let i = 0; i < 40; i++) {
+      let seed = lcg(i + 200);
+      const count = 2 + (seed % 3);
+      const lines: string[] = [];
+      for (let j = 0; j < count; j++) {
+        seed = lcg(seed);
+        lines.push(pick(INLINES, seed));
+      }
+      const md = lines.join("\n");
+      expect(roundtrip(md), `iteration ${i}: ${JSON.stringify(md)}`).toBe(md);
+    }
+  });
+
+  test("heading followed by paragraphs", () => {
+    const levels = [1, 2, 3, 4, 5, 6] as const;
+    for (let i = 0; i < 30; i++) {
+      let seed = lcg(i + 300);
+      const level = pick(levels, seed);
+      const hashes = "#".repeat(level);
+      seed = lcg(seed);
+      const title = pick(WORDS, seed);
+      seed = lcg(seed);
+      const body = pick(WORDS, seed);
+      seed = lcg(seed);
+      const body2 = pick(WORDS, seed);
+      const md = `${hashes} ${title}\n\n${body}\n${body2}`;
+      expect(roundtrip(md), `iteration ${i}: ${JSON.stringify(md)}`).toBe(md);
+    }
+  });
+
+  test("two headings with paragraph between", () => {
+    for (let i = 0; i < 20; i++) {
+      let seed = lcg(i + 400);
+      const w1 = pick(WORDS, seed);
+      seed = lcg(seed);
+      const w2 = pick(WORDS, seed);
+      seed = lcg(seed);
+      const w3 = pick(WORDS, seed);
+      const md = `## ${w1}\n\n${w2}\n\n## ${w3}`;
+      expect(roundtrip(md), `iteration ${i}: ${JSON.stringify(md)}`).toBe(md);
+    }
+  });
+
+  test("list followed by heading", () => {
+    for (let i = 0; i < 20; i++) {
+      let seed = lcg(i + 500);
+      const item1 = pick(WORDS, seed);
+      seed = lcg(seed);
+      const item2 = pick(WORDS, seed);
+      seed = lcg(seed);
+      const title = pick(WORDS, seed);
+      const md = `- ${item1}\n- ${item2}\n\n## ${title}`;
+      expect(roundtrip(md), `iteration ${i}: ${JSON.stringify(md)}`).toBe(md);
+    }
+  });
+
+  test("code block surrounded by paragraphs", () => {
+    for (let i = 0; i < 20; i++) {
+      let seed = lcg(i + 600);
+      const before = pick(WORDS, seed);
+      seed = lcg(seed);
+      const lang = pick(["js", "ts", "py", ""], seed);
+      seed = lcg(seed);
+      const code = pick(WORDS, seed);
+      seed = lcg(seed);
+      const after = pick(WORDS, seed);
+      const md = `${before}\n\n\`\`\`${lang}\n${code}\n\`\`\`\n\n${after}`;
+      expect(roundtrip(md), `iteration ${i}: ${JSON.stringify(md)}`).toBe(md);
+    }
+  });
+
+  test("mixed blank lines in paragraph sequences", () => {
+    // Patterns: single \n, double \n\n, and triple \n\n\n all roundtrip
+    for (let i = 0; i < 30; i++) {
+      let seed = lcg(i + 700);
+      const w1 = pick(WORDS, seed);
+      seed = lcg(seed);
+      const w2 = pick(WORDS, seed);
+      seed = lcg(seed);
+      const w3 = pick(WORDS, seed);
+      // Two blank lines between paragraphs (three newlines total)
+      const md = `${w1}\n\n\n${w2}\n${w3}`;
+      expect(roundtrip(md), `iteration ${i}: ${JSON.stringify(md)}`).toBe(md);
+    }
+  });
+});

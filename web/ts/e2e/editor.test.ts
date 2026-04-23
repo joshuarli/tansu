@@ -116,4 +116,79 @@ describe("e2e: editor", () => {
     const pasteText = await page.$eval(".editor-content", (el) => el.textContent);
     expect(pasteText).toContain("pasted content");
   }, 30_000);
+
+  async function saveAndGetSource(): Promise<string> {
+    await page.keyboard.press("Meta+s");
+    await page.waitForTimeout(300);
+    await page.click("button:has-text('Source')");
+    const src = await page.$eval(".editor-source", (el: HTMLTextAreaElement) => el.value);
+    // Toggle back to content mode for subsequent tests
+    await page.click("button:has-text('Source')");
+    return src;
+  }
+
+  test("single Enter produces \\n in saved markdown", async () => {
+    await resetEditor("");
+    await page.keyboard.type("foo");
+    await page.keyboard.press("Enter");
+    await page.keyboard.type("bar");
+    const src = await saveAndGetSource();
+    expect(src).toBe("foo\nbar");
+  }, 15_000);
+
+  test("double Enter produces \\n\\n in saved markdown", async () => {
+    await resetEditor("");
+    await page.keyboard.type("foo");
+    await page.keyboard.press("Enter");
+    await page.keyboard.press("Enter");
+    await page.keyboard.type("bar");
+    const src = await saveAndGetSource();
+    expect(src).toBe("foo\n\nbar");
+  }, 15_000);
+
+  test("three lines separated by single Enter", async () => {
+    await resetEditor("");
+    await page.keyboard.type("a");
+    await page.keyboard.press("Enter");
+    await page.keyboard.type("b");
+    await page.keyboard.press("Enter");
+    await page.keyboard.type("c");
+    const src = await saveAndGetSource();
+    expect(src).toBe("a\nb\nc");
+  }, 15_000);
+
+  test("inline bold transform roundtrips as **bold**", async () => {
+    await resetEditor("");
+    await page.keyboard.type("**bold**");
+    await page.waitForTimeout(200);
+    const src = await saveAndGetSource();
+    expect(src).toBe("**bold**");
+  }, 15_000);
+
+  test("inline italic transform roundtrips as *italic*", async () => {
+    await resetEditor("");
+    await page.keyboard.type("*italic*");
+    await page.waitForTimeout(200);
+    const src = await saveAndGetSource();
+    expect(src).toBe("*italic*");
+  }, 15_000);
+
+  test("inline code transform roundtrips as `code`", async () => {
+    await resetEditor("");
+    await page.keyboard.type("`code` ");
+    await page.waitForTimeout(200);
+    const src = await saveAndGetSource();
+    // Trailing space from trigger is not preserved
+    expect(src.trim()).toBe("`code`");
+  }, 15_000);
+
+  test("bold on a line followed by Enter stays on one line", async () => {
+    await resetEditor("");
+    await page.keyboard.type("**bold**");
+    await page.waitForTimeout(200);
+    await page.keyboard.press("Enter");
+    await page.keyboard.type("next");
+    const src = await saveAndGetSource();
+    expect(src).toBe("**bold**\nnext");
+  }, 15_000);
 });
