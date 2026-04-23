@@ -71,19 +71,15 @@ describe("e2e: tabs", () => {
     await page.waitForTimeout(500);
     expect(await page.isVisible(".tab.active .dirty")).toBe(false);
 
-    // + button opens new note
-    await page.evaluate(() => {
-      (window as any).__origPrompt = window.prompt;
-      window.prompt = () => "new-tab-note";
-    });
+    // + button opens new note via the custom input dialog
     const tabsBefore = await page.$$eval(".tab:not(.tab-new)", (els) => els.length);
     await page.click(".tab-new");
+    await page.waitForSelector("#input-dialog-overlay:not(.hidden)", { timeout: 2000 });
+    await page.fill("#input-dialog-input", "new-tab-note");
+    await page.keyboard.press("Enter");
     await page.waitForTimeout(500);
     const tabsAfter = await page.$$eval(".tab:not(.tab-new)", (els) => els.length);
     expect(tabsAfter).toBe(tabsBefore + 1);
-    await page.evaluate(() => {
-      window.prompt = (window as any).__origPrompt;
-    });
 
     // Close tab via close button
     const beforeClose = await page.$$eval(".tab:not(.tab-new)", (els) => els.length);
