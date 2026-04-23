@@ -19,8 +19,6 @@ describe("filenav", () => {
     cleanup = setupDOM();
     mock = mockFetch();
 
-    // Register /api/note before /api/notes so the more specific one wins
-    // (mock searches in reverse — last registered has highest priority)
     mock.on("GET", "/api/note", { content: "# Test", mtime: 1000 });
     mock.on("GET", "/api/state", { tabs: [], active: -1 });
     mock.on("PUT", "/api/state", {});
@@ -29,19 +27,12 @@ describe("filenav", () => {
       { path: "notes/alpha.md", title: "alpha", mtime: 2000 },
       { path: "notes/beta.md", title: "beta", mtime: 1000 },
     ]);
-    // /api/notes must be last so it takes priority over /api/note for list fetches
-    mock.on("GET", "/api/notes", [
-      { path: "notes/alpha.md", title: "alpha" },
-      { path: "notes/beta.md", title: "beta" },
-    ]);
 
-    // Import tab-state first so openTab is available
     const tabMod = await import("./tab-state.ts");
     openTab = tabMod.openTab;
     closeTab = tabMod.closeTab;
     getTabs = tabMod.getTabs;
 
-    // Clean any state from other test files
     while (getTabs().length > 0) closeTab(0);
 
     const navMod = await import("./filenav.ts");
@@ -54,7 +45,7 @@ describe("filenav", () => {
     cleanup();
   });
 
-  test("tree: no duplicate .active after two rapid files:changed (save + SSE pattern)", async () => {
+  test("no duplicate .active after two rapid files:changed (save + SSE pattern)", async () => {
     while (getTabs().length > 0) closeTab(0);
     await openTab("notes/alpha.md");
     await tick();
@@ -68,7 +59,7 @@ describe("filenav", () => {
     expect(activeCount()).toBe(1);
   });
 
-  test("tree: no duplicate .active after sequential files:changed", async () => {
+  test("no duplicate .active after sequential files:changed", async () => {
     while (getTabs().length > 0) closeTab(0);
     await openTab("notes/alpha.md");
     await tick();
@@ -81,15 +72,10 @@ describe("filenav", () => {
     expect(activeCount()).toBe(1);
   });
 
-  test("recent: no duplicate .active after two rapid files:changed", async () => {
+  test("no duplicate .active after two rapid files:changed (recent mode)", async () => {
     while (getTabs().length > 0) closeTab(0);
     await openTab("notes/alpha.md");
     await tick();
-
-    // Switch to recent mode
-    const recentBtn = document.getElementById("sidebar-recent-btn") as HTMLButtonElement;
-    recentBtn.click();
-    await drain();
 
     emit("files:changed", undefined);
     emit("files:changed", undefined);
@@ -97,13 +83,9 @@ describe("filenav", () => {
     await drain();
 
     expect(activeCount()).toBe(1);
-
-    // Reset to tree mode
-    recentBtn.click();
-    await tick();
   });
 
-  test("tree: no duplicate .active when tab:change fires while files:changed render is in-flight", async () => {
+  test("no duplicate .active when tab:change fires while files:changed render is in-flight", async () => {
     while (getTabs().length > 0) closeTab(0);
     await openTab("notes/alpha.md");
     await tick();
@@ -112,7 +94,7 @@ describe("filenav", () => {
     emit("files:changed", undefined);
 
     // Immediately emit tab:change (simulates switching tab while render is in-flight)
-    // openTab triggers tab:change via notifyChange → onTabChange → renderTree
+    // openTab triggers tab:change via notifyChange → onTabChange
     await openTab("notes/beta.md");
 
     await drain();
@@ -120,7 +102,7 @@ describe("filenav", () => {
     expect(activeCount()).toBe(1);
   });
 
-  test("tree: no duplicate under rapid files:changed + tab:change interleave", async () => {
+  test("no duplicate under rapid files:changed + tab:change interleave", async () => {
     while (getTabs().length > 0) closeTab(0);
     await openTab("notes/alpha.md");
     await tick();
@@ -138,20 +120,20 @@ describe("filenav", () => {
     expect(activeEl?.title).toBe("notes/beta.md");
   });
 
-  test("tree: no duplicate with real network delay (save emit fires during slower SSE re-render)", async () => {
+  test("no duplicate with real network delay (save emit fires during slower SSE re-render)", async () => {
     while (getTabs().length > 0) closeTab(0);
     await openTab("notes/alpha.md");
     await tick();
 
-    // Simulate network lag on the SECOND files:changed by overriding /api/notes to be slow.
+    // Simulate network lag on the SECOND files:changed by overriding /api/recentfiles to be slow.
     // The first emit completes fast; the second (SSE) triggers a slow refresh.
     // Meanwhile, tab:change also fires. Check for no duplicates.
     mock.onDelayed(
       "GET",
-      "/api/notes",
+      "/api/recentfiles",
       [
-        { path: "notes/alpha.md", title: "alpha" },
-        { path: "notes/beta.md", title: "beta" },
+        { path: "notes/alpha.md", title: "alpha", mtime: 2000 },
+        { path: "notes/beta.md", title: "beta", mtime: 1000 },
       ],
       10,
     );
@@ -169,7 +151,7 @@ describe("filenav", () => {
     expect(activeEl?.title).toBe("notes/beta.md");
   });
 
-  test("tree: active element is the correct one (not stale) after save", async () => {
+  test("active element is the correct one (not stale) after save", async () => {
     while (getTabs().length > 0) closeTab(0);
     await openTab("notes/alpha.md");
     await openTab("notes/beta.md");

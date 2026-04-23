@@ -41,11 +41,6 @@ const TANSU_HTML = `<!doctype html>
   <div id="sidebar">
     <div id="sidebar-header">
       <input id="sidebar-search" type="text">
-      <div id="sidebar-toolbar">
-        <button id="sidebar-recent-btn">Recent</button>
-        <button id="sidebar-pinned-btn">Pinned</button>
-        <button id="sidebar-sort-btn">Name</button>
-      </div>
     </div>
     <div id="sidebar-tree"></div>
   </div>

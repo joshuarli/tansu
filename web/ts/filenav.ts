@@ -1,5 +1,4 @@
 import {
-  listNotes,
   searchFileNames,
   getRecentFiles,
   getPinnedFiles,
@@ -56,26 +55,7 @@ function showNavContextMenu(e: MouseEvent, path: string, title: string): void {
   );
 }
 
-interface DirNode {
-  type: "dir";
-  name: string;
-  dirPath: string;
-  children: TreeNode[];
-}
-
-interface FileNode {
-  type: "file";
-  name: string;
-  path: string;
-  title: string;
-}
-
-type TreeNode = DirNode | FileNode;
-
-const collapsed = new Set<string>();
-let sortByName = true;
-let currentMode: "tree" | "recent" | "pinned" | "search" = "tree";
-let allNotes: { path: string; title: string }[] = [];
+let currentMode: "recent" | "search" = "recent";
 let pinnedPaths = new Set<string>();
 let currentQuery = "";
 // Prevents a queued files:changed render from being dropped when one is already in-flight.
@@ -83,13 +63,9 @@ let renderQueued = false;
 let renderInFlight = false;
 
 export async function initFileNav(): Promise<() => void> {
-  await Promise.all([refreshNotes(), refreshPinned()]);
   render();
 
   const searchInput = document.getElementById("sidebar-search") as HTMLInputElement;
-  const recentBtn = document.getElementById("sidebar-recent-btn") as HTMLButtonElement;
-  const pinnedBtn = document.getElementById("sidebar-pinned-btn") as HTMLButtonElement;
-  const sortBtn = document.getElementById("sidebar-sort-btn") as HTMLButtonElement;
 
   searchInput.addEventListener("input", (e) => {
     const q = (e.target as HTMLInputElement).value;
@@ -97,7 +73,7 @@ export async function initFileNav(): Promise<() => void> {
     if (q.trim()) {
       currentMode = "search";
     } else if (currentMode === "search") {
-      currentMode = "tree";
+      currentMode = "recent";
     }
     render();
   });
@@ -106,42 +82,10 @@ export async function initFileNav(): Promise<() => void> {
     if (e.key === "Escape" && currentMode === "search") {
       searchInput.value = "";
       currentQuery = "";
-      currentMode = "tree";
+      currentMode = "recent";
       render();
     }
   });
-
-  recentBtn.addEventListener("click", () => {
-    if (currentMode === "recent") {
-      currentMode = "tree";
-    } else {
-      currentMode = "recent";
-      searchInput.value = "";
-      currentQuery = "";
-    }
-    updateButtons(recentBtn, pinnedBtn, sortBtn);
-    render();
-  });
-
-  pinnedBtn.addEventListener("click", () => {
-    if (currentMode === "pinned") {
-      currentMode = "tree";
-    } else {
-      currentMode = "pinned";
-      searchInput.value = "";
-      currentQuery = "";
-    }
-    updateButtons(recentBtn, pinnedBtn, sortBtn);
-    render();
-  });
-
-  sortBtn.addEventListener("click", () => {
-    sortByName = !sortByName;
-    updateButtons(recentBtn, pinnedBtn, sortBtn);
-    if (currentMode === "tree") render();
-  });
-
-  updateButtons(recentBtn, pinnedBtn, sortBtn);
 
   // Re-render on tab changes to update active file highlight and scroll
   const offTabChange = on("tab:change", () => onTabChange());
@@ -155,12 +99,10 @@ export async function initFileNav(): Promise<() => void> {
     }
     renderInFlight = true;
     try {
-      await Promise.all([refreshNotes(), refreshPinned()]);
-      render();
+      await render();
       if (renderQueued) {
         renderQueued = false;
-        await Promise.all([refreshNotes(), refreshPinned()]);
-        render();
+        await render();
       }
     } finally {
       renderInFlight = false;
@@ -181,24 +123,6 @@ export async function initFileNav(): Promise<() => void> {
   };
 }
 
-function updateButtons(
-  recentBtn: HTMLButtonElement,
-  pinnedBtn: HTMLButtonElement,
-  sortBtn: HTMLButtonElement,
-): void {
-  recentBtn.classList.toggle("active", currentMode === "recent");
-  pinnedBtn.classList.toggle("active", currentMode === "pinned");
-  sortBtn.classList.toggle("active", sortByName);
-}
-
-async function refreshNotes(): Promise<void> {
-  try {
-    allNotes = await listNotes();
-  } catch {
-    // keep stale data on failure
-  }
-}
-
 async function refreshPinned(): Promise<void> {
   try {
     const files = await getPinnedFiles();
@@ -213,14 +137,6 @@ function onTabChange(): void {
   const container = getContainer();
   if (!container) return;
 
-  if (currentMode === "tree") {
-    // Re-render so the active file's parent dir is visible and `.active` is set correctly.
-    renderTree();
-    container.querySelector<HTMLElement>(".nav-file.active")?.scrollIntoView({ block: "center" });
-    return;
-  }
-
-  // For non-tree modes: update `.active` in-place (no re-render needed).
   const active = getActiveTab();
   for (const el of container.querySelectorAll<HTMLElement>(".nav-file")) {
     el.classList.toggle("active", el.title === active?.path);
@@ -229,58 +145,43 @@ function onTabChange(): void {
 }
 
 async function render(): Promise<void> {
-  if (currentMode === "recent") {
-    await renderRecent();
-  } else if (currentMode === "pinned") {
-    await renderPinned();
-  } else if (currentMode === "search" && currentQuery.trim()) {
+  if (currentMode === "search" && currentQuery.trim()) {
     await renderSearch(currentQuery);
   } else {
-    renderTree();
+    await renderRecent();
   }
 }
 
 async function renderRecent(): Promise<void> {
   const container = getContainer();
   if (!container) return;
-  let files: { path: string; title: string; mtime: number }[];
+
+  let pinned: { path: string; title: string }[] = [];
+  let recent: { path: string; title: string; mtime: number }[] = [];
   try {
-    files = await getRecentFiles();
+    [pinned, recent] = await Promise.all([getPinnedFiles(), getRecentFiles()]);
+    pinnedPaths = new Set(pinned.map((f) => f.path));
   } catch {
     container.innerHTML = '<div class="nav-empty">Failed to load</div>';
     return;
   }
+
   const active = getActiveTab();
   container.innerHTML = "";
-  if (files.length === 0) {
+
+  const pinnedSet = new Set(pinned.map((f) => f.path));
+  const recentNonPinned = recent.filter((f) => !pinnedSet.has(f.path));
+
+  if (pinned.length === 0 && recentNonPinned.length === 0) {
     container.innerHTML = '<div class="nav-empty">No files</div>';
     return;
   }
-  for (const file of files) {
-    container.appendChild(makeFileRow(file.path, file.title, 0, active?.path, false));
-  }
-}
 
-async function renderPinned(): Promise<void> {
-  const container = getContainer();
-  if (!container) return;
-  let files: { path: string; title: string }[];
-  try {
-    files = await getPinnedFiles();
-  } catch {
-    container.innerHTML = '<div class="nav-empty">Failed to load</div>';
-    return;
+  for (const file of pinned) {
+    container.appendChild(makeFileRow(file.path, file.title, active?.path, null));
   }
-  // Sync local set too
-  pinnedPaths = new Set(files.map((f) => f.path));
-  const active = getActiveTab();
-  container.innerHTML = "";
-  if (files.length === 0) {
-    container.innerHTML = '<div class="nav-empty">No pinned files</div>';
-    return;
-  }
-  for (const file of files) {
-    container.appendChild(makeFileRow(file.path, file.title, 0, active?.path, false));
+  for (const file of recentNonPinned) {
+    container.appendChild(makeFileRow(file.path, file.title, active?.path, timeAgo(file.mtime)));
   }
 }
 
@@ -301,150 +202,63 @@ async function renderSearch(q: string): Promise<void> {
     return;
   }
   for (const r of results) {
-    const el = makeFileRow(r.path, r.title, 0, active?.path, false);
-
+    const el = makeFileRow(r.path, r.title, active?.path, null);
     const dir = r.path.includes("/") ? r.path.substring(0, r.path.lastIndexOf("/")) : "";
     if (dir) {
-      // Wrap the text node in a name div so the dir line can sit below it
-      const nameNode = el.firstChild;
-      if (nameNode) {
-        const nameDiv = document.createElement("div");
-        nameDiv.className = "nav-file-name";
-        nameDiv.textContent = nameNode.textContent;
-        el.replaceChild(nameDiv, nameNode);
-      }
+      const nameSpan = el.querySelector(".nav-file-name") as HTMLElement;
+      const textWrapper = document.createElement("div");
+      textWrapper.className = "nav-file-text";
+      el.insertBefore(textWrapper, nameSpan);
+      textWrapper.appendChild(nameSpan);
       const dirLine = document.createElement("div");
       dirLine.className = "nav-file-dir";
       dirLine.textContent = dir;
-      el.appendChild(dirLine);
+      textWrapper.appendChild(dirLine);
     }
-
     container.appendChild(el);
   }
-}
-
-function renderTree(): void {
-  const container = getContainer();
-  if (!container) return;
-  const root = buildTree(allNotes);
-  if (sortByName) sortNode(root);
-  const active = getActiveTab();
-  container.innerHTML = "";
-  if (root.children.length === 0) {
-    container.innerHTML = '<div class="nav-empty">No notes</div>';
-    return;
-  }
-  renderChildren(container, root.children, 0, active?.path);
 }
 
 function getContainer(): HTMLElement | null {
   return document.getElementById("sidebar-tree");
 }
 
-function buildTree(notes: { path: string; title: string }[]): DirNode {
-  const root: DirNode = { type: "dir", name: "", dirPath: "", children: [] };
-  for (const note of notes) {
-    const parts = note.path.split("/");
-    let cur = root;
-    for (let i = 0; i < parts.length - 1; i++) {
-      const part = parts[i]!;
-      const dirPath = parts.slice(0, i + 1).join("/");
-      let dir = cur.children.find((c) => c.type === "dir" && c.name === part) as
-        | DirNode
-        | undefined;
-      if (!dir) {
-        dir = { type: "dir", name: part, dirPath, children: [] };
-        cur.children.push(dir);
-      }
-      cur = dir;
-    }
-    cur.children.push({
-      type: "file",
-      name: parts[parts.length - 1]!,
-      path: note.path,
-      title: note.title,
-    });
-  }
-  return root;
-}
-
-function sortNode(node: DirNode): void {
-  node.children.sort((a, b) => {
-    if (a.type !== b.type) return a.type === "dir" ? -1 : 1;
-    return a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
-  });
-  for (const child of node.children) {
-    if (child.type === "dir") sortNode(child);
-  }
-}
-
-function renderChildren(
-  container: HTMLElement,
-  nodes: TreeNode[],
-  depth: number,
-  activePath: string | undefined,
-): void {
-  for (const node of nodes) {
-    if (node.type === "dir") {
-      renderDir(container, node, depth, activePath);
-    } else {
-      container.appendChild(makeFileRow(node.path, node.title, depth, activePath, true));
-    }
-  }
-}
-
-function renderDir(
-  container: HTMLElement,
-  node: DirNode,
-  depth: number,
-  activePath: string | undefined,
-): void {
-  const isCollapsed = collapsed.has(node.dirPath);
-
-  const wrapper = document.createElement("div");
-  wrapper.className = "nav-dir";
-
-  const label = document.createElement("div");
-  label.className = "nav-dir-label";
-  label.style.paddingLeft = `${8 + depth * 14}px`;
-
-  const arrow = document.createElement("span");
-  arrow.className = "nav-dir-arrow";
-  arrow.textContent = isCollapsed ? "▶" : "▼";
-  label.appendChild(arrow);
-  label.appendChild(document.createTextNode(node.name));
-
-  const childContainer = document.createElement("div");
-  childContainer.className = "nav-dir-children";
-  if (isCollapsed) childContainer.style.display = "none";
-
-  label.addEventListener("click", () => {
-    const nowCollapsed = !collapsed.has(node.dirPath);
-    if (nowCollapsed) collapsed.add(node.dirPath);
-    else collapsed.delete(node.dirPath);
-    arrow.textContent = nowCollapsed ? "▶" : "▼";
-    childContainer.style.display = nowCollapsed ? "none" : "";
-  });
-
-  renderChildren(childContainer, node.children, depth + 1, activePath);
-  wrapper.appendChild(label);
-  wrapper.appendChild(childContainer);
-  container.appendChild(wrapper);
+function timeAgo(mtime: number): string {
+  const seconds = Math.floor(Date.now() / 1000 - mtime);
+  if (seconds < 60) return "<1m";
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days}d`;
+  const weeks = Math.floor(days / 7);
+  if (weeks < 5) return `${weeks}w`;
+  return `${Math.floor(days / 30)}mo`;
 }
 
 function makeFileRow(
   path: string,
   title: string,
-  depth: number,
   activePath: string | undefined,
-  indent: boolean,
+  timeLabel: string | null,
 ): HTMLElement {
   const el = document.createElement("div");
   el.className = "nav-file" + (path === activePath ? " active" : "");
-  // depth * 14 for nesting, +14 for arrow gutter when in tree, +8 base padding
-  el.style.paddingLeft = indent ? `${8 + depth * 14 + 14}px` : "8px";
-  el.textContent = title || stemFromPath(path);
   el.title = path;
+
+  const nameSpan = document.createElement("span");
+  nameSpan.className = "nav-file-name";
+  nameSpan.textContent = title || stemFromPath(path);
+  el.appendChild(nameSpan);
+
+  if (timeLabel) {
+    const timeSpan = document.createElement("span");
+    timeSpan.className = "nav-file-time";
+    timeSpan.textContent = timeLabel;
+    el.appendChild(timeSpan);
+  }
+
   el.addEventListener("click", () => openTab(path));
   el.addEventListener("contextmenu", (e) =>
     showNavContextMenu(e, path, title || stemFromPath(path)),
