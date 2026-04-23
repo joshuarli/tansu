@@ -169,8 +169,8 @@ function parseBlocks(lines: string[]): Block[] {
       paraLines.push(l);
       i++;
     }
-    if (paraLines.length > 0) {
-      blocks.push({ type: "paragraph", text: paraLines.join("\n") });
+    for (const line of paraLines) {
+      blocks.push({ type: "paragraph", text: line });
     }
   }
 

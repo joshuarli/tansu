@@ -272,6 +272,7 @@ function joinBlocks(blocks: readonly SerializedBlock[]): string {
 
 function blockSeparator(previous: SerializedBlock, current: SerializedBlock): string {
   if (previous.md === BLANK_LINE_SENTINEL || current.md === BLANK_LINE_SENTINEL) return "\n";
+  if (previous.kind === "paragraph" && current.kind === "paragraph") return "\n";
   if (
     (previous.kind === "paragraph" && current.kind === "list") ||
     (previous.kind === "list" && current.kind === "paragraph")
