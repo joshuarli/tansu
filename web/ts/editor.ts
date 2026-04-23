@@ -655,15 +655,18 @@ function applyHighlightToSelection(): boolean {
     return false;
   }
 
-  const mark = document.createElement("mark");
-  const contents = range.extractContents();
-  mark.appendChild(contents);
-  range.insertNode(mark);
+  const div = document.createElement("div");
+  div.appendChild(range.cloneContents());
+  const html = `<mark>${div.innerHTML}</mark>`;
 
-  const nextRange = document.createRange();
-  nextRange.selectNodeContents(mark);
-  sel.removeAllRanges();
-  sel.addRange(nextRange);
+  if (typeof document.execCommand === "function" && document.execCommand("insertHTML", false, html)) {
+    return true;
+  }
+
+  // Fallback for environments without execCommand (e.g. tests)
+  const mark = document.createElement("mark");
+  mark.appendChild(range.extractContents());
+  range.insertNode(mark);
   return true;
 }
 
