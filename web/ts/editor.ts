@@ -18,6 +18,7 @@ import { loadBacklinks } from "./backlinks.ts";
 import { showConflictBanner, handleReloadConflict } from "./conflict.ts";
 import { showContextMenu } from "./context-menu.ts";
 import { on, emit } from "./events.ts";
+import { dispatchEditorAction } from "./editor-action-bus.ts";
 import { initFormatToolbar } from "./format-toolbar.ts";
 import { handleImagePaste } from "./image-paste.ts";
 import { initImageResize } from "./image-resize.ts";
@@ -265,6 +266,7 @@ export async function saveCurrentNote(opts?: { silent?: boolean }) {
 
 async function _doSave(silent: boolean) {
   if (!currentPath) return;
+  dispatchEditorAction({ type: "save", path: currentPath, trigger: silent ? "auto" : "manual" });
   const savePath = currentPath;
   const tab = getTabs().find((t) => t.path === savePath) ?? getActiveTab();
   if (!tab) return;
@@ -405,6 +407,18 @@ function toggleSourceMode() {
   toolbarEl?.querySelector(".editor-toolbar-btn--source")?.classList.toggle("active", isSourceMode);
 }
 
+function getAnchorBlockTag(): string | null {
+  let node: Node | null = window.getSelection()?.anchorNode ?? null;
+  while (node && node !== contentEl) {
+    if (node instanceof HTMLElement) {
+      const tag = node.tagName.toLowerCase();
+      if (/^(h[1-6]|p|ul|ol|li|blockquote|pre)$/.test(tag)) return tag;
+    }
+    node = node.parentNode;
+  }
+  return null;
+}
+
 function setupEditorEvents() {
   if (!contentEl || !sourceEl) return;
 
@@ -420,6 +434,7 @@ function setupEditorEvents() {
   contentEl.addEventListener("input", (e) => {
     const ie = e as InputEvent;
     if (ie.inputType === "historyUndo" || ie.inputType === "historyRedo") {
+      dispatchEditorAction({ type: ie.inputType === "historyUndo" ? "undo" : "redo" });
       if (currentPath) markDirty(currentPath);
       scheduleAutosave();
       // Collapse any selection the browser restores as part of undo/redo.
@@ -433,8 +448,12 @@ function setupEditorEvents() {
     }
     if (currentPath) markDirty(currentPath);
     scheduleAutosave();
-    if (contentEl && checkBlockInputTransform(contentEl)) return;
-    checkInlineTransform();
+    if (contentEl && checkBlockInputTransform(contentEl)) {
+      dispatchEditorAction({ type: "block-transform", trigger: "space", to: getAnchorBlockTag() ?? "unknown" });
+      return;
+    }
+    const inlineTag = checkInlineTransform();
+    if (inlineTag) dispatchEditorAction({ type: "inline-transform", tag: inlineTag });
     if (contentEl) checkWikiLinkTrigger(contentEl, currentPath);
   });
 
@@ -456,23 +475,31 @@ function setupEditorEvents() {
     if (meta && e.key === "b") {
       e.preventDefault();
       document.execCommand("bold");
+      dispatchEditorAction({ type: "format", kind: "bold" });
       return;
     }
 
     if (meta && e.key === "i") {
       e.preventDefault();
       document.execCommand("italic");
+      dispatchEditorAction({ type: "format", kind: "italic" });
       return;
     }
 
     if (meta && e.key === "h") {
       e.preventDefault();
-      if (applyHighlightToSelection()) onEditorTabMutation();
+      if (applyHighlightToSelection()) {
+        onEditorTabMutation();
+        dispatchEditorAction({ type: "format", kind: "highlight" });
+      }
       return;
     }
 
     if (e.key === "Tab") {
-      if (handleContentTabKey(e)) return;
+      if (handleContentTabKey(e)) {
+        dispatchEditorAction({ type: "indent", direction: e.shiftKey ? "out" : "in" });
+        return;
+      }
     }
 
     if (e.key === "Backspace") {
@@ -483,6 +510,9 @@ function setupEditorEvents() {
       handleBlockTransform(e, contentEl!, () => {
         if (currentPath) markDirty(currentPath);
       });
+      if (e.defaultPrevented) {
+        dispatchEditorAction({ type: "block-transform", trigger: "enter", to: getAnchorBlockTag() ?? "unknown" });
+      }
     }
   });
 
@@ -494,11 +524,13 @@ function setupEditorEvents() {
     const imageItem = Array.from(clipData.items).find((item) => item.type.startsWith("image/"));
     if (imageItem) {
       handleImagePaste(imageItem, currentPath);
+      dispatchEditorAction({ type: "paste", kind: "image" });
       return;
     }
 
     const text = clipData.getData("text/plain");
     document.execCommand("insertText", false, text);
+    dispatchEditorAction({ type: "paste", kind: "text" });
   });
 
   initImageResize(contentEl, () => {
@@ -659,7 +691,10 @@ function applyHighlightToSelection(): boolean {
   div.appendChild(range.cloneContents());
   const html = `<mark>${div.innerHTML}</mark>`;
 
-  if (typeof document.execCommand === "function" && document.execCommand("insertHTML", false, html)) {
+  if (
+    typeof document.execCommand === "function" &&
+    document.execCommand("insertHTML", false, html)
+  ) {
     return true;
   }
 

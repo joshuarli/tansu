@@ -6,7 +6,8 @@
   ],
   "type": "module",
   "scripts": {
-    "bundle": "esbuild web/ts/main.ts --bundle --outfile=web/static/app.js --minify --format=esm",
+    "bundle": "esbuild web/ts/main.ts --bundle --outfile=web/static/app.js --minify --format=esm --define:process.env.NODE_ENV='\"production\"'",
+    "bundle-dev": "esbuild web/ts/main.ts --bundle --outfile=web/static/app.js --format=esm --define:process.env.NODE_ENV='\"development\"'",
     "test": "vitest run",
     "test-e2e": "vitest run --config vitest.e2e.config.ts"
   },

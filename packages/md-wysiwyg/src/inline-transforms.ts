@@ -40,14 +40,14 @@ export function buildReplacementHtml(pat: InlinePattern, content: string): strin
 }
 
 /// Check if the user just completed an inline markdown pattern at the cursor.
-/// If so, replace the raw markers with a styled element. Returns true if a
-/// transform was applied.
-export function checkInlineTransform(): boolean {
+/// If so, replace the raw markers with a styled element. Returns the HTML tag
+/// name that was applied (e.g. "strong"), or null if no transform fired.
+export function checkInlineTransform(): string | null {
   const sel = window.getSelection();
-  if (!sel || sel.rangeCount === 0 || !sel.isCollapsed) return false;
+  if (!sel || sel.rangeCount === 0 || !sel.isCollapsed) return null;
 
   const node = sel.anchorNode;
-  if (!node || node.nodeType !== Node.TEXT_NODE) return false;
+  if (!node || node.nodeType !== Node.TEXT_NODE) return null;
 
   const text = node.textContent ?? "";
   const pos = clampNodeOffset(node, sel.anchorOffset);
@@ -90,10 +90,10 @@ export function checkInlineTransform(): boolean {
       }
     }
 
-    return true;
+    return pat.tag;
   }
 
-  return false;
+  return null;
 }
 
 export function matchPattern(

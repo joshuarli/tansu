@@ -2,6 +2,8 @@
 /// within the editor content element. Uses mousedown+preventDefault on buttons
 /// to preserve editor focus and selection while applying formats.
 
+import { dispatchEditorAction } from "./editor-action-bus.ts";
+
 export interface FormatToolbarOptions {
   contentEl: HTMLElement;
   applyIndent: (dedent: boolean) => void;
@@ -73,21 +75,25 @@ export function initFormatToolbar(opts: FormatToolbarOptions): () => void {
 
   btn("<b>B</b>", "Bold", () => {
     document.execCommand("bold");
+    dispatchEditorAction({ type: "format", kind: "bold" });
     afterInline();
   });
 
   btn("<i>I</i>", "Italic", () => {
     document.execCommand("italic");
+    dispatchEditorAction({ type: "format", kind: "italic" });
     afterInline();
   });
 
   btn(`<span class="ftb-strike">S</span>`, "Strikethrough", () => {
     toggleInlineWrap(contentEl, "del");
+    dispatchEditorAction({ type: "format", kind: "strikethrough" });
     afterInline();
   });
 
   btn(`<span class="ftb-highlight">A</span>`, "Highlight", () => {
     toggleInlineWrap(contentEl, "mark");
+    dispatchEditorAction({ type: "format", kind: "highlight" });
     afterInline();
   });
 
@@ -96,6 +102,7 @@ export function initFormatToolbar(opts: FormatToolbarOptions): () => void {
   for (const level of [1, 2, 3, 4] as const) {
     btn(`<span class="ftb-heading">H${level}</span>`, `Heading ${level}`, () => {
       applyBlockFormat(contentEl, `h${level}`);
+      dispatchEditorAction({ type: "format", kind: "heading", detail: `h${level}` });
       afterBlock();
     });
   }
@@ -107,6 +114,7 @@ export function initFormatToolbar(opts: FormatToolbarOptions): () => void {
     "Indent",
     () => {
       applyIndent(false);
+      dispatchEditorAction({ type: "indent", direction: "in" });
       hideToolbar();
     },
   );
@@ -116,6 +124,7 @@ export function initFormatToolbar(opts: FormatToolbarOptions): () => void {
     "Dedent",
     () => {
       applyIndent(true);
+      dispatchEditorAction({ type: "indent", direction: "out" });
       hideToolbar();
     },
   );
@@ -127,6 +136,7 @@ export function initFormatToolbar(opts: FormatToolbarOptions): () => void {
     "Code block",
     () => {
       applyCodeBlock(contentEl);
+      dispatchEditorAction({ type: "format", kind: "code-block" });
       afterBlock();
     },
   );

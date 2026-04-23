@@ -1,7 +1,10 @@
 NAME       := tansu
 TARGET     := $(shell rustc -vV | awk '/^host:/ {print $$2}')
 
-dev: ts
+dev: lint-ts
+	oxfmt web/ts/
+	tsgo --noEmit --pretty false
+	pnpm run bundle-dev
 	cargo run --bin tansu -- $(NOTES_DIR) --port 3000
 
 build: check build-ts build-rs
