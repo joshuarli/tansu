@@ -40,9 +40,9 @@ const merged = merge3(base, ours, theirs); // null on conflict
 
 This aligns the DOM editing primitive (Enter creates a new `<p>`) with the markdown storage primitive (`\n` separates lines):
 
-| Markdown | DOM |
-|---|---|
-| `foo\nbar` | `<p>foo</p><p>bar</p>` |
+| Markdown     | DOM                                                    |
+| ------------ | ------------------------------------------------------ |
+| `foo\nbar`   | `<p>foo</p><p>bar</p>`                                 |
 | `foo\n\nbar` | `<p>foo</p><p data-md-blank="true"><br></p><p>bar</p>` |
 
 Enter in the content editor creates a new `<p>` (browser default), which round-trips to `\n`. No Enter interception is needed for plain text.
@@ -59,12 +59,12 @@ A blank line (`\n\n`) renders as `<p data-md-blank="true"><br></p>`. This placeh
 
 `joinBlocks` controls the separator emitted between adjacent serialized blocks:
 
-| previous → current | separator |
-|---|---|
-| either is blank sentinel | `\n` |
-| paragraph → paragraph | `\n` |
-| paragraph ↔ list | `\n` |
-| everything else (heading, code, blockquote…) | `\n\n` |
+| previous → current                           | separator |
+| -------------------------------------------- | --------- |
+| either is blank sentinel                     | `\n`      |
+| paragraph → paragraph                        | `\n`      |
+| paragraph ↔ list                             | `\n`      |
+| everything else (heading, code, blockquote…) | `\n\n`    |
 
 The paragraph→paragraph `\n` is what makes the line model work. Text immediately before a heading (e.g. `intro\n## H`) gains a blank line on first round-trip (`intro\n\n## H`) because heading uses the `\n\n` default. This is stable after one save.
 
@@ -106,7 +106,7 @@ The sentinel `﷐` is a Unicode noncharacter permanently reserved as "not a char
 
 Block transforms (`transforms.ts`) fire on Enter and input/space, converting markdown syntax typed into a `<p>` into the appropriate HTML element.
 
-- **Enter-triggered** (`handleBlockTransform`): if the `<p>` text matches a pattern (`## foo`, `- item`, `---`, `` ``` ``), the element is replaced and `setCursorStart` positions the cursor. `e.preventDefault()` suppresses browser Enter. If no pattern matches, browser default (new `<p>`) is used.
+- **Enter-triggered** (`handleBlockTransform`): if the `<p>` text matches a pattern (`## foo`, `- item`, `---`, ` ``` `), the element is replaced and `setCursorStart` positions the cursor. `e.preventDefault()` suppresses browser Enter. If no pattern matches, browser default (new `<p>`) is used.
 - **Input/space-triggered** (`checkBlockInputTransform`): converts `## ` or `- ` immediately on space. Also wraps bare text nodes (that the browser places directly in `contentEl`) in `<p>`.
 
 Block transforms call `setCursorStart` directly and bypass the sentinel restore path. Autosave only writes to the server; `loadContent` (which uses sentinel restore) is only called on disk reload and tab switch.

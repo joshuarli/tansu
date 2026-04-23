@@ -114,6 +114,10 @@ function render() {
   addBtn.title = "New note (Cmd+T)";
   addBtn.onclick = () => createNewNote();
   tabBar.appendChild(addBtn);
+
+  tabBar
+    .querySelector<HTMLElement>(".tab.active")
+    ?.scrollIntoView({ block: "nearest", inline: "nearest" });
 }
 
 async function showTabContextMenu(e: MouseEvent, index: number) {

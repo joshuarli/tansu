@@ -232,7 +232,7 @@ describe("roundtrip", () => {
 
 // Deterministic LCG pseudo-random number generator — no external dependency.
 function lcg(seed: number): number {
-  return ((1664525 * seed + 1013904223) >>> 0);
+  return (1664525 * seed + 1013904223) >>> 0;
 }
 function pick<T>(arr: readonly T[], seed: number): T {
   return arr[seed % arr.length]!;

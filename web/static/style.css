@@ -16,6 +16,11 @@
   --radius: 6px;
   --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
   --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --sidebar-w: 220px;
+}
+
+#app.sidebar-collapsed {
+  --sidebar-w: 28px;
 }
 
 body {
@@ -40,23 +45,29 @@ body {
 }
 
 #sidebar {
-  width: 220px;
+  width: var(--sidebar-w);
   flex-shrink: 0;
   border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
   overflow: hidden;
   background: var(--bg-subtle);
+  transition: width 0.15s ease;
 }
 
 #sidebar-header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
   padding: 8px;
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
+  overflow: hidden;
 }
 
 #sidebar-search {
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   padding: 5px 8px;
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -70,6 +81,38 @@ body {
 #sidebar-search:focus {
   outline: none;
   border-color: var(--accent);
+}
+
+#sidebar-collapse {
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--fg-muted);
+  font-size: 16px;
+  line-height: 1;
+  padding: 2px 4px;
+  border-radius: var(--radius);
+}
+
+#sidebar-collapse:hover {
+  background: var(--border);
+  color: var(--fg);
+}
+
+#app.sidebar-collapsed #sidebar-search,
+#app.sidebar-collapsed #sidebar-tree {
+  display: none;
+}
+
+#app.sidebar-collapsed #sidebar-header {
+  justify-content: center;
+  padding: 6px 0;
+  border-bottom: none;
+}
+
+#app.sidebar-collapsed #sidebar-collapse {
+  padding: 4px 6px;
 }
 
 #sidebar-tree {
@@ -144,6 +187,11 @@ body {
   min-height: 36px;
   overflow-x: auto;
   flex-shrink: 0;
+  scrollbar-width: none;
+}
+
+#tab-bar::-webkit-scrollbar {
+  display: none;
 }
 
 .tab {
@@ -230,31 +278,42 @@ body {
 }
 
 .editor-toolbar {
+  align-self: stretch;
   display: flex;
+  justify-content: flex-end;
   align-items: center;
-  gap: 4px;
-  margin-bottom: 12px;
-  padding-bottom: 8px;
+  gap: 2px;
+  padding: 4px 8px;
+  background: var(--bg-subtle);
   border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  flex-shrink: 0;
 }
 
-.editor-toolbar button {
+.editor-toolbar-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
   background: none;
   border: 1px solid transparent;
   border-radius: var(--radius);
-  padding: 4px 8px;
   cursor: pointer;
-  font: inherit;
-  font-size: 12px;
   color: var(--fg-muted);
+  padding: 0;
 }
 
-.editor-toolbar button:hover {
-  background: var(--bg-subtle);
+.editor-toolbar-btn:hover {
+  background: rgba(0, 0, 0, 0.06);
   border-color: var(--border);
+  color: var(--fg);
 }
-.editor-toolbar button.active {
-  background: var(--bg-subtle);
+
+.editor-toolbar-btn.active {
+  background: rgba(0, 0, 0, 0.06);
   border-color: var(--border);
   color: var(--fg);
 }
@@ -291,21 +350,17 @@ body {
 
 /* Prose styles for WYSIWYG editor */
 .editor-content h1 {
-  font-size: 2em;
-  font-weight: 600;
-  margin: 0.67em 0;
-  padding-bottom: 0.3em;
-  border-bottom: 1px solid var(--border);
-}
-.editor-content h2 {
   font-size: 1.5em;
   font-weight: 600;
+  margin: 0.67em 0;
+}
+.editor-content h2 {
+  font-size: 1.25em;
+  font-weight: 600;
   margin: 1em 0 0.5em;
-  padding-bottom: 0.3em;
-  border-bottom: 1px solid var(--border);
 }
 .editor-content h3 {
-  font-size: 1.25em;
+  font-size: 1.1em;
   font-weight: 600;
   margin: 1em 0 0.5em;
 }

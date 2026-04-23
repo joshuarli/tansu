@@ -65,6 +65,14 @@ let renderInFlight = false;
 export async function initFileNav(): Promise<() => void> {
   render();
 
+  const collapseBtn = document.getElementById("sidebar-collapse") as HTMLButtonElement;
+  collapseBtn.addEventListener("click", () => {
+    const app = document.getElementById("app")!;
+    const collapsed = app.classList.toggle("sidebar-collapsed");
+    collapseBtn.innerHTML = collapsed ? "&#x203A;" : "&#x2039;";
+    collapseBtn.title = collapsed ? "Expand sidebar" : "Collapse sidebar";
+  });
+
   const searchInput = document.getElementById("sidebar-search") as HTMLInputElement;
 
   searchInput.addEventListener("input", (e) => {

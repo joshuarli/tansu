@@ -16,6 +16,7 @@ import {
 } from "./autocomplete.ts";
 import { loadBacklinks } from "./backlinks.ts";
 import { showConflictBanner, handleReloadConflict } from "./conflict.ts";
+import { showContextMenu } from "./context-menu.ts";
 import { on, emit } from "./events.ts";
 import { handleImagePaste } from "./image-paste.ts";
 import { initImageResize } from "./image-resize.ts";
@@ -24,6 +25,7 @@ import { toggleRevisions, hideRevisions, isRevisionsOpen } from "./revisions.ts"
 import { markDirty, markClean, getActiveTab, getTabs, setCursor, getCursor } from "./tabs.ts";
 
 let editorArea: HTMLElement;
+let toolbarEl: HTMLElement | null = null;
 let container: HTMLElement | null = null;
 let contentEl: HTMLElement | null = null;
 let sourceEl: HTMLTextAreaElement | null = null;
@@ -81,38 +83,53 @@ export function showEditor(path: string, content: string) {
   container = document.createElement("div");
   container.className = "editor-container";
 
-  const toolbar = document.createElement("div");
-  toolbar.className = "editor-toolbar";
+  toolbarEl = document.createElement("div");
+  toolbarEl.className = "editor-toolbar";
 
   const sourceBtn = document.createElement("button");
-  sourceBtn.textContent = "Source";
+  sourceBtn.className = "editor-toolbar-btn editor-toolbar-btn--source";
   sourceBtn.title = "Toggle source mode";
+  sourceBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="5,4 1,8 5,12"/><polyline points="11,4 15,8 11,12"/><line x1="9.5" y1="2" x2="6.5" y2="14"/></svg>`;
   sourceBtn.onclick = () => toggleSourceMode();
 
-  const revBtn = document.createElement("button");
-  revBtn.textContent = "Revisions";
-  revBtn.onclick = () => {
-    if (currentPath && revisionsEl) {
-      toggleRevisions({
-        path: currentPath,
-        host: revisionsEl,
-        getCurrentContent: getCurrentContent,
-        onHide: () => {
-          if (revisionsEl) revisionsEl.style.display = "none";
-          if (isSourceMode && sourceEl) sourceEl.style.display = "";
-          else if (contentEl) contentEl.style.display = "";
+  const menuBtn = document.createElement("button");
+  menuBtn.className = "editor-toolbar-btn";
+  menuBtn.title = "More";
+  menuBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><rect x="1" y="3" width="14" height="2" rx="1"/><rect x="1" y="7" width="14" height="2" rx="1"/><rect x="1" y="11" width="14" height="2" rx="1"/></svg>`;
+  menuBtn.onclick = () => {
+    const rect = menuBtn.getBoundingClientRect();
+    showContextMenu(
+      [
+        {
+          label: "Revisions",
+          onclick: () => {
+            if (currentPath && revisionsEl) {
+              toggleRevisions({
+                path: currentPath,
+                host: revisionsEl,
+                getCurrentContent: getCurrentContent,
+                onHide: () => {
+                  if (revisionsEl) revisionsEl.style.display = "none";
+                  if (isSourceMode && sourceEl) sourceEl.style.display = "";
+                  else if (contentEl) contentEl.style.display = "";
+                },
+              });
+              if (isRevisionsOpen()) {
+                if (contentEl) contentEl.style.display = "none";
+                if (sourceEl) sourceEl.style.display = "none";
+                if (revisionsEl) revisionsEl.style.display = "";
+              }
+            }
+          },
         },
-      });
-      if (isRevisionsOpen()) {
-        if (contentEl) contentEl.style.display = "none";
-        if (sourceEl) sourceEl.style.display = "none";
-        if (revisionsEl) revisionsEl.style.display = "";
-      }
-    }
+      ],
+      rect.left,
+      rect.bottom + 4,
+    );
   };
 
-  toolbar.append(sourceBtn, revBtn);
-  container.appendChild(toolbar);
+  toolbarEl.append(sourceBtn, menuBtn);
+  editorArea.appendChild(toolbarEl);
 
   contentEl = document.createElement("div");
   contentEl.className = "editor-content";
@@ -154,6 +171,10 @@ export function hideEditor() {
   hideRevisions();
   hideAutocomplete();
 
+  if (toolbarEl) {
+    toolbarEl.remove();
+    toolbarEl = null;
+  }
   if (container) {
     container.remove();
     container = null;
@@ -365,7 +386,7 @@ function toggleSourceMode() {
     isSourceMode = true;
   }
 
-  container?.querySelector(".editor-toolbar button")?.classList.toggle("active", isSourceMode);
+  toolbarEl?.querySelector(".editor-toolbar-btn--source")?.classList.toggle("active", isSourceMode);
 }
 
 function setupEditorEvents() {
