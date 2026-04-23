@@ -241,6 +241,20 @@ body {
   color: var(--fg);
 }
 
+.tab-tooltip {
+  position: fixed;
+  display: none;
+  transform: translateX(-50%);
+  background: var(--fg);
+  color: var(--bg);
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 100px;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 200;
+}
+
 #editor-area {
   flex: 1;
   overflow: auto;
@@ -316,6 +330,68 @@ body {
   background: rgba(0, 0, 0, 0.06);
   border-color: var(--border);
   color: var(--fg);
+}
+
+.format-toolbar {
+  position: fixed;
+  z-index: 200;
+  display: none;
+  align-items: center;
+  gap: 1px;
+  padding: 3px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.12);
+  pointer-events: auto;
+}
+
+.format-toolbar-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 26px;
+  height: 26px;
+  padding: 0 4px;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  background: none;
+  color: var(--fg-muted);
+  font-size: 12px;
+  font-family: var(--font);
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.format-toolbar-btn:hover {
+  background: rgba(0, 0, 0, 0.06);
+  color: var(--fg);
+}
+
+.format-toolbar-sep {
+  width: 1px;
+  height: 16px;
+  background: var(--border);
+  margin: 0 2px;
+  flex-shrink: 0;
+}
+
+.ftb-strike {
+  text-decoration: line-through;
+}
+
+.ftb-highlight {
+  background: #fbbf24;
+  color: #000;
+  border-radius: 2px;
+  padding: 0 2px;
+  font-size: 11px;
+}
+
+.ftb-heading {
+  font-size: 10px;
+  font-weight: 600;
 }
 
 .editor-content {

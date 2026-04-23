@@ -42,17 +42,31 @@ on("tab:render", render);
 
 let hoveredTabIndex = -1;
 
+const tabTooltip = document.createElement("div");
+tabTooltip.className = "tab-tooltip";
+tabTooltip.textContent = "space to close";
+document.body.appendChild(tabTooltip);
+
+function showTabTooltip(tabEl: HTMLElement) {
+  const rect = tabEl.getBoundingClientRect();
+  tabTooltip.style.top = `${rect.bottom + 6}px`;
+  tabTooltip.style.left = `${rect.left + rect.width / 2}px`;
+  tabTooltip.style.display = "block";
+}
+
+function hideTabTooltip() {
+  tabTooltip.style.display = "none";
+}
+
 document.addEventListener("keydown", (e) => {
   if (hoveredTabIndex === -1) return;
-  if (e.key !== "x" && e.key !== "X") return;
+  if (e.key !== " ") return;
   if (e.metaKey || e.ctrlKey || e.altKey) return;
   const target = e.target as Element;
-  if (
-    target.closest("[contenteditable]") ||
-    target.tagName === "INPUT" ||
-    target.tagName === "TEXTAREA"
-  )
-    return;
+  // Allow space in text inputs but not in contenteditable — the editor is
+  // always focused, so we must intercept there too and preventDefault stops
+  // the character from being inserted.
+  if (target.tagName === "INPUT" || target.tagName === "TEXTAREA") return;
   e.preventDefault();
   closeTab(hoveredTabIndex);
 });
@@ -62,6 +76,7 @@ function render() {
   const emptyState = document.getElementById("empty-state")!;
   tabBar.innerHTML = "";
   hoveredTabIndex = -1;
+  hideTabTooltip();
   const tabs = getTabs();
   const activeIndex = getActiveIndex();
   emptyState.style.display = tabs.length === 0 ? "flex" : "none";
@@ -92,9 +107,11 @@ function render() {
 
     el.addEventListener("mouseenter", () => {
       hoveredTabIndex = i;
+      showTabTooltip(el);
     });
     el.addEventListener("mouseleave", () => {
       hoveredTabIndex = -1;
+      hideTabTooltip();
     });
     el.onclick = () => switchTab(i);
     el.oncontextmenu = (e) => showTabContextMenu(e, i);
@@ -111,7 +128,7 @@ function render() {
   const addBtn = document.createElement("div");
   addBtn.className = "tab tab-new";
   addBtn.textContent = "+";
-  addBtn.title = "New note (Cmd+T)";
+  addBtn.title = "New note (Ctrl+N)";
   addBtn.onclick = () => createNewNote();
   tabBar.appendChild(addBtn);
 

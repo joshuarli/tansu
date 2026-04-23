@@ -18,6 +18,7 @@ import { loadBacklinks } from "./backlinks.ts";
 import { showConflictBanner, handleReloadConflict } from "./conflict.ts";
 import { showContextMenu } from "./context-menu.ts";
 import { on, emit } from "./events.ts";
+import { initFormatToolbar } from "./format-toolbar.ts";
 import { handleImagePaste } from "./image-paste.ts";
 import { initImageResize } from "./image-resize.ts";
 import { registerLinkHover } from "./link-hover.ts";
@@ -26,6 +27,7 @@ import { markDirty, markClean, getActiveTab, getTabs, setCursor, getCursor } fro
 
 let editorArea: HTMLElement;
 let toolbarEl: HTMLElement | null = null;
+let formatToolbarCleanup: (() => void) | null = null;
 let container: HTMLElement | null = null;
 let contentEl: HTMLElement | null = null;
 let sourceEl: HTMLTextAreaElement | null = null;
@@ -171,6 +173,10 @@ export function hideEditor() {
   hideRevisions();
   hideAutocomplete();
 
+  if (formatToolbarCleanup) {
+    formatToolbarCleanup();
+    formatToolbarCleanup = null;
+  }
   if (toolbarEl) {
     toolbarEl.remove();
     toolbarEl = null;
@@ -227,10 +233,20 @@ let autosaveTimer: ReturnType<typeof setTimeout> | null = null;
 
 function scheduleAutosave() {
   if (autosaveTimer !== null) clearTimeout(autosaveTimer);
-  autosaveTimer = setTimeout(() => {
-    autosaveTimer = null;
-    saveCurrentNote({ silent: true });
-  }, 1500);
+  autosaveTimer = setTimeout(tryAutosave, 1500);
+}
+
+function tryAutosave() {
+  autosaveTimer = null;
+  // Defer if the user has an active selection — they may be mid-formatting.
+  if (contentEl) {
+    const sel = window.getSelection();
+    if (sel && !sel.isCollapsed && contentEl.contains(sel.anchorNode)) {
+      autosaveTimer = setTimeout(tryAutosave, 500);
+      return;
+    }
+  }
+  saveCurrentNote({ silent: true });
 }
 
 export async function saveCurrentNote(opts?: { silent?: boolean }) {
@@ -392,7 +408,29 @@ function toggleSourceMode() {
 function setupEditorEvents() {
   if (!contentEl || !sourceEl) return;
 
-  contentEl.addEventListener("input", () => {
+  if (formatToolbarCleanup) formatToolbarCleanup();
+  formatToolbarCleanup = initFormatToolbar({
+    contentEl,
+    applyIndent: (dedent) => {
+      if (indentCurrentSelection(dedent)) onEditorTabMutation();
+    },
+    onMutation: onEditorTabMutation,
+  });
+
+  contentEl.addEventListener("input", (e) => {
+    const ie = e as InputEvent;
+    if (ie.inputType === "historyUndo" || ie.inputType === "historyRedo") {
+      if (currentPath) markDirty(currentPath);
+      scheduleAutosave();
+      // Collapse any selection the browser restores as part of undo/redo.
+      // Doing it here (synchronously in the input event) prevents the selection
+      // from ever being painted and stops the format toolbar from appearing.
+      const sel = window.getSelection();
+      if (sel && !sel.isCollapsed && contentEl && contentEl.contains(sel.anchorNode)) {
+        sel.collapseToStart();
+      }
+      return;
+    }
     if (currentPath) markDirty(currentPath);
     scheduleAutosave();
     if (contentEl && checkBlockInputTransform(contentEl)) return;
@@ -511,7 +549,7 @@ function handleSourceTabKey(e: KeyboardEvent): boolean {
   return true;
 }
 
-function handleContentTabKey(e: KeyboardEvent): boolean {
+function indentCurrentSelection(dedent: boolean): boolean {
   if (!contentEl) return false;
   const sel = window.getSelection();
   if (!sel || sel.rangeCount === 0) return false;
@@ -520,57 +558,60 @@ function handleContentTabKey(e: KeyboardEvent): boolean {
     return false;
   }
 
-  e.preventDefault();
-
   const listItem = getListItemBlock(range.startContainer);
   if (range.collapsed && listItem) {
     const marker = insertMarker(range);
-    if (e.shiftKey) dedentListItems([listItem]);
+    if (dedent) dedentListItems([listItem]);
     else indentListItems([listItem]);
     restoreCollapsedSelection(marker);
-    onEditorTabMutation();
     return true;
   }
 
-  if (range.collapsed && !e.shiftKey) {
+  if (range.collapsed && !dedent) {
     insertTabAtRange(range);
-    onEditorTabMutation();
     return true;
   }
 
   const targetRange = range.cloneRange();
   const blocks = getSelectedBlocks(targetRange);
   if (blocks.length === 0) {
-    if (e.shiftKey) return true;
+    if (dedent) return true;
     insertTabAtRange(range);
-    onEditorTabMutation();
     return true;
   }
 
   if (blocks.every(isListItemBlock)) {
     const endMarker = insertBoundaryMarker(range, "end");
     const startMarker = insertBoundaryMarker(range, "start");
-    if (e.shiftKey) dedentListItems(blocks);
+    if (dedent) dedentListItems(blocks);
     else indentListItems(blocks);
     restoreSelectionFromMarkers(startMarker, endMarker);
-    onEditorTabMutation();
     return true;
   }
 
-  if (e.shiftKey) {
-    const endMarker = insertBoundaryMarker(range, "end");
-    const startMarker = insertBoundaryMarker(range, "start");
+  const endMarker = insertBoundaryMarker(range, "end");
+  const startMarker = insertBoundaryMarker(range, "start");
+  if (dedent) {
     for (const block of blocks) dedentBlock(block);
-    restoreSelectionFromMarkers(startMarker, endMarker);
   } else {
-    const endMarker = insertBoundaryMarker(range, "end");
-    const startMarker = insertBoundaryMarker(range, "start");
     for (const block of blocks) indentBlock(block);
-    restoreSelectionFromMarkers(startMarker, endMarker);
   }
-
-  onEditorTabMutation();
+  restoreSelectionFromMarkers(startMarker, endMarker);
   return true;
+}
+
+function handleContentTabKey(e: KeyboardEvent): boolean {
+  if (!contentEl) return false;
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0) return false;
+  const range = sel.getRangeAt(0);
+  if (!contentEl.contains(range.startContainer) || !contentEl.contains(range.endContainer)) {
+    return false;
+  }
+  e.preventDefault();
+  const did = indentCurrentSelection(e.shiftKey);
+  if (did) onEditorTabMutation();
+  return did;
 }
 
 function handleEmptyListItemBackspace(e: KeyboardEvent): boolean {

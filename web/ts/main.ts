@@ -205,8 +205,8 @@ function initApp() {
     },
     {
       label: "New note",
-      shortcut: "\u2318T",
-      keys: { key: "t", meta: true },
+      shortcut: "\u2318N",
+      keys: { key: "n", meta: true },
       action: () => createNewNote(),
     },
     {
