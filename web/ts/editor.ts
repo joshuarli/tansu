@@ -17,8 +17,8 @@ import {
 import { loadBacklinks } from "./backlinks.ts";
 import { showConflictBanner, handleReloadConflict } from "./conflict.ts";
 import { showContextMenu } from "./context-menu.ts";
+import { dispatchEditorAction } from "./editor-events.ts";
 import { on, emit } from "./events.ts";
-import { dispatchEditorAction } from "./editor-action-bus.ts";
 import { initFormatToolbar } from "./format-toolbar.ts";
 import { handleImagePaste } from "./image-paste.ts";
 import { initImageResize } from "./image-resize.ts";
@@ -449,7 +449,11 @@ function setupEditorEvents() {
     if (currentPath) markDirty(currentPath);
     scheduleAutosave();
     if (contentEl && checkBlockInputTransform(contentEl)) {
-      dispatchEditorAction({ type: "block-transform", trigger: "space", to: getAnchorBlockTag() ?? "unknown" });
+      dispatchEditorAction({
+        type: "block-transform",
+        trigger: "space",
+        to: getAnchorBlockTag() ?? "unknown",
+      });
       return;
     }
     const inlineTag = checkInlineTransform();
@@ -511,7 +515,11 @@ function setupEditorEvents() {
         if (currentPath) markDirty(currentPath);
       });
       if (e.defaultPrevented) {
-        dispatchEditorAction({ type: "block-transform", trigger: "enter", to: getAnchorBlockTag() ?? "unknown" });
+        dispatchEditorAction({
+          type: "block-transform",
+          trigger: "enter",
+          to: getAnchorBlockTag() ?? "unknown",
+        });
       }
     }
   });

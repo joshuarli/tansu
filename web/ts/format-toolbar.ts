@@ -2,7 +2,7 @@
 /// within the editor content element. Uses mousedown+preventDefault on buttons
 /// to preserve editor focus and selection while applying formats.
 
-import { dispatchEditorAction } from "./editor-action-bus.ts";
+import { dispatchEditorAction } from "./editor-events.ts";
 
 export interface FormatToolbarOptions {
   contentEl: HTMLElement;
