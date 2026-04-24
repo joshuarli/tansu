@@ -111,6 +111,25 @@ describe("toggleHighlight", () => {
     expect(selStart).toBe(0);
     expect(selEnd).toBe(5);
   });
+
+  it("wraps each block independently across paragraphs", () => {
+    const { md, selStart, selEnd } = toggleHighlight("foo\n\nbar", 0, 8);
+    expect(md).toBe("==foo==\n\n==bar==");
+    expect(selStart).toBe(0);
+    expect(selEnd).toBe(16);
+  });
+
+  it("unwraps each block independently across paragraphs", () => {
+    const { md, selStart, selEnd } = toggleHighlight("==foo==\n\n==bar==", 0, 16);
+    expect(md).toBe("foo\n\nbar");
+    expect(selStart).toBe(0);
+    expect(selEnd).toBe(8);
+  });
+
+  it("wraps only non-empty blocks when selection spans a blank line", () => {
+    const { md } = toggleHighlight("foo\n\n\n\nbar", 0, 10);
+    expect(md).toBe("==foo==\n\n\n\n==bar==");
+  });
 });
 
 describe("clearInlineFormats", () => {

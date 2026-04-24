@@ -58,7 +58,42 @@ export function toggleStrikethrough(md: string, start: number, end: number): For
 }
 
 export function toggleHighlight(md: string, start: number, end: number): FormatResult {
-  return toggleMarker(md, start, end, "==");
+  const marker = "==";
+  const n = marker.length;
+  const slice = md.slice(start, end);
+
+  if (!slice.includes("\n\n")) {
+    return toggleMarker(md, start, end, marker);
+  }
+
+  const blocks = slice.split("\n\n");
+  const nonEmpty = blocks.filter((b) => b.trim().length > 0);
+
+  const allWrapped =
+    nonEmpty.length > 0 &&
+    nonEmpty.every((b) => b.startsWith(marker) && b.endsWith(marker) && b.length >= 2 * n);
+
+  if (allWrapped) {
+    const newSlice = blocks
+      .map((b) =>
+        b.trim().length > 0 && b.startsWith(marker) && b.endsWith(marker)
+          ? b.slice(n, b.length - n)
+          : b,
+      )
+      .join("\n\n");
+    return {
+      md: md.slice(0, start) + newSlice + md.slice(end),
+      selStart: start,
+      selEnd: end - nonEmpty.length * 2 * n,
+    };
+  }
+
+  const newSlice = blocks.map((b) => (b.trim().length > 0 ? marker + b + marker : b)).join("\n\n");
+  return {
+    md: md.slice(0, start) + newSlice + md.slice(end),
+    selStart: start,
+    selEnd: end + nonEmpty.length * 2 * n,
+  };
 }
 
 export function clearInlineFormats(md: string, start: number, end: number): FormatResult {
