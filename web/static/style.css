@@ -332,6 +332,13 @@ body {
   color: var(--fg);
 }
 
+.editor-toolbar-fmt-group {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  flex-shrink: 0;
+}
+
 .format-toolbar {
   position: fixed;
   z-index: 200;

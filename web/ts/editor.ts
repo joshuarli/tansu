@@ -19,7 +19,7 @@ import { showConflictBanner, handleReloadConflict } from "./conflict.ts";
 import { showContextMenu } from "./context-menu.ts";
 import { dispatchEditorAction } from "./editor-events.ts";
 import { on, emit } from "./events.ts";
-import { initFormatToolbar } from "./format-toolbar.ts";
+import { initFormatToolbar, populateFormatButtons } from "./format-toolbar.ts";
 import { handleImagePaste } from "./image-paste.ts";
 import { initImageResize } from "./image-resize.ts";
 import { registerLinkHover } from "./link-hover.ts";
@@ -131,7 +131,22 @@ export function showEditor(path: string, content: string) {
     );
   };
 
-  toolbarEl.append(sourceBtn, menuBtn);
+  const fmtGroup = document.createElement("div");
+  fmtGroup.className = "editor-toolbar-fmt-group";
+
+  populateFormatButtons(fmtGroup, {
+    contentEl,
+    applyIndent: (dedent) => {
+      if (indentCurrentSelection(dedent)) onEditorTabMutation();
+    },
+    afterInline: onEditorTabMutation,
+    afterBlock: onEditorTabMutation,
+  });
+
+  const toolbarSpacer = document.createElement("div");
+  toolbarSpacer.style.flex = "1";
+
+  toolbarEl.append(fmtGroup, toolbarSpacer, sourceBtn, menuBtn);
   editorArea.appendChild(toolbarEl);
 
   contentEl = document.createElement("div");
@@ -405,6 +420,8 @@ function toggleSourceMode() {
   }
 
   toolbarEl?.querySelector(".editor-toolbar-btn--source")?.classList.toggle("active", isSourceMode);
+  const fmtGroup = toolbarEl?.querySelector(".editor-toolbar-fmt-group") as HTMLElement | null;
+  if (fmtGroup) fmtGroup.style.display = isSourceMode ? "none" : "flex";
 }
 
 function getAnchorBlockTag(): string | null {

@@ -10,6 +10,116 @@ export interface FormatToolbarOptions {
   onMutation: () => void;
 }
 
+export interface FormatButtonsOpts {
+  contentEl: HTMLElement;
+  applyIndent: (dedent: boolean) => void;
+  afterInline: () => void;
+  afterBlock: () => void;
+  // Called after indent/dedent. Mutation is already handled by applyIndent, so this
+  // is only needed for side-effects like hiding the floating toolbar.
+  afterIndent?: () => void;
+}
+
+export function populateFormatButtons(container: HTMLElement, opts: FormatButtonsOpts): void {
+  const { contentEl, applyIndent, afterInline, afterBlock } = opts;
+  const afterIndent = opts.afterIndent ?? (() => {});
+
+  function btn(innerHTML: string, title: string, action: () => void) {
+    const el = document.createElement("button");
+    el.className = "format-toolbar-btn";
+    el.title = title;
+    el.innerHTML = innerHTML;
+    el.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      action();
+    });
+    container.appendChild(el);
+  }
+
+  function sep() {
+    const el = document.createElement("div");
+    el.className = "format-toolbar-sep";
+    container.appendChild(el);
+  }
+
+  btn("<b>B</b>", "Bold", () => {
+    document.execCommand("bold");
+    dispatchEditorAction({ type: "format", kind: "bold" });
+    afterInline();
+  });
+
+  btn("<i>I</i>", "Italic", () => {
+    document.execCommand("italic");
+    dispatchEditorAction({ type: "format", kind: "italic" });
+    afterInline();
+  });
+
+  btn(`<span class="ftb-strike">S</span>`, "Strikethrough", () => {
+    toggleInlineWrap(contentEl, "del");
+    dispatchEditorAction({ type: "format", kind: "strikethrough" });
+    afterInline();
+  });
+
+  btn(`<span class="ftb-highlight">A</span>`, "Highlight", () => {
+    toggleInlineWrap(contentEl, "mark");
+    dispatchEditorAction({ type: "format", kind: "highlight" });
+    afterInline();
+  });
+
+  btn(
+    `<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3L13 7L6.5 13.5H3V10L9 3Z"/><line x1="6" y1="7" x2="10" y2="11"/><line x1="3" y1="13.5" x2="14" y2="13.5"/></svg>`,
+    "Clear formatting",
+    () => {
+      clearInlineStyles(contentEl);
+      afterInline();
+    },
+  );
+
+  sep();
+
+  for (const level of [1, 2, 3, 4] as const) {
+    btn(`<span class="ftb-heading">H${level}</span>`, `Heading ${level}`, () => {
+      applyBlockFormat(contentEl, `h${level}`);
+      dispatchEditorAction({ type: "format", kind: "heading", detail: `h${level}` });
+      afterBlock();
+    });
+  }
+
+  sep();
+
+  btn(
+    `<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"><line x1="3" y1="4" x2="9" y2="4"/><line x1="3" y1="8" x2="13" y2="8"/><line x1="3" y1="12" x2="11" y2="12"/><polyline points="11,6 13,8 11,10" stroke-linejoin="round"/></svg>`,
+    "Indent",
+    () => {
+      applyIndent(false);
+      dispatchEditorAction({ type: "indent", direction: "in" });
+      afterIndent();
+    },
+  );
+
+  btn(
+    `<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"><line x1="3" y1="4" x2="9" y2="4"/><line x1="3" y1="8" x2="13" y2="8"/><line x1="3" y1="12" x2="11" y2="12"/><polyline points="5,6 3,8 5,10" stroke-linejoin="round"/></svg>`,
+    "Dedent",
+    () => {
+      applyIndent(true);
+      dispatchEditorAction({ type: "indent", direction: "out" });
+      afterIndent();
+    },
+  );
+
+  sep();
+
+  btn(
+    `<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="5,4 1,8 5,12"/><polyline points="11,4 15,8 11,12"/></svg>`,
+    "Code block",
+    () => {
+      applyCodeBlock(contentEl);
+      dispatchEditorAction({ type: "format", kind: "code-block" });
+      afterBlock();
+    },
+  );
+}
+
 export function initFormatToolbar(opts: FormatToolbarOptions): () => void {
   const { contentEl, applyIndent, onMutation } = opts;
 
@@ -45,101 +155,19 @@ export function initFormatToolbar(opts: FormatToolbarOptions): () => void {
     toolbar.style.display = "none";
   }
 
-  function btn(innerHTML: string, title: string, action: () => void) {
-    const el = document.createElement("button");
-    el.className = "format-toolbar-btn";
-    el.title = title;
-    el.innerHTML = innerHTML;
-    el.addEventListener("mousedown", (e) => {
-      e.preventDefault();
-      action();
-    });
-    toolbar.appendChild(el);
-  }
-
-  function sep() {
-    const el = document.createElement("div");
-    el.className = "format-toolbar-sep";
-    toolbar.appendChild(el);
-  }
-
-  function afterInline() {
-    onMutation();
-    requestAnimationFrame(updateVisibility);
-  }
-
-  function afterBlock() {
-    onMutation();
-    hideToolbar();
-  }
-
-  btn("<b>B</b>", "Bold", () => {
-    document.execCommand("bold");
-    dispatchEditorAction({ type: "format", kind: "bold" });
-    afterInline();
-  });
-
-  btn("<i>I</i>", "Italic", () => {
-    document.execCommand("italic");
-    dispatchEditorAction({ type: "format", kind: "italic" });
-    afterInline();
-  });
-
-  btn(`<span class="ftb-strike">S</span>`, "Strikethrough", () => {
-    toggleInlineWrap(contentEl, "del");
-    dispatchEditorAction({ type: "format", kind: "strikethrough" });
-    afterInline();
-  });
-
-  btn(`<span class="ftb-highlight">A</span>`, "Highlight", () => {
-    toggleInlineWrap(contentEl, "mark");
-    dispatchEditorAction({ type: "format", kind: "highlight" });
-    afterInline();
-  });
-
-  sep();
-
-  for (const level of [1, 2, 3, 4] as const) {
-    btn(`<span class="ftb-heading">H${level}</span>`, `Heading ${level}`, () => {
-      applyBlockFormat(contentEl, `h${level}`);
-      dispatchEditorAction({ type: "format", kind: "heading", detail: `h${level}` });
-      afterBlock();
-    });
-  }
-
-  sep();
-
-  btn(
-    `<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"><line x1="3" y1="4" x2="9" y2="4"/><line x1="3" y1="8" x2="13" y2="8"/><line x1="3" y1="12" x2="11" y2="12"/><polyline points="11,6 13,8 11,10" stroke-linejoin="round"/></svg>`,
-    "Indent",
-    () => {
-      applyIndent(false);
-      dispatchEditorAction({ type: "indent", direction: "in" });
+  populateFormatButtons(toolbar, {
+    contentEl,
+    applyIndent,
+    afterInline: () => {
+      onMutation();
+      requestAnimationFrame(updateVisibility);
+    },
+    afterBlock: () => {
+      onMutation();
       hideToolbar();
     },
-  );
-
-  btn(
-    `<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"><line x1="3" y1="4" x2="9" y2="4"/><line x1="3" y1="8" x2="13" y2="8"/><line x1="3" y1="12" x2="11" y2="12"/><polyline points="5,6 3,8 5,10" stroke-linejoin="round"/></svg>`,
-    "Dedent",
-    () => {
-      applyIndent(true);
-      dispatchEditorAction({ type: "indent", direction: "out" });
-      hideToolbar();
-    },
-  );
-
-  sep();
-
-  btn(
-    `<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="5,4 1,8 5,12"/><polyline points="11,4 15,8 11,12"/></svg>`,
-    "Code block",
-    () => {
-      applyCodeBlock(contentEl);
-      dispatchEditorAction({ type: "format", kind: "code-block" });
-      afterBlock();
-    },
-  );
+    afterIndent: hideToolbar,
+  });
 
   const onSelectionChange = () => {
     if (!mouseIsDown) requestAnimationFrame(updateVisibility);
@@ -173,14 +201,30 @@ export function initFormatToolbar(opts: FormatToolbarOptions): () => void {
 }
 
 function positionToolbar(toolbar: HTMLElement, range: Range) {
-  const selRect = range.getBoundingClientRect();
+  // Prefer positioning above the caret's focus point (where the cursor landed after selection)
+  // rather than centering over the entire selection rect.
+  let refRect: DOMRect | null = null;
+  const sel = window.getSelection();
+  if (sel && sel.focusNode) {
+    try {
+      const r = document.createRange();
+      r.setStart(sel.focusNode, sel.focusOffset);
+      r.collapse(true);
+      const rect = r.getBoundingClientRect();
+      if (rect.height > 0) refRect = rect;
+    } catch (_) {
+      // focusNode may be in an edge-case state
+    }
+  }
+  if (!refRect) refRect = range.getBoundingClientRect();
+
   const tbRect = toolbar.getBoundingClientRect();
   const GAP = 8;
 
-  let top = selRect.top - tbRect.height - GAP;
-  if (top < 8) top = selRect.bottom + GAP;
+  let top = refRect.top - tbRect.height - GAP;
+  if (top < 8) top = refRect.bottom + GAP;
 
-  let left = selRect.left + selRect.width / 2 - tbRect.width / 2;
+  let left = refRect.left - tbRect.width / 2;
   left = Math.max(8, Math.min(left, window.innerWidth - tbRect.width - 8));
 
   toolbar.style.top = `${top}px`;
@@ -193,10 +237,33 @@ function isBlankBlock(el: HTMLElement): boolean {
   return (el.textContent ?? "").replace(/\u200B/g, "").trim() === "";
 }
 
+// Strip all inline formatting (bold, italic, strikethrough, highlight) from the selection.
+// Uses execCommand('insertHTML') so the operation joins the browser undo stack.
+export function clearInlineStyles(contentEl: HTMLElement): void {
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return;
+  const range = sel.getRangeAt(0);
+  if (!contentEl.contains(range.startContainer) || !contentEl.contains(range.endContainer)) return;
+
+  const div = document.createElement("div");
+  div.appendChild(range.cloneContents());
+
+  const STRIP_TAGS = ["b", "strong", "i", "em", "del", "s", "mark", "u"];
+  for (const tag of STRIP_TAGS) {
+    for (const el of Array.from(div.querySelectorAll(tag))) {
+      const parent = el.parentNode!;
+      while (el.firstChild) parent.insertBefore(el.firstChild, el);
+      el.remove();
+    }
+  }
+
+  document.execCommand("insertHTML", false, div.innerHTML);
+}
+
 // Toggle an inline format (e.g. del, mark) on the selection.
 // If the selection is already inside a matching element, removes it; otherwise wraps it.
 // Uses execCommand('insertHTML') so the operation joins the browser undo stack.
-function toggleInlineWrap(contentEl: HTMLElement, tag: string): void {
+export function toggleInlineWrap(contentEl: HTMLElement, tag: string): void {
   const sel = window.getSelection();
   if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return;
   const range = sel.getRangeAt(0);
@@ -308,7 +375,7 @@ function getDirectChild(contentEl: HTMLElement, node: Node): HTMLElement | null 
 
 // Convert the current block to a heading (or back to p if already that level).
 // Uses execCommand('formatBlock') so the operation joins the browser undo stack.
-function applyBlockFormat(contentEl: HTMLElement, tag: string) {
+export function applyBlockFormat(contentEl: HTMLElement, tag: string) {
   const sel = window.getSelection();
   if (!sel || sel.rangeCount === 0) return;
   const range = sel.getRangeAt(0);
@@ -325,7 +392,7 @@ function applyBlockFormat(contentEl: HTMLElement, tag: string) {
 
 // Convert the current block to a code block (pre), or back to p if already pre.
 // Uses execCommand('formatBlock') so the operation joins the browser undo stack.
-function applyCodeBlock(contentEl: HTMLElement) {
+export function applyCodeBlock(contentEl: HTMLElement) {
   const sel = window.getSelection();
   if (!sel || sel.rangeCount === 0) return;
   const range = sel.getRangeAt(0);
