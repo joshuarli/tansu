@@ -47,6 +47,20 @@ describe("toggleBold", () => {
     expect(selStart).toBe(2);
     expect(selEnd).toBe(7);
   });
+
+  it("wraps each block independently across paragraphs", () => {
+    const { md, selStart, selEnd } = toggleBold("foo\n\nbar", 0, 8);
+    expect(md).toBe("**foo**\n\n**bar**");
+    expect(selStart).toBe(0);
+    expect(selEnd).toBe(16);
+  });
+
+  it("unwraps each block independently across paragraphs", () => {
+    const { md, selStart, selEnd } = toggleBold("**foo**\n\n**bar**", 0, 16);
+    expect(md).toBe("foo\n\nbar");
+    expect(selStart).toBe(0);
+    expect(selEnd).toBe(8);
+  });
 });
 
 describe("toggleItalic", () => {
@@ -79,6 +93,20 @@ describe("toggleItalic", () => {
     // It should wrap with *, not strip (since the outer is ** not *)
     expect(md).toBe("***hello***");
   });
+
+  it("wraps each block independently across paragraphs", () => {
+    const { md, selStart, selEnd } = toggleItalic("foo\n\nbar", 0, 8);
+    expect(md).toBe("*foo*\n\n*bar*");
+    expect(selStart).toBe(0);
+    expect(selEnd).toBe(12);
+  });
+
+  it("unwraps each block independently across paragraphs", () => {
+    const { md, selStart, selEnd } = toggleItalic("*foo*\n\n*bar*", 0, 12);
+    expect(md).toBe("foo\n\nbar");
+    expect(selStart).toBe(0);
+    expect(selEnd).toBe(8);
+  });
 });
 
 describe("toggleStrikethrough", () => {
@@ -94,6 +122,20 @@ describe("toggleStrikethrough", () => {
     expect(md).toBe("hello");
     expect(selStart).toBe(0);
     expect(selEnd).toBe(5);
+  });
+
+  it("wraps each block independently across paragraphs", () => {
+    const { md, selStart, selEnd } = toggleStrikethrough("foo\n\nbar", 0, 8);
+    expect(md).toBe("~~foo~~\n\n~~bar~~");
+    expect(selStart).toBe(0);
+    expect(selEnd).toBe(16);
+  });
+
+  it("unwraps each block independently across paragraphs", () => {
+    const { md, selStart, selEnd } = toggleStrikethrough("~~foo~~\n\n~~bar~~", 0, 16);
+    expect(md).toBe("foo\n\nbar");
+    expect(selStart).toBe(0);
+    expect(selEnd).toBe(8);
   });
 });
 

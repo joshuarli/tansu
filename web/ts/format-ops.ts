@@ -8,8 +8,54 @@ export interface FormatResult {
   selEnd: number;
 }
 
+function splitSelectedBlocks(slice: string): string[] {
+  return slice.split("\n\n");
+}
+
+function toggleMarkerAcrossBlocks(
+  md: string,
+  start: number,
+  end: number,
+  marker: string,
+  isWrappedBlock?: (block: string) => boolean,
+): FormatResult {
+  const n = marker.length;
+  const slice = md.slice(start, end);
+  const blocks = splitSelectedBlocks(slice);
+  const nonEmpty = blocks.filter((block) => block.trim().length > 0);
+  const wrapped =
+    isWrappedBlock ?? ((block: string) => block.startsWith(marker) && block.endsWith(marker));
+
+  const allWrapped =
+    nonEmpty.length > 0 && nonEmpty.every((block) => block.length >= 2 * n && wrapped(block));
+
+  const newSlice = blocks
+    .map((block) => {
+      if (block.trim().length === 0) {
+        return block;
+      }
+      if (allWrapped && wrapped(block) && block.length >= 2 * n) {
+        return block.slice(n, block.length - n);
+      }
+      if (allWrapped) {
+        return block;
+      }
+      return `${marker}${block}${marker}`;
+    })
+    .join("\n\n");
+
+  return {
+    md: md.slice(0, start) + newSlice + md.slice(end),
+    selStart: start,
+    selEnd: end + (allWrapped ? -nonEmpty.length * 2 * n : nonEmpty.length * 2 * n),
+  };
+}
+
 function toggleMarker(md: string, start: number, end: number, marker: string): FormatResult {
   const n = marker.length;
+  if (md.slice(start, end).includes("\n\n")) {
+    return toggleMarkerAcrossBlocks(md, start, end, marker);
+  }
   const isWrapped =
     start >= n &&
     end + n <= md.length &&
@@ -30,6 +76,16 @@ export function toggleBold(md: string, start: number, end: number): FormatResult
 }
 
 export function toggleItalic(md: string, start: number, end: number): FormatResult {
+  if (md.slice(start, end).includes("\n\n")) {
+    return toggleMarkerAcrossBlocks(md, start, end, "*", (block) => {
+      return (
+        block.startsWith("*") &&
+        block.endsWith("*") &&
+        !block.startsWith("**") &&
+        !block.endsWith("**")
+      );
+    });
+  }
   const n = 1;
   const marker = "*";
 
@@ -58,42 +114,7 @@ export function toggleStrikethrough(md: string, start: number, end: number): For
 }
 
 export function toggleHighlight(md: string, start: number, end: number): FormatResult {
-  const marker = "==";
-  const n = marker.length;
-  const slice = md.slice(start, end);
-
-  if (!slice.includes("\n\n")) {
-    return toggleMarker(md, start, end, marker);
-  }
-
-  const blocks = slice.split("\n\n");
-  const nonEmpty = blocks.filter((b) => b.trim().length > 0);
-
-  const allWrapped =
-    nonEmpty.length > 0 &&
-    nonEmpty.every((b) => b.startsWith(marker) && b.endsWith(marker) && b.length >= 2 * n);
-
-  if (allWrapped) {
-    const newSlice = blocks
-      .map((b) =>
-        b.trim().length > 0 && b.startsWith(marker) && b.endsWith(marker)
-          ? b.slice(n, b.length - n)
-          : b,
-      )
-      .join("\n\n");
-    return {
-      md: md.slice(0, start) + newSlice + md.slice(end),
-      selStart: start,
-      selEnd: end - nonEmpty.length * 2 * n,
-    };
-  }
-
-  const newSlice = blocks.map((b) => (b.trim().length > 0 ? marker + b + marker : b)).join("\n\n");
-  return {
-    md: md.slice(0, start) + newSlice + md.slice(end),
-    selStart: start,
-    selEnd: end + nonEmpty.length * 2 * n,
-  };
+  return toggleMarker(md, start, end, "==");
 }
 
 export function clearInlineFormats(md: string, start: number, end: number): FormatResult {
