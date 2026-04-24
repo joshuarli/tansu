@@ -1,6 +1,6 @@
 /// Assert that a DOM element matching `sel` exists. Use for elements that must be present
 /// in the static HTML (e.g. #app, #tab-bar). Throws at initialization time if the markup is wrong.
-export function mustQuery<T extends HTMLElement>(sel: string): T {
+function mustQuery<T extends HTMLElement>(sel: string): T {
   const el = document.querySelector<T>(sel);
   if (!el) {
     throw new Error(`Required element not found: ${sel}`);
@@ -9,7 +9,7 @@ export function mustQuery<T extends HTMLElement>(sel: string): T {
 }
 
 /// Suppress a rejected promise. Use only when failure is truly inconsequential.
-export function ignoreError(p: Promise<unknown>): void {
+function ignoreError(p: Promise<unknown>): void {
   p.catch(() => void 0);
 }
 

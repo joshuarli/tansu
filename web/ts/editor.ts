@@ -14,7 +14,6 @@ export { invalidateNoteCache } from "./autocomplete.ts";
 import { loadBacklinks } from "./backlinks.ts";
 import { showConflictBanner, handleReloadConflict } from "./conflict.ts";
 import { showContextMenu } from "./context-menu.ts";
-import { dispatchEditorAction } from "./editor-events.ts";
 import { on, emit } from "./events.ts";
 import {
   toggleBold,
@@ -58,7 +57,7 @@ export function classifySaveResult(
   return { type: "real-conflict", diskContent, diskMtime: result.mtime };
 }
 
-export type ReloadAction = { type: "load" } | { type: "conflict" };
+type ReloadAction = { type: "load" } | { type: "conflict" };
 
 /// Pure decision: determine how to handle a disk reload.
 export function classifyReload(isDirty: boolean): ReloadAction {
@@ -286,7 +285,6 @@ export function initEditor(): EditorInstance {
     if (!currentPath) {
       return;
     }
-    dispatchEditorAction({ type: "save", path: currentPath, trigger: silent ? "auto" : "manual" });
     const savePath = currentPath;
     const tab = getTabs().find((t) => t.path === savePath) ?? getActiveTab();
     if (!tab) {
@@ -518,20 +516,6 @@ export function initEditor(): EditorInstance {
     if (fmtGroup) {
       fmtGroup.style.display = isSourceMode ? "none" : "flex";
     }
-  }
-
-  function getAnchorBlockTag(): string | null {
-    let node: Node | null = window.getSelection()?.anchorNode ?? null;
-    while (node && node !== contentEl) {
-      if (node instanceof HTMLElement) {
-        const tag = node.tagName.toLowerCase();
-        if (/^(h[1-6]|p|ul|ol|li|blockquote|pre)$/.test(tag)) {
-          return tag;
-        }
-      }
-      node = node.parentNode;
-    }
-    return null;
   }
 
   function isIndentableBlock(el: HTMLElement): boolean {
@@ -785,17 +769,9 @@ export function initEditor(): EditorInstance {
       scheduleAutosave();
       scheduleTypingSnapshot();
       if (contentEl && checkBlockInputTransform(contentEl)) {
-        dispatchEditorAction({
-          type: "block-transform",
-          trigger: "space",
-          to: getAnchorBlockTag() ?? "unknown",
-        });
         return;
       }
-      const inlineTag = checkInlineTransform();
-      if (inlineTag) {
-        dispatchEditorAction({ type: "inline-transform", tag: inlineTag });
-      }
+      checkInlineTransform();
       if (contentEl) {
         checkWikiLinkTrigger(contentEl, currentPath);
       }
@@ -821,42 +797,36 @@ export function initEditor(): EditorInstance {
       if (meta && e.key === "z" && !e.shiftKey) {
         e.preventDefault();
         undoEdit();
-        dispatchEditorAction({ type: "undo" });
         return;
       }
 
       if ((meta && e.shiftKey && e.key === "z") || (meta && e.key === "y")) {
         e.preventDefault();
         redoEdit();
-        dispatchEditorAction({ type: "redo" });
         return;
       }
 
       if (meta && e.key === "b") {
         e.preventDefault();
         applySourceFormatInEditor(toggleBold);
-        dispatchEditorAction({ type: "format", kind: "bold" });
         return;
       }
 
       if (meta && e.key === "i") {
         e.preventDefault();
         applySourceFormatInEditor(toggleItalic);
-        dispatchEditorAction({ type: "format", kind: "italic" });
         return;
       }
 
       if (meta && e.key === "h") {
         e.preventDefault();
         applySourceFormatInEditor(toggleHighlight);
-        dispatchEditorAction({ type: "format", kind: "highlight" });
         return;
       }
 
       if (e.key === "Tab") {
         e.preventDefault();
         applyIndentInEditor(e.shiftKey);
-        dispatchEditorAction({ type: "indent", direction: e.shiftKey ? "out" : "in" });
         return;
       }
 
@@ -870,13 +840,6 @@ export function initEditor(): EditorInstance {
             markDirty(currentPath);
           }
         });
-        if (e.defaultPrevented) {
-          dispatchEditorAction({
-            type: "block-transform",
-            trigger: "enter",
-            to: getAnchorBlockTag() ?? "unknown",
-          });
-        }
       }
     });
 
@@ -896,7 +859,6 @@ export function initEditor(): EditorInstance {
       const imageItem = [...clipData.items].find((item) => item.type.startsWith("image/"));
       if (imageItem) {
         handleImagePaste(imageItem, currentPath);
-        dispatchEditorAction({ type: "paste", kind: "image" });
         return;
       }
 
@@ -915,7 +877,6 @@ export function initEditor(): EditorInstance {
         restoreSelectionFromRenderedMarkers(contentEl);
         onEditorTabMutation();
       }
-      dispatchEditorAction({ type: "paste", kind: "text" });
     });
 
     initImageResize(contentEl, () => {

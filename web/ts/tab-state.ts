@@ -174,7 +174,7 @@ export function closeTabByPath(path: string) {
   }
 }
 
-export function clearClosedTabs() {
+function clearClosedTabs() {
   closedTabs.length = 0;
 }
 

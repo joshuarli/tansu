@@ -2,13 +2,14 @@
 
 import type { Tab } from "./tab-state.ts";
 
-export interface EventMap {
+interface EventMap {
   "tab:render": undefined;
   "tab:change": Tab | null;
   "tab:close": Tab;
   "files:changed": undefined;
   "pinned:changed": undefined;
   "revision:restore": { content: string; mtime: number };
+  "file:rename": { oldPath: string; newPath: string };
 }
 
 type Handler<T> = (data: T) => void;

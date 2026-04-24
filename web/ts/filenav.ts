@@ -27,7 +27,8 @@ function showNavContextMenu(e: MouseEvent, path: string, title: string): void {
         onclick: async () => {
           const newName = await showInputDialog("Rename to...", title);
           if (newName && newName !== title) {
-            window.dispatchEvent(new CustomEvent("tansu:rename", { detail: { path, newName } }));
+            const dir = path.includes("/") ? path.slice(0, path.lastIndexOf("/") + 1) : "";
+            emit("file:rename", { oldPath: path, newPath: `${dir}${newName}.md` });
           }
         },
       },

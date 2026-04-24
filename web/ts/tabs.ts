@@ -149,9 +149,9 @@ async function showTabContextMenu(e: MouseEvent, index: number) {
         onclick: async () => {
           const newName = await showInputDialog("Rename to...", tab.title);
           if (newName && newName !== tab.title) {
-            window.dispatchEvent(
-              new CustomEvent("tansu:rename", { detail: { path: tab.path, newName } }),
-            );
+            const oldPath = tab.path;
+            const dir = oldPath.includes("/") ? oldPath.slice(0, oldPath.lastIndexOf("/") + 1) : "";
+            emit("file:rename", { oldPath, newPath: `${dir}${newName}.md` });
           }
         },
       },

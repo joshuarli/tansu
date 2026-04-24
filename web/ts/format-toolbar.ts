@@ -2,7 +2,6 @@
 /// within the editor content element. Uses mousedown+preventDefault on buttons
 /// to preserve editor focus and selection while applying formats.
 
-import { dispatchEditorAction } from "./editor-events.ts";
 import {
   toggleBold,
   toggleItalic,
@@ -55,25 +54,21 @@ export function populateFormatButtons(container: HTMLElement, opts: FormatButton
 
   btn("<b>B</b>", "Bold", () => {
     applySourceFormat(toggleBold);
-    dispatchEditorAction({ type: "format", kind: "bold" });
     afterInline();
   });
 
   btn("<i>I</i>", "Italic", () => {
     applySourceFormat(toggleItalic);
-    dispatchEditorAction({ type: "format", kind: "italic" });
     afterInline();
   });
 
   btn(`<span class="ftb-strike">S</span>`, "Strikethrough", () => {
     applySourceFormat(toggleStrikethrough);
-    dispatchEditorAction({ type: "format", kind: "strikethrough" });
     afterInline();
   });
 
   btn(`<span class="ftb-highlight">A</span>`, "Highlight", () => {
     applySourceFormat(toggleHighlight);
-    dispatchEditorAction({ type: "format", kind: "highlight" });
     afterInline();
   });
 
@@ -91,7 +86,6 @@ export function populateFormatButtons(container: HTMLElement, opts: FormatButton
   for (const level of [1, 2, 3, 4] as const) {
     btn(`<span class="ftb-heading">H${level}</span>`, `Heading ${level}`, () => {
       applySourceFormat((md, start) => toggleHeading(md, start, level));
-      dispatchEditorAction({ type: "format", kind: "heading", detail: `h${level}` });
       afterBlock();
     });
   }
@@ -103,7 +97,6 @@ export function populateFormatButtons(container: HTMLElement, opts: FormatButton
     "Indent",
     () => {
       applyIndent(false);
-      dispatchEditorAction({ type: "indent", direction: "in" });
       afterIndent();
     },
   );
@@ -113,7 +106,6 @@ export function populateFormatButtons(container: HTMLElement, opts: FormatButton
     "Dedent",
     () => {
       applyIndent(true);
-      dispatchEditorAction({ type: "indent", direction: "out" });
       afterIndent();
     },
   );
@@ -125,7 +117,6 @@ export function populateFormatButtons(container: HTMLElement, opts: FormatButton
     "Code block",
     () => {
       applySourceFormat(toggleCodeFence);
-      dispatchEditorAction({ type: "format", kind: "code-block" });
       afterBlock();
     },
   );

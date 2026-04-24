@@ -284,12 +284,7 @@ function initApp() {
     }
   });
 
-  window.addEventListener("tansu:rename", async (ev: Event) => {
-    const detail = (ev as CustomEvent).detail as { path: string; newName: string };
-    const oldPath = detail.path;
-    const dir = oldPath.includes("/") ? oldPath.slice(0, oldPath.lastIndexOf("/") + 1) : "";
-    const newPath = `${dir}${detail.newName}.md`;
-
+  on("file:rename", async ({ oldPath, newPath }) => {
     try {
       const result = await renameNote(oldPath, newPath);
       invalidateNoteCache();
