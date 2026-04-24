@@ -31,7 +31,7 @@ describe("tabs", () => {
     ({ closeTab } = stateMod);
     ({ getTabs } = stateMod);
     ({ markDirty } = stateMod);
-    createNewNoteViaDialog = mod.createNewNote;
+    createNewNoteViaDialog = mod.promptNewNote;
 
     // Clean up any leaked state from other test files sharing the module.
     while (getTabs().length > 0) {
@@ -364,7 +364,7 @@ describe("tabs", () => {
     // No assertion needed — just verifying no crash
   });
 
-  it("+ button createNewNote opens dialog and creates note on Enter", async () => {
+  it("+ button promptNewNote opens dialog and creates note on Enter", async () => {
     // Ensure render() has been called so .tab-new exists (render only fires on tab events)
     await openTab("notes/ensure-render.md");
     await tick();
@@ -395,7 +395,7 @@ describe("tabs", () => {
     }
   });
 
-  it("createNewNote does nothing when dialog is cancelled with Escape", async () => {
+  it("promptNewNote does nothing when dialog is cancelled with Escape", async () => {
     while (getTabs().length > 0) {
       closeTab(0);
     }

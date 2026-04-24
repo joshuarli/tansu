@@ -71,7 +71,7 @@ export function checkInlineTransform(): string | null {
     sel.removeAllRanges();
     sel.addRange(range);
 
-    document.execCommand("insertHTML", false, html);
+    document.execCommand("insertHTML", false, html); // incremental edit; bypasses renderer intentionally for undo stack
 
     // For trailingSpace patterns, the space text node is already there —
     // move cursor to after it so typing continues outside the styled element

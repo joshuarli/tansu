@@ -12,6 +12,29 @@ interface SearchDeps {
   invalidateNoteCache: () => void;
 }
 
+function appendExcerpt(el: HTMLElement, excerpt: string): void {
+  const parts = excerpt.split(/(<b>|<\/b>)/);
+  let inBold = false;
+  for (const part of parts) {
+    if (part === "<b>") {
+      inBold = true;
+      continue;
+    }
+    if (part === "</b>") {
+      inBold = false;
+      continue;
+    }
+    if (!part) continue;
+    if (inBold) {
+      const b = document.createElement("b");
+      b.textContent = part;
+      el.append(b);
+    } else {
+      el.append(document.createTextNode(part));
+    }
+  }
+}
+
 export function createSearch(deps: SearchDeps): Search {
   const overlay = document.querySelector("#search-overlay")!;
   const input = document.querySelector("#search-input")! as HTMLInputElement;
@@ -142,7 +165,7 @@ export function createSearch(deps: SearchDeps): Search {
       if (r.excerpt) {
         const excerpt = document.createElement("div");
         excerpt.className = "excerpt";
-        excerpt.innerHTML = r.excerpt;
+        appendExcerpt(excerpt, r.excerpt);
         el.append(excerpt);
       }
 

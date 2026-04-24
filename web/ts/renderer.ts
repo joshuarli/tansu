@@ -1,5 +1,8 @@
 /// DOM-rendering wrappers for md-wysiwyg render functions.
-/// These own the `el.innerHTML = ...` mutation so callers don't touch innerHTML directly.
+/// These own full-document `el.innerHTML = ...` mutations. Incremental edits (inline
+/// transforms, block transforms, image paste) bypass this via execCommand("insertHTML")
+/// intentionally — execCommand participates in the browser's native undo stack, which a
+/// full re-render would break.
 
 import {
   renderMarkdown,

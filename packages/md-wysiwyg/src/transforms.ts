@@ -10,8 +10,8 @@ import { clampNodeOffset, escapeHtml, isBlockTag } from "./util.js";
 
 type TransformFn = (block: HTMLElement, text: string) => boolean;
 
-// contentEditable inserts   (nbsp) instead of regular spaces in many cases
-const SP = String.raw`[ \u00A0]`;
+// contentEditable inserts   (nbsp) instead of regular spaces in many cases
+const SP = String.raw`[  ]`;
 
 // Attribute placed on the element where the cursor should land after transform.
 // Removed immediately after the element is located.
@@ -23,62 +23,31 @@ const inputTransforms: [RegExp, TransformFn][] = [
     new RegExp(`^#{1,6}${SP}$`),
     (block, text) => {
       const level = text.trimEnd().length;
-      const el = replaceBlock(block, `<h${level} ${CURSOR_ATTR}="1"><br></h${level}>`);
-      if (!el) {
-        return false;
-      }
-      setCursorStart(el);
-      return true;
+      return replaceBlock(block, `<h${level} ${CURSOR_ATTR}="1"><br></h${level}>`);
     },
   ],
 
   [
     new RegExp(`^[-*]${SP}$`),
-    (block) => {
-      const el = replaceBlock(block, `<ul><li ${CURSOR_ATTR}="1"><br></li></ul>`);
-      if (!el) {
-        return false;
-      }
-      setCursorStart(el);
-      return true;
-    },
+    (block) => replaceBlock(block, `<ul><li ${CURSOR_ATTR}="1"><br></li></ul>`),
   ],
 
   [
     new RegExp(`^\\d+\\.${SP}$`),
-    (block) => {
-      const el = replaceBlock(block, `<ol><li ${CURSOR_ATTR}="1"><br></li></ol>`);
-      if (!el) {
-        return false;
-      }
-      setCursorStart(el);
-      return true;
-    },
+    (block) => replaceBlock(block, `<ol><li ${CURSOR_ATTR}="1"><br></li></ol>`),
   ],
 
   [
     new RegExp(`^>${SP}$`),
-    (block) => {
-      const el = replaceBlock(block, `<blockquote><p ${CURSOR_ATTR}="1"><br></p></blockquote>`);
-      if (!el) {
-        return false;
-      }
-      setCursorStart(el);
-      return true;
-    },
+    (block) => replaceBlock(block, `<blockquote><p ${CURSOR_ATTR}="1"><br></p></blockquote>`),
   ],
 
   [
     new RegExp(`^\`{3}\\S*${SP}$`),
     (block, text) => {
-      const lang = text.slice(3).replace(/[  ]+$/, "");
+      const lang = text.slice(3).replace(/[  ]+$/, "");
       const cls = lang ? ` class="language-${lang}"` : "";
-      const el = replaceBlock(block, `<pre><code${cls} ${CURSOR_ATTR}="1">\n</code></pre>`);
-      if (!el) {
-        return false;
-      }
-      setCursorStart(el);
-      return true;
+      return replaceBlock(block, `<pre><code${cls} ${CURSOR_ATTR}="1">\n</code></pre>`);
     },
   ],
 ];
@@ -93,44 +62,21 @@ const transforms: [RegExp, TransformFn][] = [
         return false;
       }
       const level = match[1]!.length;
-      const el = replaceBlock(
+      return replaceBlock(
         block,
         `<h${level}>${escapeHtml(match[2] ?? "")}</h${level}><p ${CURSOR_ATTR}="1"><br></p>`,
       );
-      if (!el) {
-        return false;
-      }
-      setCursorStart(el);
-      return true;
     },
   ],
 
-  [
-    /^---$/,
-    (block) => {
-      const el = replaceBlock(block, `<hr><p ${CURSOR_ATTR}="1"><br></p>`);
-      if (!el) {
-        return false;
-      }
-      setCursorStart(el);
-      return true;
-    },
-  ],
+  [/^---$/, (block) => replaceBlock(block, `<hr><p ${CURSOR_ATTR}="1"><br></p>`)],
 
   [
     /^```/,
     (block, text) => {
       const lang = text.slice(3).trim();
       const cls = lang ? ` class="language-${lang}"` : "";
-      const el = replaceBlock(
-        block,
-        `<pre><code${cls} ${CURSOR_ATTR}="1">\n</code></pre><p><br></p>`,
-      );
-      if (!el) {
-        return false;
-      }
-      setCursorStart(el);
-      return true;
+      return replaceBlock(block, `<pre><code${cls} ${CURSOR_ATTR}="1">\n</code></pre><p><br></p>`);
     },
   ],
 
@@ -141,15 +87,10 @@ const transforms: [RegExp, TransformFn][] = [
       if (!match) {
         return false;
       }
-      const el = replaceBlock(
+      return replaceBlock(
         block,
         `<ul><li ${CURSOR_ATTR}="1">${escapeHtml(match[1] ?? "")}</li></ul>`,
       );
-      if (!el) {
-        return false;
-      }
-      setCursorStart(el);
-      return true;
     },
   ],
 
@@ -160,15 +101,10 @@ const transforms: [RegExp, TransformFn][] = [
       if (!match) {
         return false;
       }
-      const el = replaceBlock(
+      return replaceBlock(
         block,
         `<ol><li ${CURSOR_ATTR}="1">${escapeHtml(match[1] ?? "")}</li></ol>`,
       );
-      if (!el) {
-        return false;
-      }
-      setCursorStart(el);
-      return true;
     },
   ],
 
@@ -179,15 +115,10 @@ const transforms: [RegExp, TransformFn][] = [
       if (!match) {
         return false;
       }
-      const el = replaceBlock(
+      return replaceBlock(
         block,
         `<blockquote><p ${CURSOR_ATTR}="1">${escapeHtml(match[1] ?? "")}</p></blockquote>`,
       );
-      if (!el) {
-        return false;
-      }
-      setCursorStart(el);
-      return true;
     },
   ],
 ];
@@ -195,8 +126,10 @@ const transforms: [RegExp, TransformFn][] = [
 /// Replace a block element with parsed HTML via execCommand so the operation
 /// enters the browser's undo stack. Falls back to direct DOM swap in
 /// environments (e.g. tests) where execCommand is not implemented.
-/// Returns the element carrying CURSOR_ATTR (with the attribute removed).
-function replaceBlock(block: HTMLElement, html: string): HTMLElement | null {
+/// Moves the cursor to the element carrying CURSOR_ATTR and returns true on
+/// success.
+function replaceBlock(block: HTMLElement, html: string): boolean {
+  let marker: HTMLElement | null = null;
   if (typeof document.execCommand === "function") {
     const sel = window.getSelection();
     if (sel) {
@@ -206,23 +139,25 @@ function replaceBlock(block: HTMLElement, html: string): HTMLElement | null {
       sel.removeAllRanges();
       sel.addRange(range);
       if (document.execCommand("insertHTML", false, html)) {
-        const marker = document.querySelector(`[${CURSOR_ATTR}]`);
-        if (marker instanceof HTMLElement) {
-          marker.removeAttribute(CURSOR_ATTR);
-        }
-        return marker instanceof HTMLElement ? marker : null;
+        // incremental edit; bypasses renderer intentionally for undo stack
+        const found = document.querySelector(`[${CURSOR_ATTR}]`);
+        marker = found instanceof HTMLElement ? found : null;
       }
     }
+  } else {
+    // Fallback: direct DOM swap for environments without execCommand
+    const wrap = document.createElement("div");
+    wrap.innerHTML = html;
+    const found = wrap.querySelector(`[${CURSOR_ATTR}]`);
+    block.replaceWith(...wrap.childNodes);
+    marker = found instanceof HTMLElement ? found : null;
   }
-  // Fallback: direct DOM swap for environments without execCommand
-  const wrap = document.createElement("div");
-  wrap.innerHTML = html;
-  const marker = wrap.querySelector(`[${CURSOR_ATTR}]`);
-  block.replaceWith(...wrap.childNodes);
-  if (marker instanceof HTMLElement) {
+  if (marker) {
     marker.removeAttribute(CURSOR_ATTR);
+    setCursorStart(marker);
+    return true;
   }
-  return marker instanceof HTMLElement ? marker : null;
+  return false;
 }
 
 /// Check if the user just completed a block-start pattern (e.g. "## ", "- ").
@@ -269,12 +204,7 @@ export function checkBlockInputTransform(contentEl: HTMLElement): boolean {
       const level = match[0].trimEnd().length;
       const rest = text.slice(match[0].length);
       const inner = rest ? escapeHtml(rest) : "<br>";
-      const el = replaceBlock(block, `<h${level} ${CURSOR_ATTR}="1">${inner}</h${level}>`);
-      if (!el) {
-        return false;
-      }
-      setCursorStart(el);
-      return true;
+      return replaceBlock(block, `<h${level} ${CURSOR_ATTR}="1">${inner}</h${level}>`);
     }
     return false;
   }

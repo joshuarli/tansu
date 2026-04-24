@@ -12,7 +12,7 @@ import {
   createNewNote as _createNewNote,
 } from "./tab-state.ts";
 
-export async function createNewNote(): Promise<void> {
+export async function promptNewNote(): Promise<void> {
   const name = await showInputDialog("New note name...");
   if (!name) {
     return;
@@ -123,7 +123,7 @@ function render() {
   addBtn.className = "tab tab-new";
   addBtn.textContent = "+";
   addBtn.title = "New note (Ctrl+N)";
-  addBtn.onclick = () => createNewNote();
+  addBtn.onclick = () => promptNewNote();
   tabBar.append(addBtn);
 
   tabBar

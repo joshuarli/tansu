@@ -1,6 +1,6 @@
 import { merge3 } from "@joshuarli98/md-wysiwyg";
 
-import { saveNote } from "./api.ts";
+import { forceSaveNote, saveNote } from "./api.ts";
 import { markClean, type Tab } from "./tab-state.ts";
 
 /// Show a conflict banner when disk and editor content diverge.
@@ -25,7 +25,7 @@ export function showConflictBanner(
   keepBtn.onclick = () => {
     banner.remove();
     const content = getCurrentContent();
-    void saveNote(currentPath, content, 0)
+    void forceSaveNote(currentPath, content)
       .then((r) => markClean(currentPath, content, r.mtime))
       .catch(() => void 0);
   };

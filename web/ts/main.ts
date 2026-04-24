@@ -28,7 +28,7 @@ import {
   reopenClosedTab,
   syncToServer,
 } from "./tab-state.ts";
-import { createNewNote } from "./tabs.ts";
+import { promptNewNote } from "./tabs.ts";
 import { isPrfLikelySupported, getPrfKey } from "./webauthn.ts";
 import { registerWikiLinkClickHandler } from "./wikilinks.ts";
 
@@ -209,7 +209,7 @@ function initApp() {
       label: "New note",
       shortcut: "\u2318N",
       keys: { key: "n", meta: true },
-      action: () => createNewNote(),
+      action: () => promptNewNote(),
     },
     {
       label: "Reopen closed tab",

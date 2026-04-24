@@ -77,8 +77,8 @@ function buildHunks(
 
     const lines: DiffLine[] = [];
     const firstRaw = raw[i]!;
-    const oldStart = firstRaw.type === "add" ? firstRaw.oldNum : firstRaw.oldNum;
-    const newStart = firstRaw.type === "del" ? firstRaw.newNum : firstRaw.newNum;
+    const oldStart = firstRaw.type === "add" ? firstRaw.oldNum - 1 : firstRaw.oldNum;
+    const newStart = firstRaw.type === "del" ? firstRaw.newNum - 1 : firstRaw.newNum;
 
     while (i < raw.length && included[i]) {
       const r = raw[i]!;

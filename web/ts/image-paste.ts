@@ -33,7 +33,7 @@ export async function handleImagePaste(item: DataTransferItem, currentPath: stri
     const savedName = await uploadImage(blob, filename);
     const src = `/z-images/${encodeURIComponent(savedName)}`;
     const html = `<img src="${escapeHtml(src)}" alt="${escapeHtml(savedName)}" data-wiki-image="${escapeHtml(savedName)}" loading="lazy">`;
-    document.execCommand("insertHTML", false, html);
+    document.execCommand("insertHTML", false, html); // incremental edit; bypasses renderer intentionally for undo stack
     if (currentPath) {
       markDirty(currentPath);
     }

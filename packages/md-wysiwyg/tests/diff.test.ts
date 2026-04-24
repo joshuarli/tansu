@@ -54,6 +54,41 @@ describe("computeDiff", () => {
     const delLines = hunks[0]!.lines.filter((l) => l.type === "del");
     expect(delLines.length).toBeGreaterThanOrEqual(1);
   });
+
+  describe("hunk header line numbers (@@ -N +N @@)", () => {
+    // These tests exercise the oldStart/newStart computation in buildHunks, which
+    // had dead ternary branches (both arms returned the same value).
+
+    it("mid-file substitution: header starts at correct 1-indexed line", () => {
+      // Change line 3 of 5; context starts at line 1 (0-indexed 0).
+      const hunks = computeDiff(
+        "line1\nline2\nline3\nline4\nline5",
+        "line1\nline2\nLINE3\nline4\nline5",
+      );
+      expect(hunks).toHaveLength(1);
+      // oldStart/newStart are 0-indexed; header renders them as +1.
+      expect(hunks[0]!.oldStart).toBe(0);
+      expect(hunks[0]!.newStart).toBe(0);
+    });
+
+    it("prepend-only: oldStart is -1 so header shows @@ -0 +1 @@", () => {
+      // Inserting before the first line means no old-file line is consumed.
+      // oldNum on an add = oi = 0, so oldStart must be 0-1 = -1 → header "-0".
+      const hunks = computeDiff("a\nb\nc\nd\ne\nf\ng\nh", "X\na\nb\nc\nd\ne\nf\ng\nh");
+      expect(hunks).toHaveLength(1);
+      expect(hunks[0]!.oldStart).toBe(-1);
+      expect(hunks[0]!.newStart).toBe(0);
+    });
+
+    it("delete-from-start: newStart is -1 so header shows @@ -1 +0 @@", () => {
+      // Deleting the first line means no new-file line is present.
+      // newNum on a del = ni = 0, so newStart must be 0-1 = -1 → header "+0".
+      const hunks = computeDiff("X\na\nb\nc\nd\ne\nf\ng\nh", "a\nb\nc\nd\ne\nf\ng\nh");
+      expect(hunks).toHaveLength(1);
+      expect(hunks[0]!.oldStart).toBe(0);
+      expect(hunks[0]!.newStart).toBe(-1);
+    });
+  });
 });
 
 describe("renderDiff", () => {

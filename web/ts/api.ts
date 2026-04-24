@@ -85,6 +85,11 @@ export async function saveNote(
   return { mtime: data["mtime"] as number };
 }
 
+// Unconditional overwrite — server treats expected_mtime=0 as "skip conflict check".
+export function forceSaveNote(path: string, content: string): Promise<SaveResult> {
+  return saveNote(path, content, 0);
+}
+
 export async function createNote(path: string): Promise<{ mtime: number }> {
   const res = await fetch(`/api/note?path=${encodeURIComponent(path)}`, {
     method: "POST",

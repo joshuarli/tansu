@@ -8,7 +8,7 @@ import {
   handleBlockTransform,
 } from "@joshuarli98/md-wysiwyg";
 
-import { saveNote } from "./api.ts";
+import { forceSaveNote, saveNote } from "./api.ts";
 import { checkWikiLinkTrigger, hideAutocomplete } from "./autocomplete.ts";
 export { invalidateNoteCache } from "./autocomplete.ts";
 import { loadBacklinks } from "./backlinks.ts";
@@ -308,7 +308,7 @@ export function initEditor(): EditorInstance {
         break;
       }
       case "false-conflict": {
-        const retry = await saveNote(savePath, content, 0);
+        const retry = await forceSaveNote(savePath, content);
         markClean(savePath, content, retry.mtime);
         if (cursorOffset >= 0) {
           setCursor(savePath, cursorOffset);

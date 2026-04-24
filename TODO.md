@@ -1,23 +1,3 @@
-# TODO
-
-## Code quality audit
-
-### Critical
-
-- [ ] **XSS: `search.ts:145`** — `excerpt.innerHTML = r.excerpt` injects server HTML directly, bypassing the `setHTML`/Sanitizer API invariant used everywhere else. Fix: use `excerpt.setHTML(r.excerpt)` or build the excerpt by wrapping match text in `<b>` text nodes.
-
-- [ ] **`util.ts` dead utilities** — `mustQuery<T>` and `ignoreError` are written but never called. Two conflicting patterns exist side-by-side: migrate all call sites, then the utilities become load-bearing.
-  - Replace 25+ `document.querySelector("#x") as HTMLElement` casts with `mustQuery<HTMLElement>("#x")` — representative sites: `main.ts:35,66,67,118`, `palette.ts:43`, `search.ts:17`, `input-dialog.ts:14`, `filenav.ts:72,80,223`, `settings.ts:131,184,235,257,286`
-  - Note: `querySelector<T>` generic form is already used correctly in some places (`settings.ts:130,168`, `tabs.ts:130`, `filenav.ts:155`) — the fix is just consistency
-  - Replace all `.catch(() => void 0)` with `ignoreError()` — 12+ sites: `tab-state.ts:42,60,68,147,223,263`, `search.ts:29,43`, `tabs.ts:162,177`, `conflict.ts:30`
-
-- [ ] **`diff.ts:80-81` dead ternary branches** — both branches of two ternaries produce the same value, making the condition dead. Likely a latent off-by-one bug in hunk header generation. Write a test for `@@ -N,M +N,M @@` output and fix.
-  ```ts
-  // current (wrong):
-  const oldStart = firstRaw.type === "add" ? firstRaw.oldNum : firstRaw.oldNum;
-  const newStart = firstRaw.type === "del" ? firstRaw.newNum : firstRaw.newNum;
-  ```
-
 ### Type safety
 
 - [ ] **`api.ts` unchecked casts** — every fetch does `(await res.json()) as T` with no runtime validation. `saveNote` compounds this with `as Record<string, unknown>` then two further `as number`/`as string` casts (`api.ts:78-85`). Add a `requireFields` helper or per-type `parseX(json): X | Error` validator for each response shape.
@@ -28,15 +8,6 @@
 
 ### Architecture
 
-- [ ] **`magic-number 0` save protocol** — `saveNote(..., 0)` means "force overwrite, skip conflict check" (`editor.ts:313`, `conflict.ts:28`) but `0` is also used as "not loaded yet" sentinel in `tab-state.ts:113`. Add `expectedMtime: number | "force"` union in `api.ts` or a dedicated `forceSaveNote(path, content)` helper, and document the protocol.
-
-- [ ] **Rename `tabs.ts` `createNewNote` to `promptNewNote`** — `tab-state.ts:247` and `tabs.ts:15` both export `createNewNote`. `tabs.ts` imports the state-layer version as `_createNewNote` and re-exports a UI wrapper under the same name. "Go to definition" lands on the wrong one. Rename the UI wrapper to `promptNewNote`.
-
-- [ ] **Split `editor.ts` (1100 lines, god module)**
-  - `editor-undo.ts`: `undoStack`, `pushUndo`, `undoEdit`, `redoEdit`, `scheduleTypingSnapshot`
-    - [ ] **`undoEdit`/`redoEdit` are 95% identical** (`editor.ts:614-650`) — extract `applyUndoEntry(idx: number)` for the shared 20-line body after each boundary check.
-  - `editor-save.ts`: `saveCurrentNote`, `_doSave`, autosave timer, `reloadFromDisk` (join the existing `classifySaveResult`/`classifyReload` pure helpers)
-
 - [ ] **`packages/md-wysiwyg` DOM coupling** — the package calls `document.getSelection()` and `document.execCommand` directly in `serialize.ts:37,48`, `transforms.ts:201,231,301`, `inline-transforms.ts:46,74`. This makes it impossible to test without a DOM. Split into a `core` layer (string→string: `markdown.ts`, `format-ops.ts`, `diff.ts`, `merge.ts`, `util.ts`, `highlight.ts`) and a `dom` layer (anything touching globals).
 
 - [ ] **`renderer.ts` invariant is unenforced** — the abstraction intends "only renderer.ts writes HTML to the editor" but `document.execCommand("insertHTML", …)` bypasses it at `inline-transforms.ts:74`, `transforms.ts:208`, `image-paste.ts:36`. Either document that execCommand paths are explicitly exempt, or route through the renderer.
@@ -44,8 +15,6 @@
 - [ ] **`saveState` missing error check** — `api.ts:237-242` `saveState` POST has no `if (!res.ok) throw` — inconsistent with every other mutating call in the file.
 
 ### Code smells & duplication
-
-- [ ] **6 copies of `replaceBlock → null-check → setCursorStart → return`** (`transforms.ts:22-192`) — have `replaceBlock` call `setCursorStart` on its own return value and return `boolean`, eliminating ~30 lines and 12 early-return branches.
 
 - [ ] **`serialize.ts:80-99` 6 near-identical heading branches** — collapse to:
 
