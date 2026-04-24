@@ -96,7 +96,7 @@ function isListItemEmpty(item: HTMLElement): boolean {
   for (const nested of clone.querySelectorAll("ul, ol")) {
     nested.remove();
   }
-  const text = (clone.textContent ?? "").replaceAll("​", "").replaceAll(" ", " ").trim();
+  const text = (clone.textContent ?? "").replaceAll("​", "").replaceAll(" ", " ").trim();
   return text === "";
 }
 
@@ -595,23 +595,27 @@ export function initEditor(): EditorInstance {
     }, 1000);
   }
 
+  function applyUndoEntry(idx: number): void {
+    const entry = undoStack[idx]!;
+    setContentWithSelection(contentEl!, entry.md, entry.selStart, entry.selEnd);
+    restoreSelectionFromRenderedMarkers(contentEl!);
+    const tab = getActiveTab();
+    if (currentPath && tab && entry.md === tab.lastSavedMd) {
+      markClean(currentPath, entry.md, tab.mtime);
+      if (!isSourceMode) {
+        checkWikiLinkTrigger(contentEl!, currentPath);
+      }
+    } else {
+      onEditorTabMutation();
+    }
+  }
+
   function undoEdit(): void {
     if (undoIndex <= 0 || !contentEl) {
       return;
     }
     undoIndex--;
-    const entry = undoStack[undoIndex]!;
-    setContentWithSelection(contentEl, entry.md, entry.selStart, entry.selEnd);
-    restoreSelectionFromRenderedMarkers(contentEl);
-    const tab = getActiveTab();
-    if (currentPath && tab && entry.md === tab.lastSavedMd) {
-      markClean(currentPath, entry.md, tab.mtime);
-      if (contentEl && !isSourceMode) {
-        checkWikiLinkTrigger(contentEl, currentPath);
-      }
-    } else {
-      onEditorTabMutation();
-    }
+    applyUndoEntry(undoIndex);
   }
 
   function redoEdit(): void {
@@ -619,18 +623,7 @@ export function initEditor(): EditorInstance {
       return;
     }
     undoIndex++;
-    const entry = undoStack[undoIndex]!;
-    setContentWithSelection(contentEl, entry.md, entry.selStart, entry.selEnd);
-    restoreSelectionFromRenderedMarkers(contentEl);
-    const tab = getActiveTab();
-    if (currentPath && tab && entry.md === tab.lastSavedMd) {
-      markClean(currentPath, entry.md, tab.mtime);
-      if (contentEl && !isSourceMode) {
-        checkWikiLinkTrigger(contentEl, currentPath);
-      }
-    } else {
-      onEditorTabMutation();
-    }
+    applyUndoEntry(undoIndex);
   }
 
   /// Apply a source-text format transform to the current editor content.

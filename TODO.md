@@ -72,7 +72,7 @@
 
 - [ ] **`eslint-disable no-loop-func` cargo-culted** — `tabs.ts:100,105`, `search.ts:149`, `revisions.ts:101` all disable the rule unnecessarily in `for..of .entries()` loops where `const` scoping is already correct. Remove the disables.
 
-### Error handling
+## Error handling
 
 - [ ] **Empty `catch` blocks silently swallow user-visible failures** — `main.ts:304-306,313-316,393-396` eat network errors and failed renames/reloads with no user feedback. At minimum surface via `showNotification`.
 
@@ -84,15 +84,13 @@
 
 - [ ] **`tab-state.ts` inconsistent error visibility** — same file uses silent `.catch` at lines 42/60/68 but `console.warn` at lines 126/190/295. Establish one policy: structural failures warn, best-effort cache ops silent.
 
-### Performance
+## Performance
 
 - [ ] **`scheduleTypingSnapshot` does full `domToMarkdown` every 1s** (`editor.ts:599-612`) — hot path on large notes. Consider storing cursor offset only and computing markdown lazily on undo since undo is rare.
 
 - [ ] **`transforms.ts:209` page-wide `document.querySelector`** — scanning the entire document for `[${CURSOR_ATTR}]`. Fix: pass `contentEl` down from `editor.ts` into `checkBlockInputTransform` / `replaceBlock` and use `contentEl.querySelector(...)` instead.
 
 - [ ] **`reloadFromDisk` does full `domToMarkdown` on every save round-trip** (`editor.ts:341-368`) — the `files:changed` SSE fires on the client's own saves too. Gate by comparing `tab.lastSavedMd === content` before calling `domToMarkdown`.
-
----
 
 ## Offline resilience
 
