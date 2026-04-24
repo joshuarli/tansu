@@ -10,6 +10,7 @@ export interface Tab {
   dirty: boolean;
   content: string;
   mtime: number;
+  lastSavedMd: string;
 }
 
 const tabs: Tab[] = [];
@@ -87,7 +88,14 @@ export async function openTab(path: string): Promise<Tab> {
   }
 
   const { content, mtime } = await fetchNote(path);
-  const tab: Tab = { path, title: titleFromPath(path), dirty: false, content, mtime };
+  const tab: Tab = {
+    path,
+    title: titleFromPath(path),
+    dirty: false,
+    content,
+    mtime,
+    lastSavedMd: content,
+  };
   tabs.push(tab);
   await switchTab(tabs.length - 1);
   persistState();
@@ -105,6 +113,7 @@ export async function switchTab(index: number) {
       const note = await fetchNote(tab.path);
       tab.content = note.content;
       tab.mtime = note.mtime;
+      tab.lastSavedMd = note.content;
     } catch {
       /* offline fallback unavailable */
     }
@@ -202,6 +211,7 @@ export function markClean(path: string, content: string, mtime: number) {
     tab.dirty = false;
     tab.content = content;
     tab.mtime = mtime;
+    tab.lastSavedMd = content;
     tab.title = titleFromPath(path);
     /* c8 ignore start */
     notePut(path, content, mtime).catch(() => void 0);
@@ -278,9 +288,23 @@ export async function restoreSession() {
       } catch {
         /* load failed, use empty content */
       }
-      tabs.push({ path, title: titleFromPath(path), dirty: false, content, mtime });
+      tabs.push({
+        path,
+        title: titleFromPath(path),
+        dirty: false,
+        content,
+        mtime,
+        lastSavedMd: content,
+      });
     } else {
-      tabs.push({ path, title: titleFromPath(path), dirty: false, content: "", mtime: 0 });
+      tabs.push({
+        path,
+        title: titleFromPath(path),
+        dirty: false,
+        content: "",
+        mtime: 0,
+        lastSavedMd: "",
+      });
     }
   }
 

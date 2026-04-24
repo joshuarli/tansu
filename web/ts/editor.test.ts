@@ -283,7 +283,7 @@ describe("editor", () => {
     hideEditor();
   });
 
-  it("WYSIWYG: Tab inserts a visible tab and preserves markdown", async () => {
+  it("WYSIWYG: Tab indents the current line", async () => {
     showEditor("tab-wysiwyg.md", "hello");
     await new Promise((r) => setTimeout(r, 50));
 
@@ -298,8 +298,7 @@ describe("editor", () => {
 
     contentEl.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true }));
 
-    expect(getCurrentContent()).toBe("he\tllo");
-    expect(contentEl.querySelector(`.${"md-tab"}`)).not.toBeNull();
+    expect(getCurrentContent()).toBe("\thello");
 
     hideEditor();
   });

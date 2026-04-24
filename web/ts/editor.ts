@@ -17,7 +17,13 @@ import { showConflictBanner, handleReloadConflict } from "./conflict.ts";
 import { showContextMenu } from "./context-menu.ts";
 import { dispatchEditorAction } from "./editor-events.ts";
 import { on, emit } from "./events.ts";
-import { toggleBold, toggleItalic, toggleHighlight, type FormatResult } from "./format-ops.ts";
+import {
+  toggleBold,
+  toggleItalic,
+  toggleHighlight,
+  shiftIndent,
+  type FormatResult,
+} from "./format-ops.ts";
 import { initFormatToolbar, populateFormatButtons } from "./format-toolbar.ts";
 import { handleImagePaste } from "./image-paste.ts";
 import { initImageResize } from "./image-resize.ts";
@@ -51,7 +57,6 @@ const undoStack: UndoEntry[] = [];
 let undoIndex = -1;
 let typingSnapshotTimer: ReturnType<typeof setTimeout> | null = null;
 const INDENT_UNIT = "\t";
-const TAB_CLASS = "md-tab";
 const INDENTABLE_BLOCKS = new Set([
   "P",
   "DIV",
@@ -163,11 +168,7 @@ export function showEditor(path: string, content: string) {
 
   populateFormatButtons(fmtGroup, {
     contentEl: contentEl!,
-    applyIndent: (dedent) => {
-      if (indentCurrentSelection(dedent)) {
-        onEditorTabMutation();
-      }
-    },
+    applyIndent: applyIndentInEditor,
     applySourceFormat: applySourceFormatInEditor,
     afterInline: onEditorTabMutation,
     afterBlock: onEditorTabMutation,
@@ -593,27 +594,12 @@ function setupEditorEvents() {
   }
   formatToolbarCleanup = initFormatToolbar({
     contentEl,
-    applyIndent: (dedent) => {
-      if (indentCurrentSelection(dedent)) {
-        onEditorTabMutation();
-      }
-    },
+    applyIndent: applyIndentInEditor,
     applySourceFormat: applySourceFormatInEditor,
     onMutation: onEditorTabMutation,
   });
 
-  contentEl.addEventListener("input", (e) => {
-    const ie = e as InputEvent;
-    // historyUndo/historyRedo branches are kept for completeness but Cmd+Z is now
-    // intercepted by the keydown handler before it reaches the browser's undo path.
-    if (ie.inputType === "historyUndo" || ie.inputType === "historyRedo") {
-      dispatchEditorAction({ type: ie.inputType === "historyUndo" ? "undo" : "redo" });
-      if (currentPath) {
-        markDirty(currentPath);
-      }
-      scheduleAutosave();
-      return;
-    }
+  contentEl.addEventListener("input", () => {
     if (currentPath) {
       markDirty(currentPath);
     }
@@ -688,7 +674,9 @@ function setupEditorEvents() {
       return;
     }
 
-    if (e.key === "Tab" && handleContentTabKey(e)) {
+    if (e.key === "Tab") {
+      e.preventDefault();
+      applyIndentInEditor(e.shiftKey);
       dispatchEditorAction({ type: "indent", direction: e.shiftKey ? "out" : "in" });
       return;
     }
@@ -728,7 +716,18 @@ function setupEditorEvents() {
     }
 
     const text = clipData.getData("text/plain");
-    document.execCommand("insertText", false, text);
+    if (text && contentEl) {
+      const md = domToMarkdown(contentEl);
+      const sel = getSelectionMarkdownOffsets(contentEl);
+      const start = sel?.start ?? md.length;
+      const end = sel?.end ?? start;
+      pushUndo(md, start, end);
+      const newMd = md.slice(0, start) + text + md.slice(end);
+      const newCursor = start + text.length;
+      setContentWithSelection(contentEl, newMd, newCursor, newCursor);
+      restoreSelectionFromRenderedMarkers(contentEl);
+      onEditorTabMutation();
+    }
     dispatchEditorAction({ type: "paste", kind: "text" });
   });
 
@@ -786,93 +785,6 @@ function handleSourceTabKey(e: KeyboardEvent): boolean {
   return true;
 }
 
-function indentCurrentSelection(dedent: boolean): boolean {
-  if (!contentEl) {
-    return false;
-  }
-  const sel = window.getSelection();
-  if (!sel || sel.rangeCount === 0) {
-    return false;
-  }
-  const range = sel.getRangeAt(0);
-  if (!contentEl.contains(range.startContainer) || !contentEl.contains(range.endContainer)) {
-    return false;
-  }
-
-  const listItem = getListItemBlock(range.startContainer);
-  if (range.collapsed && listItem) {
-    const marker = insertMarker(range);
-    if (dedent) {
-      dedentListItems([listItem]);
-    } else {
-      indentListItems([listItem]);
-    }
-    restoreCollapsedSelection(marker);
-    return true;
-  }
-
-  if (range.collapsed && !dedent) {
-    insertTabAtRange(range);
-    return true;
-  }
-
-  const targetRange = range.cloneRange();
-  const blocks = getSelectedBlocks(targetRange);
-  if (blocks.length === 0) {
-    if (dedent) {
-      return true;
-    }
-    insertTabAtRange(range);
-    return true;
-  }
-
-  if (blocks.every(isListItemBlock)) {
-    const endMarker = insertBoundaryMarker(range, "end");
-    const startMarker = insertBoundaryMarker(range, "start");
-    if (dedent) {
-      dedentListItems(blocks);
-    } else {
-      indentListItems(blocks);
-    }
-    restoreSelectionFromMarkers(startMarker, endMarker);
-    return true;
-  }
-
-  const endMarker = insertBoundaryMarker(range, "end");
-  const startMarker = insertBoundaryMarker(range, "start");
-  if (dedent) {
-    for (const block of blocks) {
-      dedentBlock(block);
-    }
-  } else {
-    for (const block of blocks) {
-      indentBlock(block);
-    }
-  }
-  restoreSelectionFromMarkers(startMarker, endMarker);
-  return true;
-}
-
-function handleContentTabKey(e: KeyboardEvent): boolean {
-  if (!contentEl) {
-    return false;
-  }
-  const sel = window.getSelection();
-  if (!sel || sel.rangeCount === 0) {
-    return false;
-  }
-  const range = sel.getRangeAt(0);
-  if (!contentEl.contains(range.startContainer) || !contentEl.contains(range.endContainer)) {
-    return false;
-  }
-  e.preventDefault();
-  const did = indentCurrentSelection(e.shiftKey);
-  if (did) {
-    onEditorTabMutation();
-  }
-  return did;
-}
-
 function handleEmptyListItemBackspace(e: KeyboardEvent): boolean {
   if (!contentEl) {
     return false;
@@ -900,9 +812,15 @@ function handleEmptyListItemBackspace(e: KeyboardEvent): boolean {
 
   e.preventDefault();
   if (isNestedListItem(listItem)) {
-    const marker = insertMarker(range);
-    dedentListItems([listItem]);
-    restoreCollapsedSelection(marker);
+    const md = domToMarkdown(contentEl);
+    const offsets = getSelectionMarkdownOffsets(contentEl);
+    if (!offsets) {
+      return false;
+    }
+    pushUndo(md, offsets.start, offsets.end);
+    const { md: newMd, selStart, selEnd } = shiftIndent(md, offsets.start, offsets.end, true);
+    setContentWithSelection(contentEl, newMd, selStart, selEnd);
+    restoreSelectionFromRenderedMarkers(contentEl);
   } else {
     removeEmptyTopLevelListItem(listItem);
   }
@@ -954,7 +872,15 @@ function undoEdit(): void {
   const entry = undoStack[undoIndex]!;
   setContentWithSelection(contentEl, entry.md, entry.selStart, entry.selEnd);
   restoreSelectionFromRenderedMarkers(contentEl);
-  onEditorTabMutation();
+  const tab = getActiveTab();
+  if (currentPath && tab && entry.md === tab.lastSavedMd) {
+    markClean(currentPath, entry.md, tab.mtime);
+    if (contentEl && !isSourceMode) {
+      checkWikiLinkTrigger(contentEl, currentPath);
+    }
+  } else {
+    onEditorTabMutation();
+  }
 }
 
 function redoEdit(): void {
@@ -965,7 +891,15 @@ function redoEdit(): void {
   const entry = undoStack[undoIndex]!;
   setContentWithSelection(contentEl, entry.md, entry.selStart, entry.selEnd);
   restoreSelectionFromRenderedMarkers(contentEl);
-  onEditorTabMutation();
+  const tab = getActiveTab();
+  if (currentPath && tab && entry.md === tab.lastSavedMd) {
+    markClean(currentPath, entry.md, tab.mtime);
+    if (contentEl && !isSourceMode) {
+      checkWikiLinkTrigger(contentEl, currentPath);
+    }
+  } else {
+    onEditorTabMutation();
+  }
 }
 
 /// Apply a source-text format transform to the current editor content.
@@ -989,26 +923,20 @@ function applySourceFormatInEditor(
   onEditorTabMutation();
 }
 
-function createTabNode(): HTMLSpanElement {
-  const tab = document.createElement("span");
-  tab.className = TAB_CLASS;
-  tab.textContent = INDENT_UNIT;
-  return tab;
-}
-
-function insertTabAtRange(range: Range) {
-  const tab = createTabNode();
-  range.deleteContents();
-  range.insertNode(tab);
-  const sel = window.getSelection();
+function applyIndentInEditor(dedent: boolean): void {
+  if (!contentEl) {
+    return;
+  }
+  const sel = getSelectionMarkdownOffsets(contentEl);
   if (!sel) {
     return;
   }
-  const next = document.createRange();
-  next.setStartAfter(tab);
-  next.collapse(true);
-  sel.removeAllRanges();
-  sel.addRange(next);
+  const md = domToMarkdown(contentEl);
+  pushUndo(md, sel.start, sel.end);
+  const { md: newMd, selStart, selEnd } = shiftIndent(md, sel.start, sel.end, dedent);
+  setContentWithSelection(contentEl, newMd, selStart, selEnd);
+  restoreSelectionFromRenderedMarkers(contentEl);
+  onEditorTabMutation();
 }
 
 function isIndentableBlock(el: HTMLElement): boolean {
@@ -1043,73 +971,9 @@ function getIndentableBlock(node: Node): HTMLElement | null {
   return null;
 }
 
-function getSelectedBlocks(range: Range): HTMLElement[] {
-  if (!contentEl) {
-    return [];
-  }
-
-  const blocks: HTMLElement[] = [];
-  const seen = new Set<HTMLElement>();
-  const walker = document.createTreeWalker(contentEl, NodeFilter.SHOW_ELEMENT);
-  let node: Node | null = walker.currentNode;
-  while (node) {
-    if (
-      node instanceof HTMLElement &&
-      isIndentableBlock(node) &&
-      range.intersectsNode(node) &&
-      !seen.has(node)
-    ) {
-      seen.add(node);
-      blocks.push(node);
-    }
-    node = walker.nextNode();
-  }
-
-  if (blocks.length > 0) {
-    return blocks;
-  }
-  const block = getIndentableBlock(range.startContainer);
-  return block ? [block] : [];
-}
-
 function getListItemBlock(node: Node): HTMLElement | null {
   const block = getIndentableBlock(node);
   return block && isListItemBlock(block) ? block : null;
-}
-
-function indentBlock(block: HTMLElement) {
-  block.prepend(createTabNode());
-}
-
-function dedentBlock(block: HTMLElement) {
-  const first = block.firstChild;
-  if (!first) {
-    return;
-  }
-
-  if (
-    first instanceof HTMLElement &&
-    first.classList.contains(TAB_CLASS) &&
-    (first.textContent ?? "") === INDENT_UNIT
-  ) {
-    first.remove();
-    return;
-  }
-
-  if (first.nodeType !== Node.TEXT_NODE) {
-    return;
-  }
-
-  const text = first.textContent ?? "";
-  if (text.startsWith(INDENT_UNIT)) {
-    first.textContent = text.slice(INDENT_UNIT.length);
-    return;
-  }
-
-  const match = text.match(/^[ \u00A0]{1,4}/);
-  if (match) {
-    first.textContent = text.slice(match[0].length);
-  }
 }
 
 function isListItemEmpty(item: HTMLElement): boolean {
@@ -1119,122 +983,6 @@ function isListItemEmpty(item: HTMLElement): boolean {
   }
   const text = (clone.textContent ?? "").replaceAll("​", "").replaceAll("\u00A0", " ").trim();
   return text === "";
-}
-
-function indentListItems(items: readonly HTMLElement[]) {
-  const groups = groupSiblingListItems(items);
-
-  for (const group of groups) {
-    const [first] = group.items;
-    if (!first) {
-      continue;
-    }
-
-    const previous = first.previousElementSibling;
-    if (!(previous instanceof HTMLElement) || previous.tagName !== "LI") {
-      continue;
-    }
-
-    const nestedList = ensureNestedList(previous, group.parent.tagName);
-    for (const item of group.items) {
-      nestedList.append(item);
-    }
-  }
-}
-
-function dedentListItems(items: readonly HTMLElement[]) {
-  const groups = groupSiblingListItems(items);
-
-  for (const group of groups) {
-    const parentList = group.parent;
-    const parentItem = parentList.parentElement;
-    if (!(parentItem instanceof HTMLElement) || parentItem.tagName !== "LI") {
-      continue;
-    }
-
-    const grandList = parentItem.parentElement;
-    if (
-      !(grandList instanceof HTMLElement) ||
-      (grandList.tagName !== "UL" && grandList.tagName !== "OL")
-    ) {
-      continue;
-    }
-
-    const lastSelected = group.items.at(-1);
-    if (!lastSelected) {
-      continue;
-    }
-    const trailingSiblings = collectTrailingListSiblings(lastSelected);
-    let insertAfter: HTMLElement = parentItem;
-
-    for (const item of group.items) {
-      insertAfter.after(item);
-      insertAfter = item;
-    }
-
-    if (trailingSiblings.length > 0) {
-      const nestedList = ensureNestedList(insertAfter, parentList.tagName);
-      for (const sibling of trailingSiblings) {
-        nestedList.append(sibling);
-      }
-    }
-
-    if (parentList.children.length === 0) {
-      parentList.remove();
-    }
-  }
-}
-
-function groupSiblingListItems(
-  items: readonly HTMLElement[],
-): { parent: HTMLElement; items: HTMLElement[] }[] {
-  const groups: { parent: HTMLElement; items: HTMLElement[] }[] = [];
-  let current: { parent: HTMLElement; items: HTMLElement[] } | null = null;
-
-  for (const item of items) {
-    const parent = item.parentElement;
-    if (!(parent instanceof HTMLElement) || (parent.tagName !== "UL" && parent.tagName !== "OL")) {
-      continue;
-    }
-
-    const previous: HTMLElement | null = current ? (current.items.at(-1) ?? null) : null;
-    if (current && current.parent === parent && isAdjacentSibling(previous, item)) {
-      current.items.push(item);
-      continue;
-    }
-
-    current = { parent, items: [item] };
-    groups.push(current);
-  }
-
-  return groups;
-}
-
-function ensureNestedList(parentItem: HTMLElement, tagName: string): HTMLElement {
-  const last = parentItem.lastElementChild;
-  if (last instanceof HTMLElement && last.tagName === tagName) {
-    return last;
-  }
-  const list = document.createElement(tagName.toLowerCase());
-  parentItem.append(list);
-  return list;
-}
-
-function collectTrailingListSiblings(item: HTMLElement): HTMLElement[] {
-  const trailing: HTMLElement[] = [];
-  let current = item.nextElementSibling;
-  while (current) {
-    const next = current.nextElementSibling;
-    if (current instanceof HTMLElement && current.tagName === "LI") {
-      trailing.push(current);
-    }
-    current = next;
-  }
-  return trailing;
-}
-
-function isAdjacentSibling(previous: HTMLElement | null, item: HTMLElement): boolean {
-  return previous !== null && getNextListElementSibling(previous) === item;
 }
 
 function getNextListElementSibling(node: Node): HTMLElement | null {
@@ -1337,53 +1085,6 @@ function isRangeAtStartOfBlock(range: Range, block: HTMLElement): boolean {
   before.selectNodeContents(block);
   before.setEnd(range.startContainer, clampNodeOffset(range.startContainer, range.startOffset));
   return before.toString().replaceAll("​", "") === "";
-}
-
-function createMarker(kind: "start" | "end" | "cursor"): HTMLSpanElement {
-  const marker = document.createElement("span");
-  marker.dataset["tabMarker"] = kind;
-  return marker;
-}
-
-function insertMarker(range: Range): HTMLSpanElement {
-  const marker = createMarker("cursor");
-  range.insertNode(marker);
-  return marker;
-}
-
-function insertBoundaryMarker(range: Range, kind: "start" | "end"): HTMLSpanElement {
-  const marker = createMarker(kind);
-  const boundary = range.cloneRange();
-  boundary.collapse(kind === "start");
-  boundary.insertNode(marker);
-  return marker;
-}
-
-function restoreCollapsedSelection(marker: HTMLElement) {
-  const sel = window.getSelection();
-  if (!sel) {
-    return;
-  }
-  const range = document.createRange();
-  range.setStartAfter(marker);
-  range.collapse(true);
-  sel.removeAllRanges();
-  sel.addRange(range);
-  marker.remove();
-}
-
-function restoreSelectionFromMarkers(startMarker: HTMLElement, endMarker: HTMLElement) {
-  const sel = window.getSelection();
-  if (!sel) {
-    return;
-  }
-  const range = document.createRange();
-  range.setStartAfter(startMarker);
-  range.setEndBefore(endMarker);
-  sel.removeAllRanges();
-  sel.addRange(range);
-  startMarker.remove();
-  endMarker.remove();
 }
 
 function dedentLine(line: string): string {

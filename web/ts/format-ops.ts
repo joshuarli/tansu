@@ -193,8 +193,14 @@ export function shiftIndent(
         newLine = line.slice(1);
         delta = -1;
       } else {
-        newLine = line;
-        delta = 0;
+        const spaceMatch = line.match(/^ {1,4}/);
+        if (spaceMatch) {
+          newLine = line.slice(spaceMatch[0].length);
+          delta = -spaceMatch[0].length;
+        } else {
+          newLine = line;
+          delta = 0;
+        }
       }
     } else {
       newLine = `\t${line}`;
@@ -211,14 +217,14 @@ export function shiftIndent(
     ) {
       // Don't move cursor before line start when dedenting
       newSelStart =
-        dedent && delta === -1
+        dedent && delta < 0
           ? Math.max(lineAbsStart + offset, selStart + offset + delta)
           : selStart + offset + delta;
     }
     if (selEnd >= lineAbsStart && selEnd <= lineAbsStart + line.length) {
       newSelEnd = Math.max(
         newSelStart,
-        dedent && delta === -1
+        dedent && delta < 0
           ? Math.max(lineAbsStart + offset, selEnd + offset + delta)
           : selEnd + offset + delta,
       );

@@ -163,6 +163,7 @@ describe("conflict", () => {
       content: "a\nb", // base: what was last known
       mtime: 1000,
       dirty: true,
+      lastSavedMd: "a\nb",
     };
 
     handleReloadConflict(
@@ -192,6 +193,7 @@ describe("conflict", () => {
       content: "a\nb",
       mtime: 1000,
       dirty: true,
+      lastSavedMd: "a\nb",
     };
 
     handleReloadConflict(
