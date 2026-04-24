@@ -4,59 +4,30 @@ import {
   searchFileNames,
   getRecentFiles,
   getPinnedFiles,
-  pinFile,
-  unpinFile,
-  deleteNote,
   type PinnedFileEntry,
   type RecentFileEntry,
   type FileSearchResult,
 } from "./api.ts";
 import { showContextMenu } from "./context-menu.ts";
-import { on, emit } from "./events.ts";
-import { showInputDialog } from "./input-dialog.ts";
+import { on } from "./events.ts";
+import { buildFileContextMenuItems } from "./file-actions.ts";
 import { openTab, getActiveTab, closeTabByPath } from "./tab-state.ts";
 import { relativeTime } from "./util.ts";
 
 function showNavContextMenu(e: MouseEvent, path: string, title: string): void {
   e.preventDefault();
-  const isPinned = pinnedPaths.has(path);
 
   showContextMenu(
-    [
-      {
-        label: "Rename...",
-        onclick: async () => {
-          const newName = await showInputDialog("Rename to...", title);
-          if (newName && newName !== title) {
-            const dir = path.includes("/") ? path.slice(0, path.lastIndexOf("/") + 1) : "";
-            emit("file:rename", { oldPath: path, newPath: `${dir}${newName}.md` });
-            window.dispatchEvent(new CustomEvent("tansu:rename", { detail: { path, newName } }));
-          }
-        },
+    buildFileContextMenuItems({
+      path,
+      title,
+      isPinned: pinnedPaths.has(path),
+      onPinChanged: async () => {
+        await refreshPinned();
+        await render();
       },
-      {
-        label: isPinned ? "Unpin" : "Pin",
-        onclick: async () => {
-          const action = isPinned ? unpinFile(path) : pinFile(path);
-          await action;
-          await refreshPinned();
-          render();
-          emit("pinned:changed");
-        },
-      },
-      {
-        label: "Delete",
-        danger: true,
-        onclick: async () => {
-          if (!confirm(`Delete ${title}?`)) {
-            return;
-          }
-          await deleteNote(path);
-          closeTabByPath(path);
-          emit("files:changed");
-        },
-      },
-    ],
+      onDeleted: () => closeTabByPath(path),
+    }),
     e.clientX,
     e.clientY,
   );

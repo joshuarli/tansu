@@ -1,8 +1,9 @@
 /// Tab bar DOM rendering.
 
-import { deleteNote, pinFile, unpinFile, getPinnedFiles } from "./api.ts";
+import { getPinnedFiles } from "./api.ts";
 import { showContextMenu } from "./context-menu.ts";
-import { emit, on } from "./events.ts";
+import { on } from "./events.ts";
+import { buildFileContextMenuItems } from "./file-actions.ts";
 import { showInputDialog } from "./input-dialog.ts";
 import {
   getTabs,
@@ -141,48 +142,13 @@ async function showTabContextMenu(e: MouseEvent, index: number) {
   const isPinned = pinned.some((f) => f.path === tab.path);
 
   showContextMenu(
-    [
-      {
-        label: "Rename...",
-        onclick: async () => {
-          const newName = await showInputDialog("Rename to...", tab.title);
-          if (newName && newName !== tab.title) {
-            const oldPath = tab.path;
-            const dir = oldPath.includes("/") ? oldPath.slice(0, oldPath.lastIndexOf("/") + 1) : "";
-            emit("file:rename", { oldPath, newPath: `${dir}${newName}.md` });
-            window.dispatchEvent(
-              new CustomEvent("tansu:rename", { detail: { path: oldPath, newName } }),
-            );
-          }
-        },
-      },
-      {
-        label: isPinned ? "Unpin" : "Pin",
-        onclick: () => {
-          const action = isPinned ? unpinFile(tab.path) : pinFile(tab.path);
-          void action.then(() => emit("pinned:changed")).catch(() => void 0);
-        },
-      },
-      {
-        label: "Delete",
-        danger: true,
-        onclick: () => {
-          if (!confirm(`Delete ${tab.title}?`)) {
-            return;
-          }
-          void deleteNote(tab.path)
-            .then(() => {
-              closeTab(index);
-              return emit("files:changed");
-            })
-            .catch(() => void 0);
-        },
-      },
-      {
-        label: "Close",
-        onclick: () => closeTab(index),
-      },
-    ],
+    buildFileContextMenuItems({
+      path: tab.path,
+      title: tab.title,
+      isPinned,
+      onDeleted: () => closeTab(index),
+      onClosed: () => closeTab(index),
+    }),
     e.clientX,
     e.clientY,
   );

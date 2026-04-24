@@ -1,6 +1,6 @@
 /// Singleton context menu — only one may be visible at a time.
 
-interface MenuItem {
+export interface MenuItem {
   label: string;
   danger?: boolean;
   onclick: () => void;

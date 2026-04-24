@@ -6,9 +6,7 @@
 
 - [ ] **`editor.ts:1111` untyped return object** — `initEditor()` returns `{ showEditor, hideEditor, … }` with an inferred type. Assign to an explicit `const api: EditorInstance = { … }` before returning so structural mismatches are caught at the definition.
 
-### Architecture
-
-- [ ] **`packages/md-wysiwyg` DOM coupling** — the package calls `document.getSelection()` and `document.execCommand` directly in `serialize.ts:37,48`, `transforms.ts:201,231,301`, `inline-transforms.ts:46,74`. This makes it impossible to test without a DOM. Split into a `core` layer (string→string: `markdown.ts`, `format-ops.ts`, `diff.ts`, `merge.ts`, `util.ts`, `highlight.ts`) and a `dom` layer (anything touching globals).
+### Misc
 
 - [ ] **`saveState` missing error check** — `api.ts:237-242` `saveState` POST has no `if (!res.ok) throw` — inconsistent with every other mutating call in the file.
 

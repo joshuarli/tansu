@@ -47,10 +47,17 @@ export function createSearch(deps: SearchDeps): Search {
   let isOpen = false;
   let scopePath: string | null = null;
   let showScoreBreakdown = true;
+  let settingsRequestId = 0;
+  let searchRequestId = 0;
 
   function refreshShowScoreBreakdown() {
+    const requestId = ++settingsRequestId;
     void getSettings()
-      .then((s) => (showScoreBreakdown = s.show_score_breakdown))
+      .then((s) => {
+        if (requestId === settingsRequestId) {
+          showScoreBreakdown = s.show_score_breakdown;
+        }
+      })
       .catch(() => void 0);
   }
 
@@ -58,6 +65,7 @@ export function createSearch(deps: SearchDeps): Search {
   refreshShowScoreBreakdown();
 
   function open(filterPath?: string) {
+    searchRequestId++;
     isOpen = true;
     scopePath = filterPath ?? null;
     overlay.classList.remove("hidden");
@@ -71,6 +79,7 @@ export function createSearch(deps: SearchDeps): Search {
   }
 
   function close() {
+    searchRequestId++;
     isOpen = false;
     overlay.classList.add("hidden");
     input.blur();
@@ -86,16 +95,28 @@ export function createSearch(deps: SearchDeps): Search {
 
   async function doSearch() {
     const q = input.value.trim();
+    const requestId = ++searchRequestId;
+    const requestScopePath = scopePath;
     if (q.length < 2) {
       results = [];
       renderResults(q);
       return;
     }
+    let nextResults: SearchResult[] = [];
     try {
-      results = await searchNotes(q, scopePath ?? undefined);
+      nextResults = await searchNotes(q, requestScopePath ?? undefined);
     } catch {
-      results = [];
+      nextResults = [];
     }
+    if (
+      requestId !== searchRequestId ||
+      !isOpen ||
+      input.value.trim() !== q ||
+      scopePath !== requestScopePath
+    ) {
+      return;
+    }
+    results = nextResults;
     selectedIndex = 0;
     renderResults(q);
   }

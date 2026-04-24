@@ -1,15 +1,39 @@
-# Refactor Checklist
+# Refactor Plan
 
-Items are grouped by severity and ordered by suggested priority.
+This file tracks the current TypeScript refactor work in `web/` and `packages/`.
 
-## Low — style / minor
+Status keys:
 
-- [ ] **L1** — magic timing numbers throughout: autosave `1500ms`/`500ms` (`editor.ts:297,306`), typing snapshot `1000ms` (`editor.ts:872`), SSE retry sequence (`main.ts:342`), notification `5000ms` (`main.ts:333`), tooltip hide `100ms` (`link-hover.ts:32`), image resize min `50`/factor `1.5` (`image-resize.ts:20`), undo stack size `200` (`editor.ts:853`); name them
-- [ ] **L2** `palette.ts:188` — shortcut strings use raw unicode escapes (`"⌘K"`); not greppable as "Cmd+K"
-- [ ] **L4** `image-paste.ts:19` — manual `YYYYMMDDhhmmss` date formatting; use `.toISOString().replaceAll(/[-T:]/g, "").slice(0, 14)`
-- [ ] **L5** `filenav.ts:238 timeAgo` vs `util.ts:9 relativeTime` — two time-ago formatters with different outputs and thresholds; pick one
-- [ ] **L6** `wrapIndex` pattern duplicated in `palette.ts:126` and `search.ts:87`; extract helper
-- [ ] **L7** `markdown.ts:228` — `(block satisfies never, "")` abuses comma operator; use `_exhaustiveCheck(block); return ""`
-- [ ] **L8** `conflict.ts` — `loadContent`/`getCurrentContent` callback shapes repeated across multiple signatures; extract a `ContentIO` type
-- [ ] **L9** `revisions.ts:62–64` — hardcoded color `#57606a` in inline styles; use a CSS variable or class
-- [ ] **L11** `md-wysiwyg/src/index.ts` — package barrel leaks internal implementation details (`matchPattern`, `computeReplaceRange`, `buildReplacementHtml`); trim to the public API
+- `[ ]` not started
+- `[-]` in progress
+- `[x]` done
+
+## Current tranche
+
+- [x] Recreate task tracker and turn the audit into an execution backlog
+- [x] Race-proof async UI flows in `web/ts/search.ts` and `web/ts/autocomplete.ts`
+- [x] Tighten the fetch/JSON boundary in `web/ts/api.ts`
+- [-] Extract shared file actions used by tabs and file nav
+
+## Backlog
+
+### High priority
+
+- [ ] Replace ad hoc `res.json() as T` casts with explicit decoders at API boundaries
+- [ ] Remove duplicated rename/pin/delete action wiring across tabs and file nav
+- [ ] Consolidate the app onto one typed event transport instead of mixing the local bus with raw `CustomEvent`
+- [ ] Add a single error-reporting path for silent catches in user-important flows
+
+### Medium priority
+
+- [ ] Extract shared modal/listbox primitives used by search, palette, settings, and input dialog
+- [ ] Replace `settings.ts` DOM scraping with a typed field schema
+- [ ] Reduce stringly `innerHTML` UI assembly where structure is persistent
+- [ ] Move markdown renderer/serializer/transforms toward registries instead of large condition ladders
+- [ ] Trim casts in the typed event bus implementation
+
+### Lower priority
+
+- [ ] Name timing constants and other repeated magic numbers
+- [ ] Remove small duplication like selection wrap logic between search and palette
+- [ ] Clean up remaining greppability issues in command labels and helper names

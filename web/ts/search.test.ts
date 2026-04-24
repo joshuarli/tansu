@@ -280,4 +280,46 @@ describe("search", () => {
       excluded_folders: [],
     });
   });
+
+  it("ignores stale search responses", async () => {
+    const input = document.querySelector("#search-input")! as HTMLInputElement;
+    const resultsEl = document.querySelector("#search-results")!;
+
+    mock.onDelayed(
+      "GET",
+      /\/api\/search\?q=alpha(?:&|$)/,
+      [
+        {
+          path: "a.md",
+          title: "Alpha",
+          excerpt: "alpha result",
+          score: 1,
+          field_scores: { title: 1, headings: 0, tags: 0, content: 0 },
+        },
+      ],
+      100,
+    );
+    mock.on("GET", /\/api\/search\?q=beta(?:&|$)/, [
+      {
+        path: "b.md",
+        title: "Beta",
+        excerpt: "beta result",
+        score: 1,
+        field_scores: { title: 1, headings: 0, tags: 0, content: 0 },
+      },
+    ]);
+
+    openSearch2();
+    input.value = "alpha";
+    input.dispatchEvent(new Event("input"));
+    input.value = "beta";
+    input.dispatchEvent(new Event("input"));
+
+    await new Promise((r) => setTimeout(r, 150));
+
+    const firstResult = resultsEl.querySelector(".search-result") as HTMLElement | null;
+    expect(firstResult).not.toBeNull();
+    expect(firstResult!.textContent!).toContain("Beta");
+    expect(firstResult!.textContent!).not.toContain("Alpha");
+  });
 });

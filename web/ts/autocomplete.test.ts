@@ -271,6 +271,23 @@ describe("autocomplete", () => {
     invalidateNoteCache();
   });
 
+  it("ignores stale autocomplete results after the trigger disappears", async () => {
+    mock.onDelayed("GET", "/api/notes", NOTES, 100);
+    invalidateNoteCache();
+
+    typeInEditor("see [[al");
+    checkWikiLinkTrigger(contentEl, "test.md");
+
+    typeInEditor("see done");
+    checkWikiLinkTrigger(contentEl, "test.md");
+
+    await new Promise((r) => setTimeout(r, 150));
+    expect(getDropdown()).toBeNull();
+
+    mock.on("GET", "/api/notes", NOTES);
+    invalidateNoteCache();
+  });
+
   it("hideAutocomplete removes the dropdown", async () => {
     invalidateNoteCache();
     typeInEditor("[[");

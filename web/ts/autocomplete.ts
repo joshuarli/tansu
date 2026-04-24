@@ -8,6 +8,7 @@ import { markDirty } from "./tab-state.ts";
 let autocompleteEl: HTMLElement | null = null;
 let allNotes: NoteEntry[] | null = null;
 let activeKeyHandler: ((e: KeyboardEvent) => void) | null = null;
+let autocompleteRequestId = 0;
 
 export function invalidateNoteCache() {
   allNotes = null;
@@ -20,12 +21,17 @@ function removeKeyHandler() {
   }
 }
 
-export function hideAutocomplete() {
+function clearAutocomplete() {
   if (autocompleteEl) {
     autocompleteEl.remove();
     autocompleteEl = null;
   }
   removeKeyHandler();
+}
+
+export function hideAutocomplete() {
+  autocompleteRequestId++;
+  clearAutocomplete();
 }
 
 export function checkWikiLinkTrigger(contentEl: HTMLElement, currentPath: string | null) {
@@ -53,22 +59,77 @@ export function checkWikiLinkTrigger(contentEl: HTMLElement, currentPath: string
   }
 
   const query = before.slice(triggerIdx + 2).toLowerCase();
-  showAutocomplete(query, node as Text, triggerIdx, pos, currentPath);
+  const requestId = ++autocompleteRequestId;
+  void showAutocomplete({
+    requestId,
+    query,
+    contentEl,
+    textNode: node as Text,
+    triggerIdx,
+    cursorPos: pos,
+    currentPath,
+  });
 }
 
-async function showAutocomplete(
-  query: string,
+interface AutocompleteRequest {
+  requestId: number;
+  query: string;
+  contentEl: HTMLElement;
+  textNode: Text;
+  triggerIdx: number;
+  cursorPos: number;
+  currentPath: string | null;
+}
+
+function isActiveTrigger(
+  contentEl: HTMLElement,
   textNode: Text,
   triggerIdx: number,
   cursorPos: number,
-  currentPath: string | null,
-) {
+): boolean {
+  if (!textNode.isConnected || !contentEl.contains(textNode)) {
+    return false;
+  }
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0 || !sel.isCollapsed) {
+    return false;
+  }
+  const range = sel.getRangeAt(0);
+  if (range.startContainer !== textNode) {
+    return false;
+  }
+  const pos = clampNodeOffset(textNode, range.startOffset);
+  if (pos !== cursorPos) {
+    return false;
+  }
+  const before = (textNode.textContent ?? "").slice(0, pos);
+  return before.lastIndexOf("[[") === triggerIdx && !before.includes("]]", triggerIdx);
+}
+
+async function showAutocomplete({
+  requestId,
+  query,
+  contentEl,
+  textNode,
+  triggerIdx,
+  cursorPos,
+  currentPath,
+}: AutocompleteRequest) {
   if (!allNotes) {
     try {
       allNotes = await listNotes();
     } catch {
+      if (requestId === autocompleteRequestId) {
+        clearAutocomplete();
+      }
       return;
     }
+  }
+  if (
+    requestId !== autocompleteRequestId ||
+    !isActiveTrigger(contentEl, textNode, triggerIdx, cursorPos)
+  ) {
+    return;
   }
 
   const filtered = allNotes
@@ -80,11 +141,11 @@ async function showAutocomplete(
     .slice(0, 10);
 
   if (filtered.length === 0) {
-    hideAutocomplete();
+    clearAutocomplete();
     return;
   }
 
-  hideAutocomplete();
+  clearAutocomplete();
   autocompleteEl = document.createElement("div");
   autocompleteEl.className = "autocomplete";
 
@@ -129,7 +190,7 @@ async function showAutocomplete(
       e.preventDefault();
       e.stopPropagation();
       const note = filtered[selectedIdx];
-      if (note) {
+      if (note && requestId === autocompleteRequestId) {
         completeWikiLink(textNode, triggerIdx, cursorPos, note, currentPath);
       }
       removeKeyHandler();
