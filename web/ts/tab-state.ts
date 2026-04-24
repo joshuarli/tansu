@@ -174,10 +174,6 @@ export function closeTabByPath(path: string) {
   }
 }
 
-function clearClosedTabs() {
-  closedTabs.length = 0;
-}
-
 export async function reopenClosedTab() {
   const path = closedTabs.pop();
   if (!path) {

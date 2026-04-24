@@ -96,7 +96,7 @@ function isListItemEmpty(item: HTMLElement): boolean {
   for (const nested of clone.querySelectorAll("ul, ol")) {
     nested.remove();
   }
-  const text = (clone.textContent ?? "").replaceAll("​", "").replaceAll(" ", " ").trim();
+  const text = (clone.textContent ?? "").replaceAll("\u200b", "").replaceAll("\u00a0", " ").trim();
   return text === "";
 }
 
@@ -150,7 +150,7 @@ function isRangeAtStartOfBlock(range: Range, block: HTMLElement): boolean {
   const before = range.cloneRange();
   before.selectNodeContents(block);
   before.setEnd(range.startContainer, clampNodeOffset(range.startContainer, range.startOffset));
-  return before.toString().replaceAll("​", "") === "";
+  return before.toString().replaceAll("\u200b", "") === "";
 }
 
 function removeEmptyTopLevelListItem(item: HTMLElement) {

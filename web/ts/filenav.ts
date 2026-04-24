@@ -15,6 +15,7 @@ import { showContextMenu } from "./context-menu.ts";
 import { on, emit } from "./events.ts";
 import { showInputDialog } from "./input-dialog.ts";
 import { openTab, getActiveTab, closeTabByPath } from "./tab-state.ts";
+import { relativeTime } from "./util.ts";
 
 function showNavContextMenu(e: MouseEvent, path: string, title: string): void {
   e.preventDefault();
@@ -29,6 +30,7 @@ function showNavContextMenu(e: MouseEvent, path: string, title: string): void {
           if (newName && newName !== title) {
             const dir = path.includes("/") ? path.slice(0, path.lastIndexOf("/") + 1) : "";
             emit("file:rename", { oldPath: path, newPath: `${dir}${newName}.md` });
+            window.dispatchEvent(new CustomEvent("tansu:rename", { detail: { path, newName } }));
           }
         },
       },
@@ -195,7 +197,9 @@ async function renderRecent(): Promise<void> {
     container.append(makeFileRow(file.path, file.title, active?.path, null));
   }
   for (const file of recentNonPinned) {
-    container.append(makeFileRow(file.path, file.title, active?.path, timeAgo(file.mtime)));
+    container.append(
+      makeFileRow(file.path, file.title, active?.path, relativeTime(file.mtime * 1000)),
+    );
   }
 }
 
@@ -237,30 +241,6 @@ async function renderSearch(q: string): Promise<void> {
 
 function getContainer(): HTMLElement | null {
   return document.querySelector("#sidebar-tree");
-}
-
-function timeAgo(mtime: number): string {
-  const seconds = Math.floor(Date.now() / 1000 - mtime);
-  if (seconds < 60) {
-    return "<1m";
-  }
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) {
-    return `${minutes}m`;
-  }
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) {
-    return `${hours}h`;
-  }
-  const days = Math.floor(hours / 24);
-  if (days < 7) {
-    return `${days}d`;
-  }
-  const weeks = Math.floor(days / 7);
-  if (weeks < 5) {
-    return `${weeks}w`;
-  }
-  return `${Math.floor(days / 30)}mo`;
 }
 
 function makeFileRow(

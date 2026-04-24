@@ -20,6 +20,13 @@ export default defineConfig({
     // Already caught by TypeScript
     "no-undef": "off",
 
+    // False positive: fires on const-scoped variables in for...of loops where each iteration
+    // has its own binding. ESLint docs state const loop vars are not affected by this rule.
+    "no-loop-func": "off",
+
+    // Lowercase Unicode escapes (​) are clearer than uppercase (​) — readable as-is
+    "unicorn/escape-case": "off",
+
     // Conflicts: unicorn/prefer-ternary wins over no-ternary; unicorn covers nested-ternary too
     "no-ternary": "off",
     "no-nested-ternary": "off",

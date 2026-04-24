@@ -156,7 +156,7 @@ function updateSelection(idx: number) {
 
 export type CompleteWikiLink = typeof completeWikiLink;
 
-function completeWikiLink(
+export function completeWikiLink(
   textNode: Text,
   triggerIdx: number,
   cursorPos: number,

@@ -24,7 +24,9 @@ function appendExcerpt(el: HTMLElement, excerpt: string): void {
       inBold = false;
       continue;
     }
-    if (!part) continue;
+    if (!part) {
+      continue;
+    }
     if (inBold) {
       const b = document.createElement("b");
       b.textContent = part;
@@ -46,10 +48,14 @@ export function createSearch(deps: SearchDeps): Search {
   let scopePath: string | null = null;
   let showScoreBreakdown = true;
 
+  function refreshShowScoreBreakdown() {
+    void getSettings()
+      .then((s) => (showScoreBreakdown = s.show_score_breakdown))
+      .catch(() => void 0);
+  }
+
   // Load setting once at startup, refresh on each open
-  void getSettings()
-    .then((s) => (showScoreBreakdown = s.show_score_breakdown))
-    .catch(() => void 0);
+  refreshShowScoreBreakdown();
 
   function open(filterPath?: string) {
     isOpen = true;
@@ -61,9 +67,7 @@ export function createSearch(deps: SearchDeps): Search {
     results = [];
     selectedIndex = 0;
     input.focus();
-    void getSettings()
-      .then((s) => (showScoreBreakdown = s.show_score_breakdown))
-      .catch(() => void 0);
+    refreshShowScoreBreakdown();
   }
 
   function close() {
@@ -169,7 +173,6 @@ export function createSearch(deps: SearchDeps): Search {
         el.append(excerpt);
       }
 
-      // eslint-disable-next-line no-loop-func
       el.onclick = () => {
         selectedIndex = i;
         selectItem();

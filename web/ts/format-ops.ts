@@ -245,11 +245,7 @@ export function shiftIndent(
     transformed.push(newLine);
 
     // Adjust selStart: if selStart is on or after the start of this line
-    if (
-      selStart >= lineAbsStart + (i > 0 ? 1 : 0) &&
-      selStart >= lineAbsStart &&
-      selStart <= lineAbsStart + line.length
-    ) {
+    if (selStart >= lineAbsStart + (i > 0 ? 1 : 0) && selStart <= lineAbsStart + line.length) {
       // Don't move cursor before line start when dedenting
       newSelStart =
         dedent && delta < 0

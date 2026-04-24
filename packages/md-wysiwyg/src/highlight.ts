@@ -16,7 +16,7 @@ const Hl = {
   Constant: 9,
   Macro: 10,
 } as const;
-type Hl = (typeof Hl)[keyof typeof Hl];
+type HlValue = (typeof Hl)[keyof typeof Hl];
 
 const hlClass: (string | null)[] = [
   null, // Normal
@@ -37,10 +37,10 @@ const State = {
   BlockComment: 1,
   MultiLineString: 2, // index stored separately
 } as const;
-type State = (typeof State)[keyof typeof State];
+type StateValue = (typeof State)[keyof typeof State];
 
 interface HlState {
-  state: State;
+  state: StateValue;
   stringIdx: number;
 }
 
@@ -298,7 +298,7 @@ function buildHl(src: string, st: HlState, rules: Rules): Uint8Array {
       while (i < len && isAlnum(src.codePointAt(i)!)) {
         i++;
       }
-      let ident: Hl | null;
+      let ident: HlValue | null;
       if (kwSearch(src, start, i, rules.keywords)) {
         ident = Hl.Keyword;
       } else if (kwSearch(src, start, i, rules.types)) {
@@ -382,9 +382,9 @@ function buildHl(src: string, st: HlState, rules: Rules): Uint8Array {
 
 function applyHlHtml(src: string, hl: Uint8Array): string {
   let out = "";
-  let cur: Hl = Hl.Normal;
+  let cur: HlValue = Hl.Normal;
   for (let i = 0; i < src.length; i++) {
-    const h = (i < hl.length ? hl[i]! : Hl.Normal) as Hl;
+    const h = (i < hl.length ? hl[i]! : Hl.Normal) as HlValue;
     if (h !== cur) {
       if (cur !== Hl.Normal) {
         out += "</span>";

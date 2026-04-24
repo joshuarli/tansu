@@ -17,7 +17,6 @@ describe("offline resilience", () => {
   let getTabs: () => Tab[];
   let markClean: (path: string, content: string, mtime: number) => void;
   let reopenClosedTab: () => Promise<void>;
-  let clearClosedTabs: () => void;
   let syncToServer: () => Promise<void>;
   let restoreSession: () => Promise<void>;
   let offRender: () => void;
@@ -27,7 +26,6 @@ describe("offline resilience", () => {
     while (getTabs().length > 0) {
       closeTab(0);
     }
-    clearClosedTabs();
   }
 
   beforeAll(async () => {
@@ -47,7 +45,6 @@ describe("offline resilience", () => {
     ({ getTabs } = mod);
     ({ markClean } = mod);
     ({ reopenClosedTab } = mod);
-    ({ clearClosedTabs } = mod);
     ({ syncToServer } = mod);
     ({ restoreSession } = mod);
 
@@ -84,7 +81,6 @@ describe("offline resilience", () => {
     await openTab("notes/offline.md");
     await new Promise((r) => setTimeout(r, 10));
     closeTab(0);
-    clearClosedTabs();
 
     // Server goes down
     mock.on("GET", "/api/note", "server error", 500);
@@ -164,8 +160,6 @@ describe("offline resilience", () => {
 
     const cached = await noteGet("notes/closing.md");
     expect(cached).toStrictEqual({ content: "# Closing", mtime: 7000 });
-
-    clearClosedTabs();
   });
 
   it("persistState writes session state including closed tabs to IDB", async () => {
@@ -271,7 +265,6 @@ describe("closed-tab stack", () => {
   let closeTab: (i: number) => void;
   let getTabs: () => Tab[];
   let reopenClosedTab: () => Promise<void>;
-  let clearClosedTabs: () => void;
   let restoreSession: () => Promise<void>;
   let offRender: () => void;
   let offChange: () => void;
@@ -280,7 +273,6 @@ describe("closed-tab stack", () => {
     while (getTabs().length > 0) {
       closeTab(0);
     }
-    clearClosedTabs();
   }
 
   beforeAll(async () => {
@@ -297,7 +289,6 @@ describe("closed-tab stack", () => {
     ({ closeTab } = mod);
     ({ getTabs } = mod);
     ({ reopenClosedTab } = mod);
-    ({ clearClosedTabs } = mod);
     ({ restoreSession } = mod);
 
     offRender = on("tab:render", () => {});

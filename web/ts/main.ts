@@ -327,19 +327,31 @@ function showNotification(msg: string, type: "error" | "info" | "success" = "err
   }, 5000);
 }
 
-let sseWasUnavailable = false;
-let sseRetryAttempt = 0;
-
-function nextSseRetryDelay(): number {
-  const delays = [250, 250, 500, 1000, 1000, 2000, 5000];
-  const delay = delays[Math.min(sseRetryAttempt, delays.length - 1)]!;
-  sseRetryAttempt++;
-  return delay;
+function createBackoff(delays: number[]) {
+  let attempt = 0;
+  let unavailable = false;
+  return {
+    next(): number {
+      const delay = delays[Math.min(attempt, delays.length - 1)]!;
+      attempt++;
+      return delay;
+    },
+    format(delay: number): string {
+      return delay < 1000 ? `${delay}ms` : `${Math.round(delay / 1000)}s`;
+    },
+    reset() {
+      attempt = 0;
+    },
+    get wasUnavailable() {
+      return unavailable;
+    },
+    set wasUnavailable(v: boolean) {
+      unavailable = v;
+    },
+  };
 }
 
-function formatRetryDelay(delay: number): string {
-  return delay < 1000 ? `${delay}ms` : `${Math.round(delay / 1000)}s`;
-}
+const sseBackoff = createBackoff([250, 250, 500, 1000, 1000, 2000, 5000]);
 
 function requestImmediateSSEReconnect() {
   if (pageUnloading || sse) {
@@ -368,9 +380,9 @@ function connectSSE() {
   sse = es;
 
   es.addEventListener("connected", () => {
-    sseRetryAttempt = 0;
-    if (sseWasUnavailable) {
-      sseWasUnavailable = false;
+    sseBackoff.reset();
+    if (sseBackoff.wasUnavailable) {
+      sseBackoff.wasUnavailable = false;
       showNotification("Server connection restored.", "success");
     } else {
       notif.className = "notification hidden";
@@ -415,9 +427,9 @@ function connectSSE() {
     if (pageUnloading) {
       return;
     }
-    sseWasUnavailable = true;
-    const delay = nextSseRetryDelay();
-    showNotification(`Server unavailable — retrying in ${formatRetryDelay(delay)}...`);
+    sseBackoff.wasUnavailable = true;
+    const delay = sseBackoff.next();
+    showNotification(`Server unavailable — retrying in ${sseBackoff.format(delay)}...`);
     sseReconnectTimer = setTimeout(() => {
       sseReconnectTimer = null;
       connectSSE();

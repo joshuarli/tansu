@@ -1,7 +1,8 @@
 NAME       := tansu
 TARGET     := $(shell rustc -vV | awk '/^host:/ {print $$2}')
 
-dev: ts
+dev:
+	pnpm run bundle-dev
 	cargo run --bin tansu -- $(NOTES_DIR) --port 3000
 
 build: check ts build-rs

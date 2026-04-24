@@ -1,6 +1,6 @@
 import { merge3 } from "@joshuarli98/md-wysiwyg";
 
-import { forceSaveNote, saveNote } from "./api.ts";
+import { forceSaveNote } from "./api.ts";
 import { markClean, type Tab } from "./tab-state.ts";
 
 /// Show a conflict banner when disk and editor content diverge.

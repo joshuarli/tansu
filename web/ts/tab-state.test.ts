@@ -29,7 +29,6 @@ describe("tab-state", () => {
   let syncToServer: () => Promise<void>;
   let setCursor: (path: string, offset: number) => void;
   let getCursor: (path: string) => number | undefined;
-  let clearClosedTabs: () => void;
   let reopenClosedTab: () => Promise<void>;
   let offRender: () => void;
   let offChange: () => void;
@@ -63,7 +62,6 @@ describe("tab-state", () => {
     ({ syncToServer } = mod);
     ({ setCursor } = mod);
     ({ getCursor } = mod);
-    ({ clearClosedTabs } = mod);
     ({ reopenClosedTab } = mod);
 
     offRender = on("tab:render", () => {});
@@ -371,19 +369,6 @@ describe("tab-state", () => {
     await syncToServer();
   });
 
-  it("clearClosedTabs empties the closed-tabs stack", async () => {
-    while (getTabs().length > 0) {
-      closeTab(0);
-    }
-    mock.on("GET", "/api/note", { content: "# X", mtime: 1000 });
-    await openTab("notes/x.md");
-    closeTab(0); // pushes to closedTabs
-    clearClosedTabs();
-    // reopenClosedTab should now be a no-op
-    await reopenClosedTab();
-    expect(getTabs()).toHaveLength(0);
-  });
-
   it("reopenClosedTab restores the last closed tab", async () => {
     while (getTabs().length > 0) {
       closeTab(0);
@@ -391,7 +376,6 @@ describe("tab-state", () => {
     mock.on("GET", "/api/note", { content: "# X", mtime: 1000 });
     await openTab("notes/reopen.md");
     closeTab(0);
-    clearClosedTabs(); // start fresh
     // Open and close to populate closedTabs
     await openTab("notes/reopen.md");
     closeTab(0);

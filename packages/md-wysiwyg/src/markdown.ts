@@ -65,6 +65,12 @@ interface ListNode {
   items: ListItem[];
 }
 
+function isBlockStart(line: string): boolean {
+  return (
+    /^(#{1,6}\s|`{3,}|~{3,}|>|(-{3,}|\*{3,}|_{3,})\s*$)/.test(line) || parseListLine(line) !== null
+  );
+}
+
 function parseBlocks(lines: string[]): Block[] {
   const blocks: Block[] = [];
   let i = 0;
@@ -162,10 +168,7 @@ function parseBlocks(lines: string[]): Block[] {
       if (l.trim() === "") {
         break;
       }
-      if (/^(#{1,6}\s|```|~~~|>|(-{3,}|\*{3,}|_{3,})\s*$)/.test(l)) {
-        break;
-      }
-      if (parseListLine(l)) {
+      if (isBlockStart(l)) {
         break;
       }
       if (

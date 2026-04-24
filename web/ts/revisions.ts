@@ -98,7 +98,6 @@ async function showRevisions(path: string, host: HTMLElement) {
       };
 
       item.append(time, restore);
-      // eslint-disable-next-line no-loop-func
       item.onclick = async () => {
         const revContent = await getRevision(path, ts);
         const preview = host.querySelector(".revision-preview");

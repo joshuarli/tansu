@@ -79,23 +79,9 @@ export function domToMarkdown(root: HTMLElement): string {
 function blockToMd(el: HTMLElement): SerializedBlock | null {
   const tag = el.tagName;
 
-  if (tag === "H1") {
-    return { md: `# ${inlineToMd(el)}`, kind: "heading" };
-  }
-  if (tag === "H2") {
-    return { md: `## ${inlineToMd(el)}`, kind: "heading" };
-  }
-  if (tag === "H3") {
-    return { md: `### ${inlineToMd(el)}`, kind: "heading" };
-  }
-  if (tag === "H4") {
-    return { md: `#### ${inlineToMd(el)}`, kind: "heading" };
-  }
-  if (tag === "H5") {
-    return { md: `##### ${inlineToMd(el)}`, kind: "heading" };
-  }
-  if (tag === "H6") {
-    return { md: `###### ${inlineToMd(el)}`, kind: "heading" };
+  if (/^H[1-6]$/.test(tag)) {
+    const level = Number(tag[1]!);
+    return { md: `${"#".repeat(level)} ${inlineToMd(el)}`, kind: "heading" };
   }
   if (el.classList.contains("callout")) {
     const type = el.dataset["callout"] ?? "note";
@@ -213,7 +199,7 @@ function inlineNodesToMd(nodes: Iterable<Node>, skip?: (node: Node) => boolean):
     }
 
     if (node.nodeType === Node.TEXT_NODE) {
-      md += (node.textContent ?? "").replaceAll("​", "");
+      md += (node.textContent ?? "").replaceAll("\u200b", "");
     } else if (node.nodeType === Node.ELEMENT_NODE) {
       const child = node as HTMLElement;
       const childTag = child.tagName;
@@ -329,7 +315,7 @@ function isNestedListOrCheckbox(node: Node): boolean {
 }
 
 function normalizeListItemText(text: string): string {
-  const stripped = text.replaceAll("​", "");
+  const stripped = text.replaceAll("\u200b", "");
   if (stripped.trim() === "") {
     return "";
   }
@@ -388,7 +374,7 @@ function isBlankLineBlock(el: HTMLElement): boolean {
   let sawBreak = false;
   for (const child of el.childNodes) {
     if (child.nodeType === Node.TEXT_NODE) {
-      if ((child.textContent ?? "").replaceAll("​", "").trim() !== "") {
+      if ((child.textContent ?? "").replaceAll("\u200b", "").trim() !== "") {
         return false;
       }
       continue;

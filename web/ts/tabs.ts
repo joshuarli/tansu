@@ -97,12 +97,10 @@ function render() {
     };
     el.append(closeBtn);
 
-    // eslint-disable-next-line no-loop-func
     el.addEventListener("mouseenter", () => {
       hoveredTabIndex = i;
       showTabTooltip(el);
     });
-    // eslint-disable-next-line no-loop-func
     el.addEventListener("mouseleave", () => {
       hoveredTabIndex = -1;
       hideTabTooltip();
@@ -152,6 +150,9 @@ async function showTabContextMenu(e: MouseEvent, index: number) {
             const oldPath = tab.path;
             const dir = oldPath.includes("/") ? oldPath.slice(0, oldPath.lastIndexOf("/") + 1) : "";
             emit("file:rename", { oldPath, newPath: `${dir}${newName}.md` });
+            window.dispatchEvent(
+              new CustomEvent("tansu:rename", { detail: { path: oldPath, newName } }),
+            );
           }
         },
       },
