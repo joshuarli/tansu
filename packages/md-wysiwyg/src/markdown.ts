@@ -31,6 +31,8 @@ const calloutIcons: Record<string, string> = {
 };
 
 const CURSOR_SENTINEL = "\uFDD0";
+const SEL_START_SENTINEL = "\uFDD1";
+const SEL_END_SENTINEL = "\uFDD2";
 
 export function renderMarkdown(src: string): string {
   if (src === "") return "";
@@ -350,6 +352,18 @@ function inline(text: string): string {
       continue;
     }
 
+    if (ch === SEL_START_SENTINEL) {
+      out += '<span data-md-sel-start="true"></span>';
+      i++;
+      continue;
+    }
+
+    if (ch === SEL_END_SENTINEL) {
+      out += '<span data-md-sel-end="true"></span>';
+      i++;
+      continue;
+    }
+
     // Inline code (backtick) — no nesting
     if (ch === "`") {
       const end = text.indexOf("`", i + 1);
@@ -509,4 +523,17 @@ function findClosing(text: string, delim: string, start: number): number {
     if (text[i] === delim) return i;
   }
   return -1;
+}
+
+/// Render markdown with selection markers inserted. Emits
+/// <span data-md-sel-start> and <span data-md-sel-end> at the given offsets
+/// so callers can restore the DOM selection after re-rendering.
+export function renderMarkdownWithSelection(src: string, selStart: number, selEnd: number): string {
+  const clampedStart = Math.max(0, Math.min(selStart, src.length));
+  const clampedEnd = Math.max(clampedStart, Math.min(selEnd, src.length));
+  // Insert end sentinel first (higher offset) so inserting it doesn't shift the start offset.
+  const withEnd = src.slice(0, clampedEnd) + SEL_END_SENTINEL + src.slice(clampedEnd);
+  const withBoth =
+    withEnd.slice(0, clampedStart) + SEL_START_SENTINEL + withEnd.slice(clampedStart);
+  return renderMarkdown(withBoth);
 }
