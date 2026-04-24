@@ -1,4 +1,4 @@
-export type EditorEvent =
+type EditorEvent =
   | { type: "undo" | "redo" }
   | {
       type: "format";

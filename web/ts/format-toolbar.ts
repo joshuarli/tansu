@@ -15,14 +15,14 @@ import {
   type FormatResult,
 } from "./format-ops.ts";
 
-export interface FormatToolbarOptions {
+interface FormatToolbarOptions {
   contentEl: HTMLElement;
   applyIndent: (dedent: boolean) => void;
   onMutation: () => void;
   applySourceFormat: (transform: (md: string, start: number, end: number) => FormatResult) => void;
 }
 
-export interface FormatButtonsOpts {
+interface FormatButtonsOpts {
   contentEl: HTMLElement;
   applyIndent: (dedent: boolean) => void;
   afterInline: () => void;
@@ -244,4 +244,3 @@ function positionToolbar(toolbar: HTMLElement, range: Range) {
   toolbar.style.top = `${top}px`;
   toolbar.style.left = `${left}px`;
 }
-

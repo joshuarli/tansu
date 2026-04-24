@@ -1,9 +1,10 @@
 /// Tests for renderer.ts helpers and an enforcement test that render functions
 /// are only called from renderer.ts (not scattered across other source files).
 
-import { describe, test, expect } from "vitest";
 import { readFileSync, readdirSync } from "fs";
 import { join } from "path";
+
+import { describe, test, expect } from "vitest";
 
 describe("renderer invariants", () => {
   test("renderMarkdown/renderMarkdownWithCursor/renderMarkdownWithSelection only imported in renderer.ts", () => {
@@ -12,7 +13,8 @@ describe("renderer invariants", () => {
       (f) => f.endsWith(".ts") && !f.endsWith(".test.ts") && f !== "renderer.ts",
     );
 
-    const renderFnPattern = /\b(renderMarkdown|renderMarkdownWithCursor|renderMarkdownWithSelection)\b/;
+    const renderFnPattern =
+      /\b(renderMarkdown|renderMarkdownWithCursor|renderMarkdownWithSelection)\b/;
 
     const violations: string[] = [];
     for (const file of files) {

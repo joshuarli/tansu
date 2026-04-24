@@ -275,7 +275,9 @@ describe("format-toolbar", () => {
     const remove = initFormatToolbar({
       contentEl: el,
       applyIndent: () => {},
-      applySourceFormat: (fn) => { fn("hello", 0, 5); },
+      applySourceFormat: (fn) => {
+        fn("hello", 0, 5);
+      },
       onMutation: () => {
         mutationCount++;
       },
@@ -300,7 +302,9 @@ describe("format-toolbar", () => {
     const remove = initFormatToolbar({
       contentEl: el,
       applyIndent: () => {},
-      applySourceFormat: (fn) => { fn("hello", 0, 5); },
+      applySourceFormat: (fn) => {
+        fn("hello", 0, 5);
+      },
       onMutation: () => {
         mutationCount++;
       },
@@ -325,7 +329,9 @@ describe("format-toolbar", () => {
     const remove = initFormatToolbar({
       contentEl: el,
       applyIndent: () => {},
-      applySourceFormat: (fn) => { fn("hello", 0, 5); },
+      applySourceFormat: (fn) => {
+        fn("hello", 0, 5);
+      },
       onMutation: () => {
         mutationCount++;
       },
@@ -350,7 +356,9 @@ describe("format-toolbar", () => {
     const remove = initFormatToolbar({
       contentEl: el,
       applyIndent: () => {},
-      applySourceFormat: (fn) => { fn("hello", 0, 5); },
+      applySourceFormat: (fn) => {
+        fn("hello", 0, 5);
+      },
       onMutation: () => {
         mutationCount++;
       },
@@ -384,7 +392,9 @@ describe("format-toolbar", () => {
     const remove = initFormatToolbar({
       contentEl: el,
       applyIndent: () => {},
-      applySourceFormat: (fn) => { fn("hello", 0, 5); },
+      applySourceFormat: (fn) => {
+        fn("hello", 0, 5);
+      },
       onMutation: () => {
         mutationCount++;
       },
@@ -409,7 +419,9 @@ describe("format-toolbar", () => {
     const remove = initFormatToolbar({
       contentEl: el,
       applyIndent: () => {},
-      applySourceFormat: (fn) => { fn("hello", 0, 5); },
+      applySourceFormat: (fn) => {
+        fn("hello", 0, 5);
+      },
       onMutation: () => {
         mutationCount++;
       },
@@ -448,7 +460,9 @@ describe("format-toolbar", () => {
       applyIndent: (dedent) => {
         indentArgs.push(dedent);
       },
-      applySourceFormat: (fn) => { fn("hello", 0, 5); },
+      applySourceFormat: (fn) => {
+        fn("hello", 0, 5);
+      },
       onMutation: () => {},
     });
     const toolbar = document.body.querySelector(".format-toolbar")!;
@@ -472,7 +486,9 @@ describe("format-toolbar", () => {
       applyIndent: (dedent) => {
         indentArgs.push(dedent);
       },
-      applySourceFormat: (fn) => { fn("hello", 0, 5); },
+      applySourceFormat: (fn) => {
+        fn("hello", 0, 5);
+      },
       onMutation: () => {},
     });
     const toolbar = document.body.querySelector(".format-toolbar")!;
@@ -494,7 +510,9 @@ describe("format-toolbar", () => {
     const remove = initFormatToolbar({
       contentEl: el,
       applyIndent: () => {},
-      applySourceFormat: (fn) => { fn("hello", 0, 5); },
+      applySourceFormat: (fn) => {
+        fn("hello", 0, 5);
+      },
       onMutation: () => {
         mutationCount++;
       },
@@ -561,7 +579,9 @@ describe("format-toolbar", () => {
     const remove = initFormatToolbar({
       contentEl: el,
       applyIndent: () => {},
-      applySourceFormat: (fn) => { fn("hello", 0, 5); },
+      applySourceFormat: (fn) => {
+        fn("hello", 0, 5);
+      },
       onMutation: () => {
         mutationCount++;
       },
@@ -594,7 +614,9 @@ describe("format-toolbar", () => {
     const remove = initFormatToolbar({
       contentEl: el,
       applyIndent: () => {},
-      applySourceFormat: (fn) => { fn("hello", 0, 5); },
+      applySourceFormat: (fn) => {
+        fn("hello", 0, 5);
+      },
       onMutation: () => {
         mutationCount++;
       },
@@ -628,7 +650,9 @@ describe("format-toolbar", () => {
     const remove = initFormatToolbar({
       contentEl: el,
       applyIndent: () => {},
-      applySourceFormat: (fn) => { fn("hello", 0, 5); },
+      applySourceFormat: (fn) => {
+        fn("hello", 0, 5);
+      },
       onMutation: () => {
         mutationCount++;
       },

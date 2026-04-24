@@ -6,19 +6,6 @@ import {
   handleBlockTransform,
 } from "@joshuarli98/md-wysiwyg";
 
-import {
-  toggleBold,
-  toggleItalic,
-  toggleHighlight,
-  type FormatResult,
-} from "./format-ops.ts";
-import {
-  setContent,
-  setContentWithCursor,
-  setContentWithSelection,
-  restoreSelectionFromRenderedMarkers,
-} from "./renderer.ts";
-
 import { saveNote } from "./api.ts";
 import {
   checkWikiLinkTrigger,
@@ -30,10 +17,17 @@ import { showConflictBanner, handleReloadConflict } from "./conflict.ts";
 import { showContextMenu } from "./context-menu.ts";
 import { dispatchEditorAction } from "./editor-events.ts";
 import { on, emit } from "./events.ts";
+import { toggleBold, toggleItalic, toggleHighlight, type FormatResult } from "./format-ops.ts";
 import { initFormatToolbar, populateFormatButtons } from "./format-toolbar.ts";
 import { handleImagePaste } from "./image-paste.ts";
 import { initImageResize } from "./image-resize.ts";
 import { registerLinkHover } from "./link-hover.ts";
+import {
+  setContent,
+  setContentWithCursor,
+  setContentWithSelection,
+  restoreSelectionFromRenderedMarkers,
+} from "./renderer.ts";
 import { toggleRevisions, hideRevisions, isRevisionsOpen } from "./revisions.ts";
 import { markDirty, markClean, getActiveTab, getTabs, setCursor, getCursor } from "./tabs.ts";
 

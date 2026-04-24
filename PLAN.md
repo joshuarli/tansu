@@ -30,11 +30,7 @@ to emit:
 New export:
 
 ```ts
-export function renderMarkdownWithSelection(
-  src: string,
-  selStart: number,
-  selEnd: number,
-): string
+export function renderMarkdownWithSelection(src: string, selStart: number, selEnd: number): string;
 ```
 
 Injects the two sentinels at `selStart` and `selEnd` in the markdown string (clamped,
@@ -42,6 +38,7 @@ Injects the two sentinels at `selStart` and `selEnd` in the markdown string (cla
 
 Also export a `restoreSelectionFromMarkers(contentEl: HTMLElement): void` helper (can
 live in editor.ts or the package) that:
+
 1. Finds `[data-md-sel-start]` and `[data-md-sel-end]` spans
 2. Creates a Range from `startAfter(selStartSpan)` to `startBefore(selEndSpan)`
 3. Applies it via `sel.removeAllRanges() / sel.addRange(r)`
@@ -64,12 +61,11 @@ saved container reference.
 Instead, write a single-pass helper that inserts **both** markers before serializing:
 
 ```ts
-function getSelectionMarkdownOffsets(
-  contentEl: HTMLElement,
-): { start: number; end: number } | null
+function getSelectionMarkdownOffsets(contentEl: HTMLElement): { start: number; end: number } | null;
 ```
 
 Implementation:
+
 1. Get `sel = window.getSelection()`. Return null if no range or collapsed.
 2. Insert `[data-md-sel-start]` span at `range.startContainer / startOffset`.
 3. Insert `[data-md-sel-end]` span at `range.endContainer / endOffset`.
@@ -89,16 +85,17 @@ the transformed markdown and updated offsets. No DOM access.
 ```ts
 type FormatResult = { md: string; selStart: number; selEnd: number };
 
-export function toggleBold(md: string, start: number, end: number): FormatResult
-export function toggleItalic(md: string, start: number, end: number): FormatResult
-export function toggleStrikethrough(md: string, start: number, end: number): FormatResult
-export function toggleHighlight(md: string, start: number, end: number): FormatResult
-export function clearInlineFormats(md: string, start: number, end: number): FormatResult
+export function toggleBold(md: string, start: number, end: number): FormatResult;
+export function toggleItalic(md: string, start: number, end: number): FormatResult;
+export function toggleStrikethrough(md: string, start: number, end: number): FormatResult;
+export function toggleHighlight(md: string, start: number, end: number): FormatResult;
+export function clearInlineFormats(md: string, start: number, end: number): FormatResult;
 ```
 
 **Toggle logic** (same pattern for each marker pair):
 
 For a marker of length `n` (e.g. `**` → n=2):
+
 - Already wrapped: `md.slice(start-n, start) === marker && md.slice(end, end+n) === marker`
   → Remove outer markers. New offsets shift left by `n`.
 - Not wrapped: insert marker at `start` and `end`.
@@ -122,8 +119,12 @@ with mixed markers.
 **File:** `web/ts/format-ops.ts`
 
 ```ts
-export function toggleHeading(md: string, selStart: number, level: 1|2|3|4|5|6): FormatResult
-export function toggleCodeFence(md: string, selStart: number, selEnd: number): FormatResult
+export function toggleHeading(
+  md: string,
+  selStart: number,
+  level: 1 | 2 | 3 | 4 | 5 | 6,
+): FormatResult;
+export function toggleCodeFence(md: string, selStart: number, selEnd: number): FormatResult;
 ```
 
 **`toggleHeading`**: find the line containing `selStart`. If it already starts with the
@@ -148,7 +149,7 @@ export function shiftIndent(
   selStart: number,
   selEnd: number,
   dedent: boolean,
-): FormatResult
+): FormatResult;
 ```
 
 Find all lines that overlap `[selStart, selEnd]`. Add or remove one leading `\t` from
@@ -172,7 +173,7 @@ function applyInlineFormat(transform: (md, s, e) => FormatResult) {
   if (!sel) return;
   const md = domToMarkdown(contentEl);
   const { md: newMd, selStart, selEnd } = transform(md, sel.start, sel.end);
-  pushUndo(md, sel.start, sel.end);          // step 7
+  pushUndo(md, sel.start, sel.end); // step 7
   contentEl.innerHTML = renderMarkdownWithSelection(newMd, selStart, selEnd);
   restoreSelectionFromMarkers(contentEl);
   onMutation();
@@ -200,7 +201,7 @@ The browser DOM undo stack is unreliable once any code sets `innerHTML` directly
 ```ts
 type UndoEntry = { md: string; selStart: number; selEnd: number };
 let undoStack: UndoEntry[] = [];
-let undoIndex = -1;          // points to the current position in the stack
+let undoIndex = -1; // points to the current position in the stack
 ```
 
 **`pushUndo(md, selStart, selEnd)`**: called before every mutation (format op, block
@@ -212,6 +213,7 @@ keystrokes into a single undo step. Called from the `input` event handler for
 non-structural edits (plain typing).
 
 **`undo()`**:
+
 1. If `undoIndex <= 0`, nothing to undo.
 2. Snapshot current state at `undoIndex` if it hasn't been snapshotted yet (the
    "live" state is the current DOM; convert with `domToMarkdown` + current selection).
@@ -223,6 +225,7 @@ non-structural edits (plain typing).
 **`redo()`**: advance `undoIndex`, same re-render path.
 
 **Keyboard interception** in the `keydown` handler:
+
 ```
 Cmd+Z / Ctrl+Z           → e.preventDefault(); undo()
 Cmd+Shift+Z / Ctrl+Y     → e.preventDefault(); redo()

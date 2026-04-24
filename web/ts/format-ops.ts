@@ -8,12 +8,7 @@ export interface FormatResult {
   selEnd: number;
 }
 
-function toggleMarker(
-  md: string,
-  start: number,
-  end: number,
-  marker: string,
-): FormatResult {
+function toggleMarker(md: string, start: number, end: number, marker: string): FormatResult {
   const n = marker.length;
   const isWrapped =
     start >= n &&
@@ -40,22 +35,14 @@ export function toggleItalic(md: string, start: number, end: number): FormatResu
 
   // Check if selection is surrounded by italic *, but make sure we're not just
   // detecting the inner characters of a ** (bold) marker.
-  const hasSingleStarBefore =
-    start >= n && md.slice(start - n, start) === marker;
-  const hasSingleStarAfter =
-    end + n <= md.length && md.slice(end, end + n) === marker;
-  const hasBoldBefore =
-    start >= 2 && md.slice(start - 2, start) === "**";
-  const hasBoldAfter =
-    end + 2 <= md.length && md.slice(end, end + 2) === "**";
+  const hasSingleStarBefore = start >= n && md.slice(start - n, start) === marker;
+  const hasSingleStarAfter = end + n <= md.length && md.slice(end, end + n) === marker;
+  const hasBoldBefore = start >= 2 && md.slice(start - 2, start) === "**";
+  const hasBoldAfter = end + 2 <= md.length && md.slice(end, end + 2) === "**";
 
   // Already wrapped in italic: there's a * immediately outside the selection that is
   // NOT part of a ** bold pair (i.e., not both chars are *).
-  const isWrapped =
-    hasSingleStarBefore &&
-    hasSingleStarAfter &&
-    !hasBoldBefore &&
-    !hasBoldAfter;
+  const isWrapped = hasSingleStarBefore && hasSingleStarAfter && !hasBoldBefore && !hasBoldAfter;
 
   if (isWrapped) {
     const newMd = md.slice(0, start - n) + md.slice(start, end) + md.slice(end + n);
@@ -160,7 +147,7 @@ export function toggleCodeFence(md: string, selStart: number, selEnd: number): F
     // The following fence occupies positions after the original le
     // nextLine: [afterLe, nextLineEnd], but shifted by removedBefore
     const shiftedAfterLe = newLe < md.length - removedBefore ? newLe + 1 : newLe;
-    const newNextLineEnd = lineEnd(md.slice(fenceBeforeEnd), newLe - (fenceBeforeStart)) ;
+    const newNextLineEnd = lineEnd(md.slice(fenceBeforeEnd), newLe - fenceBeforeStart);
 
     // Simpler: build the new string directly
     const before = md.slice(0, fenceBeforeStart);
