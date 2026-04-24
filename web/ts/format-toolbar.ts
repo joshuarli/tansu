@@ -187,6 +187,12 @@ function positionToolbar(toolbar: HTMLElement, range: Range) {
   toolbar.style.left = `${left}px`;
 }
 
+const TOOLBAR_BLOCK_TAGS = new Set(["P", "DIV", "H1", "H2", "H3", "H4", "H5", "H6"]);
+
+function isBlankBlock(el: HTMLElement): boolean {
+  return (el.textContent ?? "").replace(/\u200B/g, "").trim() === "";
+}
+
 // Toggle an inline format (e.g. del, mark) on the selection.
 // If the selection is already inside a matching element, removes it; otherwise wraps it.
 // Uses execCommand('insertHTML') so the operation joins the browser undo stack.
@@ -195,6 +201,36 @@ function toggleInlineWrap(contentEl: HTMLElement, tag: string): void {
   if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return;
   const range = sel.getRangeAt(0);
   if (!contentEl.contains(range.startContainer) || !contentEl.contains(range.endContainer)) return;
+
+  const uid = Math.random().toString(36).slice(2);
+
+  // When the selection crosses block boundaries, commonAncestorContainer is contentEl and
+  // the single-block ancestor walk won't find any wrapper. Handle multi-block separately.
+  if (range.commonAncestorContainer === contentEl) {
+    const div = document.createElement("div");
+    div.appendChild(range.cloneContents());
+
+    if (nodeIsInsideTag(range.startContainer, tag, contentEl)) {
+      // Unwrap: strip all instances of the tag from the cloned blocks.
+      for (const el of Array.from(div.querySelectorAll(tag))) {
+        const parent = el.parentNode!;
+        while (el.firstChild) parent.insertBefore(el.firstChild, el);
+        el.remove();
+      }
+    } else {
+      // Wrap: apply tag inside each non-blank block.
+      for (const child of Array.from(div.children)) {
+        if (TOOLBAR_BLOCK_TAGS.has(child.tagName) && !isBlankBlock(child as HTMLElement)) {
+          const mark = document.createElement(tag);
+          while (child.firstChild) mark.appendChild(child.firstChild);
+          child.appendChild(mark);
+        }
+      }
+    }
+
+    document.execCommand("insertHTML", false, div.innerHTML);
+    return;
+  }
 
   // Walk up from commonAncestor to find an enclosing wrapper of the same tag
   let ancestor: Node | null = range.commonAncestorContainer;
@@ -207,8 +243,6 @@ function toggleInlineWrap(contentEl: HTMLElement, tag: string): void {
     }
     ancestor = ancestor.parentNode;
   }
-
-  const uid = Math.random().toString(36).slice(2);
 
   if (wrapper) {
     // Unwrap: select the entire wrapper element, replace it with its inner content
@@ -242,7 +276,7 @@ function toggleInlineWrap(contentEl: HTMLElement, tag: string): void {
     return;
   }
 
-  // Wrap: clone selection HTML, replace selection with wrapped version via execCommand
+  // Wrap: clone selection HTML, replace selection with wrapped version via execCommand.
   const div = document.createElement("div");
   div.appendChild(range.cloneContents());
   document.execCommand("insertHTML", false, `<${tag} data-ftb="${uid}">${div.innerHTML}</${tag}>`);
@@ -255,6 +289,15 @@ function toggleInlineWrap(contentEl: HTMLElement, tag: string): void {
     sel.removeAllRanges();
     sel.addRange(r);
   }
+}
+
+function nodeIsInsideTag(node: Node, tag: string, stopAt: Node): boolean {
+  let cur: Node | null = node.nodeType === Node.TEXT_NODE ? node.parentNode : node;
+  while (cur && cur !== stopAt) {
+    if (cur instanceof HTMLElement && cur.tagName.toLowerCase() === tag) return true;
+    cur = cur.parentNode;
+  }
+  return false;
 }
 
 function getDirectChild(contentEl: HTMLElement, node: Node): HTMLElement | null {

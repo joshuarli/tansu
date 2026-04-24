@@ -330,6 +330,36 @@ describe("editor", () => {
     hideEditor();
   });
 
+  test("WYSIWYG: Cmd/Ctrl+H across multiple paragraphs highlights each block", async () => {
+    showEditor("highlight-multiblock.md", "foo\n\nbar");
+    await new Promise((r) => setTimeout(r, 50));
+
+    const contentEl = document.querySelector(".editor-content") as HTMLElement;
+    const paragraphs = Array.from(contentEl.querySelectorAll("p")).filter(
+      (p) => (p.textContent ?? "").trim() !== "",
+    );
+    const startNode = paragraphs[0]!.firstChild as Text;
+    const endNode = paragraphs[1]!.firstChild as Text;
+    const range = document.createRange();
+    range.setStart(startNode, 0);
+    range.setEnd(endNode, endNode.length);
+    const sel = window.getSelection()!;
+    sel.removeAllRanges();
+    sel.addRange(range);
+
+    contentEl.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "h", ctrlKey: true, bubbles: true }),
+    );
+
+    expect(getCurrentContent()).toBe("==foo==\n\n==bar==");
+    const marks = contentEl.querySelectorAll("mark");
+    expect(marks.length).toBe(2);
+    expect(marks[0]!.textContent).toBe("foo");
+    expect(marks[1]!.textContent).toBe("bar");
+
+    hideEditor();
+  });
+
   test("WYSIWYG: Tab and Shift+Tab indent and dedent selected blocks", async () => {
     showEditor("tab-wysiwyg-blocks.md", "alpha\n\nbeta");
     await new Promise((r) => setTimeout(r, 50));

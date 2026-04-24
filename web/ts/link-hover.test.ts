@@ -31,7 +31,7 @@ describe("link-hover", () => {
   test("mouseover on editor link shows tooltip", () => {
     const a = makeEditorLink("https://example.com");
 
-    document.dispatchEvent(new MouseEvent("mouseover", { bubbles: true, target: a }));
+    document.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
     // Event must bubble from anchor; dispatch from the anchor itself
     a.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
 
