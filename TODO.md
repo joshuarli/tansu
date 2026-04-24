@@ -26,11 +26,9 @@
 
 ## Performance
 
-- [ ] **`scheduleTypingSnapshot` does full `domToMarkdown` every 1s** (`editor.ts:599-612`) — hot path on large notes. Consider storing cursor offset only and computing markdown lazily on undo since undo is rare.
+**`transforms.ts:209` page-wide `document.querySelector`** — scanning the entire document for `[${CURSOR_ATTR}]`. Fix: pass `contentEl` down from `editor.ts` into `checkBlockInputTransform` / `replaceBlock` and use `contentEl.querySelector(...)` instead.
 
-- [ ] **`transforms.ts:209` page-wide `document.querySelector`** — scanning the entire document for `[${CURSOR_ATTR}]`. Fix: pass `contentEl` down from `editor.ts` into `checkBlockInputTransform` / `replaceBlock` and use `contentEl.querySelector(...)` instead.
-
-- [ ] **`reloadFromDisk` does full `domToMarkdown` on every save round-trip** (`editor.ts:341-368`) — the `files:changed` SSE fires on the client's own saves too. Gate by comparing `tab.lastSavedMd === content` before calling `domToMarkdown`.
+**`reloadFromDisk` does full `domToMarkdown` on every save round-trip** (`editor.ts:341-368`) — the `files:changed` SSE fires on the client's own saves too. Gate by comparing `tab.lastSavedMd === content` before calling `domToMarkdown`.
 
 ## Offline resilience
 

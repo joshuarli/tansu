@@ -224,7 +224,6 @@ export function initEditor(): EditorInstance {
   }
   const undoStack: UndoEntry[] = [];
   let undoIndex = -1;
-  let typingSnapshotTimer: ReturnType<typeof setTimeout> | null = null;
   let saving = false;
   let autosaveTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -292,6 +291,10 @@ export function initEditor(): EditorInstance {
     }
 
     const content = getCurrentContent();
+    if (contentEl) {
+      const sel = getSelectionMarkdownOffsets(contentEl);
+      pushUndo(content, sel?.start ?? 0, sel?.end ?? 0);
+    }
     // Capture cursor synchronously before the first await
     const cursorOffset = isSourceMode ? -1 : saveCursorOffset();
 
@@ -580,21 +583,6 @@ export function initEditor(): EditorInstance {
     }
   }
 
-  function scheduleTypingSnapshot(): void {
-    if (typingSnapshotTimer !== null) {
-      clearTimeout(typingSnapshotTimer);
-    }
-    typingSnapshotTimer = setTimeout(() => {
-      typingSnapshotTimer = null;
-      if (!contentEl) {
-        return;
-      }
-      const md = domToMarkdown(contentEl);
-      const sel = getSelectionMarkdownOffsets(contentEl);
-      pushUndo(md, sel?.start ?? 0, sel?.end ?? 0);
-    }, 1000);
-  }
-
   function applyUndoEntry(idx: number): void {
     const entry = undoStack[idx]!;
     setContentWithSelection(contentEl!, entry.md, entry.selStart, entry.selEnd);
@@ -760,7 +748,6 @@ export function initEditor(): EditorInstance {
         markDirty(currentPath);
       }
       scheduleAutosave();
-      scheduleTypingSnapshot();
       if (contentEl && checkBlockInputTransform(contentEl)) {
         return;
       }
@@ -1026,10 +1013,6 @@ export function initEditor(): EditorInstance {
       clearTimeout(autosaveTimer);
       autosaveTimer = null;
       void saveCurrentNote({ silent: true });
-    }
-    if (typingSnapshotTimer !== null) {
-      clearTimeout(typingSnapshotTimer);
-      typingSnapshotTimer = null;
     }
     undoStack.length = 0;
     undoIndex = -1;
