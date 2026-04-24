@@ -122,6 +122,15 @@ export function populateFormatButtons(container: HTMLElement, opts: FormatButton
   );
 }
 
+function isImageOnlySelection(sel: Selection): boolean {
+  const range = sel.getRangeAt(0);
+  const container = range.commonAncestorContainer;
+  if (container.nodeType !== Node.ELEMENT_NODE) return false;
+  if (range.endOffset - range.startOffset !== 1) return false;
+  const node = (container as Element).childNodes[range.startOffset];
+  return node?.nodeName === "IMG";
+}
+
 export function initFormatToolbar(opts: FormatToolbarOptions): () => void {
   const { contentEl, applyIndent, onMutation, applySourceFormat } = opts;
 
@@ -142,6 +151,10 @@ export function initFormatToolbar(opts: FormatToolbarOptions): () => void {
     }
     const range = sel.getRangeAt(0);
     if (!contentEl.contains(range.startContainer) || !contentEl.contains(range.endContainer)) {
+      hideToolbar();
+      return;
+    }
+    if (isImageOnlySelection(sel)) {
       hideToolbar();
       return;
     }

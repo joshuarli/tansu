@@ -17,7 +17,7 @@ export interface Tab {
 
 const tabs: Tab[] = [];
 let activeIndex = -1;
-const closedTabs: string[] = [];
+export const closedTabs: string[] = [];
 let cursors: Record<string, number> = {};
 const MAX_CLOSED = 20;
 

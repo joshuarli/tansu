@@ -266,6 +266,7 @@ describe("closed-tab stack", () => {
   let getTabs: () => Tab[];
   let reopenClosedTab: () => Promise<void>;
   let restoreSession: () => Promise<void>;
+  let closedTabs: string[];
   let offRender: () => void;
   let offChange: () => void;
 
@@ -273,6 +274,7 @@ describe("closed-tab stack", () => {
     while (getTabs().length > 0) {
       closeTab(0);
     }
+    closedTabs.length = 0;
   }
 
   beforeAll(async () => {
@@ -290,6 +292,7 @@ describe("closed-tab stack", () => {
     ({ getTabs } = mod);
     ({ reopenClosedTab } = mod);
     ({ restoreSession } = mod);
+    ({ closedTabs } = mod);
 
     offRender = on("tab:render", () => {});
     offChange = on("tab:change", () => {});

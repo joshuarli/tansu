@@ -553,6 +553,49 @@ body {
   max-width: 100%;
   border-radius: var(--radius);
 }
+.img-resize-overlay {
+  position: fixed;
+  display: none;
+  pointer-events: none;
+  outline: 2px solid rgba(74, 158, 255, 0.6);
+  outline-offset: 1px;
+  border-radius: var(--radius);
+  z-index: 100;
+  box-sizing: border-box;
+}
+.img-resize-overlay.visible {
+  display: block;
+}
+.img-resize-handle {
+  position: absolute;
+  width: 9px;
+  height: 9px;
+  background: white;
+  border: 1.5px solid rgba(74, 158, 255, 0.85);
+  border-radius: 2px;
+  pointer-events: auto;
+  box-sizing: border-box;
+}
+.img-resize-nw {
+  top: -5px;
+  left: -5px;
+  cursor: nw-resize;
+}
+.img-resize-ne {
+  top: -5px;
+  right: -5px;
+  cursor: ne-resize;
+}
+.img-resize-sw {
+  bottom: -5px;
+  left: -5px;
+  cursor: sw-resize;
+}
+.img-resize-se {
+  bottom: -5px;
+  right: -5px;
+  cursor: se-resize;
+}
 .editor-content mark {
   background: rgba(255, 220, 0, 0.4);
   border-radius: 2px;

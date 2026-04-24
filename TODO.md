@@ -10,36 +10,7 @@
 
 - [ ] **`packages/md-wysiwyg` DOM coupling** — the package calls `document.getSelection()` and `document.execCommand` directly in `serialize.ts:37,48`, `transforms.ts:201,231,301`, `inline-transforms.ts:46,74`. This makes it impossible to test without a DOM. Split into a `core` layer (string→string: `markdown.ts`, `format-ops.ts`, `diff.ts`, `merge.ts`, `util.ts`, `highlight.ts`) and a `dom` layer (anything touching globals).
 
-- [ ] **`renderer.ts` invariant is unenforced** — the abstraction intends "only renderer.ts writes HTML to the editor" but `document.execCommand("insertHTML", …)` bypasses it at `inline-transforms.ts:74`, `transforms.ts:208`, `image-paste.ts:36`. Either document that execCommand paths are explicitly exempt, or route through the renderer.
-
 - [ ] **`saveState` missing error check** — `api.ts:237-242` `saveState` POST has no `if (!res.ok) throw` — inconsistent with every other mutating call in the file.
-
-### Code smells & duplication
-
-- [ ] **`serialize.ts:80-99` 6 near-identical heading branches** — collapse to:
-
-  ```ts
-  if (/^H[1-6]$/.test(tag)) {
-    const level = +tag[1];
-    return { md: `${"#".repeat(level)} ${inlineToMd(el)}`, kind: "heading" };
-  }
-  ```
-
-- [ ] **`search.ts:27-43` settings fetched twice** — `showScoreBreakdown` is loaded once at construction and again on every open. Extract `async function refreshShowScoreBreakdown()`.
-
-- [ ] **`shiftIndent` in `format-ops.ts:198-280`** — 82-line function with triple-nested conditionals and a redundant condition on line 249: `selStart >= lineAbsStart + (i > 0 ? 1 : 0) && selStart >= lineAbsStart` — the second clause is always implied by the first. Split into: (1) compute indent delta per line, (2) rebuild lines, (3) adjust selection offsets. Unit tests already exist so rewrite is safe.
-
-- [ ] **`markdown.ts:160-174` duplicated block-start condition** — the paragraph lookahead regex (line 165) re-encodes the same stop conditions as the HR check (line 107), code fence (83), heading (99), blockquote (140). Extract `function isBlockStart(line: string): boolean` used by all four.
-
-- [ ] **`highlight.ts:19` const/type name shadowing** — `const Hl = { … } as const` and `type Hl = …` share the same identifier. `grep Hl` matches 40+ lines in the same file. Same pattern for `State` at line 35. Use a distinct alias (e.g. `type HlValue`) or a `const enum`.
-
-- [ ] **`filenav.ts:241-263` duplicate time-format utility** — `timeAgo` here and `relativeTime` in `util.ts:16` both format durations but with different output formats (`"5m ago"` vs `"5m"`). Pick one and delete the other.
-
-- [ ] **`main.ts:335-343` four module-globals for one retry policy** — `sseWasUnavailable`, `sseRetryAttempt`, `nextSseRetryDelay`, `formatRetryDelay`. Encapsulate in a `createBackoff([250, 250, 500, 1000, 1000, 2000, 5000])` helper.
-
-- [ ] **` ` invisible in source** — `editor.ts:100`, `serialize.ts:216,332,391` use literal non-breaking space characters in `.replaceAll(" ", " ")`. Replace with explicit `" "` escape sequences for greppability.
-
-- [ ] **`eslint-disable no-loop-func` cargo-culted** — `tabs.ts:100,105`, `search.ts:149`, `revisions.ts:101` all disable the rule unnecessarily in `for..of .entries()` loops where `const` scoping is already correct. Remove the disables.
 
 ## Error handling
 
