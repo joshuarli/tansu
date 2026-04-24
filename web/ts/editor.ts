@@ -1,12 +1,23 @@
 import {
   checkInlineTransform,
-  renderMarkdown,
-  renderMarkdownWithCursor,
   domToMarkdown,
   getCursorMarkdownOffset,
   checkBlockInputTransform,
   handleBlockTransform,
 } from "@joshuarli98/md-wysiwyg";
+
+import {
+  toggleBold,
+  toggleItalic,
+  toggleHighlight,
+  type FormatResult,
+} from "./format-ops.ts";
+import {
+  setContent,
+  setContentWithCursor,
+  setContentWithSelection,
+  restoreSelectionFromRenderedMarkers,
+} from "./renderer.ts";
 
 import { saveNote } from "./api.ts";
 import {
@@ -139,6 +150,7 @@ export function showEditor(path: string, content: string) {
     applyIndent: (dedent) => {
       if (indentCurrentSelection(dedent)) onEditorTabMutation();
     },
+    applySourceFormat: applySourceFormatInEditor,
     afterInline: onEditorTabMutation,
     afterBlock: onEditorTabMutation,
   });
@@ -417,7 +429,7 @@ function getSelectionMarkdownOffsets(el: HTMLElement): { start: number; end: num
 
 function restoreCursorOffset(offset: number, markdown: string, scroll = false) {
   if (!contentEl || offset < 0) return;
-  contentEl.innerHTML = renderMarkdownWithCursor(markdown, offset);
+  setContentWithCursor(contentEl, markdown, offset);
   restoreCursorMarker(scroll);
 }
 
@@ -449,7 +461,7 @@ function loadContent(markdown: string, explicitOffset?: number) {
       contentEl === document.activeElement || contentEl.contains(document.activeElement);
     const offset = explicitOffset ?? (focused ? saveCursorOffset() : -1);
     if (offset >= 0) restoreCursorOffset(offset, markdown, explicitOffset !== undefined);
-    else contentEl.innerHTML = renderMarkdown(markdown);
+    else setContent(contentEl, markdown);
   }
 }
 
@@ -459,7 +471,7 @@ function toggleSourceMode() {
 
   if (isSourceMode) {
     const md = sourceEl.value;
-    contentEl.innerHTML = renderMarkdown(md);
+    setContent(contentEl, md);
     contentEl.style.display = "";
     sourceEl.style.display = "none";
     isSourceMode = false;
@@ -497,6 +509,7 @@ function setupEditorEvents() {
     applyIndent: (dedent) => {
       if (indentCurrentSelection(dedent)) onEditorTabMutation();
     },
+    applySourceFormat: applySourceFormatInEditor,
     onMutation: onEditorTabMutation,
   });
 
@@ -547,24 +560,22 @@ function setupEditorEvents() {
 
     if (meta && e.key === "b") {
       e.preventDefault();
-      document.execCommand("bold");
+      applySourceFormatInEditor(toggleBold);
       dispatchEditorAction({ type: "format", kind: "bold" });
       return;
     }
 
     if (meta && e.key === "i") {
       e.preventDefault();
-      document.execCommand("italic");
+      applySourceFormatInEditor(toggleItalic);
       dispatchEditorAction({ type: "format", kind: "italic" });
       return;
     }
 
     if (meta && e.key === "h") {
       e.preventDefault();
-      if (applyHighlightToSelection()) {
-        onEditorTabMutation();
-        dispatchEditorAction({ type: "format", kind: "highlight" });
-      }
+      applySourceFormatInEditor(toggleHighlight);
+      dispatchEditorAction({ type: "format", kind: "highlight" });
       return;
     }
 
@@ -752,6 +763,21 @@ function onEditorTabMutation() {
   if (currentPath) markDirty(currentPath);
   scheduleAutosave();
   if (contentEl && !isSourceMode) checkWikiLinkTrigger(contentEl, currentPath);
+}
+
+/// Apply a source-text format transform to the current editor content.
+/// Gets the selection offsets, applies the transform, re-renders, and restores the selection.
+function applySourceFormatInEditor(
+  transform: (md: string, s: number, e: number) => FormatResult,
+): void {
+  if (!contentEl) return;
+  const sel = getSelectionMarkdownOffsets(contentEl);
+  if (!sel) return;
+  const md = domToMarkdown(contentEl);
+  const { md: newMd, selStart, selEnd } = transform(md, sel.start, sel.end);
+  setContentWithSelection(contentEl, newMd, selStart, selEnd);
+  restoreSelectionFromRenderedMarkers(contentEl);
+  onEditorTabMutation();
 }
 
 function applyHighlightToSelection(): boolean {

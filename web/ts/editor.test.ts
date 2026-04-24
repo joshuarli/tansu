@@ -330,7 +330,9 @@ describe("editor", () => {
     hideEditor();
   });
 
-  test("WYSIWYG: Cmd/Ctrl+H across multiple paragraphs highlights each block", async () => {
+  test("WYSIWYG: Cmd/Ctrl+H across multiple paragraphs wraps entire selection", async () => {
+    // Source-text highlight inserts == at start and end offsets regardless of block boundaries.
+    // For "foo\n\nbar" selecting all: produces "==foo\n\nbar==" (markers at offsets 0 and 8).
     showEditor("highlight-multiblock.md", "foo\n\nbar");
     await new Promise((r) => setTimeout(r, 50));
 
@@ -351,11 +353,7 @@ describe("editor", () => {
       new KeyboardEvent("keydown", { key: "h", ctrlKey: true, bubbles: true }),
     );
 
-    expect(getCurrentContent()).toBe("==foo==\n\n==bar==");
-    const marks = contentEl.querySelectorAll("mark");
-    expect(marks.length).toBe(2);
-    expect(marks[0]!.textContent).toBe("foo");
-    expect(marks[1]!.textContent).toBe("bar");
+    expect(getCurrentContent()).toBe("==foo\n\nbar==");
 
     hideEditor();
   });

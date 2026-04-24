@@ -3,11 +3,23 @@
 /// to preserve editor focus and selection while applying formats.
 
 import { dispatchEditorAction } from "./editor-events.ts";
+import {
+  toggleBold,
+  toggleItalic,
+  toggleStrikethrough,
+  toggleHighlight,
+  clearInlineFormats,
+  toggleHeading,
+  toggleCodeFence,
+  shiftIndent,
+  type FormatResult,
+} from "./format-ops.ts";
 
 export interface FormatToolbarOptions {
   contentEl: HTMLElement;
   applyIndent: (dedent: boolean) => void;
   onMutation: () => void;
+  applySourceFormat: (transform: (md: string, start: number, end: number) => FormatResult) => void;
 }
 
 export interface FormatButtonsOpts {
@@ -18,10 +30,11 @@ export interface FormatButtonsOpts {
   // Called after indent/dedent. Mutation is already handled by applyIndent, so this
   // is only needed for side-effects like hiding the floating toolbar.
   afterIndent?: () => void;
+  applySourceFormat: (transform: (md: string, start: number, end: number) => FormatResult) => void;
 }
 
 export function populateFormatButtons(container: HTMLElement, opts: FormatButtonsOpts): void {
-  const { contentEl, applyIndent, afterInline, afterBlock } = opts;
+  const { applyIndent, afterInline, afterBlock, applySourceFormat } = opts;
   const afterIndent = opts.afterIndent ?? (() => {});
 
   function btn(innerHTML: string, title: string, action: () => void) {
@@ -43,25 +56,25 @@ export function populateFormatButtons(container: HTMLElement, opts: FormatButton
   }
 
   btn("<b>B</b>", "Bold", () => {
-    document.execCommand("bold");
+    applySourceFormat(toggleBold);
     dispatchEditorAction({ type: "format", kind: "bold" });
     afterInline();
   });
 
   btn("<i>I</i>", "Italic", () => {
-    document.execCommand("italic");
+    applySourceFormat(toggleItalic);
     dispatchEditorAction({ type: "format", kind: "italic" });
     afterInline();
   });
 
   btn(`<span class="ftb-strike">S</span>`, "Strikethrough", () => {
-    toggleInlineWrap(contentEl, "del");
+    applySourceFormat(toggleStrikethrough);
     dispatchEditorAction({ type: "format", kind: "strikethrough" });
     afterInline();
   });
 
   btn(`<span class="ftb-highlight">A</span>`, "Highlight", () => {
-    toggleInlineWrap(contentEl, "mark");
+    applySourceFormat(toggleHighlight);
     dispatchEditorAction({ type: "format", kind: "highlight" });
     afterInline();
   });
@@ -70,7 +83,7 @@ export function populateFormatButtons(container: HTMLElement, opts: FormatButton
     `<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3L13 7L6.5 13.5H3V10L9 3Z"/><line x1="6" y1="7" x2="10" y2="11"/><line x1="3" y1="13.5" x2="14" y2="13.5"/></svg>`,
     "Clear formatting",
     () => {
-      clearInlineStyles(contentEl);
+      applySourceFormat(clearInlineFormats);
       afterInline();
     },
   );
@@ -79,7 +92,7 @@ export function populateFormatButtons(container: HTMLElement, opts: FormatButton
 
   for (const level of [1, 2, 3, 4] as const) {
     btn(`<span class="ftb-heading">H${level}</span>`, `Heading ${level}`, () => {
-      applyBlockFormat(contentEl, `h${level}`);
+      applySourceFormat((md, start) => toggleHeading(md, start, level));
       dispatchEditorAction({ type: "format", kind: "heading", detail: `h${level}` });
       afterBlock();
     });
@@ -113,7 +126,7 @@ export function populateFormatButtons(container: HTMLElement, opts: FormatButton
     `<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="5,4 1,8 5,12"/><polyline points="11,4 15,8 11,12"/></svg>`,
     "Code block",
     () => {
-      applyCodeBlock(contentEl);
+      applySourceFormat(toggleCodeFence);
       dispatchEditorAction({ type: "format", kind: "code-block" });
       afterBlock();
     },
@@ -121,7 +134,7 @@ export function populateFormatButtons(container: HTMLElement, opts: FormatButton
 }
 
 export function initFormatToolbar(opts: FormatToolbarOptions): () => void {
-  const { contentEl, applyIndent, onMutation } = opts;
+  const { contentEl, applyIndent, onMutation, applySourceFormat } = opts;
 
   const toolbar = document.createElement("div");
   toolbar.className = "format-toolbar";
@@ -158,6 +171,7 @@ export function initFormatToolbar(opts: FormatToolbarOptions): () => void {
   populateFormatButtons(toolbar, {
     contentEl,
     applyIndent,
+    applySourceFormat,
     afterInline: () => {
       onMutation();
       requestAnimationFrame(updateVisibility);
