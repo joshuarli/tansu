@@ -1,7 +1,7 @@
 /// DOM → Markdown serialization for the WYSIWYG editor.
 
 const BLANK_LINE_SENTINEL = "\u0000";
-const CURSOR_SENTINEL = "\uFDD0";
+import { CURSOR_SENTINEL, isBlockTag } from "./util.js";
 type BlockKind =
   | "blank"
   | "paragraph"
@@ -414,25 +414,8 @@ function isBlockElement(el: Element): el is HTMLElement {
   if (el.classList.contains("callout")) {
     return true;
   }
-  return BLOCK_TAGS.has(el.tagName);
+  return isBlockTag(el.tagName);
 }
-
-const BLOCK_TAGS = new Set([
-  "P",
-  "DIV",
-  "H1",
-  "H2",
-  "H3",
-  "H4",
-  "H5",
-  "H6",
-  "UL",
-  "OL",
-  "BLOCKQUOTE",
-  "PRE",
-  "TABLE",
-  "HR",
-]);
 
 function tableToMd(table: HTMLElement): string {
   const rows: string[][] = [];

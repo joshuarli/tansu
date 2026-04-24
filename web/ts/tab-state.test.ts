@@ -1,6 +1,8 @@
 /// Tests for tab-state.ts — pure data logic, but needs DOM because
 /// tabs.ts registers a render listener on the shared event bus.
 
+import { stemFromPath } from "@joshuarli98/md-wysiwyg";
+
 import { on } from "./events.ts";
 import type { Tab } from "./tab-state.ts";
 import { setupDOM, mockFetch } from "./test-helper.ts";
@@ -21,7 +23,6 @@ describe("tab-state", () => {
   let updateTabPath: (oldPath: string, newPath: string) => void;
   let closeActiveTab: () => void;
   let closeTabByPath: (path: string) => void;
-  let titleFromPath: (path: string) => string;
   let createNewNote: (name: string) => Promise<void>;
   let restoreSession: () => Promise<void>;
   let switchTab: (index: number) => Promise<void>;
@@ -57,7 +58,6 @@ describe("tab-state", () => {
     ({ updateTabPath } = mod);
     ({ closeActiveTab } = mod);
     ({ closeTabByPath } = mod);
-    ({ titleFromPath } = mod);
     ({ createNewNote } = mod);
     ({ restoreSession } = mod);
     ({ syncToServer } = mod);
@@ -77,10 +77,10 @@ describe("tab-state", () => {
     cleanup();
   });
 
-  it("titleFromPath", () => {
-    expect(titleFromPath("notes/hello.md")).toBe("hello");
-    expect(titleFromPath("hello.md")).toBe("hello");
-    expect(titleFromPath("deep/path/note.MD")).toBe("note");
+  it("stemFromPath", () => {
+    expect(stemFromPath("notes/hello.md")).toBe("hello");
+    expect(stemFromPath("hello.md")).toBe("hello");
+    expect(stemFromPath("deep/path/note.MD")).toBe("note");
   });
 
   it("tab lifecycle", async () => {

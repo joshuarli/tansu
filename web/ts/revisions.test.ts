@@ -105,7 +105,7 @@ describe("revisions", () => {
     const { on } = await import("./events.ts");
 
     let restoreEvent: { content: string; mtime: number } | null = null;
-    const offR = on<{ content: string; mtime: number }>("revision:restore", (data) => {
+    const offR = on("revision:restore", (data) => {
       restoreEvent = data;
     });
 

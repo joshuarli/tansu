@@ -1,3 +1,5 @@
+import { stemFromPath } from "@joshuarli98/md-wysiwyg";
+
 import {
   renameNote,
   getNote,
@@ -7,14 +9,7 @@ import {
   unlockWithPrf,
   type AppStatus,
 } from "./api.ts";
-import {
-  initEditor,
-  showEditor,
-  hideEditor,
-  saveCurrentNote,
-  reloadFromDisk,
-  invalidateNoteCache,
-} from "./editor.ts";
+import { initEditor, invalidateNoteCache, type EditorInstance } from "./editor.ts";
 import { emit, on } from "./events.ts";
 import { initFileNav } from "./filenav.ts";
 import { openStore } from "./local-store.ts";
@@ -30,18 +25,17 @@ import {
   updateTabPath,
   updateTabContent,
   restoreSession,
-  createNewNote,
   reopenClosedTab,
   syncToServer,
-  type Tab,
-} from "./tabs.ts";
-import { stemFromPath } from "./util.ts";
+} from "./tab-state.ts";
+import { createNewNote } from "./tabs.ts";
 import { isPrfLikelySupported, getPrfKey } from "./webauthn.ts";
 import { registerWikiLinkClickHandler } from "./wikilinks.ts";
 
 const appEl = document.querySelector("#app") as HTMLElement;
 let sse: EventSource | null = null;
 let appInitialized = false;
+let editor: EditorInstance | null = null;
 let sseReconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let pageUnloading = false;
 
@@ -82,28 +76,31 @@ function showUnlockScreen(status?: AppStatus) {
   }
 
   // Biometric unlock button
-  if (hasPrf) {
-    const bioBtn = document.querySelector("#unlock-biometric")!;
-    bioBtn.addEventListener("click", async () => {
-      errorEl.textContent = "";
-      statusEl.textContent = "Waiting for biometrics...";
-      try {
-        const prfKeyB64 = await getPrfKey(status.prf_credential_ids);
-        statusEl.textContent = "Unlocking...";
-        const ok = await unlockWithPrf(prfKeyB64);
-        if (ok) {
-          onUnlockSuccess();
-        } else {
-          errorEl.textContent = "Biometric unlock failed.";
+  if (hasPrf && status) {
+    const credIds = status.prf_credential_ids;
+    const bioBtn = document.querySelector("#unlock-biometric") as HTMLButtonElement | null;
+    if (bioBtn) {
+      bioBtn.addEventListener("click", async () => {
+        errorEl.textContent = "";
+        statusEl.textContent = "Waiting for biometrics...";
+        try {
+          const prfKeyB64 = await getPrfKey(credIds);
+          statusEl.textContent = "Unlocking...";
+          const ok = await unlockWithPrf(prfKeyB64);
+          if (ok) {
+            onUnlockSuccess();
+          } else {
+            errorEl.textContent = "Biometric unlock failed.";
+            statusEl.textContent = "";
+          }
+        } catch (error) {
+          errorEl.textContent = error instanceof Error ? error.message : "Biometric unlock failed.";
           statusEl.textContent = "";
         }
-      } catch (error) {
-        errorEl.textContent = error instanceof Error ? error.message : "Biometric unlock failed.";
-        statusEl.textContent = "";
-      }
-    });
-    // Auto-trigger biometric on load
-    (document.querySelector("#unlock-biometric") as HTMLButtonElement).click();
+      });
+      // Auto-trigger biometric on load
+      bioBtn.click();
+    }
   } else {
     input.focus();
   }
@@ -149,7 +146,7 @@ async function startApp() {
 }
 
 function initApp() {
-  initEditor();
+  editor = initEditor();
   initFileNav();
   const palette = createPalette();
   const settings = createSettings();
@@ -174,11 +171,11 @@ function initApp() {
     }
   });
 
-  on<Tab | null>("tab:change", (tab) => {
+  on("tab:change", (tab) => {
     if (tab) {
-      showEditor(tab.path, tab.content);
+      editor?.showEditor(tab.path, tab.content);
     } else {
-      hideEditor();
+      editor?.hideEditor();
     }
   });
 
@@ -224,7 +221,7 @@ function initApp() {
       label: "Save",
       shortcut: "\u2318S",
       keys: { key: "s", meta: true },
-      action: () => saveCurrentNote(),
+      action: () => editor?.saveCurrentNote(),
     },
     {
       label: "Close tab",
@@ -312,7 +309,7 @@ function initApp() {
 
       const active = getActiveTab();
       if (active && active.path === newPath) {
-        showEditor(active.path, active.content);
+        editor?.showEditor(active.path, active.content);
       }
     } catch {
       /* rename failed silently */
@@ -393,7 +390,7 @@ function connectSSE() {
     if (active && active.path === path) {
       try {
         const note = await getNote(path);
-        reloadFromDisk(note.content, note.mtime);
+        editor?.reloadFromDisk(note.content, note.mtime);
       } catch {
         /* reload failed silently */
       }
@@ -406,7 +403,7 @@ function connectSSE() {
     emit("files:changed");
     const active = getActiveTab();
     if (active && active.path === path) {
-      alert(`"${stemFromPath(path)}" was deleted externally.`);
+      showNotification(`"${stemFromPath(path)}" was deleted externally.`);
       closeActiveTab();
     }
   });

@@ -1,14 +1,23 @@
 /// Wiki-link autocomplete: detects [[ typing and shows a dropdown of matching notes.
 
+import { clampNodeOffset, stemFromPath } from "@joshuarli98/md-wysiwyg";
+
 import { listNotes, type NoteEntry } from "./api.ts";
-import { markDirty } from "./tabs.ts";
-import { stemFromPath } from "./util.ts";
+import { markDirty } from "./tab-state.ts";
 
 let autocompleteEl: HTMLElement | null = null;
 let allNotes: NoteEntry[] | null = null;
+let activeKeyHandler: ((e: KeyboardEvent) => void) | null = null;
 
 export function invalidateNoteCache() {
   allNotes = null;
+}
+
+function removeKeyHandler() {
+  if (activeKeyHandler) {
+    document.removeEventListener("keydown", activeKeyHandler, true);
+    activeKeyHandler = null;
+  }
 }
 
 export function hideAutocomplete() {
@@ -16,6 +25,7 @@ export function hideAutocomplete() {
     autocompleteEl.remove();
     autocompleteEl = null;
   }
+  removeKeyHandler();
 }
 
 export function checkWikiLinkTrigger(contentEl: HTMLElement, currentPath: string | null) {
@@ -97,9 +107,10 @@ async function showAutocomplete(
 
   document.body.append(autocompleteEl);
 
+  removeKeyHandler();
   const handler = (e: KeyboardEvent) => {
     if (!autocompleteEl) {
-      document.removeEventListener("keydown", handler, true);
+      removeKeyHandler();
       return;
     }
 
@@ -121,16 +132,16 @@ async function showAutocomplete(
       if (note) {
         completeWikiLink(textNode, triggerIdx, cursorPos, note, currentPath);
       }
-      document.removeEventListener("keydown", handler, true);
+      removeKeyHandler();
       /* c8 ignore stop */
     } else if (e.key === "Escape") {
       e.preventDefault();
       hideAutocomplete();
-      document.removeEventListener("keydown", handler, true);
     }
   };
 
   document.addEventListener("keydown", handler, true);
+  activeKeyHandler = handler;
 }
 
 function updateSelection(idx: number) {
@@ -172,15 +183,4 @@ export function completeWikiLink(
   if (currentPath) {
     markDirty(currentPath);
   }
-}
-
-function clampNodeOffset(node: Node, offset: number): number {
-  if (offset < 0) {
-    return 0;
-  }
-  if (node.nodeType === Node.TEXT_NODE) {
-    return Math.min(offset, node.textContent?.length ?? 0);
-  }
-  /* c8 ignore next */
-  return Math.min(offset, node.childNodes.length);
 }

@@ -1,5 +1,7 @@
 /// Pure tab state management — no DOM dependencies.
 
+import { stemFromPath } from "@joshuarli98/md-wysiwyg";
+
 import { getNote, createNote, saveState, getState, type SessionState } from "./api.ts";
 import { emit } from "./events.ts";
 import { kvGet, kvPut, noteGet, notePut } from "./local-store.ts";
@@ -90,7 +92,7 @@ export async function openTab(path: string): Promise<Tab> {
   const { content, mtime } = await fetchNote(path);
   const tab: Tab = {
     path,
-    title: titleFromPath(path),
+    title: stemFromPath(path),
     dirty: false,
     content,
     mtime,
@@ -107,15 +109,21 @@ export async function switchTab(index: number) {
     return;
   }
   activeIndex = index;
-  const tab = tabs[activeIndex];
+  const tab = tabs[index];
   if (tab && tab.mtime === 0 && !tab.dirty) {
     try {
       const note = await fetchNote(tab.path);
+      // Another switchTab or closeTab may have run while we awaited.
+      // If the tab is no longer current, discard the load and let the
+      // winner's notifyChange() stand.
+      if (tabs[activeIndex] !== tab) {
+        return;
+      }
       tab.content = note.content;
       tab.mtime = note.mtime;
       tab.lastSavedMd = note.content;
     } catch {
-      /* offline fallback unavailable */
+      console.warn(`Could not load ${tab.path} offline`);
     }
   }
   notifyChange();
@@ -178,11 +186,9 @@ export async function reopenClosedTab() {
   persistState();
   try {
     await openTab(path);
-    /* c8 ignore start */
   } catch {
-    /* reopen failed silently */
+    console.warn(`Could not reopen ${path}`);
   }
-  /* c8 ignore stop */
 }
 
 export function nextTab() {
@@ -212,7 +218,7 @@ export function markClean(path: string, content: string, mtime: number) {
     tab.content = content;
     tab.mtime = mtime;
     tab.lastSavedMd = content;
-    tab.title = titleFromPath(path);
+    tab.title = stemFromPath(path);
     /* c8 ignore start */
     notePut(path, content, mtime).catch(() => void 0);
     /* c8 ignore stop */
@@ -225,7 +231,7 @@ export function updateTabContent(path: string, content: string, mtime: number) {
   if (tab) {
     tab.content = content;
     tab.mtime = mtime;
-    tab.title = titleFromPath(path);
+    tab.title = stemFromPath(path);
   }
 }
 
@@ -233,7 +239,7 @@ export function updateTabPath(oldPath: string, newPath: string) {
   const tab = tabs.find((t) => t.path === oldPath);
   if (tab) {
     tab.path = newPath;
-    tab.title = titleFromPath(newPath);
+    tab.title = stemFromPath(newPath);
     notifyChange();
   }
 }
@@ -245,7 +251,7 @@ export async function createNewNote(name: string) {
     emit("files:changed");
     await openTab(path);
   } catch {
-    /* create failed silently */
+    console.error(`Failed to create note ${path}`);
   }
 }
 
@@ -286,11 +292,11 @@ export async function restoreSession() {
         ({ content } = note);
         ({ mtime } = note);
       } catch {
-        /* load failed, use empty content */
+        console.warn(`Could not load ${path} for session restore`);
       }
       tabs.push({
         path,
-        title: titleFromPath(path),
+        title: stemFromPath(path),
         dirty: false,
         content,
         mtime,
@@ -299,7 +305,7 @@ export async function restoreSession() {
     } else {
       tabs.push({
         path,
-        title: titleFromPath(path),
+        title: stemFromPath(path),
         dirty: false,
         content: "",
         mtime: 0,
@@ -312,9 +318,4 @@ export async function restoreSession() {
     activeIndex = activeIdx;
     notifyChange();
   }
-}
-
-export function titleFromPath(path: string): string {
-  const name = path.split("/").pop() ?? path;
-  return name.replace(/\.md$/i, "");
 }

@@ -1,6 +1,8 @@
 /// Line-based 3-way merge.
 /// Returns the merged result, or null if there are conflicts.
 
+import { lcs } from "./util.js";
+
 export function merge3(base: string, ours: string, theirs: string): string | null {
   const baseLines = base.split("\n");
   const ourLines = ours.split("\n");
@@ -140,39 +142,4 @@ function processRegion(
   if (mCount > paired) {
     insertions.set(bStart + paired, modified.slice(mStart + paired, mEnd));
   }
-}
-
-/// Compute LCS and return matching pairs [baseIndex, modifiedIndex].
-function lcs(base: string[], modified: string[]): [number, number][] {
-  const n = base.length;
-  const m = modified.length;
-
-  const table: number[][] = Array.from({ length: n + 1 }, () =>
-    Array.from<number>({ length: m + 1 }).fill(0),
-  );
-  for (let i = 1; i <= n; i++) {
-    for (let j = 1; j <= m; j++) {
-      table[i]![j] =
-        base[i - 1] === modified[j - 1]
-          ? table[i - 1]![j - 1]! + 1
-          : Math.max(table[i - 1]![j]!, table[i]![j - 1]!);
-    }
-  }
-
-  const matches: [number, number][] = [];
-  let i = n;
-  let j = m;
-  while (i > 0 && j > 0) {
-    if (base[i - 1] === modified[j - 1]) {
-      matches.push([i - 1, j - 1]);
-      i--;
-      j--;
-    } else if (table[i - 1]![j]! >= table[i]![j - 1]!) {
-      i--;
-    } else {
-      j--;
-    }
-  }
-  matches.reverse();
-  return matches;
 }

@@ -3,7 +3,7 @@
 /// fenced code blocks, tables, HR, and inline formatting.
 
 import { highlightCode } from "./highlight.js";
-import { escapeHtml } from "./util.js";
+import { escapeHtml, CURSOR_SENTINEL, SEL_START_SENTINEL, SEL_END_SENTINEL } from "./util.js";
 
 const calloutIcons: Record<string, string> = {
   note: "\u{1F4DD}",
@@ -29,10 +29,6 @@ const calloutIcons: Record<string, string> = {
   fail: "\u274C",
   missing: "\u274C",
 };
-
-const CURSOR_SENTINEL = "\uFDD0";
-const SEL_START_SENTINEL = "\uFDD1";
-const SEL_END_SENTINEL = "\uFDD2";
 
 export function renderMarkdown(src: string): string {
   if (src === "") {

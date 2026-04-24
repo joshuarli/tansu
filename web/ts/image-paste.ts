@@ -1,6 +1,7 @@
+import { escapeHtml, stemFromPath } from "@joshuarli98/md-wysiwyg";
+
 import { uploadImage } from "./api.ts";
-import { markDirty } from "./tabs.ts";
-import { escapeHtml, stemFromPath } from "./util.ts";
+import { markDirty } from "./tab-state.ts";
 
 /// Handle pasted image: convert to webp, upload, insert wiki-link.
 export async function handleImagePaste(item: DataTransferItem, currentPath: string | null) {

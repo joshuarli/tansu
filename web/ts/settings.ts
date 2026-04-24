@@ -8,6 +8,7 @@ import {
   type Settings,
   type AppStatus,
 } from "./api.ts";
+import { showInputDialog } from "./input-dialog.ts";
 import { isPrfLikelySupported, createPrfCredential } from "./webauthn.ts";
 
 interface SettingsPanel {
@@ -158,21 +159,27 @@ export function createSettings(): SettingsPanel {
     }
 
     const updated = { ...current };
+    const validKeys = new Set<string>(Object.keys(updated));
+
+    function isSettingKey(k: string): k is keyof Settings {
+      return validKeys.has(k);
+    }
 
     for (const el of panel.querySelectorAll<HTMLInputElement | HTMLSelectElement>("[data-key]")) {
-      const key = el.dataset["key"] as keyof Settings;
-      if (!key) {
+      const raw = el.dataset["key"] ?? "";
+      if (!isSettingKey(raw)) {
         continue;
       }
+      const key = raw;
 
       if (el instanceof HTMLInputElement && el.type === "checkbox") {
-        (updated as Record<string, unknown>)[key] = el.checked;
+        Object.assign(updated, { [key]: el.checked });
       } else if (el instanceof HTMLInputElement && el.type === "range") {
-        (updated as Record<string, unknown>)[key] = Number.parseFloat(el.value);
+        Object.assign(updated, { [key]: Number.parseFloat(el.value) });
       } else if (el instanceof HTMLInputElement && el.type === "number") {
-        (updated as Record<string, unknown>)[key] = Number.parseInt(el.value, 10);
+        Object.assign(updated, { [key]: Number.parseInt(el.value, 10) });
       } else if (el instanceof HTMLSelectElement) {
-        (updated as Record<string, unknown>)[key] = Number.parseInt(el.value, 10);
+        Object.assign(updated, { [key]: Number.parseInt(el.value, 10) });
       } else if (key === "excluded_folders") {
         updated.excluded_folders = (el as HTMLInputElement).value
           .split(",")
@@ -255,7 +262,8 @@ export function createSettings(): SettingsPanel {
         }
         try {
           const result = await createPrfCredential();
-          const name = prompt("Name this credential (e.g. 'MacBook Touch ID')") || "Unnamed";
+          const name =
+            (await showInputDialog("Name this credential", "e.g. MacBook Touch ID")) || "Unnamed";
           if (statusEl) {
             statusEl.textContent = "Registering...";
           }

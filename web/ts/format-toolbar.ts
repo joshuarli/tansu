@@ -22,7 +22,6 @@ interface FormatToolbarOptions {
 }
 
 interface FormatButtonsOpts {
-  contentEl: HTMLElement;
   applyIndent: (dedent: boolean) => void;
   afterInline: () => void;
   afterBlock: () => void;
@@ -170,7 +169,6 @@ export function initFormatToolbar(opts: FormatToolbarOptions): () => void {
   }
 
   populateFormatButtons(toolbar, {
-    contentEl,
     applyIndent,
     applySourceFormat,
     afterInline: () => {

@@ -23,6 +23,22 @@ export interface NoteEntry {
   title: string;
 }
 
+export interface FileSearchResult {
+  path: string;
+  title: string;
+}
+
+export interface RecentFileEntry {
+  path: string;
+  title: string;
+  mtime: number;
+}
+
+export interface PinnedFileEntry {
+  path: string;
+  title: string;
+}
+
 export async function searchNotes(q: string, path?: string): Promise<SearchResult[]> {
   let url = `/api/search?q=${encodeURIComponent(q)}`;
   if (path) {
@@ -32,7 +48,7 @@ export async function searchNotes(q: string, path?: string): Promise<SearchResul
   if (!res.ok) {
     throw new Error(`search failed: ${res.status}`);
   }
-  return res.json() as Promise<SearchResult[]>;
+  return (await res.json()) as SearchResult[];
 }
 
 export async function getNote(path: string): Promise<Note> {
@@ -40,7 +56,7 @@ export async function getNote(path: string): Promise<Note> {
   if (!res.ok) {
     throw new Error(`get note failed: ${res.status}`);
   }
-  return res.json() as Promise<Note>;
+  return (await res.json()) as Note;
 }
 
 export interface SaveResult {
@@ -78,7 +94,7 @@ export async function createNote(path: string): Promise<{ mtime: number }> {
   if (!res.ok) {
     throw new Error(`create failed: ${res.status}`);
   }
-  return res.json() as Promise<{ mtime: number }>;
+  return (await res.json()) as { mtime: number };
 }
 
 export async function deleteNote(path: string): Promise<void> {
@@ -97,7 +113,7 @@ export async function renameNote(oldPath: string, newPath: string): Promise<{ up
   if (!res.ok) {
     throw new Error(`rename failed: ${res.status}`);
   }
-  return res.json() as Promise<{ updated: string[] }>;
+  return (await res.json()) as { updated: string[] };
 }
 
 export async function listNotes(): Promise<NoteEntry[]> {
@@ -105,18 +121,7 @@ export async function listNotes(): Promise<NoteEntry[]> {
   if (!res.ok) {
     throw new Error(`list failed: ${res.status}`);
   }
-  return res.json() as Promise<NoteEntry[]>;
-}
-
-interface FileSearchResult {
-  path: string;
-  title: string;
-}
-
-export interface RecentFileEntry {
-  path: string;
-  title: string;
-  mtime: number;
+  return (await res.json()) as NoteEntry[];
 }
 
 export async function searchFileNames(q: string): Promise<FileSearchResult[]> {
@@ -124,7 +129,7 @@ export async function searchFileNames(q: string): Promise<FileSearchResult[]> {
   if (!res.ok) {
     throw new Error(`filesearch failed: ${res.status}`);
   }
-  return res.json() as Promise<FileSearchResult[]>;
+  return (await res.json()) as FileSearchResult[];
 }
 
 export async function getRecentFiles(): Promise<RecentFileEntry[]> {
@@ -132,12 +137,7 @@ export async function getRecentFiles(): Promise<RecentFileEntry[]> {
   if (!res.ok) {
     throw new Error(`recentfiles failed: ${res.status}`);
   }
-  return res.json() as Promise<RecentFileEntry[]>;
-}
-
-interface PinnedFileEntry {
-  path: string;
-  title: string;
+  return (await res.json()) as RecentFileEntry[];
 }
 
 export async function getPinnedFiles(): Promise<PinnedFileEntry[]> {
@@ -145,7 +145,7 @@ export async function getPinnedFiles(): Promise<PinnedFileEntry[]> {
   if (!res.ok) {
     throw new Error(`pinned failed: ${res.status}`);
   }
-  return res.json() as Promise<PinnedFileEntry[]>;
+  return (await res.json()) as PinnedFileEntry[];
 }
 
 export async function pinFile(path: string): Promise<void> {
@@ -175,7 +175,7 @@ export async function getBacklinks(path: string): Promise<string[]> {
   if (!res.ok) {
     throw new Error(`backlinks failed: ${res.status}`);
   }
-  return res.json() as Promise<string[]>;
+  return (await res.json()) as string[];
 }
 
 export async function uploadImage(blob: Blob, filename: string): Promise<string> {
@@ -196,7 +196,7 @@ export async function listRevisions(path: string): Promise<number[]> {
   if (!res.ok) {
     throw new Error(`revisions failed: ${res.status}`);
   }
-  return res.json() as Promise<number[]>;
+  return (await res.json()) as number[];
 }
 
 export async function getRevision(path: string, ts: number): Promise<string> {
@@ -215,7 +215,7 @@ export async function restoreRevision(path: string, ts: number): Promise<{ mtime
   if (!res.ok) {
     throw new Error(`restore failed: ${res.status}`);
   }
-  return res.json() as Promise<{ mtime: number }>;
+  return (await res.json()) as { mtime: number };
 }
 
 export interface SessionState {
@@ -230,7 +230,7 @@ export async function getState(): Promise<SessionState> {
   if (!res.ok) {
     throw new Error(`state failed: ${res.status}`);
   }
-  return res.json() as Promise<SessionState>;
+  return (await res.json()) as SessionState;
 }
 
 export async function saveState(state: SessionState): Promise<void> {
@@ -266,7 +266,7 @@ export async function getStatus(): Promise<AppStatus> {
   if (!res.ok) {
     throw new Error(`status failed: ${res.status}`);
   }
-  return res.json() as Promise<AppStatus>;
+  return (await res.json()) as AppStatus;
 }
 
 export async function unlockWithRecoveryKey(recoveryKey: string): Promise<boolean> {
@@ -318,7 +318,7 @@ export async function getSettings(): Promise<Settings> {
   if (!res.ok) {
     throw new Error(`settings failed: ${res.status}`);
   }
-  return res.json() as Promise<Settings>;
+  return (await res.json()) as Settings;
 }
 
 export async function saveSettings(settings: Settings): Promise<void> {

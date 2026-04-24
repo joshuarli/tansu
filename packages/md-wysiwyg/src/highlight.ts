@@ -3,19 +3,20 @@
 
 import { escapeHtml } from "./util.js";
 
-const enum Hl {
-  Normal = 0,
-  Keyword = 1,
-  Type = 2,
-  String = 3,
-  Comment = 4,
-  Number = 5,
-  Bracket = 6,
-  Operator = 7,
-  Function = 8,
-  Constant = 9,
-  Macro = 10,
-}
+const Hl = {
+  Normal: 0,
+  Keyword: 1,
+  Type: 2,
+  String: 3,
+  Comment: 4,
+  Number: 5,
+  Bracket: 6,
+  Operator: 7,
+  Function: 8,
+  Constant: 9,
+  Macro: 10,
+} as const;
+type Hl = (typeof Hl)[keyof typeof Hl];
 
 const hlClass: (string | null)[] = [
   null, // Normal
@@ -31,11 +32,12 @@ const hlClass: (string | null)[] = [
   "hl-macro", // Macro
 ];
 
-const enum State {
-  Normal = 0,
-  BlockComment = 1,
-  MultiLineString = 2, // index stored separately
-}
+const State = {
+  Normal: 0,
+  BlockComment: 1,
+  MultiLineString: 2, // index stored separately
+} as const;
+type State = (typeof State)[keyof typeof State];
 
 interface HlState {
   state: State;
@@ -380,9 +382,9 @@ function buildHl(src: string, st: HlState, rules: Rules): Uint8Array {
 
 function applyHlHtml(src: string, hl: Uint8Array): string {
   let out = "";
-  let cur = Hl.Normal;
+  let cur: Hl = Hl.Normal;
   for (let i = 0; i < src.length; i++) {
-    const h: Hl = i < hl.length ? hl[i]! : Hl.Normal;
+    const h = (i < hl.length ? hl[i]! : Hl.Normal) as Hl;
     if (h !== cur) {
       if (cur !== Hl.Normal) {
         out += "</span>";

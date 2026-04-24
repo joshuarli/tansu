@@ -1,7 +1,7 @@
 import { merge3 } from "@joshuarli98/md-wysiwyg";
 
 import { saveNote } from "./api.ts";
-import { markClean, type Tab } from "./tabs.ts";
+import { markClean, type Tab } from "./tab-state.ts";
 
 /// Show a conflict banner when disk and editor content diverge.
 export function showConflictBanner(

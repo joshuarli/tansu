@@ -1,9 +1,16 @@
-export function escapeHtml(s: string): string {
-  return s
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;");
+/// Assert that a DOM element matching `sel` exists. Use for elements that must be present
+/// in the static HTML (e.g. #app, #tab-bar). Throws at initialization time if the markup is wrong.
+export function mustQuery<T extends HTMLElement>(sel: string): T {
+  const el = document.querySelector<T>(sel);
+  if (!el) {
+    throw new Error(`Required element not found: ${sel}`);
+  }
+  return el;
+}
+
+/// Suppress a rejected promise. Use only when failure is truly inconsequential.
+export function ignoreError(p: Promise<unknown>): void {
+  p.catch(() => void 0);
 }
 
 export function relativeTime(tsMs: number, now: number = Date.now()): string {
@@ -22,9 +29,4 @@ export function relativeTime(tsMs: number, now: number = Date.now()): string {
   }
   const d = new Date(tsMs);
   return d.toLocaleDateString();
-}
-
-export function stemFromPath(path: string): string {
-  const name = path.split("/").pop() ?? path;
-  return name.replace(/\.md$/i, "");
 }

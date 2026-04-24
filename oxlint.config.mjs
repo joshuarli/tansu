@@ -36,6 +36,7 @@ export default defineConfig({
 
     // Import ordering handled by oxfmt
     "sort-imports": "off",
+    "import/first": "off",
     "import/exports-last": "off",
     "import/group-exports": "off",
 
@@ -155,6 +156,9 @@ export default defineConfig({
     "typescript/explicit-function-return-type": "off",
     "typescript/explicit-module-boundary-types": "off",
 
+    // console.warn/error used for offline/error diagnostics; no structured logger exists
+    "no-console": "off",
+
     // Bitwise operators are intentional (e.g. >>> for unsigned right shift in binary search)
     "no-bitwise": "off",
 
@@ -176,11 +180,9 @@ export default defineConfig({
   },
   overrides: [
     {
-      // console.log/warn/error are legitimate in tests (spying) and in CLI output
       // no-empty-function: noop callbacks like applyIndent: () => {} are intentional in tests
       files: ["**/*.test.ts", "**/e2e/**/*.ts", "**/test-helper.ts", "**/search-cli.ts"],
       rules: {
-        "no-console": "off",
         "no-empty-function": "off",
       },
     },

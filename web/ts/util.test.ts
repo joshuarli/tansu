@@ -1,4 +1,6 @@
-import { escapeHtml, relativeTime, stemFromPath } from "./util.ts";
+import { escapeHtml, stemFromPath } from "@joshuarli98/md-wysiwyg";
+
+import { relativeTime } from "./util.ts";
 
 describe("escapeHtml", () => {
   it("escape ampersand", () => {

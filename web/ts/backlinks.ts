@@ -1,6 +1,7 @@
+import { stemFromPath } from "@joshuarli98/md-wysiwyg";
+
 import { getBacklinks } from "./api.ts";
-import { openTab } from "./tabs.ts";
-import { stemFromPath } from "./util.ts";
+import { openTab } from "./tab-state.ts";
 
 /// Load and render backlinks for a note into the given container.
 export async function loadBacklinks(el: HTMLElement, path: string) {

@@ -26,10 +26,11 @@ describe("tabs", () => {
     mock.on("DELETE", "/api/pin", {});
 
     const mod = await import("./tabs.ts");
-    ({ openTab } = mod);
-    ({ closeTab } = mod);
-    ({ getTabs } = mod);
-    ({ markDirty } = mod);
+    const stateMod = await import("./tab-state.ts");
+    ({ openTab } = stateMod);
+    ({ closeTab } = stateMod);
+    ({ getTabs } = stateMod);
+    ({ markDirty } = stateMod);
     createNewNoteViaDialog = mod.createNewNote;
 
     // Clean up any leaked state from other test files sharing the module.

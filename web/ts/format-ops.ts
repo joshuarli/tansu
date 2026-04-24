@@ -102,7 +102,7 @@ export function clearInlineFormats(md: string, start: number, end: number): Form
   const stripped = slice
     .replaceAll("**", "")
     .replaceAll("~~", "")
-    .replaceAll(/[=]=/g, "")
+    .replaceAll("==", "")
     .replaceAll("`", "")
     .replaceAll("*", "")
     .replaceAll("_", "");

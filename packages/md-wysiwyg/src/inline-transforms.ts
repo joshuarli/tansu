@@ -3,7 +3,7 @@
 /// with styled elements. Uses execCommand('insertHTML') so transforms
 /// participate in the browser's undo stack.
 
-import { escapeHtml } from "./util.js";
+import { clampNodeOffset, escapeHtml } from "./util.js";
 
 interface InlinePattern {
   open: string;
@@ -173,14 +173,4 @@ export function matchPattern(
   }
 
   return null;
-}
-
-function clampNodeOffset(node: Node, offset: number): number {
-  if (offset < 0) {
-    return 0;
-  }
-  if (node.nodeType === Node.TEXT_NODE) {
-    return Math.min(offset, node.textContent?.length ?? 0);
-  }
-  return Math.min(offset, node.childNodes.length);
 }

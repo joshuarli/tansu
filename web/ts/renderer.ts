@@ -1,3 +1,6 @@
+/// DOM-rendering wrappers for md-wysiwyg render functions.
+/// These own the `el.innerHTML = ...` mutation so callers don't touch innerHTML directly.
+
 import {
   renderMarkdown,
   renderMarkdownWithCursor,

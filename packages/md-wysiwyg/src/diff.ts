@@ -1,6 +1,6 @@
 /// Line-based diff with compact rendering, like git diff.
 
-import { escapeHtml } from "./util.js";
+import { escapeHtml, lcs } from "./util.js";
 
 export interface DiffLine {
   type: "add" | "del" | "ctx";
@@ -130,38 +130,4 @@ export function renderDiff(hunks: DiffHunk[]): HTMLElement {
   }
 
   return container;
-}
-
-function lcs(a: string[], b: string[]): [number, number][] {
-  const n = a.length;
-  const m = b.length;
-
-  const table: number[][] = Array.from({ length: n + 1 }, () =>
-    Array.from<number>({ length: m + 1 }).fill(0),
-  );
-  for (let i = 1; i <= n; i++) {
-    for (let j = 1; j <= m; j++) {
-      table[i]![j] =
-        a[i - 1] === b[j - 1]
-          ? table[i - 1]![j - 1]! + 1
-          : Math.max(table[i - 1]![j]!, table[i]![j - 1]!);
-    }
-  }
-
-  const matches: [number, number][] = [];
-  let i = n;
-  let j = m;
-  while (i > 0 && j > 0) {
-    if (a[i - 1] === b[j - 1]) {
-      matches.push([i - 1, j - 1]);
-      i--;
-      j--;
-    } else if (table[i - 1]![j]! >= table[i]![j - 1]!) {
-      i--;
-    } else {
-      j--;
-    }
-  }
-  matches.reverse();
-  return matches;
 }

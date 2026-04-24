@@ -6,7 +6,7 @@
 /// by inline-transforms.ts. A direct-DOM fallback handles test environments
 /// where execCommand is not implemented.
 
-import { escapeHtml } from "./util.js";
+import { clampNodeOffset, escapeHtml, isBlockTag } from "./util.js";
 
 type TransformFn = (block: HTMLElement, text: string) => boolean;
 
@@ -322,18 +322,8 @@ export function handleBlockTransform(
 function findBlock(node: Node | null, contentEl: HTMLElement): HTMLElement | null {
   let current: Node | null = node;
   while (current && current !== contentEl) {
-    if (current.nodeType === Node.ELEMENT_NODE) {
-      const tag = (current as HTMLElement).tagName;
-      if (
-        tag === "P" ||
-        tag === "DIV" ||
-        tag.startsWith("H") ||
-        tag === "LI" ||
-        tag === "BLOCKQUOTE" ||
-        tag === "PRE"
-      ) {
-        return current as HTMLElement;
-      }
+    if (current.nodeType === Node.ELEMENT_NODE && isBlockTag((current as HTMLElement).tagName)) {
+      return current as HTMLElement;
     }
     current = current.parentNode;
   }
@@ -350,14 +340,4 @@ function setCursorStart(el: Node) {
   range.collapse(true);
   sel.removeAllRanges();
   sel.addRange(range);
-}
-
-function clampNodeOffset(node: Node, offset: number): number {
-  if (offset < 0) {
-    return 0;
-  }
-  if (node.nodeType === Node.TEXT_NODE) {
-    return Math.min(offset, node.textContent?.length ?? 0);
-  }
-  return Math.min(offset, node.childNodes.length);
 }

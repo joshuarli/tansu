@@ -27,15 +27,15 @@ check:
 	tsgo -p packages/md-wysiwyg/tsconfig.json --noEmit
 	cargo check
 
-ts:
-	oxlint --quiet --config oxlint.config.mjs web/ts/ packages/
+ts-lint:
 	oxfmt --config oxfmt.config.mjs web/ts/ packages/
+	oxlint --quiet --config oxlint.config.mjs web/ts/ packages/
+
+ts: ts-lint
 	tsgo --noEmit --pretty false
 	pnpm run bundle-dev
 
-release-ts:
-	oxlint --quiet --config oxlint.config.mjs web/ts/ packages/
-	oxfmt --config oxfmt.config.mjs web/ts/ packages/
+release-ts: ts-lint
 	tsgo --noEmit --pretty false
 	pnpm run bundle
 

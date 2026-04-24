@@ -64,7 +64,6 @@ describe("classifyReload", () => {
 describe("editor", () => {
   let cleanup: () => void;
   let mock: ReturnType<typeof mockFetch>;
-  let initEditor: () => void;
   let showEditor: (path: string, content: string) => void;
   let hideEditor: () => void;
   let getCurrentContent: () => string;
@@ -84,14 +83,8 @@ describe("editor", () => {
     mock.on("GET", "/api/revisions", []);
 
     const mod = await import("./editor.ts");
-    ({ initEditor } = mod);
-    ({ showEditor } = mod);
-    ({ hideEditor } = mod);
-    ({ getCurrentContent } = mod);
-    ({ saveCurrentNote } = mod);
-    ({ reloadFromDisk } = mod);
-
-    initEditor();
+    const instance = mod.initEditor();
+    ({ showEditor, hideEditor, getCurrentContent, saveCurrentNote, reloadFromDisk } = instance);
   });
 
   afterAll(() => {
@@ -327,8 +320,7 @@ describe("editor", () => {
   });
 
   it("WYSIWYG: Cmd/Ctrl+H across multiple paragraphs wraps entire selection", async () => {
-    // Source-text highlight inserts == at start and end offsets regardless of block boundaries.
-    // For "foo\n\nbar" selecting all: produces "==foo\n\nbar==" (markers at offsets 0 and 8).
+    // Highlight across paragraph boundaries wraps each paragraph separately.
     showEditor("highlight-multiblock.md", "foo\n\nbar");
     await new Promise((r) => setTimeout(r, 50));
 
@@ -349,7 +341,7 @@ describe("editor", () => {
       new KeyboardEvent("keydown", { key: "h", ctrlKey: true, bubbles: true }),
     );
 
-    expect(getCurrentContent()).toBe("==foo\n\nbar==");
+    expect(getCurrentContent()).toBe("==foo==\n\n==bar==");
 
     hideEditor();
   });

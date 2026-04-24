@@ -12,26 +12,6 @@ import {
   createNewNote as _createNewNote,
 } from "./tab-state.ts";
 
-export {
-  type Tab,
-  getTabs,
-  getActiveTab,
-  openTab,
-  closeActiveTab,
-  nextTab,
-  prevTab,
-  markDirty,
-  markClean,
-  updateTabContent,
-  updateTabPath,
-  restoreSession,
-  reopenClosedTab,
-  syncToServer,
-  setCursor,
-  getCursor,
-  closeTab,
-} from "./tab-state.ts";
-
 export async function createNewNote(): Promise<void> {
   const name = await showInputDialog("New note name...");
   if (!name) {
@@ -83,13 +63,15 @@ document.addEventListener("keydown", (e) => {
 
 function render() {
   const tabBar = document.querySelector("#tab-bar")!;
-  const emptyState = document.querySelector("#empty-state") as HTMLElement;
+  const emptyState = document.querySelector<HTMLElement>("#empty-state");
   tabBar.innerHTML = "";
   hoveredTabIndex = -1;
   hideTabTooltip();
   const tabs = getTabs();
   const activeIndex = getActiveIndex();
-  emptyState.style.display = tabs.length === 0 ? "flex" : "none";
+  if (emptyState) {
+    emptyState.style.display = tabs.length === 0 ? "flex" : "none";
+  }
 
   for (const [i, tab] of tabs.entries()) {
     const el = document.createElement("div");

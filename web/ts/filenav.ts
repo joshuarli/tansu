@@ -1,3 +1,5 @@
+import { stemFromPath } from "@joshuarli98/md-wysiwyg";
+
 import {
   searchFileNames,
   getRecentFiles,
@@ -5,12 +7,14 @@ import {
   pinFile,
   unpinFile,
   deleteNote,
+  type PinnedFileEntry,
+  type RecentFileEntry,
+  type FileSearchResult,
 } from "./api.ts";
 import { showContextMenu } from "./context-menu.ts";
 import { on, emit } from "./events.ts";
 import { showInputDialog } from "./input-dialog.ts";
 import { openTab, getActiveTab, closeTabByPath } from "./tab-state.ts";
-import { stemFromPath } from "./util.ts";
 
 function showNavContextMenu(e: MouseEvent, path: string, title: string): void {
   e.preventDefault();
@@ -100,7 +104,7 @@ export async function initFileNav(): Promise<() => void> {
 
   // Refresh file list whenever files are mutated. Guard prevents stale double-renders
   // when both the local save and SSE fire files:changed within the same tick.
-  const offFilesChanged = on<undefined>("files:changed", async () => {
+  const offFilesChanged = on("files:changed", async () => {
     if (renderInFlight) {
       renderQueued = true;
       return;
@@ -119,7 +123,7 @@ export async function initFileNav(): Promise<() => void> {
   });
 
   // Refresh pinned state when changed from tab context menu
-  const offPinnedChanged = on<undefined>("pinned:changed", async () => {
+  const offPinnedChanged = on("pinned:changed", async () => {
     await refreshPinned();
     render();
   });
@@ -166,8 +170,8 @@ async function renderRecent(): Promise<void> {
     return;
   }
 
-  let pinned: { path: string; title: string }[] = [];
-  let recent: { path: string; title: string; mtime: number }[] = [];
+  let pinned: PinnedFileEntry[] = [];
+  let recent: RecentFileEntry[] = [];
   try {
     [pinned, recent] = await Promise.all([getPinnedFiles(), getRecentFiles()]);
     pinnedPaths = new Set(pinned.map((f) => f.path));
@@ -179,8 +183,7 @@ async function renderRecent(): Promise<void> {
   const active = getActiveTab();
   container.innerHTML = "";
 
-  const pinnedSet = new Set(pinned.map((f) => f.path));
-  const recentNonPinned = recent.filter((f) => !pinnedSet.has(f.path));
+  const recentNonPinned = recent.filter((f) => !pinnedPaths.has(f.path));
 
   if (pinned.length === 0 && recentNonPinned.length === 0) {
     container.innerHTML = '<div class="nav-empty">No files</div>';
@@ -200,7 +203,7 @@ async function renderSearch(q: string): Promise<void> {
   if (!container) {
     return;
   }
-  let results: { path: string; title: string }[];
+  let results: FileSearchResult[];
   try {
     results = await searchFileNames(q);
   } catch {
