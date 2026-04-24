@@ -47,6 +47,11 @@ let backlinksEl: HTMLElement | null = null;
 let revisionsEl: HTMLElement | null = null;
 let isSourceMode = false;
 let currentPath: string | null = null;
+
+type UndoEntry = { md: string; selStart: number; selEnd: number };
+const undoStack: UndoEntry[] = [];
+let undoIndex = -1;
+let typingSnapshotTimer: ReturnType<typeof setTimeout> | null = null;
 const INDENT_UNIT = "\t";
 const TAB_CLASS = "md-tab";
 const INDENTABLE_BLOCKS = new Set([
@@ -186,6 +191,10 @@ export function showEditor(path: string, content: string) {
 
   const cursor = getCursor(path);
   loadContent(content, cursor);
+  // Initialize undo stack with the initial content snapshot
+  undoIndex = -1;
+  undoStack.length = 0;
+  pushUndo(content, 0, 0);
   setupEditorEvents();
   loadBacklinks(backlinksEl, path);
   contentEl.focus();
@@ -197,6 +206,12 @@ export function hideEditor() {
     autosaveTimer = null;
     void saveCurrentNote({ silent: true });
   }
+  if (typingSnapshotTimer !== null) {
+    clearTimeout(typingSnapshotTimer);
+    typingSnapshotTimer = null;
+  }
+  undoStack.length = 0;
+  undoIndex = -1;
   currentPath = null;
   hideRevisions();
   hideAutocomplete();
@@ -515,21 +530,17 @@ function setupEditorEvents() {
 
   contentEl.addEventListener("input", (e) => {
     const ie = e as InputEvent;
+    // historyUndo/historyRedo branches are kept for completeness but Cmd+Z is now
+    // intercepted by the keydown handler before it reaches the browser's undo path.
     if (ie.inputType === "historyUndo" || ie.inputType === "historyRedo") {
       dispatchEditorAction({ type: ie.inputType === "historyUndo" ? "undo" : "redo" });
       if (currentPath) markDirty(currentPath);
       scheduleAutosave();
-      // Collapse any selection the browser restores as part of undo/redo.
-      // Doing it here (synchronously in the input event) prevents the selection
-      // from ever being painted and stops the format toolbar from appearing.
-      const sel = window.getSelection();
-      if (sel && !sel.isCollapsed && contentEl && contentEl.contains(sel.anchorNode)) {
-        sel.collapseToStart();
-      }
       return;
     }
     if (currentPath) markDirty(currentPath);
     scheduleAutosave();
+    scheduleTypingSnapshot();
     if (contentEl && checkBlockInputTransform(contentEl)) {
       dispatchEditorAction({
         type: "block-transform",
@@ -555,6 +566,20 @@ function setupEditorEvents() {
       e.preventDefault();
       e.stopPropagation();
       saveCurrentNote();
+      return;
+    }
+
+    if (meta && e.key === "z" && !e.shiftKey) {
+      e.preventDefault();
+      undoEdit();
+      dispatchEditorAction({ type: "undo" });
+      return;
+    }
+
+    if ((meta && e.shiftKey && e.key === "z") || (meta && e.key === "y")) {
+      e.preventDefault();
+      redoEdit();
+      dispatchEditorAction({ type: "redo" });
       return;
     }
 
@@ -765,6 +790,46 @@ function onEditorTabMutation() {
   if (contentEl && !isSourceMode) checkWikiLinkTrigger(contentEl, currentPath);
 }
 
+function pushUndo(md: string, selStart: number, selEnd: number): void {
+  // Truncate any redo tail
+  undoStack.splice(undoIndex + 1);
+  undoStack.push({ md, selStart, selEnd });
+  if (undoStack.length > 200) {
+    undoStack.shift();
+  } else {
+    undoIndex++;
+  }
+}
+
+function scheduleTypingSnapshot(): void {
+  if (typingSnapshotTimer !== null) clearTimeout(typingSnapshotTimer);
+  typingSnapshotTimer = setTimeout(() => {
+    typingSnapshotTimer = null;
+    if (!contentEl) return;
+    const md = domToMarkdown(contentEl);
+    const sel = getSelectionMarkdownOffsets(contentEl);
+    pushUndo(md, sel?.start ?? 0, sel?.end ?? 0);
+  }, 1000);
+}
+
+function undoEdit(): void {
+  if (undoIndex <= 0 || !contentEl) return;
+  undoIndex--;
+  const entry = undoStack[undoIndex]!;
+  setContentWithSelection(contentEl, entry.md, entry.selStart, entry.selEnd);
+  restoreSelectionFromRenderedMarkers(contentEl);
+  onEditorTabMutation();
+}
+
+function redoEdit(): void {
+  if (undoIndex >= undoStack.length - 1 || !contentEl) return;
+  undoIndex++;
+  const entry = undoStack[undoIndex]!;
+  setContentWithSelection(contentEl, entry.md, entry.selStart, entry.selEnd);
+  restoreSelectionFromRenderedMarkers(contentEl);
+  onEditorTabMutation();
+}
+
 /// Apply a source-text format transform to the current editor content.
 /// Gets the selection offsets, applies the transform, re-renders, and restores the selection.
 function applySourceFormatInEditor(
@@ -774,6 +839,8 @@ function applySourceFormatInEditor(
   const sel = getSelectionMarkdownOffsets(contentEl);
   if (!sel) return;
   const md = domToMarkdown(contentEl);
+  // Save before-state to undo stack
+  pushUndo(md, sel.start, sel.end);
   const { md: newMd, selStart, selEnd } = transform(md, sel.start, sel.end);
   setContentWithSelection(contentEl, newMd, selStart, selEnd);
   restoreSelectionFromRenderedMarkers(contentEl);
