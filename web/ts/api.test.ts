@@ -23,6 +23,8 @@ import {
   registerPrf,
   removePrf,
   getStatus,
+  pinFile,
+  unpinFile,
 } from "./api.ts";
 import { mockFetch } from "./test-helper.ts";
 
@@ -224,5 +226,20 @@ describe("api", () => {
     expect(status.encrypted).toBe(true);
     expect(status.locked).toBe(false);
     expect(status.prf_credential_ids.length).toBe(1);
+  });
+
+  test("pinFile succeeds on 200", async () => {
+    mock.on("POST", "/api/pin", {});
+    await expect(pinFile("notes/a.md")).resolves.toBeUndefined();
+  });
+
+  test("unpinFile succeeds on 200", async () => {
+    mock.on("DELETE", "/api/pin", {});
+    await expect(unpinFile("notes/a.md")).resolves.toBeUndefined();
+  });
+
+  test("unpinFile throws on non-200", async () => {
+    mock.on("DELETE", "/api/pin", { error: "fail" }, 500);
+    await expect(unpinFile("notes/a.md")).rejects.toThrow("unpin failed");
   });
 });

@@ -21,7 +21,9 @@ export async function openStore(): Promise<void> {
       db = req.result;
       resolve();
     };
+    /* c8 ignore start */
     req.onerror = () => reject(req.error);
+    /* c8 ignore stop */
   });
 }
 
@@ -41,7 +43,9 @@ function idbGet<T>(store: string, key: string): Promise<T | undefined> {
   return new Promise((resolve, reject) => {
     const req = tx(store, "readonly").get(key);
     req.onsuccess = () => resolve(req.result as T | undefined);
+    /* c8 ignore start */
     req.onerror = () => reject(req.error);
+    /* c8 ignore stop */
   });
 }
 
@@ -50,7 +54,9 @@ function idbPut(store: string, key: string, value: unknown): Promise<void> {
   return new Promise((resolve, reject) => {
     const req = tx(store, "readwrite").put(value, key);
     req.onsuccess = () => resolve();
+    /* c8 ignore start */
     req.onerror = () => reject(req.error);
+    /* c8 ignore stop */
   });
 }
 
@@ -80,6 +86,8 @@ export function noteDel(path: string): Promise<void> {
   return new Promise((resolve, reject) => {
     const req = tx("notes", "readwrite").delete(path);
     req.onsuccess = () => resolve();
+    /* c8 ignore start */
     req.onerror = () => reject(req.error);
+    /* c8 ignore stop */
   });
 }

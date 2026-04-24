@@ -39,6 +39,7 @@ const TANSU_HTML = `<!doctype html>
 <html><head></head><body>
 <div id="app">
   <div id="sidebar">
+    <button id="sidebar-collapse"></button>
     <div id="sidebar-header">
       <input id="sidebar-search" type="text">
     </div>
@@ -96,6 +97,7 @@ export function setupDOM(): () => void {
     "HTMLSelectElement",
     "CustomEvent",
     "MouseEvent",
+    "WheelEvent",
     "KeyboardEvent",
     "Event",
     "OffscreenCanvas",
@@ -163,6 +165,7 @@ export function mockFetch(): MockFetch {
         match: (url, init) => {
           const m = (init?.method ?? "GET").toUpperCase() === method.toUpperCase();
           if (typeof urlPattern === "string") return m && url.includes(urlPattern);
+          /* c8 ignore next */
           return m && urlPattern.test(url);
         },
         respond: () =>

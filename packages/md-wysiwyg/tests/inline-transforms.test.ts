@@ -210,9 +210,9 @@ describe("checkInlineTransform", () => {
     cleanup();
   });
 
-  test("returns false when no selection exists", () => {
+  test("returns null when no selection exists", () => {
     const result = checkInlineTransform();
-    expect(result).toBe(false);
+    expect(result).toBe(null);
   });
 
   test("clamps stale selection offsets after DOM mutation", () => {
@@ -234,7 +234,7 @@ describe("checkInlineTransform", () => {
     });
 
     expect(() => checkInlineTransform()).not.toThrow();
-    expect(checkInlineTransform()).toBe(false);
+    expect(checkInlineTransform()).toBe(null);
 
     host.remove();
   });

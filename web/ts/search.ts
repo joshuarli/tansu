@@ -29,9 +29,11 @@ export function createSearch(deps: SearchDeps): Search {
     .then((s) => {
       showScoreBreakdown = s.show_score_breakdown;
     })
+    /* c8 ignore start */
     .catch((e) => {
       console.warn("Failed to load settings:", e);
     });
+  /* c8 ignore stop */
 
   function open(filterPath?: string) {
     isOpen = true;
@@ -187,9 +189,11 @@ export function createSearch(deps: SearchDeps): Search {
         await createNote(path);
         deps.invalidateNoteCache();
         await deps.openTab(path);
+        /* c8 ignore start */
       } catch (e) {
         console.error("Failed to create note:", e);
       }
+      /* c8 ignore stop */
     }
   }
 

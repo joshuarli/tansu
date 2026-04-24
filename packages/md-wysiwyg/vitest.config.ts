@@ -7,5 +7,13 @@ export default defineConfig({
     reporters: ["agent"],
     silent: "passed-only",
     sequence: { shuffle: true },
+    coverage: {
+      provider: "v8",
+      include: ["src/**/*.ts"],
+      thresholds: {
+        lines: 90,
+        functions: 90,
+      },
+    },
   },
 });

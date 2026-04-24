@@ -263,4 +263,23 @@ describe("search", () => {
       },
     ]);
   });
+
+  test("open() handles getSettings failure gracefully without crashing", async () => {
+    mock.on("GET", "/api/settings", { error: "fail" }, 500);
+    openSearch();
+    await new Promise((r) => setTimeout(r, 100));
+    expect(isSearchOpen()).toBe(true);
+    closeSearch();
+    mock.on("GET", "/api/settings", {
+      weight_title: 10,
+      weight_headings: 5,
+      weight_tags: 2,
+      weight_content: 1,
+      fuzzy_distance: 1,
+      recency_boost: 2,
+      result_limit: 20,
+      show_score_breakdown: true,
+      excluded_folders: [],
+    });
+  });
 });

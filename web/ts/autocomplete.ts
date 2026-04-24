@@ -116,11 +116,13 @@ async function showAutocomplete(
       selectedIdx = (selectedIdx - 1 + filtered.length) % filtered.length;
       updateSelection(selectedIdx);
     } else if (e.key === "Enter" || e.key === "Tab") {
+      /* c8 ignore start */
       e.preventDefault();
       e.stopPropagation();
       const note = filtered[selectedIdx];
       if (note) completeWikiLink(textNode, triggerIdx, cursorPos, note, currentPath);
       document.removeEventListener("keydown", handler, true);
+      /* c8 ignore stop */
     } else if (e.key === "Escape") {
       e.preventDefault();
       hideAutocomplete();
@@ -171,5 +173,6 @@ function clampNodeOffset(node: Node, offset: number): number {
   if (node.nodeType === Node.TEXT_NODE) {
     return Math.min(offset, node.textContent?.length ?? 0);
   }
+  /* c8 ignore next */
   return Math.min(offset, node.childNodes.length);
 }

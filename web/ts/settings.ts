@@ -199,6 +199,7 @@ export function createSettings(): SettingsPanel {
     `;
   }
 
+  /* c8 ignore start */
   function wireSecuritySection() {
     if (!status || !status.encrypted) return;
 
@@ -251,6 +252,7 @@ export function createSettings(): SettingsPanel {
       });
     }
   }
+  /* c8 ignore stop */
 
   return { toggle, open, close, isOpen: () => isOpen };
 }

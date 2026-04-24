@@ -26,6 +26,11 @@ describe("tab-state", () => {
   let createNewNote: (name: string) => Promise<void>;
   let restoreSession: () => Promise<void>;
   let switchTab: (index: number) => Promise<void>;
+  let syncToServer: () => Promise<void>;
+  let setCursor: (path: string, offset: number) => void;
+  let getCursor: (path: string) => number | undefined;
+  let clearClosedTabs: () => void;
+  let reopenClosedTab: () => Promise<void>;
   let offRender: () => void;
   let offChange: () => void;
 
@@ -56,6 +61,11 @@ describe("tab-state", () => {
     titleFromPath = mod.titleFromPath;
     createNewNote = mod.createNewNote;
     restoreSession = mod.restoreSession;
+    syncToServer = mod.syncToServer;
+    setCursor = mod.setCursor;
+    getCursor = mod.getCursor;
+    clearClosedTabs = mod.clearClosedTabs;
+    reopenClosedTab = mod.reopenClosedTab;
 
     offRender = on("tab:render", () => {});
     offChange = on("tab:change", () => {});
@@ -314,6 +324,44 @@ describe("tab-state", () => {
     closeTabByPath("notes/not-open.md");
     expect(getTabs().length).toBe(1);
 
+    while (getTabs().length > 0) closeTab(0);
+  });
+
+  test("setCursor and getCursor round-trip", () => {
+    setCursor("notes/x.md", 42);
+    expect(getCursor("notes/x.md")).toBe(42);
+    expect(getCursor("notes/other.md")).toBeUndefined();
+  });
+
+  test("syncToServer is a no-op when no cached session", async () => {
+    // Just verify it doesn't throw
+    await syncToServer();
+  });
+
+  test("clearClosedTabs empties the closed-tabs stack", async () => {
+    while (getTabs().length > 0) closeTab(0);
+    mock.on("GET", "/api/note", { content: "# X", mtime: 1000 });
+    await openTab("notes/x.md");
+    closeTab(0); // pushes to closedTabs
+    clearClosedTabs();
+    // reopenClosedTab should now be a no-op
+    await reopenClosedTab();
+    expect(getTabs().length).toBe(0);
+  });
+
+  test("reopenClosedTab restores the last closed tab", async () => {
+    while (getTabs().length > 0) closeTab(0);
+    mock.on("GET", "/api/note", { content: "# X", mtime: 1000 });
+    await openTab("notes/reopen.md");
+    closeTab(0);
+    clearClosedTabs(); // start fresh
+    // Open and close to populate closedTabs
+    await openTab("notes/reopen.md");
+    closeTab(0);
+    // Now reopen it
+    await reopenClosedTab();
+    expect(getTabs().length).toBe(1);
+    expect(getTabs()[0]!.path).toBe("notes/reopen.md");
     while (getTabs().length > 0) closeTab(0);
   });
 

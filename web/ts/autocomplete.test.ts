@@ -251,6 +251,25 @@ describe("autocomplete", () => {
     invalidateNoteCache();
   });
 
+  test("no trigger when selection has no ranges", () => {
+    const sel = window.getSelection()!;
+    sel.removeAllRanges();
+    checkWikiLinkTrigger(contentEl, "test.md");
+    expect(getDropdown()).toBe(null);
+  });
+
+  test("showAutocomplete handles API failure gracefully", async () => {
+    invalidateNoteCache();
+    mock.on("GET", "/api/notes", { error: "fail" }, 500);
+    typeInEditor("[[broken");
+    checkWikiLinkTrigger(contentEl, "test.md");
+    await new Promise((r) => setTimeout(r, 100));
+    expect(getDropdown()).toBe(null);
+    // Restore
+    mock.on("GET", "/api/notes", NOTES);
+    invalidateNoteCache();
+  });
+
   test("hideAutocomplete removes the dropdown", async () => {
     invalidateNoteCache();
     typeInEditor("[[");

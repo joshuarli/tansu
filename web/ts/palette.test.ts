@@ -11,6 +11,7 @@ describe("palette", () => {
   let registerCommands: (
     cmds: Array<{ label: string; shortcut: string; action: () => void }>,
   ) => void;
+  let getCommands: () => Array<{ label: string; shortcut: string; action: () => void }>;
   let actionCalled = false;
 
   beforeAll(async () => {
@@ -23,6 +24,7 @@ describe("palette", () => {
     closePalette = p.close;
     isPaletteOpen = p.isOpen;
     registerCommands = p.registerCommands;
+    getCommands = p.getCommands;
 
     registerCommands([
       {
@@ -186,5 +188,11 @@ describe("palette", () => {
     expect(matchesKey(new KeyboardEvent("keydown", { key: "Escape" }), { key: "Escape" })).toBe(
       true,
     );
+  });
+
+  test("getCommands returns registered commands", () => {
+    const cmds = getCommands();
+    expect(cmds.length).toBe(3);
+    expect(cmds[0]!.label).toBe("Save");
   });
 });

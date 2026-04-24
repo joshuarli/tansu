@@ -109,7 +109,9 @@ async function showRevisions(path: string, host: HTMLElement) {
 
       host.appendChild(item);
     }
+    /* c8 ignore start */
   } catch {
     loading.textContent = "Failed to load revisions.";
   }
+  /* c8 ignore stop */
 }

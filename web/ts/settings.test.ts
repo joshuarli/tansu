@@ -141,6 +141,56 @@ describe("settings", () => {
     });
   });
 
+  test("slider input event updates displayed value", async () => {
+    await openSettings();
+    const panel = document.getElementById("settings-panel")!;
+    const slider = panel.querySelector<HTMLInputElement>(
+      'input[type="range"][data-key="weight_title"]',
+    )!;
+    const valueSpan = slider.nextElementSibling as HTMLSpanElement;
+
+    slider.value = "15";
+    slider.dispatchEvent(new Event("input", { bubbles: true }));
+
+    expect(valueSpan.textContent).toBe("15");
+    closeSettings();
+  });
+
+  test("excluded folders Enter key triggers save", async () => {
+    await openSettings();
+    const panel = document.getElementById("settings-panel")!;
+    const foldersInput = panel.querySelector<HTMLInputElement>(
+      'input[data-key="excluded_folders"]',
+    )!;
+    foldersInput.value = "archive, private";
+
+    mock.on("PUT", "/api/settings", {});
+    foldersInput.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }),
+    );
+    await new Promise((r) => setTimeout(r, 20));
+
+    // Successful save closes the panel
+    expect(isSettingsOpen()).toBe(false);
+  });
+
+  test("save error is handled gracefully (panel stays open)", async () => {
+    await openSettings();
+    mock.on("PUT", "/api/settings", { error: "server error" }, 500);
+
+    const panel = document.getElementById("settings-panel")!;
+    const saveBtn = panel.querySelector("#settings-save") as HTMLButtonElement;
+    saveBtn.click();
+    await new Promise((r) => setTimeout(r, 20));
+
+    // Panel stays open on save error
+    expect(isSettingsOpen()).toBe(true);
+    closeSettings();
+
+    // Restore working mock
+    mock.on("PUT", "/api/settings", {});
+  });
+
   test("settings lifecycle", async () => {
     // Initially closed
     expect(isSettingsOpen()).toBe(false);

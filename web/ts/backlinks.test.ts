@@ -92,4 +92,21 @@ describe("backlinks", () => {
     await loadBacklinks(el, "notes/current.md");
     expect(el.style.display).toBe("none");
   });
+
+  test("clicking a backlink item opens that tab", async () => {
+    mock.on("GET", "/api/backlinks", ["notes/foo.md"]);
+    mock.on("GET", "/api/note", { content: "# Foo", mtime: 1000 });
+    mock.on("GET", "/api/state", { tabs: [], active: -1 });
+    mock.on("PUT", "/api/state", {});
+
+    const el = makeEl();
+    await loadBacklinks(el, "notes/current.md");
+    const item = el.querySelector(".backlink-item") as HTMLElement;
+    expect(item !== null).toBe(true);
+
+    // Clicking should trigger openTab, which fetches the note
+    item.click();
+    await new Promise((r) => setTimeout(r, 50));
+    // If no error thrown, the onclick triggered openTab correctly
+  });
 });

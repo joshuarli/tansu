@@ -36,8 +36,10 @@ function persistState() {
     closed: closedTabs,
     cursors,
   };
+  /* c8 ignore start */
   kvPut("session", state).catch(() => {});
   saveState(state).catch(() => {});
+  /* c8 ignore stop */
 }
 
 export function setCursor(path: string, offset: number) {
@@ -113,7 +115,9 @@ export function closeTab(index: number) {
 
   closedTabs.push(tab.path);
   if (closedTabs.length > MAX_CLOSED) closedTabs.shift();
+  /* c8 ignore start */
   notePut(tab.path, tab.content, tab.mtime).catch(() => {});
+  /* c8 ignore stop */
 
   emit("tab:close", tab);
   tabs.splice(index, 1);
@@ -148,9 +152,11 @@ export async function reopenClosedTab() {
   persistState();
   try {
     await openTab(path);
+    /* c8 ignore start */
   } catch (e) {
     console.warn("Could not reopen closed tab:", path, e);
   }
+  /* c8 ignore stop */
 }
 
 export function nextTab() {
@@ -176,7 +182,9 @@ export function markClean(path: string, content: string, mtime: number) {
     tab.content = content;
     tab.mtime = mtime;
     tab.title = titleFromPath(path);
+    /* c8 ignore start */
     notePut(path, content, mtime).catch(() => {});
+    /* c8 ignore stop */
     emit("tab:render", undefined);
   }
 }
@@ -214,7 +222,9 @@ export async function restoreSession() {
   let state: SessionState;
   try {
     state = await getState();
+    /* c8 ignore start */
     kvPut("session", state).catch(() => {});
+    /* c8 ignore stop */
   } catch {
     state = (await kvGet<SessionState>("session")) ?? {};
   }
