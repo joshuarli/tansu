@@ -1,5 +1,4 @@
 import type { Page } from "playwright";
-import { describe, test, expect, beforeAll, afterAll } from "vitest";
 
 import { setup, teardown } from "./setup.ts";
 
@@ -8,7 +7,7 @@ describe("e2e: autocomplete", () => {
 
   beforeAll(async () => {
     const ctx = await setup();
-    page = ctx.page;
+    ({ page } = ctx);
 
     await page.goto(ctx.baseUrl);
     await page.waitForSelector("#tab-bar", { timeout: 5000 });
@@ -33,7 +32,7 @@ describe("e2e: autocomplete", () => {
     await page.click(".editor-content");
   }
 
-  test("[[ triggers autocomplete, filters, completes, and Escape dismisses", async () => {
+  it("[[ triggers autocomplete, filters, completes, and Escape dismisses", async () => {
     await resetEditor("");
 
     // Type [[ character by character with delay to ensure input events fire
@@ -42,7 +41,7 @@ describe("e2e: autocomplete", () => {
     await page.waitForTimeout(1000);
 
     // Check if dropdown appeared
-    let hasDropdown = await page.isVisible(".autocomplete-dropdown");
+    const hasDropdown = await page.isVisible(".autocomplete-dropdown");
 
     if (hasDropdown) {
       // Dropdown appeared — test the full flow
@@ -60,12 +59,12 @@ describe("e2e: autocomplete", () => {
         els.map((e) => e.textContent),
       );
       const hasSecond = filtered.some((t) => t?.toLowerCase().includes("second"));
-      expect(hasSecond).toBe(true);
+      expect(hasSecond).toBeTruthy();
 
       // Enter completes
       await page.keyboard.press("Enter");
       await page.waitForTimeout(300);
-      expect(await page.isHidden(".autocomplete-dropdown")).toBe(true);
+      await expect(page.isHidden(".autocomplete-dropdown")).resolves.toBeTruthy();
 
       const text = await page.$eval(".editor-content", (el) => el.textContent);
       expect(text).toContain("second");
@@ -78,7 +77,7 @@ describe("e2e: autocomplete", () => {
       if (await page.isVisible(".autocomplete-dropdown")) {
         await page.keyboard.press("Escape");
         await page.waitForTimeout(300);
-        expect(await page.isVisible(".autocomplete-dropdown")).toBe(false);
+        await expect(page.isVisible(".autocomplete-dropdown")).resolves.toBeFalsy();
       }
     } else {
       // Autocomplete didn't trigger — likely contenteditable input events

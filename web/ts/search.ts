@@ -1,5 +1,4 @@
-import { searchNotes, createNote, getSettings } from "./api.ts";
-import type { SearchResult } from "./api.ts";
+import { searchNotes, createNote, getSettings, type SearchResult } from "./api.ts";
 
 interface Search {
   toggle(): void;
@@ -14,9 +13,9 @@ interface SearchDeps {
 }
 
 export function createSearch(deps: SearchDeps): Search {
-  const overlay = document.getElementById("search-overlay")!;
-  const input = document.getElementById("search-input")! as HTMLInputElement;
-  const resultsEl = document.getElementById("search-results")!;
+  const overlay = document.querySelector("#search-overlay")!;
+  const input = document.querySelector("#search-input")! as HTMLInputElement;
+  const resultsEl = document.querySelector("#search-results")!;
 
   let results: SearchResult[] = [];
   let selectedIndex = 0;
@@ -25,15 +24,9 @@ export function createSearch(deps: SearchDeps): Search {
   let showScoreBreakdown = true;
 
   // Load setting once at startup, refresh on each open
-  getSettings()
-    .then((s) => {
-      showScoreBreakdown = s.show_score_breakdown;
-    })
-    /* c8 ignore start */
-    .catch((e) => {
-      console.warn("Failed to load settings:", e);
-    });
-  /* c8 ignore stop */
+  void getSettings()
+    .then((s) => (showScoreBreakdown = s.show_score_breakdown))
+    .catch(() => void 0);
 
   function open(filterPath?: string) {
     isOpen = true;
@@ -45,13 +38,9 @@ export function createSearch(deps: SearchDeps): Search {
     results = [];
     selectedIndex = 0;
     input.focus();
-    getSettings()
-      .then((s) => {
-        showScoreBreakdown = s.show_score_breakdown;
-      })
-      .catch((e) => {
-        console.warn("Failed to load settings:", e);
-      });
+    void getSettings()
+      .then((s) => (showScoreBreakdown = s.show_score_breakdown))
+      .catch(() => void 0);
   }
 
   function close() {
@@ -61,8 +50,11 @@ export function createSearch(deps: SearchDeps): Search {
   }
 
   function toggle() {
-    if (isOpen) close();
-    else open();
+    if (isOpen) {
+      close();
+    } else {
+      open();
+    }
   }
 
   async function doSearch() {
@@ -74,8 +66,7 @@ export function createSearch(deps: SearchDeps): Search {
     }
     try {
       results = await searchNotes(q, scopePath ?? undefined);
-    } catch (e) {
-      console.warn("Search failed:", e);
+    } catch {
       results = [];
     }
     selectedIndex = 0;
@@ -105,15 +96,17 @@ export function createSearch(deps: SearchDeps): Search {
   });
 
   overlay.addEventListener("click", (e) => {
-    if (e.target === overlay) close();
+    if (e.target === overlay) {
+      close();
+    }
   });
 
   function renderResults(query: string) {
     resultsEl.innerHTML = "";
 
-    results.forEach((r, i) => {
+    for (const [i, r] of results.entries()) {
       const el = document.createElement("div");
-      el.className = "search-result" + (i === selectedIndex ? " selected" : "");
+      el.className = `search-result${i === selectedIndex ? " selected" : ""}`;
 
       const title = document.createElement("div");
       title.className = "title";
@@ -130,38 +123,47 @@ export function createSearch(deps: SearchDeps): Search {
         score.className = "score";
         const fs = r.field_scores;
         const parts: string[] = [];
-        if (fs.title > 0) parts.push(`title:${fs.title.toPrecision(3)}`);
-        if (fs.headings > 0) parts.push(`headings:${fs.headings.toPrecision(3)}`);
-        if (fs.tags > 0) parts.push(`tags:${fs.tags.toPrecision(3)}`);
-        if (fs.content > 0) parts.push(`content:${fs.content.toPrecision(3)}`);
-        score.textContent = `${r.score.toPrecision(3)}${parts.length ? " = " + parts.join(" + ") : ""}`;
-        el.appendChild(score);
+        if (fs.title > 0) {
+          parts.push(`title:${fs.title.toPrecision(3)}`);
+        }
+        if (fs.headings > 0) {
+          parts.push(`headings:${fs.headings.toPrecision(3)}`);
+        }
+        if (fs.tags > 0) {
+          parts.push(`tags:${fs.tags.toPrecision(3)}`);
+        }
+        if (fs.content > 0) {
+          parts.push(`content:${fs.content.toPrecision(3)}`);
+        }
+        score.textContent = `${r.score.toPrecision(3)}${parts.length > 0 ? ` = ${parts.join(" + ")}` : ""}`;
+        el.append(score);
       }
 
       if (r.excerpt) {
         const excerpt = document.createElement("div");
         excerpt.className = "excerpt";
         excerpt.innerHTML = r.excerpt;
-        el.appendChild(excerpt);
+        el.append(excerpt);
       }
 
+      // eslint-disable-next-line no-loop-func
       el.onclick = () => {
         selectedIndex = i;
         selectItem();
       };
-      resultsEl.appendChild(el);
-    });
+      resultsEl.append(el);
+    }
 
     // Create note option (not shown when scoped to a single file)
     if (query.length > 0 && !scopePath) {
       const createEl = document.createElement("div");
-      createEl.className = "search-create" + (selectedIndex === results.length ? " selected" : "");
+      createEl.className = `search-create${selectedIndex === results.length ? " selected" : ""}`;
       createEl.textContent = `Create "${query}"`;
       createEl.onclick = () => {
         selectedIndex = results.length;
         selectItem();
       };
-      resultsEl.appendChild(createEl);
+      resultsEl.append(createEl);
     }
   }
 
@@ -182,18 +184,19 @@ export function createSearch(deps: SearchDeps): Search {
       }
     } else {
       const name = input.value.trim();
-      if (!name) return;
+      if (!name) {
+        return;
+      }
       const path = name.endsWith(".md") ? name : `${name}.md`;
       close();
       try {
         await createNote(path);
         deps.invalidateNoteCache();
         await deps.openTab(path);
-        /* c8 ignore start */
-      } catch (e) {
-        console.error("Failed to create note:", e);
+        /* c8 ignore next */
+      } catch {
+        /* ignore */
       }
-      /* c8 ignore stop */
     }
   }
 

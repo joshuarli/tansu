@@ -1,10 +1,9 @@
-import { describe, test, expect, beforeAll, afterAll } from "vitest";
-
+import type { Tab } from "./tab-state.ts";
 import { setupDOM, mockFetch } from "./test-helper.ts";
 
 function makeContainer(): HTMLElement {
   const div = document.createElement("div");
-  document.body.appendChild(div);
+  document.body.append(div);
   return div;
 }
 
@@ -20,7 +19,7 @@ describe("conflict", () => {
     getCurrentContent: () => string,
   ) => void;
   let handleReloadConflict: (
-    tab: any,
+    tab: Tab,
     container: HTMLElement,
     path: string,
     diskContent: string,
@@ -39,8 +38,8 @@ describe("conflict", () => {
 
     // Import AFTER mocks so module-level fetches see them
     const mod = await import("./conflict.ts");
-    showConflictBanner = mod.showConflictBanner;
-    handleReloadConflict = mod.handleReloadConflict;
+    ({ showConflictBanner } = mod);
+    ({ handleReloadConflict } = mod);
   });
 
   afterAll(() => {
@@ -48,7 +47,7 @@ describe("conflict", () => {
     cleanup();
   });
 
-  test("banner exists", () => {
+  it("banner exists", () => {
     const container = makeContainer();
     showConflictBanner(
       container,
@@ -59,10 +58,10 @@ describe("conflict", () => {
       () => "mine",
     );
     const banner = container.querySelector(".conflict-banner");
-    expect(banner !== null).toBe(true);
+    expect(banner !== null).toBeTruthy();
   });
 
-  test("message text correct", () => {
+  it("message text correct", () => {
     const container = makeContainer();
     showConflictBanner(
       container,
@@ -73,11 +72,11 @@ describe("conflict", () => {
       () => "mine",
     );
     const span = container.querySelector(".conflict-banner")!.querySelector("span");
-    expect(span !== null).toBe(true);
-    expect(span!.textContent!.includes("File changed externally")).toBe(true);
+    expect(span !== null).toBeTruthy();
+    expect(span!.textContent!).toContain("File changed externally");
   });
 
-  test("two buttons", () => {
+  it("two buttons", () => {
     const container = makeContainer();
     showConflictBanner(
       container,
@@ -88,12 +87,12 @@ describe("conflict", () => {
       () => "mine",
     );
     const buttons = container.querySelector(".conflict-banner")!.querySelectorAll("button");
-    expect(buttons.length).toBe(2);
+    expect(buttons).toHaveLength(2);
     expect(buttons[0]!.textContent).toBe("Keep mine");
     expect(buttons[1]!.textContent).toBe("Take theirs");
   });
 
-  test("banner removed after Keep mine", async () => {
+  it("banner removed after Keep mine", async () => {
     const container = makeContainer();
     showConflictBanner(
       container,
@@ -106,12 +105,12 @@ describe("conflict", () => {
     const banner = container.querySelector(".conflict-banner")!;
     const keepBtn = banner.querySelectorAll("button")[0]! as HTMLButtonElement;
     keepBtn.click();
-    expect(container.querySelector(".conflict-banner")).toBe(null);
+    expect(container.querySelector(".conflict-banner")).toBeNull();
     // saveNote is async; give it a tick to fire the fetch
     await new Promise((r) => setTimeout(r, 10));
   });
 
-  test("banner removed after Take theirs", () => {
+  it("banner removed after Take theirs", () => {
     const container = makeContainer();
     let loadedWith = "";
     showConflictBanner(
@@ -127,11 +126,11 @@ describe("conflict", () => {
     const banner = container.querySelector(".conflict-banner")!;
     const takeBtn = banner.querySelectorAll("button")[1]! as HTMLButtonElement;
     takeBtn.click();
-    expect(container.querySelector(".conflict-banner")).toBe(null);
+    expect(container.querySelector(".conflict-banner")).toBeNull();
     expect(loadedWith).toBe("their content");
   });
 
-  test("only one banner after calling twice", () => {
+  it("only one banner after calling twice", () => {
     const container = makeContainer();
     showConflictBanner(
       container,
@@ -150,10 +149,10 @@ describe("conflict", () => {
       () => "mine",
     );
     const banners = container.querySelectorAll(".conflict-banner");
-    expect(banners.length).toBe(1);
+    expect(banners).toHaveLength(1);
   });
 
-  test("no banner on clean merge", () => {
+  it("no banner on clean merge", () => {
     // base="a\nb", ours="a\nb\nc" (ours appended), theirs="x\na\nb" (theirs prepended)
     // merge3 should produce "x\na\nb\nc"
     const container = makeContainer();
@@ -178,12 +177,12 @@ describe("conflict", () => {
       () => "a\nb\nc", // ours (editor)
     );
 
-    expect(container.querySelector(".conflict-banner")).toBe(null);
+    expect(container.querySelector(".conflict-banner")).toBeNull();
     expect(loadedWith).toBe("x\na\nb\nc");
     expect(tab.mtime).toBe(2000);
   });
 
-  test("banner shown on conflict", () => {
+  it("banner shown on conflict", () => {
     // base="a\nb", ours changed line 2 one way, theirs changed line 2 differently
     const container = makeContainer();
     let loadedWith = "";
@@ -207,7 +206,7 @@ describe("conflict", () => {
       () => "a\nX", // ours: changed line 2 to X — conflict
     );
 
-    expect(container.querySelector(".conflict-banner") !== null).toBe(true);
+    expect(container.querySelector(".conflict-banner") !== null).toBeTruthy();
     expect(loadedWith).toBe("");
   });
 });

@@ -1,5 +1,4 @@
 import type { Page } from "playwright";
-import { describe, test, expect, beforeAll, afterAll } from "vitest";
 
 import { setup, teardown } from "./setup.ts";
 
@@ -9,8 +8,8 @@ describe("e2e: tabs", () => {
 
   beforeAll(async () => {
     const ctx = await setup();
-    page = ctx.page;
-    baseUrl = ctx.baseUrl;
+    ({ page } = ctx);
+    ({ baseUrl } = ctx);
 
     await page.goto(baseUrl);
     await page.waitForSelector("#tab-bar", { timeout: 5000 });
@@ -30,7 +29,7 @@ describe("e2e: tabs", () => {
     await page.waitForTimeout(200);
   }
 
-  test("tab lifecycle: open, switch, dirty, close, empty state", async () => {
+  it("tab lifecycle: open, switch, dirty, close, empty state", async () => {
     // Open first note
     await openNote("test");
     let tabs = await page.$$eval(".tab:not(.tab-new)", (els) => els.length);
@@ -52,7 +51,7 @@ describe("e2e: tabs", () => {
     expect(activeText).toContain("test");
 
     // Editor content updates on switch
-    let html = await page.$eval(".editor-content", (el) => el.innerHTML);
+    const html = await page.$eval(".editor-content", (el) => el.innerHTML);
     expect(html).toContain("Hello");
 
     // Reopen same note — should not create duplicate tab
@@ -64,12 +63,12 @@ describe("e2e: tabs", () => {
     await page.click(".editor-content");
     await page.keyboard.type("dirty edit");
     await page.waitForTimeout(200);
-    expect(await page.isVisible(".tab.active .dirty")).toBe(true);
+    await expect(page.isVisible(".tab.active .dirty")).resolves.toBeTruthy();
 
     // Save clears dirty
     await page.keyboard.press("Meta+s");
     await page.waitForTimeout(500);
-    expect(await page.isVisible(".tab.active .dirty")).toBe(false);
+    await expect(page.isVisible(".tab.active .dirty")).resolves.toBeFalsy();
 
     // + button opens new note via the custom input dialog
     const tabsBefore = await page.$$eval(".tab:not(.tab-new)", (els) => els.length);
@@ -91,10 +90,12 @@ describe("e2e: tabs", () => {
     // Close all tabs → empty state
     while (true) {
       const count = await page.$$eval(".tab:not(.tab-new)", (els) => els.length);
-      if (count === 0) break;
+      if (count === 0) {
+        break;
+      }
       await page.locator(".tab:not(.tab-new) .close").first().click();
       await page.waitForTimeout(200);
     }
-    expect(await page.isVisible("#empty-state")).toBe(true);
+    await expect(page.isVisible("#empty-state")).resolves.toBeTruthy();
   }, 30_000);
 });

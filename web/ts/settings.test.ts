@@ -1,5 +1,3 @@
-import { describe, test, expect, beforeAll, afterAll } from "vitest";
-
 import { setupDOM, mockFetch } from "./test-helper.ts";
 
 describe("settings", () => {
@@ -40,9 +38,9 @@ describe("settings", () => {
     cleanup();
   });
 
-  test("save() collects form values and calls saveSettings", async () => {
+  it("save() collects form values and calls saveSettings", async () => {
     await openSettings();
-    const panel = document.getElementById("settings-panel")!;
+    const panel = document.querySelector("#settings-panel")!;
 
     // Modify some form values
     const titleSlider = panel.querySelector('input[data-key="weight_title"]') as HTMLInputElement;
@@ -62,10 +60,10 @@ describe("settings", () => {
     await new Promise((r) => setTimeout(r, 10));
 
     // Settings should be closed after successful save
-    expect(isSettingsOpen()).toBe(false);
+    expect(isSettingsOpen()).toBeFalsy();
   });
 
-  test("security section renders when encrypted", async () => {
+  it("security section renders when encrypted", async () => {
     // Register status mock for encrypted vault with PRF credentials
     mock.on("GET", "/api/status", {
       encrypted: true,
@@ -76,17 +74,17 @@ describe("settings", () => {
     });
 
     await openSettings();
-    const panel = document.getElementById("settings-panel")!;
+    const panel = document.querySelector("#settings-panel")!;
 
     // Security section should be rendered
     expect(panel.innerHTML).toContain("Security");
     expect(panel.innerHTML).toContain("Face ID");
     expect(panel.innerHTML).toContain("Lock now");
-    expect(panel.querySelector(".prf-remove") !== null).toBe(true);
+    expect(panel.querySelector(".prf-remove") !== null).toBeTruthy();
     closeSettings();
   });
 
-  test("lock button calls lockApp and closes", async () => {
+  it("lock button calls lockApp and closes", async () => {
     mock.on("GET", "/api/status", {
       encrypted: true,
       locked: false,
@@ -97,26 +95,26 @@ describe("settings", () => {
     mock.on("GET", "/api/lock", {});
 
     await openSettings();
-    const panel = document.getElementById("settings-panel")!;
+    const panel = document.querySelector("#settings-panel")!;
     const lockBtn = panel.querySelector("#lock-now") as HTMLButtonElement;
-    expect(lockBtn !== null).toBe(true);
+    expect(lockBtn !== null).toBeTruthy();
     lockBtn.click();
     await new Promise((r) => setTimeout(r, 10));
 
     // Lock should close the panel
-    expect(isSettingsOpen()).toBe(false);
+    expect(isSettingsOpen()).toBeFalsy();
   });
 
-  test("settings error fallback renders defaults", async () => {
+  it("settings error fallback renders defaults", async () => {
     // Mock getSettings to return 500
     mock.on("GET", "/api/settings", { error: "fail" }, 500);
     mock.on("GET", "/api/status", { error: "fail" }, 500);
 
     await openSettings();
-    const panel = document.getElementById("settings-panel")!;
+    const panel = document.querySelector("#settings-panel")!;
 
     // Should still render with defaults
-    expect(panel.querySelector("h2") !== null).toBe(true);
+    expect(panel.querySelector("h2") !== null).toBeTruthy();
     expect(panel.innerHTML).toContain("Title");
 
     // Default values: weight_title=10, fuzzy_distance=1, result_limit=20
@@ -141,9 +139,9 @@ describe("settings", () => {
     });
   });
 
-  test("slider input event updates displayed value", async () => {
+  it("slider input event updates displayed value", async () => {
     await openSettings();
-    const panel = document.getElementById("settings-panel")!;
+    const panel = document.querySelector("#settings-panel")!;
     const slider = panel.querySelector<HTMLInputElement>(
       'input[type="range"][data-key="weight_title"]',
     )!;
@@ -156,9 +154,9 @@ describe("settings", () => {
     closeSettings();
   });
 
-  test("excluded folders Enter key triggers save", async () => {
+  it("excluded folders Enter key triggers save", async () => {
     await openSettings();
-    const panel = document.getElementById("settings-panel")!;
+    const panel = document.querySelector("#settings-panel")!;
     const foldersInput = panel.querySelector<HTMLInputElement>(
       'input[data-key="excluded_folders"]',
     )!;
@@ -171,77 +169,77 @@ describe("settings", () => {
     await new Promise((r) => setTimeout(r, 20));
 
     // Successful save closes the panel
-    expect(isSettingsOpen()).toBe(false);
+    expect(isSettingsOpen()).toBeFalsy();
   });
 
-  test("save error is handled gracefully (panel stays open)", async () => {
+  it("save error is handled gracefully (panel stays open)", async () => {
     await openSettings();
     mock.on("PUT", "/api/settings", { error: "server error" }, 500);
 
-    const panel = document.getElementById("settings-panel")!;
+    const panel = document.querySelector("#settings-panel")!;
     const saveBtn = panel.querySelector("#settings-save") as HTMLButtonElement;
     saveBtn.click();
     await new Promise((r) => setTimeout(r, 20));
 
     // Panel stays open on save error
-    expect(isSettingsOpen()).toBe(true);
+    expect(isSettingsOpen()).toBeTruthy();
     closeSettings();
 
     // Restore working mock
     mock.on("PUT", "/api/settings", {});
   });
 
-  test("settings lifecycle", async () => {
+  it("settings lifecycle", async () => {
     // Initially closed
-    expect(isSettingsOpen()).toBe(false);
+    expect(isSettingsOpen()).toBeFalsy();
 
     // Open
     await openSettings();
-    expect(isSettingsOpen()).toBe(true);
-    const overlay = document.getElementById("settings-overlay")!;
-    expect(overlay.classList.contains("hidden")).toBe(false);
+    expect(isSettingsOpen()).toBeTruthy();
+    const overlay = document.querySelector("#settings-overlay") as HTMLElement;
+    expect(overlay.classList.contains("hidden")).toBeFalsy();
 
     // Panel rendered with form elements
-    const panel = document.getElementById("settings-panel")!;
-    expect(panel.querySelector("h2") !== null).toBe(true);
+    const panel = document.querySelector("#settings-panel")!;
+    expect(panel.querySelector("h2") !== null).toBeTruthy();
     expect(panel.innerHTML).toContain("Title");
     expect(panel.innerHTML).toContain("Fuzzy distance");
 
     // Slider values populated
     const titleSlider = panel.querySelector('input[data-key="weight_title"]') as HTMLInputElement;
-    expect(titleSlider !== null).toBe(true);
+    expect(titleSlider !== null).toBeTruthy();
     expect(titleSlider.value).toBe("10");
 
     // Checkbox populated
     const scoreCheckbox = panel.querySelector(
       'input[data-key="show_score_breakdown"]',
     ) as HTMLInputElement;
-    expect(scoreCheckbox !== null).toBe(true);
-    expect(scoreCheckbox.checked).toBe(true);
+    expect(scoreCheckbox !== null).toBeTruthy();
+    expect(scoreCheckbox.checked).toBeTruthy();
 
     // Excluded folders populated
     const excludedInput = panel.querySelector(
       'input[data-key="excluded_folders"]',
     ) as HTMLInputElement;
-    expect(excludedInput !== null).toBe(true);
+    expect(excludedInput !== null).toBeTruthy();
     expect(excludedInput.value).toBe("archive");
 
     // Close
     closeSettings();
-    expect(isSettingsOpen()).toBe(false);
-    expect(overlay.classList.contains("hidden")).toBe(true);
+    expect(isSettingsOpen()).toBeFalsy();
+    expect(overlay.classList.contains("hidden")).toBeTruthy();
 
     // Toggle
     toggleSettings();
     // toggleSettings calls openSettings which is async, give it a tick
     await new Promise((r) => setTimeout(r, 10));
-    expect(isSettingsOpen()).toBe(true);
+    expect(isSettingsOpen()).toBeTruthy();
     toggleSettings();
-    expect(isSettingsOpen()).toBe(false);
+    expect(isSettingsOpen()).toBeFalsy();
 
     // Overlay click closes
     await openSettings();
     overlay.click();
-    expect(isSettingsOpen()).toBe(false);
+    expect(isSettingsOpen()).toBeFalsy();
   });
 });

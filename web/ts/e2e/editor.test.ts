@@ -1,5 +1,4 @@
 import type { Page } from "playwright";
-import { describe, test, expect, beforeAll, afterAll } from "vitest";
 
 import { setup, teardown } from "./setup.ts";
 
@@ -9,8 +8,8 @@ describe("e2e: editor", () => {
 
   beforeAll(async () => {
     const ctx = await setup();
-    page = ctx.page;
-    baseUrl = ctx.baseUrl;
+    ({ page } = ctx);
+    ({ baseUrl } = ctx);
   }, 30_000);
 
   afterAll(async () => {
@@ -24,7 +23,7 @@ describe("e2e: editor", () => {
     await page.click(".editor-content");
   }
 
-  test("opens note, renders, source toggle, edit, save, transforms", async () => {
+  it("opens note, renders, source toggle, edit, save, transforms", async () => {
     await page.goto(baseUrl);
     await page.waitForSelector("#tab-bar", { timeout: 5000 });
 
@@ -50,25 +49,25 @@ describe("e2e: editor", () => {
 
     // Source mode toggle
     await page.click("button:has-text('Source')");
-    expect(await page.isVisible(".editor-source")).toBe(true);
+    await expect(page.isVisible(".editor-source")).resolves.toBeTruthy();
     const srcValue = await page.$eval(".editor-source", (el: HTMLTextAreaElement) => el.value);
     expect(srcValue).toContain("# Hello");
 
     // Toggle back
     await page.click("button:has-text('Source')");
-    expect(await page.isVisible(".editor-content")).toBe(true);
-    expect(await page.isHidden(".editor-source")).toBe(true);
+    await expect(page.isVisible(".editor-content")).resolves.toBeTruthy();
+    await expect(page.isHidden(".editor-source")).resolves.toBeTruthy();
 
     // Typing marks dirty
     await page.click(".editor-content");
     await page.keyboard.type("new text");
     await page.waitForSelector(".tab.active .dirty", { timeout: 2000 });
-    expect(await page.isVisible(".tab.active .dirty")).toBe(true);
+    await expect(page.isVisible(".tab.active .dirty")).resolves.toBeTruthy();
 
     // Cmd+S saves and clears dirty
     await page.keyboard.press("Meta+s");
     await page.waitForTimeout(500);
-    expect(await page.isVisible(".tab.active .dirty")).toBe(false);
+    await expect(page.isVisible(".tab.active .dirty")).resolves.toBeFalsy();
 
     // Inline bold transform: **text** → <strong>
     await resetEditor("");
@@ -84,7 +83,7 @@ describe("e2e: editor", () => {
     const codeHtml = await page.$eval(".editor-content", (el) => el.innerHTML);
     // Chrome may render <code> as inline styles (monospace font-family)
     const hasCode = codeHtml.includes("<code>") || codeHtml.includes("monospace");
-    expect(hasCode).toBe(true);
+    expect(hasCode).toBeTruthy();
 
     // Cmd+B toggles bold
     await resetEditor("plain text");
@@ -127,26 +126,34 @@ describe("e2e: editor", () => {
     return src;
   }
 
-  test("single Enter produces \\n in saved markdown", async () => {
-    await resetEditor("");
-    await page.keyboard.type("foo");
-    await page.keyboard.press("Enter");
-    await page.keyboard.type("bar");
-    const src = await saveAndGetSource();
-    expect(src).toBe("foo\nbar");
-  }, 15_000);
+  it(
+    String.raw`single Enter produces \n in saved markdown`,
+    async () => {
+      await resetEditor("");
+      await page.keyboard.type("foo");
+      await page.keyboard.press("Enter");
+      await page.keyboard.type("bar");
+      const src = await saveAndGetSource();
+      expect(src).toBe("foo\nbar");
+    },
+    15_000,
+  );
 
-  test("double Enter produces \\n\\n in saved markdown", async () => {
-    await resetEditor("");
-    await page.keyboard.type("foo");
-    await page.keyboard.press("Enter");
-    await page.keyboard.press("Enter");
-    await page.keyboard.type("bar");
-    const src = await saveAndGetSource();
-    expect(src).toBe("foo\n\nbar");
-  }, 15_000);
+  it(
+    String.raw`double Enter produces \n\n in saved markdown`,
+    async () => {
+      await resetEditor("");
+      await page.keyboard.type("foo");
+      await page.keyboard.press("Enter");
+      await page.keyboard.press("Enter");
+      await page.keyboard.type("bar");
+      const src = await saveAndGetSource();
+      expect(src).toBe("foo\n\nbar");
+    },
+    15_000,
+  );
 
-  test("three lines separated by single Enter", async () => {
+  it("three lines separated by single Enter", async () => {
     await resetEditor("");
     await page.keyboard.type("a");
     await page.keyboard.press("Enter");
@@ -157,7 +164,7 @@ describe("e2e: editor", () => {
     expect(src).toBe("a\nb\nc");
   }, 15_000);
 
-  test("inline bold transform roundtrips as **bold**", async () => {
+  it("inline bold transform roundtrips as **bold**", async () => {
     await resetEditor("");
     await page.keyboard.type("**bold**");
     await page.waitForTimeout(200);
@@ -165,7 +172,7 @@ describe("e2e: editor", () => {
     expect(src).toBe("**bold**");
   }, 15_000);
 
-  test("inline italic transform roundtrips as *italic*", async () => {
+  it("inline italic transform roundtrips as *italic*", async () => {
     await resetEditor("");
     await page.keyboard.type("*italic*");
     await page.waitForTimeout(200);
@@ -173,7 +180,7 @@ describe("e2e: editor", () => {
     expect(src).toBe("*italic*");
   }, 15_000);
 
-  test("inline code transform roundtrips as `code`", async () => {
+  it("inline code transform roundtrips as `code`", async () => {
     await resetEditor("");
     await page.keyboard.type("`code` ");
     await page.waitForTimeout(200);
@@ -182,7 +189,7 @@ describe("e2e: editor", () => {
     expect(src.trim()).toBe("`code`");
   }, 15_000);
 
-  test("bold on a line followed by Enter stays on one line", async () => {
+  it("bold on a line followed by Enter stays on one line", async () => {
     await resetEditor("");
     await page.keyboard.type("**bold**");
     await page.waitForTimeout(200);

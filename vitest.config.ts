@@ -9,6 +9,7 @@ export default defineConfig({
     },
   },
   test: {
+    globals: true,
     environment: "happy-dom",
     include: ["web/ts/*.test.ts"],
     reporters: ["agent"],

@@ -1,8 +1,7 @@
 import { merge3 } from "@joshuarli98/md-wysiwyg";
 
 import { saveNote } from "./api.ts";
-import { markClean } from "./tabs.ts";
-import type { Tab } from "./tabs.ts";
+import { markClean, type Tab } from "./tabs.ts";
 
 /// Show a conflict banner when disk and editor content diverge.
 export function showConflictBanner(
@@ -26,9 +25,9 @@ export function showConflictBanner(
   keepBtn.onclick = () => {
     banner.remove();
     const content = getCurrentContent();
-    saveNote(currentPath, content, 0).then((r) => {
-      markClean(currentPath, content, r.mtime);
-    });
+    void saveNote(currentPath, content, 0)
+      .then((r) => markClean(currentPath, content, r.mtime))
+      .catch(() => void 0);
   };
 
   const takeBtn = document.createElement("button");
@@ -40,7 +39,7 @@ export function showConflictBanner(
   };
 
   banner.append(msg, keepBtn, takeBtn);
-  container.insertBefore(banner, container.firstChild);
+  container.prepend(banner);
 }
 
 /// Attempt 3-way merge for dirty tabs; show conflict banner if merge fails.

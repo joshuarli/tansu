@@ -1,5 +1,4 @@
 import type { Page } from "playwright";
-import { describe, test, expect, beforeAll, afterAll } from "vitest";
 
 import { setup, teardown } from "./setup.ts";
 
@@ -8,7 +7,7 @@ describe("e2e: block transforms", () => {
 
   beforeAll(async () => {
     const ctx = await setup();
-    page = ctx.page;
+    ({ page } = ctx);
 
     // Open a note to get an editor
     await page.goto(ctx.baseUrl);
@@ -32,34 +31,34 @@ describe("e2e: block transforms", () => {
     await page.click(".editor-content");
   }
 
-  test("heading transforms: ## + space creates H2", async () => {
+  it("heading transforms: ## + space creates H2", async () => {
     await resetEditor("");
     await page.keyboard.type("## ");
     await page.waitForTimeout(200);
 
-    const hasH2 = await page.$eval(".editor-content", (el) => !!el.querySelector("h2"));
-    expect(hasH2).toBe(true);
+    const hasH2 = await page.$eval(".editor-content", (el) => Boolean(el.querySelector("h2")));
+    expect(hasH2).toBeTruthy();
   });
 
-  test("heading transform: ### + space creates H3", async () => {
+  it("heading transform: ### + space creates H3", async () => {
     await resetEditor("");
     await page.keyboard.type("### ");
     await page.waitForTimeout(200);
 
-    const hasH3 = await page.$eval(".editor-content", (el) => !!el.querySelector("h3"));
-    expect(hasH3).toBe(true);
+    const hasH3 = await page.$eval(".editor-content", (el) => Boolean(el.querySelector("h3")));
+    expect(hasH3).toBeTruthy();
   });
 
-  test("unordered list: - + space creates UL", async () => {
+  it("unordered list: - + space creates UL", async () => {
     await resetEditor("");
     await page.keyboard.type("- ");
     await page.waitForTimeout(200);
 
-    const hasUl = await page.$eval(".editor-content", (el) => !!el.querySelector("ul"));
-    expect(hasUl).toBe(true);
+    const hasUl = await page.$eval(".editor-content", (el) => Boolean(el.querySelector("ul")));
+    expect(hasUl).toBeTruthy();
   });
 
-  test("horizontal rule: --- creates HR", async () => {
+  it("horizontal rule: --- creates HR", async () => {
     await resetEditor("some text\n");
     // Move to end and type on new line
     await page.keyboard.press("End");
@@ -68,26 +67,28 @@ describe("e2e: block transforms", () => {
     await page.keyboard.press("Enter");
     await page.waitForTimeout(200);
 
-    const hasHr = await page.$eval(".editor-content", (el) => !!el.querySelector("hr"));
-    expect(hasHr).toBe(true);
+    const hasHr = await page.$eval(".editor-content", (el) => Boolean(el.querySelector("hr")));
+    expect(hasHr).toBeTruthy();
   });
 
-  test("blockquote: > + space creates BLOCKQUOTE", async () => {
+  it("blockquote: > + space creates BLOCKQUOTE", async () => {
     await resetEditor("");
     await page.keyboard.type("> ");
     await page.waitForTimeout(200);
 
-    const hasBq = await page.$eval(".editor-content", (el) => !!el.querySelector("blockquote"));
-    expect(hasBq).toBe(true);
+    const hasBq = await page.$eval(".editor-content", (el) =>
+      Boolean(el.querySelector("blockquote")),
+    );
+    expect(hasBq).toBeTruthy();
   });
 
-  test("code block: ``` + Enter creates PRE>CODE", async () => {
+  it("code block: ``` + Enter creates PRE>CODE", async () => {
     await resetEditor("");
     await page.keyboard.type("```");
     await page.keyboard.press("Enter");
     await page.waitForTimeout(200);
 
-    const hasPre = await page.$eval(".editor-content", (el) => !!el.querySelector("pre"));
-    expect(hasPre).toBe(true);
+    const hasPre = await page.$eval(".editor-content", (el) => Boolean(el.querySelector("pre")));
+    expect(hasPre).toBeTruthy();
   });
 });

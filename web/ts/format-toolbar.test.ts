@@ -1,5 +1,3 @@
-import { describe, test, expect, beforeAll, afterAll, afterEach } from "vitest";
-
 import { initFormatToolbar } from "./format-toolbar.ts";
 import { setupDOM } from "./test-helper.ts";
 
@@ -20,8 +18,12 @@ describe("format-toolbar", () => {
 
   afterEach(() => {
     // Remove any stale toolbars and editor elements left by failed tests
-    for (const el of document.body.querySelectorAll(".format-toolbar")) el.remove();
-    for (const el of document.body.querySelectorAll(".editor-content")) el.remove();
+    for (const el of document.body.querySelectorAll(".format-toolbar")) {
+      el.remove();
+    }
+    for (const el of document.body.querySelectorAll(".editor-content")) {
+      el.remove();
+    }
   });
 
   function makeEditorEl(html = "<p>hello world</p>"): HTMLElement {
@@ -29,7 +31,7 @@ describe("format-toolbar", () => {
     el.className = "editor-content";
     el.contentEditable = "true";
     el.innerHTML = html;
-    document.body.appendChild(el);
+    document.body.append(el);
     return el;
   }
 
@@ -44,7 +46,7 @@ describe("format-toolbar", () => {
     return range;
   }
 
-  test("toolbar is appended to body on init, removed by cleanup", () => {
+  it("toolbar is appended to body on init, removed by cleanup", () => {
     const el = makeEditorEl();
     const remove = initFormatToolbar({
       contentEl: el,
@@ -55,13 +57,13 @@ describe("format-toolbar", () => {
       onMutation: () => {},
     });
 
-    expect(document.body.querySelector(".format-toolbar") !== null).toBe(true);
+    expect(document.body.querySelector(".format-toolbar") !== null).toBeTruthy();
     remove();
-    expect(document.body.querySelector(".format-toolbar")).toBe(null);
+    expect(document.body.querySelector(".format-toolbar")).toBeNull();
     el.remove();
   });
 
-  test("all expected buttons are present with correct titles", () => {
+  it("all expected buttons are present with correct titles", () => {
     const el = makeEditorEl();
     const remove = initFormatToolbar({
       contentEl: el,
@@ -72,7 +74,7 @@ describe("format-toolbar", () => {
       onMutation: () => {},
     });
     const toolbar = document.body.querySelector(".format-toolbar")!;
-    const titles = Array.from(toolbar.querySelectorAll(".format-toolbar-btn")).map(
+    const titles = [...toolbar.querySelectorAll(".format-toolbar-btn")].map(
       (b) => (b as HTMLElement).title,
     );
 
@@ -96,7 +98,7 @@ describe("format-toolbar", () => {
     el.remove();
   });
 
-  test("non-collapsed selection inside contentEl shows toolbar", async () => {
+  it("non-collapsed selection inside contentEl shows toolbar", async () => {
     const el = makeEditorEl();
     const remove = initFormatToolbar({
       contentEl: el,
@@ -118,7 +120,7 @@ describe("format-toolbar", () => {
     el.remove();
   });
 
-  test("collapsed selection hides toolbar", async () => {
+  it("collapsed selection hides toolbar", async () => {
     const el = makeEditorEl();
     const remove = initFormatToolbar({
       contentEl: el,
@@ -148,11 +150,11 @@ describe("format-toolbar", () => {
     el.remove();
   });
 
-  test("selection outside contentEl hides toolbar", async () => {
+  it("selection outside contentEl hides toolbar", async () => {
     const el = makeEditorEl();
     const outside = document.createElement("div");
     outside.innerHTML = "<p>outside text</p>";
-    document.body.appendChild(outside);
+    document.body.append(outside);
 
     const remove = initFormatToolbar({
       contentEl: el,
@@ -188,7 +190,7 @@ describe("format-toolbar", () => {
     outside.remove();
   });
 
-  test("Escape key hides toolbar", async () => {
+  it("Escape key hides toolbar", async () => {
     const el = makeEditorEl();
     const remove = initFormatToolbar({
       contentEl: el,
@@ -212,7 +214,7 @@ describe("format-toolbar", () => {
     el.remove();
   });
 
-  test("mousedown on toolbar does not set mouseIsDown flag (selection is preserved)", async () => {
+  it("mousedown on toolbar does not set mouseIsDown flag (selection is preserved)", async () => {
     const el = makeEditorEl();
     const remove = initFormatToolbar({
       contentEl: el,
@@ -240,7 +242,7 @@ describe("format-toolbar", () => {
     el.remove();
   });
 
-  test("mousedown outside toolbar sets mouseIsDown, mouseup clears it", async () => {
+  it("mousedown outside toolbar sets mouseIsDown, mouseup clears it", async () => {
     const el = makeEditorEl();
     const remove = initFormatToolbar({
       contentEl: el,
@@ -269,7 +271,7 @@ describe("format-toolbar", () => {
     el.remove();
   });
 
-  test("Bold button mousedown calls onMutation", async () => {
+  it("Bold button mousedown calls onMutation", async () => {
     const el = makeEditorEl("<p>test text</p>");
     let mutationCount = 0;
     const remove = initFormatToolbar({
@@ -283,7 +285,7 @@ describe("format-toolbar", () => {
       },
     });
     const toolbar = document.body.querySelector(".format-toolbar")!;
-    const boldBtn = Array.from(toolbar.querySelectorAll(".format-toolbar-btn")).find(
+    const boldBtn = [...toolbar.querySelectorAll(".format-toolbar-btn")].find(
       (b) => (b as HTMLElement).title === "Bold",
     ) as HTMLElement;
 
@@ -296,7 +298,7 @@ describe("format-toolbar", () => {
     el.remove();
   });
 
-  test("Italic button mousedown calls onMutation", async () => {
+  it("Italic button mousedown calls onMutation", async () => {
     const el = makeEditorEl("<p>italic me</p>");
     let mutationCount = 0;
     const remove = initFormatToolbar({
@@ -310,7 +312,7 @@ describe("format-toolbar", () => {
       },
     });
     const toolbar = document.body.querySelector(".format-toolbar")!;
-    const btn = Array.from(toolbar.querySelectorAll(".format-toolbar-btn")).find(
+    const btn = [...toolbar.querySelectorAll(".format-toolbar-btn")].find(
       (b) => (b as HTMLElement).title === "Italic",
     ) as HTMLElement;
 
@@ -323,7 +325,7 @@ describe("format-toolbar", () => {
     el.remove();
   });
 
-  test("Strikethrough button mousedown calls onMutation (toggleInlineWrap wrap path)", async () => {
+  it("Strikethrough button mousedown calls onMutation (toggleInlineWrap wrap path)", async () => {
     const el = makeEditorEl("<p>strikethrough me</p>");
     let mutationCount = 0;
     const remove = initFormatToolbar({
@@ -337,7 +339,7 @@ describe("format-toolbar", () => {
       },
     });
     const toolbar = document.body.querySelector(".format-toolbar")!;
-    const btn = Array.from(toolbar.querySelectorAll(".format-toolbar-btn")).find(
+    const btn = [...toolbar.querySelectorAll(".format-toolbar-btn")].find(
       (b) => (b as HTMLElement).title === "Strikethrough",
     ) as HTMLElement;
 
@@ -350,7 +352,7 @@ describe("format-toolbar", () => {
     el.remove();
   });
 
-  test("Strikethrough on already-wrapped text unwraps it (toggleInlineWrap unwrap path)", async () => {
+  it("Strikethrough on already-wrapped text unwraps it (toggleInlineWrap unwrap path)", async () => {
     const el = makeEditorEl("<p><del>strike</del></p>");
     let mutationCount = 0;
     const remove = initFormatToolbar({
@@ -364,7 +366,7 @@ describe("format-toolbar", () => {
       },
     });
     const toolbar = document.body.querySelector(".format-toolbar")!;
-    const btn = Array.from(toolbar.querySelectorAll(".format-toolbar-btn")).find(
+    const btn = [...toolbar.querySelectorAll(".format-toolbar-btn")].find(
       (b) => (b as HTMLElement).title === "Strikethrough",
     ) as HTMLElement;
 
@@ -386,7 +388,7 @@ describe("format-toolbar", () => {
     el.remove();
   });
 
-  test("Highlight button mousedown calls onMutation (toggleInlineWrap mark)", async () => {
+  it("Highlight button mousedown calls onMutation (toggleInlineWrap mark)", async () => {
     const el = makeEditorEl("<p>highlight me</p>");
     let mutationCount = 0;
     const remove = initFormatToolbar({
@@ -400,7 +402,7 @@ describe("format-toolbar", () => {
       },
     });
     const toolbar = document.body.querySelector(".format-toolbar")!;
-    const btn = Array.from(toolbar.querySelectorAll(".format-toolbar-btn")).find(
+    const btn = [...toolbar.querySelectorAll(".format-toolbar-btn")].find(
       (b) => (b as HTMLElement).title === "Highlight",
     ) as HTMLElement;
 
@@ -413,7 +415,7 @@ describe("format-toolbar", () => {
     el.remove();
   });
 
-  test("Heading buttons hide toolbar (afterBlock path)", () => {
+  it("Heading buttons hide toolbar (afterBlock path)", () => {
     const el = makeEditorEl("<p>heading text</p>");
     let mutationCount = 0;
     const remove = initFormatToolbar({
@@ -429,7 +431,7 @@ describe("format-toolbar", () => {
     const toolbar = document.body.querySelector(".format-toolbar") as HTMLElement;
 
     for (const level of [1, 2, 3, 4]) {
-      const btn = Array.from(toolbar.querySelectorAll(".format-toolbar-btn")).find(
+      const btn = [...toolbar.querySelectorAll(".format-toolbar-btn")].find(
         (b) => (b as HTMLElement).title === `Heading ${level}`,
       ) as HTMLElement;
 
@@ -452,9 +454,9 @@ describe("format-toolbar", () => {
     el.remove();
   });
 
-  test("Indent button calls applyIndent(false) and hides toolbar", () => {
+  it("Indent button calls applyIndent(false) and hides toolbar", () => {
     const el = makeEditorEl("<p>indent me</p>");
-    let indentArgs: boolean[] = [];
+    const indentArgs: boolean[] = [];
     const remove = initFormatToolbar({
       contentEl: el,
       applyIndent: (dedent) => {
@@ -466,7 +468,7 @@ describe("format-toolbar", () => {
       onMutation: () => {},
     });
     const toolbar = document.body.querySelector(".format-toolbar")!;
-    const btn = Array.from(toolbar.querySelectorAll(".format-toolbar-btn")).find(
+    const btn = [...toolbar.querySelectorAll(".format-toolbar-btn")].find(
       (b) => (b as HTMLElement).title === "Indent",
     ) as HTMLElement;
 
@@ -478,9 +480,9 @@ describe("format-toolbar", () => {
     el.remove();
   });
 
-  test("Dedent button calls applyIndent(true) and hides toolbar", () => {
+  it("Dedent button calls applyIndent(true) and hides toolbar", () => {
     const el = makeEditorEl("<p>dedent me</p>");
-    let indentArgs: boolean[] = [];
+    const indentArgs: boolean[] = [];
     const remove = initFormatToolbar({
       contentEl: el,
       applyIndent: (dedent) => {
@@ -492,7 +494,7 @@ describe("format-toolbar", () => {
       onMutation: () => {},
     });
     const toolbar = document.body.querySelector(".format-toolbar")!;
-    const btn = Array.from(toolbar.querySelectorAll(".format-toolbar-btn")).find(
+    const btn = [...toolbar.querySelectorAll(".format-toolbar-btn")].find(
       (b) => (b as HTMLElement).title === "Dedent",
     ) as HTMLElement;
 
@@ -504,7 +506,7 @@ describe("format-toolbar", () => {
     el.remove();
   });
 
-  test("Code block button calls onMutation and hides toolbar (applyCodeBlock path)", () => {
+  it("Code block button calls onMutation and hides toolbar (applyCodeBlock path)", () => {
     const el = makeEditorEl("<p>some code</p>");
     let mutationCount = 0;
     const remove = initFormatToolbar({
@@ -518,7 +520,7 @@ describe("format-toolbar", () => {
       },
     });
     const toolbar = document.body.querySelector(".format-toolbar")!;
-    const btn = Array.from(toolbar.querySelectorAll(".format-toolbar-btn")).find(
+    const btn = [...toolbar.querySelectorAll(".format-toolbar-btn")].find(
       (b) => (b as HTMLElement).title === "Code block",
     ) as HTMLElement;
 
@@ -539,7 +541,7 @@ describe("format-toolbar", () => {
     el.remove();
   });
 
-  test("toggleInlineWrap is a no-op (no DOM change) when selection is collapsed", async () => {
+  it("toggleInlineWrap is a no-op (no DOM change) when selection is collapsed", async () => {
     const el = makeEditorEl("<p>text</p>");
     const remove = initFormatToolbar({
       contentEl: el,
@@ -550,7 +552,7 @@ describe("format-toolbar", () => {
       onMutation: () => {},
     });
     const toolbar = document.body.querySelector(".format-toolbar")!;
-    const strikeBtn = Array.from(toolbar.querySelectorAll(".format-toolbar-btn")).find(
+    const strikeBtn = [...toolbar.querySelectorAll(".format-toolbar-btn")].find(
       (b) => (b as HTMLElement).title === "Strikethrough",
     ) as HTMLElement;
 
@@ -566,14 +568,14 @@ describe("format-toolbar", () => {
     strikeBtn.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
 
     // DOM should be unchanged: no <del> inserted
-    expect(el.querySelector("del")).toBe(null);
+    expect(el.querySelector("del")).toBeNull();
     expect(el.querySelector("p")!.textContent).toBe("text");
 
     remove();
     el.remove();
   });
 
-  test("applyBlockFormat: heading toggled back to p when same tag clicked again", () => {
+  it("applyBlockFormat: heading toggled back to p when same tag clicked again", () => {
     const el = makeEditorEl("<h1>heading</h1>");
     let mutationCount = 0;
     const remove = initFormatToolbar({
@@ -587,7 +589,7 @@ describe("format-toolbar", () => {
       },
     });
     const toolbar = document.body.querySelector(".format-toolbar")!;
-    const h1Btn = Array.from(toolbar.querySelectorAll(".format-toolbar-btn")).find(
+    const h1Btn = [...toolbar.querySelectorAll(".format-toolbar-btn")].find(
       (b) => (b as HTMLElement).title === "Heading 1",
     ) as HTMLElement;
 
@@ -608,7 +610,7 @@ describe("format-toolbar", () => {
     el.remove();
   });
 
-  test("applyBlockFormat: no-op when block is not a heading/p/div", () => {
+  it("applyBlockFormat: no-op when block is not a heading/p/div", () => {
     const el = makeEditorEl("<ul><li>item</li></ul>");
     let mutationCount = 0;
     const remove = initFormatToolbar({
@@ -622,7 +624,7 @@ describe("format-toolbar", () => {
       },
     });
     const toolbar = document.body.querySelector(".format-toolbar")!;
-    const h2Btn = Array.from(toolbar.querySelectorAll(".format-toolbar-btn")).find(
+    const h2Btn = [...toolbar.querySelectorAll(".format-toolbar-btn")].find(
       (b) => (b as HTMLElement).title === "Heading 2",
     ) as HTMLElement;
 
@@ -644,7 +646,7 @@ describe("format-toolbar", () => {
     el.remove();
   });
 
-  test("applyCodeBlock: pre toggled back to p", () => {
+  it("applyCodeBlock: pre toggled back to p", () => {
     const el = makeEditorEl("<pre>code here</pre>");
     let mutationCount = 0;
     const remove = initFormatToolbar({
@@ -658,7 +660,7 @@ describe("format-toolbar", () => {
       },
     });
     const toolbar = document.body.querySelector(".format-toolbar")!;
-    const codeBtn = Array.from(toolbar.querySelectorAll(".format-toolbar-btn")).find(
+    const codeBtn = [...toolbar.querySelectorAll(".format-toolbar-btn")].find(
       (b) => (b as HTMLElement).title === "Code block",
     ) as HTMLElement;
 
@@ -679,7 +681,7 @@ describe("format-toolbar", () => {
     el.remove();
   });
 
-  test("cleanup removes all document event listeners", async () => {
+  it("cleanup removes all document event listeners", async () => {
     const el = makeEditorEl("<p>cleanup test</p>");
     const remove = initFormatToolbar({
       contentEl: el,

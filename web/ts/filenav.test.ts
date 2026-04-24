@@ -1,5 +1,3 @@
-import { describe, test, expect, beforeAll, afterAll, afterEach } from "vitest";
-
 import { emit } from "./events.ts";
 import { setupDOM, mockFetch } from "./test-helper.ts";
 
@@ -29,11 +27,13 @@ describe("filenav", () => {
     ]);
 
     const tabMod = await import("./tab-state.ts");
-    openTab = tabMod.openTab;
-    closeTab = tabMod.closeTab;
-    getTabs = tabMod.getTabs;
+    ({ openTab } = tabMod);
+    ({ closeTab } = tabMod);
+    ({ getTabs } = tabMod);
 
-    while (getTabs().length > 0) closeTab(0);
+    while (getTabs().length > 0) {
+      closeTab(0);
+    }
 
     const navMod = await import("./filenav.ts");
     navCleanup = await navMod.initFileNav();
@@ -47,7 +47,7 @@ describe("filenav", () => {
 
   // Reset search input to recent mode after each test to prevent module-level state leakage.
   afterEach(async () => {
-    const searchInput = document.getElementById("sidebar-search") as HTMLInputElement | null;
+    const searchInput = document.querySelector("#sidebar-search") as HTMLInputElement | null;
     if (searchInput && searchInput.value !== "") {
       searchInput.value = "";
       searchInput.dispatchEvent(new Event("input", { bubbles: true }));
@@ -61,56 +61,66 @@ describe("filenav", () => {
       { path: "notes/beta.md", title: "beta", mtime: 1000 },
     ]);
     mock.on("GET", "/api/pinned", []);
-    while (getTabs().length > 0) closeTab(0);
+    while (getTabs().length > 0) {
+      closeTab(0);
+    }
   });
 
-  test("no duplicate .active after two rapid files:changed (save + SSE pattern)", async () => {
-    while (getTabs().length > 0) closeTab(0);
+  it("no duplicate .active after two rapid files:changed (save + SSE pattern)", async () => {
+    while (getTabs().length > 0) {
+      closeTab(0);
+    }
     await openTab("notes/alpha.md");
     await tick();
 
     // Simulate local save emit + SSE emit fired in the same tick
-    emit("files:changed", undefined);
-    emit("files:changed", undefined);
+    emit("files:changed");
+    emit("files:changed");
 
     await drain();
 
     expect(activeCount()).toBe(1);
   });
 
-  test("no duplicate .active after sequential files:changed", async () => {
-    while (getTabs().length > 0) closeTab(0);
+  it("no duplicate .active after sequential files:changed", async () => {
+    while (getTabs().length > 0) {
+      closeTab(0);
+    }
     await openTab("notes/alpha.md");
     await tick();
 
-    emit("files:changed", undefined);
+    emit("files:changed");
     await drain();
-    emit("files:changed", undefined);
+    emit("files:changed");
     await drain();
 
     expect(activeCount()).toBe(1);
   });
 
-  test("no duplicate .active after two rapid files:changed (recent mode)", async () => {
-    while (getTabs().length > 0) closeTab(0);
+  it("no duplicate .active after two rapid files:changed (recent mode)", async () => {
+    while (getTabs().length > 0) {
+      closeTab(0);
+    }
     await openTab("notes/alpha.md");
     await tick();
 
-    emit("files:changed", undefined);
-    emit("files:changed", undefined);
+    emit("files:changed");
+    emit("files:changed");
 
     await drain();
 
     expect(activeCount()).toBe(1);
   });
 
-  test("no duplicate .active when tab:change fires while files:changed render is in-flight", async () => {
-    while (getTabs().length > 0) closeTab(0);
+  it("no duplicate .active when tab:change fires while files:changed render is in-flight", async () => {
+    while (getTabs().length > 0) {
+      closeTab(0);
+    }
     await openTab("notes/alpha.md");
     await tick();
 
     // Emit files:changed to start an in-flight render (it will await network)
-    emit("files:changed", undefined);
+    emit("files:changed");
 
     // Immediately emit tab:change (simulates switching tab while render is in-flight)
     // openTab triggers tab:change via notifyChange → onTabChange
@@ -121,16 +131,18 @@ describe("filenav", () => {
     expect(activeCount()).toBe(1);
   });
 
-  test("no duplicate under rapid files:changed + tab:change interleave", async () => {
-    while (getTabs().length > 0) closeTab(0);
+  it("no duplicate under rapid files:changed + tab:change interleave", async () => {
+    while (getTabs().length > 0) {
+      closeTab(0);
+    }
     await openTab("notes/alpha.md");
     await tick();
 
     // Fire many events in rapid succession: save + SSE + tab switch all at once
-    emit("files:changed", undefined); // local save
-    emit("files:changed", undefined); // SSE
+    emit("files:changed"); // local save
+    emit("files:changed"); // SSE
     await openTab("notes/beta.md"); // tab switch triggers tab:change
-    emit("files:changed", undefined); // extra SSE (e.g. second watcher event)
+    emit("files:changed"); // extra SSE (e.g. second watcher event)
 
     await drain();
 
@@ -139,8 +151,10 @@ describe("filenav", () => {
     expect(activeEl?.title).toBe("notes/beta.md");
   });
 
-  test("no duplicate with real network delay (save emit fires during slower SSE re-render)", async () => {
-    while (getTabs().length > 0) closeTab(0);
+  it("no duplicate with real network delay (save emit fires during slower SSE re-render)", async () => {
+    while (getTabs().length > 0) {
+      closeTab(0);
+    }
     await openTab("notes/alpha.md");
     await tick();
 
@@ -157,8 +171,8 @@ describe("filenav", () => {
       10,
     );
 
-    emit("files:changed", undefined);
-    emit("files:changed", undefined);
+    emit("files:changed");
+    emit("files:changed");
 
     // tab:change fires synchronously when switching tabs
     await openTab("notes/beta.md");
@@ -170,37 +184,37 @@ describe("filenav", () => {
     expect(activeEl?.title).toBe("notes/beta.md");
   });
 
-  test("sidebar collapse button toggles sidebar-collapsed class and updates button text", async () => {
-    const collapseBtn = document.getElementById("sidebar-collapse") as HTMLButtonElement;
-    const app = document.getElementById("app")!;
+  it("sidebar collapse button toggles sidebar-collapsed class and updates button text", async () => {
+    const collapseBtn = document.querySelector("#sidebar-collapse") as HTMLButtonElement;
+    const app = document.querySelector("#app")!;
 
     // Initial: not collapsed
-    expect(app.classList.contains("sidebar-collapsed")).toBe(false);
+    expect(app.classList.contains("sidebar-collapsed")).toBeFalsy();
 
     collapseBtn.click();
-    expect(app.classList.contains("sidebar-collapsed")).toBe(true);
+    expect(app.classList.contains("sidebar-collapsed")).toBeTruthy();
     expect(collapseBtn.title).toBe("Expand sidebar");
 
     collapseBtn.click();
-    expect(app.classList.contains("sidebar-collapsed")).toBe(false);
+    expect(app.classList.contains("sidebar-collapsed")).toBeFalsy();
     expect(collapseBtn.title).toBe("Collapse sidebar");
   });
 
-  test("typing in search input switches to search mode and renders results", async () => {
+  it("typing in search input switches to search mode and renders results", async () => {
     mock.on("GET", "/api/filesearch", [{ path: "notes/alpha.md", title: "alpha" }]);
 
-    const searchInput = document.getElementById("sidebar-search") as HTMLInputElement;
+    const searchInput = document.querySelector("#sidebar-search") as HTMLInputElement;
     searchInput.value = "alpha";
     searchInput.dispatchEvent(new Event("input", { bubbles: true }));
 
     await drain();
 
-    const container = document.getElementById("sidebar-tree")!;
-    expect(container.querySelector(".nav-file") !== null).toBe(true);
+    const container = document.querySelector("#sidebar-tree")!;
+    expect(container.querySelector(".nav-file") !== null).toBeTruthy();
   });
 
-  test("typing empty string in search mode returns to recent mode", async () => {
-    const searchInput = document.getElementById("sidebar-search") as HTMLInputElement;
+  it("typing empty string in search mode returns to recent mode", async () => {
+    const searchInput = document.querySelector("#sidebar-search") as HTMLInputElement;
     // First enter search mode
     searchInput.value = "query";
     searchInput.dispatchEvent(new Event("input", { bubbles: true }));
@@ -212,12 +226,12 @@ describe("filenav", () => {
     await drain();
 
     // Should render recent files
-    const container = document.getElementById("sidebar-tree")!;
-    expect(container.querySelector(".nav-file") !== null).toBe(true);
+    const container = document.querySelector("#sidebar-tree")!;
+    expect(container.querySelector(".nav-file") !== null).toBeTruthy();
   });
 
-  test("Escape key in search mode resets to recent mode", async () => {
-    const searchInput = document.getElementById("sidebar-search") as HTMLInputElement;
+  it("Escape key in search mode resets to recent mode", async () => {
+    const searchInput = document.querySelector("#sidebar-search") as HTMLInputElement;
     searchInput.value = "query";
     searchInput.dispatchEvent(new Event("input", { bubbles: true }));
     await drain();
@@ -228,12 +242,12 @@ describe("filenav", () => {
     await drain();
 
     expect(searchInput.value).toBe("");
-    const container = document.getElementById("sidebar-tree")!;
-    expect(container.querySelector(".nav-file") !== null).toBe(true);
+    const container = document.querySelector("#sidebar-tree")!;
+    expect(container.querySelector(".nav-file") !== null).toBeTruthy();
   });
 
-  test("Escape key outside search mode does nothing", async () => {
-    const searchInput = document.getElementById("sidebar-search") as HTMLInputElement;
+  it("Escape key outside search mode does nothing", async () => {
+    const searchInput = document.querySelector("#sidebar-search") as HTMLInputElement;
     searchInput.value = "";
     // Ensure in recent mode
     searchInput.dispatchEvent(new Event("input", { bubbles: true }));
@@ -247,44 +261,44 @@ describe("filenav", () => {
     expect(searchInput.value).toBe("");
   });
 
-  test("search renders directory path for nested files", async () => {
+  it("search renders directory path for nested files", async () => {
     mock.on("GET", "/api/filesearch", [{ path: "folder/deep.md", title: "deep" }]);
 
-    const searchInput = document.getElementById("sidebar-search") as HTMLInputElement;
+    const searchInput = document.querySelector("#sidebar-search") as HTMLInputElement;
     searchInput.value = "deep";
     searchInput.dispatchEvent(new Event("input", { bubbles: true }));
 
     await drain();
 
-    const container = document.getElementById("sidebar-tree")!;
+    const container = document.querySelector("#sidebar-tree")!;
     const dirLine = container.querySelector(".nav-file-dir");
-    expect(dirLine !== null).toBe(true);
+    expect(dirLine !== null).toBeTruthy();
     expect(dirLine!.textContent).toBe("folder");
   });
 
-  test("search failure renders error state", async () => {
+  it("search failure renders error state", async () => {
     mock.on("GET", "/api/filesearch", { error: "fail" }, 500);
 
-    const searchInput = document.getElementById("sidebar-search") as HTMLInputElement;
+    const searchInput = document.querySelector("#sidebar-search") as HTMLInputElement;
     searchInput.value = "broken";
     searchInput.dispatchEvent(new Event("input", { bubbles: true }));
 
     await drain();
 
-    const container = document.getElementById("sidebar-tree")!;
+    const container = document.querySelector("#sidebar-tree")!;
     expect(container.textContent).toContain("failed");
   });
 
-  test("search with no results shows empty state", async () => {
+  it("search with no results shows empty state", async () => {
     mock.on("GET", "/api/filesearch", []);
 
-    const searchInput = document.getElementById("sidebar-search") as HTMLInputElement;
+    const searchInput = document.querySelector("#sidebar-search") as HTMLInputElement;
     searchInput.value = "nomatch";
     searchInput.dispatchEvent(new Event("input", { bubbles: true }));
 
     await drain();
 
-    const container = document.getElementById("sidebar-tree")!;
+    const container = document.querySelector("#sidebar-tree")!;
     expect(container.textContent).toContain("No matches");
 
     // Reset back to recent mode
@@ -293,14 +307,14 @@ describe("filenav", () => {
     await drain();
   });
 
-  test("renderRecent shows empty state when no files exist", async () => {
+  it("renderRecent shows empty state when no files exist", async () => {
     mock.on("GET", "/api/recentfiles", []);
     mock.on("GET", "/api/pinned", []);
 
-    emit("files:changed", undefined);
+    emit("files:changed");
     await drain();
 
-    const container = document.getElementById("sidebar-tree")!;
+    const container = document.querySelector("#sidebar-tree")!;
     expect(container.textContent).toContain("No files");
 
     // Restore
@@ -308,17 +322,17 @@ describe("filenav", () => {
       { path: "notes/alpha.md", title: "alpha", mtime: 2000 },
       { path: "notes/beta.md", title: "beta", mtime: 1000 },
     ]);
-    emit("files:changed", undefined);
+    emit("files:changed");
     await drain();
   });
 
-  test("renderRecent shows error state when API fails", async () => {
+  it("renderRecent shows error state when API fails", async () => {
     mock.on("GET", "/api/recentfiles", { error: "fail" }, 500);
 
-    emit("files:changed", undefined);
+    emit("files:changed");
     await drain();
 
-    const container = document.getElementById("sidebar-tree")!;
+    const container = document.querySelector("#sidebar-tree")!;
     expect(container.textContent).toContain("Failed");
 
     // Restore
@@ -326,23 +340,25 @@ describe("filenav", () => {
       { path: "notes/alpha.md", title: "alpha", mtime: 2000 },
       { path: "notes/beta.md", title: "beta", mtime: 1000 },
     ]);
-    emit("files:changed", undefined);
+    emit("files:changed");
     await drain();
   });
 
-  test("contextmenu on nav-file shows context menu", async () => {
-    while (getTabs().length > 0) closeTab(0);
+  it("contextmenu on nav-file shows context menu", async () => {
+    while (getTabs().length > 0) {
+      closeTab(0);
+    }
     mock.on("GET", "/api/recentfiles", [{ path: "notes/alpha.md", title: "alpha", mtime: 2000 }]);
     mock.on("GET", "/api/pinned", []);
     mock.on("POST", "/api/pin", {});
     mock.on("DELETE", "/api/note", {});
 
-    emit("files:changed", undefined);
+    emit("files:changed");
     await drain();
 
-    const container = document.getElementById("sidebar-tree")!;
+    const container = document.querySelector("#sidebar-tree")!;
     const navFile = container.querySelector(".nav-file") as HTMLElement;
-    expect(navFile !== null).toBe(true);
+    expect(navFile !== null).toBeTruthy();
 
     navFile.dispatchEvent(
       new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 50, clientY: 50 }),
@@ -350,7 +366,7 @@ describe("filenav", () => {
     await tick();
 
     const menu = document.body.querySelector(".context-menu");
-    expect(menu !== null).toBe(true);
+    expect(menu !== null).toBeTruthy();
     const items = menu!.querySelectorAll(".context-menu-item");
     expect(items[0]!.textContent).toBe("Rename...");
     expect(items[1]!.textContent).toBe("Pin");
@@ -366,16 +382,18 @@ describe("filenav", () => {
     ]);
   });
 
-  test("pin action in context menu calls pin API", async () => {
-    while (getTabs().length > 0) closeTab(0);
+  it("pin action in context menu calls pin API", async () => {
+    while (getTabs().length > 0) {
+      closeTab(0);
+    }
     mock.on("GET", "/api/recentfiles", [{ path: "notes/alpha.md", title: "alpha", mtime: 2000 }]);
     mock.on("GET", "/api/pinned", []);
     mock.on("POST", "/api/pin", {});
 
-    emit("files:changed", undefined);
+    emit("files:changed");
     await drain();
 
-    const container = document.getElementById("sidebar-tree")!;
+    const container = document.querySelector("#sidebar-tree")!;
     const navFile = container.querySelector(".nav-file") as HTMLElement;
     navFile.dispatchEvent(
       new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 50, clientY: 50 }),
@@ -392,40 +410,42 @@ describe("filenav", () => {
       { path: "notes/beta.md", title: "beta", mtime: 1000 },
     ]);
     mock.on("GET", "/api/pinned", []);
-    emit("files:changed", undefined);
+    emit("files:changed");
     await drain();
   });
 
-  test("pinned:changed event refreshes pinned list", async () => {
+  it("pinned:changed event refreshes pinned list", async () => {
     mock.on("GET", "/api/pinned", [{ path: "notes/alpha.md", title: "alpha" }]);
     mock.on("GET", "/api/recentfiles", [
       { path: "notes/alpha.md", title: "alpha", mtime: 2000 },
       { path: "notes/beta.md", title: "beta", mtime: 1000 },
     ]);
 
-    emit("pinned:changed", undefined);
+    emit("pinned:changed");
     await drain();
 
-    const container = document.getElementById("sidebar-tree")!;
+    const container = document.querySelector("#sidebar-tree")!;
     // Alpha should appear once (pinned, not also in recent section)
     const navFiles = container.querySelectorAll(".nav-file");
     expect(navFiles.length).toBeGreaterThan(0);
 
     // Restore
     mock.on("GET", "/api/pinned", []);
-    emit("pinned:changed", undefined);
+    emit("pinned:changed");
     await drain();
   });
 
-  test("rename action in context menu dispatches tansu:rename event", async () => {
-    while (getTabs().length > 0) closeTab(0);
+  it("rename action in context menu dispatches tansu:rename event", async () => {
+    while (getTabs().length > 0) {
+      closeTab(0);
+    }
     mock.on("GET", "/api/recentfiles", [{ path: "notes/alpha.md", title: "alpha", mtime: 2000 }]);
     mock.on("GET", "/api/pinned", []);
 
-    emit("files:changed", undefined);
+    emit("files:changed");
     await drain();
 
-    const container = document.getElementById("sidebar-tree")!;
+    const container = document.querySelector("#sidebar-tree")!;
     const navFile = container.querySelector(".nav-file") as HTMLElement;
     navFile.dispatchEvent(
       new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 50, clientY: 50 }),
@@ -442,7 +462,7 @@ describe("filenav", () => {
     (items[0] as HTMLElement).click(); // Rename...
     await tick();
 
-    const dialogInput = document.getElementById("input-dialog-input") as HTMLInputElement;
+    const dialogInput = document.querySelector("#input-dialog-input") as HTMLInputElement;
     dialogInput.value = "alpha-renamed";
     dialogInput.dispatchEvent(
       new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }),
@@ -450,21 +470,23 @@ describe("filenav", () => {
     await tick();
 
     window.removeEventListener("tansu:rename", handler);
-    expect(renameDetail !== null).toBe(true);
+    expect(renameDetail !== null).toBeTruthy();
     expect(renameDetail!.path).toBe("notes/alpha.md");
     expect(renameDetail!.newName).toBe("alpha-renamed");
   });
 
-  test("delete action in context menu calls deleteNote API", async () => {
-    while (getTabs().length > 0) closeTab(0);
+  it("delete action in context menu calls deleteNote API", async () => {
+    while (getTabs().length > 0) {
+      closeTab(0);
+    }
     mock.on("GET", "/api/recentfiles", [{ path: "notes/alpha.md", title: "alpha", mtime: 2000 }]);
     mock.on("GET", "/api/pinned", []);
     mock.on("DELETE", "/api/note", {});
 
-    emit("files:changed", undefined);
+    emit("files:changed");
     await drain();
 
-    const container = document.getElementById("sidebar-tree")!;
+    const container = document.querySelector("#sidebar-tree")!;
     const navFile = container.querySelector(".nav-file") as HTMLElement;
     navFile.dispatchEvent(
       new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 50, clientY: 50 }),
@@ -477,15 +499,17 @@ describe("filenav", () => {
     // confirm returns true (mocked by setupDOM), so deletion proceeds
   });
 
-  test("active element is the correct one (not stale) after save", async () => {
-    while (getTabs().length > 0) closeTab(0);
+  it("active element is the correct one (not stale) after save", async () => {
+    while (getTabs().length > 0) {
+      closeTab(0);
+    }
     await openTab("notes/alpha.md");
     await openTab("notes/beta.md");
     await tick();
 
     // beta is active; simulate a save
-    emit("files:changed", undefined);
-    emit("files:changed", undefined);
+    emit("files:changed");
+    emit("files:changed");
 
     await drain();
 

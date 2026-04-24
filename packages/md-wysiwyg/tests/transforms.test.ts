@@ -1,5 +1,3 @@
-import { describe, test, expect, beforeAll, afterAll } from "vitest";
-
 import { handleBlockTransform, checkBlockInputTransform } from "../src/transforms.ts";
 import { setupDOM } from "./test-helper.ts";
 
@@ -10,7 +8,7 @@ describe("transforms", () => {
     const el = document.createElement("div");
     el.className = "editor-content";
     el.contentEditable = "true";
-    document.body.appendChild(el);
+    document.body.append(el);
     return el;
   }
 
@@ -20,7 +18,7 @@ describe("transforms", () => {
   ): { prevented: boolean; dirty: boolean } {
     const p = document.createElement("p");
     p.textContent = text;
-    contentEl.appendChild(p);
+    contentEl.append(p);
 
     const range = document.createRange();
     const textNode = p.firstChild ?? p;
@@ -47,7 +45,7 @@ describe("transforms", () => {
   function simulateInputTransform(contentEl: HTMLElement, text: string): boolean {
     const p = document.createElement("p");
     p.textContent = text;
-    contentEl.appendChild(p);
+    contentEl.append(p);
 
     const range = document.createRange();
     const textNode = p.firstChild ?? p;
@@ -68,95 +66,95 @@ describe("transforms", () => {
     cleanup();
   });
 
-  test("heading prevented default", () => {
+  it("heading prevented default", () => {
     const el = makeContentEl();
     const { prevented } = simulateTransform(el, "## Hello");
-    expect(prevented).toBe(true);
+    expect(prevented).toBeTruthy();
     el.remove();
   });
 
-  test("heading calls onDirty", () => {
+  it("heading calls onDirty", () => {
     const el = makeContentEl();
     const { dirty } = simulateTransform(el, "## Hello");
-    expect(dirty).toBe(true);
+    expect(dirty).toBeTruthy();
     el.remove();
   });
 
-  test("h2 created", () => {
+  it("h2 created", () => {
     const el = makeContentEl();
     simulateTransform(el, "## Hello");
     const h2 = el.querySelector("h2");
-    expect(h2 !== null).toBe(true);
+    expect(h2 !== null).toBeTruthy();
     expect(h2!.textContent).toBe("Hello");
     const p = h2!.nextElementSibling;
-    expect(p !== null && p.tagName === "P").toBe(true);
+    expect(p !== null && p.tagName === "P").toBeTruthy();
     el.remove();
   });
 
-  test("hr prevented default", () => {
+  it("hr prevented default", () => {
     const el = makeContentEl();
     const { prevented } = simulateTransform(el, "---");
-    expect(prevented).toBe(true);
-    expect(el.querySelector("hr") !== null).toBe(true);
+    expect(prevented).toBeTruthy();
+    expect(el.querySelector("hr") !== null).toBeTruthy();
     el.remove();
   });
 
-  test("code prevented default", () => {
+  it("code prevented default", () => {
     const el = makeContentEl();
     const { prevented } = simulateTransform(el, "```js");
-    expect(prevented).toBe(true);
+    expect(prevented).toBeTruthy();
     const pre = el.querySelector("pre");
-    expect(pre !== null).toBe(true);
+    expect(pre !== null).toBeTruthy();
     const code = pre!.querySelector("code");
-    expect(code !== null).toBe(true);
+    expect(code !== null).toBeTruthy();
     expect(code!.className).toBe("language-js");
     el.remove();
   });
 
-  test("ul prevented default", () => {
+  it("ul prevented default", () => {
     const el = makeContentEl();
     const { prevented } = simulateTransform(el, "- item");
-    expect(prevented).toBe(true);
+    expect(prevented).toBeTruthy();
     const ul = el.querySelector("ul");
-    expect(ul !== null).toBe(true);
+    expect(ul !== null).toBeTruthy();
     const li = ul!.querySelector("li");
     expect(li!.textContent).toBe("item");
     el.remove();
   });
 
-  test("ol prevented default", () => {
+  it("ol prevented default", () => {
     const el = makeContentEl();
     const { prevented } = simulateTransform(el, "1. first");
-    expect(prevented).toBe(true);
+    expect(prevented).toBeTruthy();
     const ol = el.querySelector("ol");
-    expect(ol !== null).toBe(true);
+    expect(ol !== null).toBeTruthy();
     expect(ol!.querySelector("li")!.textContent).toBe("first");
     el.remove();
   });
 
-  test("bq prevented default", () => {
+  it("bq prevented default", () => {
     const el = makeContentEl();
     const { prevented } = simulateTransform(el, "> quoted");
-    expect(prevented).toBe(true);
+    expect(prevented).toBeTruthy();
     const bq = el.querySelector("blockquote");
-    expect(bq !== null).toBe(true);
+    expect(bq !== null).toBeTruthy();
     expect(bq!.querySelector("p")!.textContent).toBe("quoted");
     el.remove();
   });
 
-  test("normal text not prevented", () => {
+  it("normal text not prevented", () => {
     const el = makeContentEl();
     const { prevented, dirty } = simulateTransform(el, "just text");
-    expect(prevented).toBe(false);
-    expect(dirty).toBe(false);
+    expect(prevented).toBeFalsy();
+    expect(dirty).toBeFalsy();
     el.remove();
   });
 
-  test("onDirty optional — no crash without it", () => {
+  it("onDirty optional — no crash without it", () => {
     const el = makeContentEl();
     const p = document.createElement("p");
     p.textContent = "## heading";
-    el.appendChild(p);
+    el.append(p);
     const range = document.createRange();
     range.setStart(p.firstChild!, 10);
     range.collapse(true);
@@ -168,109 +166,109 @@ describe("transforms", () => {
     el.remove();
   });
 
-  test("h2 input transform", () => {
+  it("h2 input transform", () => {
     const el = makeContentEl();
-    expect(simulateInputTransform(el, "## ")).toBe(true);
+    expect(simulateInputTransform(el, "## ")).toBeTruthy();
     const h2 = el.querySelector("h2");
-    expect(h2 !== null).toBe(true);
+    expect(h2 !== null).toBeTruthy();
     expect(h2!.innerHTML).toBe("<br>");
     el.remove();
   });
 
-  test("h2 nbsp input transform", () => {
+  it("h2 nbsp input transform", () => {
     const el = makeContentEl();
-    expect(simulateInputTransform(el, "##\u00A0")).toBe(true);
-    expect(el.querySelector("h2") !== null).toBe(true);
+    expect(simulateInputTransform(el, "##\u00A0")).toBeTruthy();
+    expect(el.querySelector("h2") !== null).toBeTruthy();
     el.remove();
   });
 
-  test("h1 input transform", () => {
+  it("h1 input transform", () => {
     const el = makeContentEl();
-    expect(simulateInputTransform(el, "# ")).toBe(true);
-    expect(el.querySelector("h1") !== null).toBe(true);
+    expect(simulateInputTransform(el, "# ")).toBeTruthy();
+    expect(el.querySelector("h1") !== null).toBeTruthy();
     el.remove();
   });
 
-  test("h3 input transform", () => {
+  it("h3 input transform", () => {
     const el = makeContentEl();
-    expect(simulateInputTransform(el, "### ")).toBe(true);
-    expect(el.querySelector("h3") !== null).toBe(true);
+    expect(simulateInputTransform(el, "### ")).toBeTruthy();
+    expect(el.querySelector("h3") !== null).toBeTruthy();
     el.remove();
   });
 
-  test("ul input transform", () => {
+  it("ul input transform", () => {
     const el = makeContentEl();
-    expect(simulateInputTransform(el, "- ")).toBe(true);
+    expect(simulateInputTransform(el, "- ")).toBeTruthy();
     const ul = el.querySelector("ul");
-    expect(ul !== null).toBe(true);
+    expect(ul !== null).toBeTruthy();
     const li = ul!.querySelector("li");
-    expect(li !== null).toBe(true);
+    expect(li !== null).toBeTruthy();
     expect(li!.innerHTML).toBe("<br>");
     el.remove();
   });
 
-  test("ul asterisk input transform", () => {
+  it("ul asterisk input transform", () => {
     const el = makeContentEl();
-    expect(simulateInputTransform(el, "* ")).toBe(true);
-    expect(el.querySelector("ul") !== null).toBe(true);
+    expect(simulateInputTransform(el, "* ")).toBeTruthy();
+    expect(el.querySelector("ul") !== null).toBeTruthy();
     el.remove();
   });
 
-  test("ol input transform", () => {
+  it("ol input transform", () => {
     const el = makeContentEl();
-    expect(simulateInputTransform(el, "1. ")).toBe(true);
+    expect(simulateInputTransform(el, "1. ")).toBeTruthy();
     const ol = el.querySelector("ol");
-    expect(ol !== null).toBe(true);
+    expect(ol !== null).toBeTruthy();
     el.remove();
   });
 
-  test("bq input transform", () => {
+  it("bq input transform", () => {
     const el = makeContentEl();
-    expect(simulateInputTransform(el, "> ")).toBe(true);
+    expect(simulateInputTransform(el, "> ")).toBeTruthy();
     const bq = el.querySelector("blockquote");
-    expect(bq !== null).toBe(true);
+    expect(bq !== null).toBeTruthy();
     const p = bq!.querySelector("p");
-    expect(p !== null).toBe(true);
+    expect(p !== null).toBeTruthy();
     expect(p!.innerHTML).toBe("<br>");
     el.remove();
   });
 
-  test("code block input transform", () => {
+  it("code block input transform", () => {
     const el = makeContentEl();
-    expect(simulateInputTransform(el, "``` ")).toBe(true);
+    expect(simulateInputTransform(el, "``` ")).toBeTruthy();
     const pre = el.querySelector("pre");
-    expect(pre !== null).toBe(true);
+    expect(pre !== null).toBeTruthy();
     const code = pre!.querySelector("code");
-    expect(code !== null).toBe(true);
+    expect(code !== null).toBeTruthy();
     el.remove();
   });
 
-  test("code block lang input transform", () => {
+  it("code block lang input transform", () => {
     const el = makeContentEl();
-    expect(simulateInputTransform(el, "```js ")).toBe(true);
+    expect(simulateInputTransform(el, "```js ")).toBeTruthy();
     const code = el.querySelector("code");
-    expect(code !== null).toBe(true);
+    expect(code !== null).toBeTruthy();
     expect(code!.className).toBe("language-js");
     el.remove();
   });
 
-  test("code block nbsp input transform", () => {
+  it("code block nbsp input transform", () => {
     const el = makeContentEl();
-    expect(simulateInputTransform(el, "```\u00A0")).toBe(true);
-    expect(el.querySelector("pre") !== null).toBe(true);
+    expect(simulateInputTransform(el, "```\u00A0")).toBeTruthy();
+    expect(el.querySelector("pre") !== null).toBeTruthy();
     el.remove();
   });
 
-  test("no input transform for normal text", () => {
+  it("no input transform for normal text", () => {
     const el = makeContentEl();
-    expect(simulateInputTransform(el, "hello ")).toBe(false);
+    expect(simulateInputTransform(el, "hello ")).toBeFalsy();
     el.remove();
   });
 
-  test("unwrapped text node triggers transform", () => {
+  it("unwrapped text node triggers transform", () => {
     const el = makeContentEl();
     const textNode = document.createTextNode("## ");
-    el.appendChild(textNode);
+    el.append(textNode);
 
     const range = document.createRange();
     range.setStart(textNode, 3);
@@ -279,56 +277,56 @@ describe("transforms", () => {
     sel.removeAllRanges();
     sel.addRange(range);
 
-    expect(checkBlockInputTransform(el)).toBe(true);
-    expect(el.querySelector("h2") !== null).toBe(true);
+    expect(checkBlockInputTransform(el)).toBeTruthy();
+    expect(el.querySelector("h2") !== null).toBeTruthy();
     el.remove();
   });
 
-  test("heading re-level triggers", () => {
+  it("heading re-level triggers", () => {
     const el = makeContentEl();
     const h1 = document.createElement("h1");
     h1.textContent = "### hello";
-    el.appendChild(h1);
+    el.append(h1);
     const range = document.createRange();
     range.setStart(h1.firstChild!, 4);
     range.collapse(true);
     window.getSelection()!.removeAllRanges();
     window.getSelection()!.addRange(range);
-    expect(checkBlockInputTransform(el)).toBe(true);
+    expect(checkBlockInputTransform(el)).toBeTruthy();
     const h3 = el.querySelector("h3");
-    expect(h3 !== null).toBe(true);
+    expect(h3 !== null).toBeTruthy();
     expect(h3!.textContent).toBe("hello");
     el.remove();
   });
 
-  test("heading re-level empty triggers", () => {
+  it("heading re-level empty triggers", () => {
     const el = makeContentEl();
     const h1 = document.createElement("h1");
     h1.textContent = "## ";
-    el.appendChild(h1);
+    el.append(h1);
     const range = document.createRange();
     range.setStart(h1.firstChild!, 3);
     range.collapse(true);
     window.getSelection()!.removeAllRanges();
     window.getSelection()!.addRange(range);
-    expect(checkBlockInputTransform(el)).toBe(true);
+    expect(checkBlockInputTransform(el)).toBeTruthy();
     const h2 = el.querySelector("h2");
-    expect(h2 !== null).toBe(true);
+    expect(h2 !== null).toBeTruthy();
     expect(h2!.innerHTML).toBe("<br>");
     el.remove();
   });
 
-  test("no transform for plain heading text", () => {
+  it("no transform for plain heading text", () => {
     const el = makeContentEl();
     const h2 = document.createElement("h2");
     h2.textContent = "just text";
-    el.appendChild(h2);
+    el.append(h2);
     const range = document.createRange();
     range.setStart(h2.firstChild!, 9);
     range.collapse(true);
     window.getSelection()!.removeAllRanges();
     window.getSelection()!.addRange(range);
-    expect(checkBlockInputTransform(el)).toBe(false);
+    expect(checkBlockInputTransform(el)).toBeFalsy();
     el.remove();
   });
 });

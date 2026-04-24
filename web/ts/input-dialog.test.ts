@@ -1,5 +1,3 @@
-import { describe, test, expect, beforeAll, afterAll } from "vitest";
-
 import { setupDOM } from "./test-helper.ts";
 
 const tick = () => new Promise<void>((r) => setTimeout(r, 0));
@@ -11,7 +9,7 @@ describe("input-dialog", () => {
   beforeAll(async () => {
     cleanup = setupDOM();
     const mod = await import("./input-dialog.ts");
-    showInputDialog = mod.showInputDialog;
+    ({ showInputDialog } = mod);
   });
 
   afterAll(() => {
@@ -19,18 +17,18 @@ describe("input-dialog", () => {
   });
 
   function getOverlay() {
-    return document.getElementById("input-dialog-overlay")!;
+    return document.querySelector("#input-dialog-overlay")!;
   }
 
   function getInput() {
-    return document.getElementById("input-dialog-input") as HTMLInputElement;
+    return document.querySelector("#input-dialog-input") as HTMLInputElement;
   }
 
-  test("Enter key submits the dialog and resolves with trimmed value", async () => {
+  it("Enter key submits the dialog and resolves with trimmed value", async () => {
     const p = showInputDialog("Type something...");
     await tick();
 
-    expect(getOverlay().classList.contains("hidden")).toBe(false);
+    expect(getOverlay().classList.contains("hidden")).toBeFalsy();
     getInput().value = "  hello  ";
     getInput().dispatchEvent(
       new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }),
@@ -38,14 +36,14 @@ describe("input-dialog", () => {
 
     const result = await p;
     expect(result).toBe("hello");
-    expect(getOverlay().classList.contains("hidden")).toBe(true);
+    expect(getOverlay().classList.contains("hidden")).toBeTruthy();
   });
 
-  test("Escape key cancels and resolves with null", async () => {
+  it("Escape key cancels and resolves with null", async () => {
     const p = showInputDialog("Type something...", "default");
     await tick();
 
-    expect(getOverlay().classList.contains("hidden")).toBe(false);
+    expect(getOverlay().classList.contains("hidden")).toBeFalsy();
     expect(getInput().value).toBe("default");
     getInput().dispatchEvent(
       new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }),
@@ -53,23 +51,23 @@ describe("input-dialog", () => {
 
     const result = await p;
     expect(result).toBeNull();
-    expect(getOverlay().classList.contains("hidden")).toBe(true);
+    expect(getOverlay().classList.contains("hidden")).toBeTruthy();
   });
 
-  test("backdrop click cancels and resolves with null", async () => {
+  it("backdrop click cancels and resolves with null", async () => {
     const p = showInputDialog("Type something...");
     await tick();
 
-    expect(getOverlay().classList.contains("hidden")).toBe(false);
+    expect(getOverlay().classList.contains("hidden")).toBeFalsy();
     // Click the overlay itself (not the inner dialog)
     getOverlay().dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
 
     const result = await p;
     expect(result).toBeNull();
-    expect(getOverlay().classList.contains("hidden")).toBe(true);
+    expect(getOverlay().classList.contains("hidden")).toBeTruthy();
   });
 
-  test("empty input resolves with null", async () => {
+  it("empty input resolves with null", async () => {
     const p = showInputDialog("Type something...");
     await tick();
 
@@ -82,7 +80,7 @@ describe("input-dialog", () => {
     expect(result).toBeNull();
   });
 
-  test("opening dialog while one is in-flight cancels the previous", async () => {
+  it("opening dialog while one is in-flight cancels the previous", async () => {
     const p1 = showInputDialog("First");
     await tick();
 

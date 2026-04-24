@@ -8,7 +8,7 @@
     "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": true,
     "noEmit": true,
-    "types": ["node"],
+    "types": ["node", "vitest/globals"],
 
     "strict": true,
     "forceConsistentCasingInFileNames": true,

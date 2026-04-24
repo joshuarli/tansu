@@ -1,5 +1,3 @@
-import { describe, test, expect, beforeAll, afterAll } from "vitest";
-
 import { setupDOM, mockFetch } from "./test-helper.ts";
 
 function makeItem(file: File | null): DataTransferItem {
@@ -26,21 +24,25 @@ describe("image-paste", () => {
     mock.on("GET", "/api/state", { tabs: [], active: -1 });
     mock.on("POST", "/api/image", { filename: "test-image.webp" });
 
+    const g = globalThis as unknown as Record<string, unknown>;
+
     // Mock createImageBitmap — not available in happy-dom
-    (globalThis as any).createImageBitmap = async () => ({
+    g["createImageBitmap"] = async () => ({
       width: 100,
       height: 100,
-      close: () => {},
+      close: () => void 0,
     });
 
     // Mock OffscreenCanvas — happy-dom's version lacks convertToBlob
-    (globalThis as any).OffscreenCanvas = class {
-      constructor(
-        public width: number,
-        public height: number,
-      ) {}
+    g["OffscreenCanvas"] = class {
+      width: number;
+      height: number;
+      constructor(w: number, h: number) {
+        this.width = w;
+        this.height = h;
+      }
       getContext() {
-        return { drawImage: () => {} };
+        return { drawImage: () => void 0 };
       }
       convertToBlob() {
         return Promise.resolve(new Blob(["fake"], { type: "image/webp" }));
@@ -48,52 +50,60 @@ describe("image-paste", () => {
     };
 
     // Mock document.execCommand — happy-dom may not implement insertHTML
-    (globalThis as any).document.execCommand = (cmd: string) => {
+    (
+      globalThis as unknown as { document: { execCommand: (cmd: string) => boolean } }
+    ).document.execCommand = (cmd: string) => {
       execCommandCalls.push(cmd);
       return true;
     };
 
     const mod = await import("./image-paste.ts");
-    handleImagePaste = mod.handleImagePaste;
+    ({ handleImagePaste } = mod);
   });
 
   afterAll(() => {
-    delete (globalThis as any).createImageBitmap;
-    delete (globalThis as any).OffscreenCanvas;
+    const g = globalThis as unknown as Record<string, unknown>;
+    delete g["createImageBitmap"];
+    delete g["OffscreenCanvas"];
     mock.restore();
     cleanup();
   });
 
-  test("should call execCommand insertHTML after upload", async () => {
+  it("should call execCommand insertHTML after upload", async () => {
     const item = makeItem(new File(["data"], "screenshot.png", { type: "image/png" }));
     execCommandCalls.length = 0;
     await handleImagePaste(item, null);
-    expect(execCommandCalls.includes("insertHTML")).toBe(true);
+    expect(execCommandCalls).toContain("insertHTML");
   });
 
-  test("should do nothing when getAsFile returns null", async () => {
+  it("should do nothing when getAsFile returns null", async () => {
     const item = makeItem(null);
     execCommandCalls.length = 0;
     await handleImagePaste(item, null);
-    expect(execCommandCalls.length).toBe(0);
+    expect(execCommandCalls).toHaveLength(0);
   });
 
-  test("filename should include note stem", async () => {
+  it("filename should include note stem", async () => {
     let capturedFilename: string | null = null;
     const origFetch = globalThis.fetch;
     globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url =
-        typeof input === "string"
-          ? input
-          : input instanceof URL
-            ? input.toString()
-            : (input as Request).url;
+      let url: string;
+      if (typeof input === "string") {
+        url = input;
+      } else if (input instanceof URL) {
+        url = input.toString();
+      } else {
+        ({ url } = input as Request);
+      }
       if (url.includes("/api/image") && init?.method === "POST") {
         capturedFilename = (init.headers as Record<string, string>)["X-Filename"] ?? null;
-        return new Response(JSON.stringify({ filename: "my-note 20260101120000.webp" }), {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        });
+        return Response.json(
+          { filename: "my-note 20260101120000.webp" },
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          },
+        );
       }
       return origFetch(input as RequestInfo, init);
     }) as typeof fetch;
@@ -103,7 +113,7 @@ describe("image-paste", () => {
 
     globalThis.fetch = origFetch;
 
-    expect(capturedFilename !== null).toBe(true);
+    expect(capturedFilename !== null).toBeTruthy();
     expect(capturedFilename!).toContain("my-note");
     expect(capturedFilename!).toContain(".webp");
   });

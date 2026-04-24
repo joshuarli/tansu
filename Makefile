@@ -1,13 +1,12 @@
 NAME       := tansu
 TARGET     := $(shell rustc -vV | awk '/^host:/ {print $$2}')
 
-dev: lint-ts
-	oxfmt web/ts/
-	tsgo --noEmit --pretty false
-	pnpm run bundle-dev
+dev: ts
 	cargo run --bin tansu -- $(NOTES_DIR) --port 3000
 
-build: check build-ts build-rs
+build: check ts build-rs
+
+release: check release-rs release-ts
 
 build-rs:
 	cargo build
@@ -28,10 +27,19 @@ check:
 	tsgo -p packages/md-wysiwyg/tsconfig.json --noEmit
 	cargo check
 
-test: test-pkg test-ts test-rs
+ts:
+	oxlint --quiet --config oxlint.config.mjs web/ts/ packages/
+	oxfmt --config oxfmt.config.mjs web/ts/ packages/
+	tsgo --noEmit --pretty false
+	pnpm run bundle-dev
 
-lint-ts:
-	oxlint --quiet web/ts/
+release-ts:
+	oxlint --quiet --config oxlint.config.mjs web/ts/ packages/
+	oxfmt --config oxfmt.config.mjs web/ts/ packages/
+	tsgo --noEmit --pretty false
+	pnpm run bundle
+
+test: test-pkg test-ts test-rs
 
 test-pkg:
 	cd packages/md-wysiwyg && vitest run
@@ -41,11 +49,6 @@ test-ts:
 
 test-e2e:
 	pnpm run test-e2e
-
-ts: lint-ts
-	oxfmt web/ts/
-	tsgo --noEmit --pretty false
-	pnpm run bundle
 
 NOTES_DIR ?= '/Users/josh/Library/Mobile Documents/iCloud~md~obsidian/Documents/Notes'
 

@@ -1,5 +1,3 @@
-import { describe, test, expect, beforeAll, afterAll } from "vitest";
-
 import { setupDOM } from "./test-helper.ts";
 
 describe("link-hover", () => {
@@ -21,14 +19,14 @@ describe("link-hover", () => {
     const a = document.createElement("a");
     a.href = href;
     a.textContent = "link text";
-    editorDiv.appendChild(a);
-    document.body.appendChild(editorDiv);
+    editorDiv.append(a);
+    document.body.append(editorDiv);
     a.getBoundingClientRect = () =>
       ({ bottom: 50, left: 10, top: 30, right: 110, width: 100, height: 20 }) as DOMRect;
     return a;
   }
 
-  test("mouseover on editor link shows tooltip", () => {
+  it("mouseover on editor link shows tooltip", () => {
     const a = makeEditorLink("https://example.com");
 
     document.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
@@ -36,13 +34,13 @@ describe("link-hover", () => {
     a.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
 
     const tooltip = document.body.querySelector(".link-hover-tooltip") as HTMLElement | null;
-    expect(tooltip !== null).toBe(true);
+    expect(tooltip !== null).toBeTruthy();
     expect(tooltip!.style.display).toBe("block");
 
     a.parentElement?.remove();
   });
 
-  test("mouseout on editor link schedules tooltip hide", async () => {
+  it("mouseout on editor link schedules tooltip hide", async () => {
     const a = makeEditorLink("https://example.com");
 
     a.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
@@ -57,7 +55,7 @@ describe("link-hover", () => {
     a.parentElement?.remove();
   });
 
-  test("Ctrl+click on editor link calls window.open", () => {
+  it("Ctrl+click on editor link calls window.open", () => {
     const a = makeEditorLink("https://example.com/page");
 
     let opened: string | null = null;
@@ -74,10 +72,10 @@ describe("link-hover", () => {
     a.parentElement?.remove();
   });
 
-  test("click outside .editor-content a[href] does nothing", () => {
+  it("click outside .editor-content a[href] does nothing", () => {
     const p = document.createElement("p");
     p.textContent = "plain text";
-    document.body.appendChild(p);
+    document.body.append(p);
 
     let opened = false;
     const origOpen = window.open;
@@ -88,7 +86,7 @@ describe("link-hover", () => {
     p.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, ctrlKey: true }));
 
     (window as unknown as Record<string, unknown>)["open"] = origOpen;
-    expect(opened).toBe(false);
+    expect(opened).toBeFalsy();
 
     p.remove();
   });

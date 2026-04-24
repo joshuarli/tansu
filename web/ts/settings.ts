@@ -1,5 +1,13 @@
-import { getSettings, saveSettings, getStatus, registerPrf, removePrf, lockApp } from "./api.ts";
-import type { Settings, AppStatus } from "./api.ts";
+import {
+  getSettings,
+  saveSettings,
+  getStatus,
+  registerPrf,
+  removePrf,
+  lockApp,
+  type Settings,
+  type AppStatus,
+} from "./api.ts";
 import { isPrfLikelySupported, createPrfCredential } from "./webauthn.ts";
 
 interface SettingsPanel {
@@ -10,8 +18,8 @@ interface SettingsPanel {
 }
 
 export function createSettings(): SettingsPanel {
-  const overlay = document.getElementById("settings-overlay")!;
-  const panel = document.getElementById("settings-panel")!;
+  const overlay = document.querySelector("#settings-overlay")!;
+  const panel = document.querySelector("#settings-panel")!;
   let isOpen = false;
   let current: Settings | null = null;
   let status: AppStatus | null = null;
@@ -26,8 +34,7 @@ export function createSettings(): SettingsPanel {
     overlay.classList.remove("hidden");
     try {
       current = await getSettings();
-    } catch (e) {
-      console.warn("Failed to load settings, using defaults:", e);
+    } catch {
       current = {
         weight_title: 10,
         weight_headings: 5,
@@ -49,16 +56,23 @@ export function createSettings(): SettingsPanel {
   }
 
   function toggle() {
-    if (isOpen) close();
-    else open();
+    if (isOpen) {
+      close();
+    } else {
+      open();
+    }
   }
 
   overlay.addEventListener("click", (e) => {
-    if (e.target === overlay) close();
+    if (e.target === overlay) {
+      close();
+    }
   });
 
   function render() {
-    if (!current) return;
+    if (!current) {
+      return;
+    }
     const s = current;
 
     panel.innerHTML = `
@@ -139,22 +153,26 @@ export function createSettings(): SettingsPanel {
   }
 
   async function save() {
-    if (!current) return;
+    if (!current) {
+      return;
+    }
 
     const updated = { ...current };
 
     for (const el of panel.querySelectorAll<HTMLInputElement | HTMLSelectElement>("[data-key]")) {
       const key = el.dataset["key"] as keyof Settings;
-      if (!key) continue;
+      if (!key) {
+        continue;
+      }
 
       if (el instanceof HTMLInputElement && el.type === "checkbox") {
         (updated as Record<string, unknown>)[key] = el.checked;
       } else if (el instanceof HTMLInputElement && el.type === "range") {
-        (updated as Record<string, unknown>)[key] = parseFloat(el.value);
+        (updated as Record<string, unknown>)[key] = Number.parseFloat(el.value);
       } else if (el instanceof HTMLInputElement && el.type === "number") {
-        (updated as Record<string, unknown>)[key] = parseInt(el.value, 10);
+        (updated as Record<string, unknown>)[key] = Number.parseInt(el.value, 10);
       } else if (el instanceof HTMLSelectElement) {
-        (updated as Record<string, unknown>)[key] = parseInt(el.value, 10);
+        (updated as Record<string, unknown>)[key] = Number.parseInt(el.value, 10);
       } else if (key === "excluded_folders") {
         updated.excluded_folders = (el as HTMLInputElement).value
           .split(",")
@@ -167,13 +185,15 @@ export function createSettings(): SettingsPanel {
       await saveSettings(updated);
       current = updated;
       close();
-    } catch (e) {
-      console.error("Failed to save settings:", e);
+    } catch {
+      // save failed silently
     }
   }
 
   function renderSecuritySection(): string {
-    if (!status || !status.encrypted) return "";
+    if (!status || !status.encrypted) {
+      return "";
+    }
 
     const names = status.prf_credential_names;
     const ids = status.prf_credential_ids;
@@ -181,7 +201,7 @@ export function createSettings(): SettingsPanel {
       .map(
         (id, i) =>
           `<div class="settings-row">
-            <span>${names[i] || id.slice(0, 12) + "..."}</span>
+            <span>${names[i] || `${id.slice(0, 12)}...`}</span>
             <button class="prf-remove" data-id="${id}">Remove</button>
           </div>`,
       )
@@ -201,15 +221,20 @@ export function createSettings(): SettingsPanel {
 
   /* c8 ignore start */
   function wireSecuritySection() {
-    if (!status || !status.encrypted) return;
+    if (!status || !status.encrypted) {
+      return;
+    }
 
     const statusEl = panel.querySelector("#security-status") as HTMLElement | null;
 
     // Remove credential buttons
     for (const btn of panel.querySelectorAll<HTMLButtonElement>(".prf-remove")) {
+      // eslint-disable-next-line no-loop-func
       btn.addEventListener("click", async () => {
         const id = btn.dataset["id"]!;
-        if (!confirm("Remove this biometric credential?")) return;
+        if (!confirm("Remove this biometric credential?")) {
+          return;
+        }
         btn.disabled = true;
         const ok = await removePrf(id);
         if (ok) {
@@ -225,11 +250,15 @@ export function createSettings(): SettingsPanel {
     const addBtn = panel.querySelector("#prf-add") as HTMLButtonElement | null;
     if (addBtn) {
       addBtn.addEventListener("click", async () => {
-        if (statusEl) statusEl.textContent = "Waiting for biometrics...";
+        if (statusEl) {
+          statusEl.textContent = "Waiting for biometrics...";
+        }
         try {
           const result = await createPrfCredential();
           const name = prompt("Name this credential (e.g. 'MacBook Touch ID')") || "Unnamed";
-          if (statusEl) statusEl.textContent = "Registering...";
+          if (statusEl) {
+            statusEl.textContent = "Registering...";
+          }
           const ok = await registerPrf(result.credentialId, result.prfKeyB64, name);
           if (ok) {
             status = await getStatus();
@@ -237,8 +266,10 @@ export function createSettings(): SettingsPanel {
           } else if (statusEl) {
             statusEl.textContent = "Registration failed.";
           }
-        } catch (e) {
-          if (statusEl) statusEl.textContent = e instanceof Error ? e.message : "Failed.";
+        } catch (error) {
+          if (statusEl) {
+            statusEl.textContent = error instanceof Error ? error.message : "Failed.";
+          }
         }
       });
     }

@@ -28,7 +28,7 @@ repos:
 
       - id: oxfmt
         name: oxfmt
-        entry: ./node_modules/.bin/oxfmt
+        entry: ./node_modules/.bin/oxfmt --config oxfmt.config.mjs
         language: system
         types: [ts]
         pass_filenames: false
@@ -36,7 +36,7 @@ repos:
 
       - id: oxlint
         name: oxlint
-        entry: ./node_modules/.bin/oxlint
+        entry: ./node_modules/.bin/oxlint --config oxlint.config.mjs
         language: system
         types: [ts]
         pass_filenames: false

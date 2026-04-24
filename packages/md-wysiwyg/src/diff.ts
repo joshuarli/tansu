@@ -109,17 +109,24 @@ export function renderDiff(hunks: DiffHunk[]): HTMLElement {
     const header = document.createElement("div");
     header.className = "diff-hunk-header";
     header.textContent = `@@ -${hunk.oldStart + 1} +${hunk.newStart + 1} @@`;
-    hunkEl.appendChild(header);
+    hunkEl.append(header);
 
     for (const line of hunk.lines) {
       const lineEl = document.createElement("div");
       lineEl.className = `diff-line diff-${line.type}`;
-      const prefix = line.type === "add" ? "+" : line.type === "del" ? "-" : " ";
+      let prefix: string;
+      if (line.type === "add") {
+        prefix = "+";
+      } else if (line.type === "del") {
+        prefix = "-";
+      } else {
+        prefix = " ";
+      }
       lineEl.innerHTML = `<span class="diff-prefix">${prefix}</span>${escapeHtml(line.text)}`;
-      hunkEl.appendChild(lineEl);
+      hunkEl.append(lineEl);
     }
 
-    container.appendChild(hunkEl);
+    container.append(hunkEl);
   }
 
   return container;
@@ -134,11 +141,10 @@ function lcs(a: string[], b: string[]): [number, number][] {
   );
   for (let i = 1; i <= n; i++) {
     for (let j = 1; j <= m; j++) {
-      if (a[i - 1] === b[j - 1]) {
-        table[i]![j] = table[i - 1]![j - 1]! + 1;
-      } else {
-        table[i]![j] = Math.max(table[i - 1]![j]!, table[i]![j - 1]!);
-      }
+      table[i]![j] =
+        a[i - 1] === b[j - 1]
+          ? table[i - 1]![j - 1]! + 1
+          : Math.max(table[i - 1]![j]!, table[i]![j - 1]!);
     }
   }
 

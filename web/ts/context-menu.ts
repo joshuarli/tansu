@@ -19,7 +19,7 @@ export function showContextMenu(items: MenuItem[], x: number, y: number): void {
 
   for (const item of items) {
     const el = document.createElement("div");
-    el.className = "context-menu-item" + (item.danger ? " danger" : "");
+    el.className = `context-menu-item${item.danger ? " danger" : ""}`;
     el.textContent = item.label;
     el.onclick = () => {
       hide();
@@ -27,17 +27,19 @@ export function showContextMenu(items: MenuItem[], x: number, y: number): void {
       // triggered by the action (e.g. tab re-renders, nested dispatchEvent).
       setTimeout(() => item.onclick(), 0);
     };
-    menu.appendChild(el);
+    menu.append(el);
   }
 
-  document.body.appendChild(menu);
+  document.body.append(menu);
   active = menu;
 
   const handler = () => hide();
   dismissHandler = handler;
   setTimeout(() => {
     // Only register if hide() hasn't been called since this menu was shown.
-    if (dismissHandler === handler) document.addEventListener("click", handler);
+    if (dismissHandler === handler) {
+      document.addEventListener("click", handler);
+    }
   }, 0);
 }
 

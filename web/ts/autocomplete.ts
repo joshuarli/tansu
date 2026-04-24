@@ -1,7 +1,6 @@
 /// Wiki-link autocomplete: detects [[ typing and shows a dropdown of matching notes.
 
-import { listNotes } from "./api.ts";
-import type { NoteEntry } from "./api.ts";
+import { listNotes, type NoteEntry } from "./api.ts";
 import { markDirty } from "./tabs.ts";
 import { stemFromPath } from "./util.ts";
 
@@ -57,8 +56,7 @@ async function showAutocomplete(
   if (!allNotes) {
     try {
       allNotes = await listNotes();
-    } catch (e) {
-      console.warn("Failed to load notes for autocomplete:", e);
+    } catch {
       return;
     }
   }
@@ -89,15 +87,15 @@ async function showAutocomplete(
 
   let selectedIdx = 0;
 
-  filtered.forEach((note, i) => {
+  for (const [i, note] of filtered.entries()) {
     const item = document.createElement("div");
-    item.className = "autocomplete-item" + (i === 0 ? " selected" : "");
+    item.className = `autocomplete-item${i === 0 ? " selected" : ""}`;
     item.textContent = note.title || stemFromPath(note.path);
     item.onclick = () => completeWikiLink(textNode, triggerIdx, cursorPos, note, currentPath);
-    autocompleteEl!.appendChild(item);
-  });
+    autocompleteEl!.append(item);
+  }
 
-  document.body.appendChild(autocompleteEl);
+  document.body.append(autocompleteEl);
 
   const handler = (e: KeyboardEvent) => {
     if (!autocompleteEl) {
@@ -120,7 +118,9 @@ async function showAutocomplete(
       e.preventDefault();
       e.stopPropagation();
       const note = filtered[selectedIdx];
-      if (note) completeWikiLink(textNode, triggerIdx, cursorPos, note, currentPath);
+      if (note) {
+        completeWikiLink(textNode, triggerIdx, cursorPos, note, currentPath);
+      }
       document.removeEventListener("keydown", handler, true);
       /* c8 ignore stop */
     } else if (e.key === "Escape") {
@@ -134,12 +134,16 @@ async function showAutocomplete(
 }
 
 function updateSelection(idx: number) {
-  if (!autocompleteEl) return;
+  if (!autocompleteEl) {
+    return;
+  }
   const items = autocompleteEl.children;
   for (let i = 0; i < items.length; i++) {
     items[i]!.classList.toggle("selected", i === idx);
   }
 }
+
+export type CompleteWikiLink = typeof completeWikiLink;
 
 export function completeWikiLink(
   textNode: Text,
@@ -165,11 +169,15 @@ export function completeWikiLink(
   }
 
   hideAutocomplete();
-  if (currentPath) markDirty(currentPath);
+  if (currentPath) {
+    markDirty(currentPath);
+  }
 }
 
 function clampNodeOffset(node: Node, offset: number): number {
-  if (offset < 0) return 0;
+  if (offset < 0) {
+    return 0;
+  }
   if (node.nodeType === Node.TEXT_NODE) {
     return Math.min(offset, node.textContent?.length ?? 0);
   }

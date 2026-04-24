@@ -17,7 +17,6 @@ export {
   getTabs,
   getActiveTab,
   openTab,
-  closeTab,
   closeActiveTab,
   nextTab,
   prevTab,
@@ -30,11 +29,14 @@ export {
   syncToServer,
   setCursor,
   getCursor,
+  closeTab,
 } from "./tab-state.ts";
 
 export async function createNewNote(): Promise<void> {
   const name = await showInputDialog("New note name...");
-  if (!name) return;
+  if (!name) {
+    return;
+  }
   await _createNewNote(name);
 }
 
@@ -45,7 +47,7 @@ let hoveredTabIndex = -1;
 const tabTooltip = document.createElement("div");
 tabTooltip.className = "tab-tooltip";
 tabTooltip.textContent = "space to close";
-document.body.appendChild(tabTooltip);
+document.body.append(tabTooltip);
 
 function showTabTooltip(tabEl: HTMLElement) {
   const rect = tabEl.getBoundingClientRect();
@@ -59,21 +61,29 @@ function hideTabTooltip() {
 }
 
 document.addEventListener("keydown", (e) => {
-  if (hoveredTabIndex === -1) return;
-  if (e.key !== " ") return;
-  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  if (hoveredTabIndex === -1) {
+    return;
+  }
+  if (e.key !== " ") {
+    return;
+  }
+  if (e.metaKey || e.ctrlKey || e.altKey) {
+    return;
+  }
   const target = e.target as Element;
   // Allow space in text inputs but not in contenteditable — the editor is
   // always focused, so we must intercept there too and preventDefault stops
   // the character from being inserted.
-  if (target.tagName === "INPUT" || target.tagName === "TEXTAREA") return;
+  if (target.tagName === "INPUT" || target.tagName === "TEXTAREA") {
+    return;
+  }
   e.preventDefault();
   closeTab(hoveredTabIndex);
 });
 
 function render() {
-  const tabBar = document.getElementById("tab-bar")!;
-  const emptyState = document.getElementById("empty-state")!;
+  const tabBar = document.querySelector("#tab-bar")!;
+  const emptyState = document.querySelector("#empty-state") as HTMLElement;
   tabBar.innerHTML = "";
   hoveredTabIndex = -1;
   hideTabTooltip();
@@ -81,34 +91,36 @@ function render() {
   const activeIndex = getActiveIndex();
   emptyState.style.display = tabs.length === 0 ? "flex" : "none";
 
-  tabs.forEach((tab, i) => {
+  for (const [i, tab] of tabs.entries()) {
     const el = document.createElement("div");
-    el.className = "tab" + (i === activeIndex ? " active" : "");
+    el.className = `tab${i === activeIndex ? " active" : ""}`;
 
     if (tab.dirty) {
       const dot = document.createElement("span");
       dot.className = "dirty";
-      dot.textContent = "\u25cf";
-      el.appendChild(dot);
+      dot.textContent = "\u25CF";
+      el.append(dot);
     }
 
     const label = document.createElement("span");
     label.textContent = tab.title;
-    el.appendChild(label);
+    el.append(label);
 
     const closeBtn = document.createElement("span");
     closeBtn.className = "close";
-    closeBtn.textContent = "\u00d7";
+    closeBtn.textContent = "\u00D7";
     closeBtn.onclick = (e) => {
       e.stopPropagation();
       closeTab(i);
     };
-    el.appendChild(closeBtn);
+    el.append(closeBtn);
 
+    // eslint-disable-next-line no-loop-func
     el.addEventListener("mouseenter", () => {
       hoveredTabIndex = i;
       showTabTooltip(el);
     });
+    // eslint-disable-next-line no-loop-func
     el.addEventListener("mouseleave", () => {
       hoveredTabIndex = -1;
       hideTabTooltip();
@@ -122,15 +134,15 @@ function render() {
       }
     };
 
-    tabBar.appendChild(el);
-  });
+    tabBar.append(el);
+  }
 
   const addBtn = document.createElement("div");
   addBtn.className = "tab tab-new";
   addBtn.textContent = "+";
   addBtn.title = "New note (Ctrl+N)";
   addBtn.onclick = () => createNewNote();
-  tabBar.appendChild(addBtn);
+  tabBar.append(addBtn);
 
   tabBar
     .querySelector<HTMLElement>(".tab.active")
@@ -141,7 +153,9 @@ async function showTabContextMenu(e: MouseEvent, index: number) {
   e.preventDefault();
   const tabs = getTabs();
   const tab = tabs[index];
-  if (!tab) return;
+  if (!tab) {
+    return;
+  }
 
   const pinned = await getPinnedFiles();
   const isPinned = pinned.some((f) => f.path === tab.path);
@@ -163,18 +177,22 @@ async function showTabContextMenu(e: MouseEvent, index: number) {
         label: isPinned ? "Unpin" : "Pin",
         onclick: () => {
           const action = isPinned ? unpinFile(tab.path) : pinFile(tab.path);
-          action.then(() => emit("pinned:changed", undefined));
+          void action.then(() => emit("pinned:changed")).catch(() => void 0);
         },
       },
       {
         label: "Delete",
         danger: true,
         onclick: () => {
-          if (!confirm(`Delete ${tab.title}?`)) return;
-          deleteNote(tab.path).then(() => {
-            closeTab(index);
-            emit("files:changed", undefined);
-          });
+          if (!confirm(`Delete ${tab.title}?`)) {
+            return;
+          }
+          void deleteNote(tab.path)
+            .then(() => {
+              closeTab(index);
+              return emit("files:changed");
+            })
+            .catch(() => void 0);
         },
       },
       {

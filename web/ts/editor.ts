@@ -42,7 +42,11 @@ let revisionsEl: HTMLElement | null = null;
 let isSourceMode = false;
 let currentPath: string | null = null;
 
-type UndoEntry = { md: string; selStart: number; selEnd: number };
+interface UndoEntry {
+  md: string;
+  selStart: number;
+  selEnd: number;
+}
 const undoStack: UndoEntry[] = [];
 let undoIndex = -1;
 let typingSnapshotTimer: ReturnType<typeof setTimeout> | null = null;
@@ -66,7 +70,7 @@ const INDENTABLE_BLOCKS = new Set([
 export { _invalidateNoteCache as invalidateNoteCache };
 
 export function initEditor() {
-  editorArea = document.getElementById("editor-area")!;
+  editorArea = document.querySelector("#editor-area")!;
   registerLinkHover();
 
   on<{ content: string; mtime: number }>("revision:restore", ({ content, mtime }) => {
@@ -88,9 +92,11 @@ export function showEditor(path: string, content: string) {
   hideRevisions();
   hideAutocomplete();
 
-  const emptyState = document.getElementById("empty-state");
+  const emptyState = document.querySelector("#empty-state") as HTMLElement | null;
   editorArea.innerHTML = "";
-  if (emptyState) editorArea.appendChild(emptyState);
+  if (emptyState) {
+    editorArea.append(emptyState);
+  }
   emptyState!.style.display = "none";
 
   container = document.createElement("div");
@@ -122,15 +128,26 @@ export function showEditor(path: string, content: string) {
                 host: revisionsEl,
                 getCurrentContent: getCurrentContent,
                 onHide: () => {
-                  if (revisionsEl) revisionsEl.style.display = "none";
-                  if (isSourceMode && sourceEl) sourceEl.style.display = "";
-                  else if (contentEl) contentEl.style.display = "";
+                  if (revisionsEl) {
+                    revisionsEl.style.display = "none";
+                  }
+                  if (isSourceMode && sourceEl) {
+                    sourceEl.style.display = "";
+                  } else if (contentEl) {
+                    contentEl.style.display = "";
+                  }
                 },
               });
               if (isRevisionsOpen()) {
-                if (contentEl) contentEl.style.display = "none";
-                if (sourceEl) sourceEl.style.display = "none";
-                if (revisionsEl) revisionsEl.style.display = "";
+                if (contentEl) {
+                  contentEl.style.display = "none";
+                }
+                if (sourceEl) {
+                  sourceEl.style.display = "none";
+                }
+                if (revisionsEl) {
+                  revisionsEl.style.display = "";
+                }
               }
             }
           },
@@ -145,9 +162,11 @@ export function showEditor(path: string, content: string) {
   fmtGroup.className = "editor-toolbar-fmt-group";
 
   populateFormatButtons(fmtGroup, {
-    contentEl,
+    contentEl: contentEl!,
     applyIndent: (dedent) => {
-      if (indentCurrentSelection(dedent)) onEditorTabMutation();
+      if (indentCurrentSelection(dedent)) {
+        onEditorTabMutation();
+      }
     },
     applySourceFormat: applySourceFormatInEditor,
     afterInline: onEditorTabMutation,
@@ -158,30 +177,30 @@ export function showEditor(path: string, content: string) {
   toolbarSpacer.style.flex = "1";
 
   toolbarEl.append(fmtGroup, toolbarSpacer, sourceBtn, menuBtn);
-  editorArea.appendChild(toolbarEl);
+  editorArea.append(toolbarEl);
 
   contentEl = document.createElement("div");
   contentEl.className = "editor-content";
   contentEl.contentEditable = "true";
   contentEl.spellcheck = true;
-  container.appendChild(contentEl);
+  container.append(contentEl);
 
   sourceEl = document.createElement("textarea");
   sourceEl.className = "editor-source";
   sourceEl.style.display = "none";
-  container.appendChild(sourceEl);
+  container.append(sourceEl);
 
   revisionsEl = document.createElement("div");
   revisionsEl.className = "revisions-container";
   revisionsEl.style.display = "none";
-  container.appendChild(revisionsEl);
+  container.append(revisionsEl);
 
   backlinksEl = document.createElement("div");
   backlinksEl.className = "backlinks";
   backlinksEl.style.display = "none";
 
-  editorArea.appendChild(container);
-  editorArea.appendChild(backlinksEl);
+  editorArea.append(container);
+  editorArea.append(backlinksEl);
 
   const cursor = getCursor(path);
   loadContent(content, cursor);
@@ -229,8 +248,10 @@ export function hideEditor() {
   contentEl = null;
   sourceEl = null;
   revisionsEl = null;
-  const emptyState = document.getElementById("empty-state");
-  if (emptyState) emptyState.style.display = "flex";
+  const emptyState = document.querySelector("#empty-state") as HTMLElement | null;
+  if (emptyState) {
+    emptyState.style.display = "flex";
+  }
 }
 
 export function getCurrentContent(): string {
@@ -269,7 +290,9 @@ let saving = false;
 let autosaveTimer: ReturnType<typeof setTimeout> | null = null;
 
 function scheduleAutosave() {
-  if (autosaveTimer !== null) clearTimeout(autosaveTimer);
+  if (autosaveTimer !== null) {
+    clearTimeout(autosaveTimer);
+  }
   autosaveTimer = setTimeout(tryAutosave, 1500);
 }
 
@@ -287,7 +310,9 @@ function tryAutosave() {
 }
 
 export async function saveCurrentNote(opts?: { silent?: boolean }) {
-  if (saving) return;
+  if (saving) {
+    return;
+  }
   if (autosaveTimer !== null) {
     clearTimeout(autosaveTimer);
     autosaveTimer = null;
@@ -301,11 +326,15 @@ export async function saveCurrentNote(opts?: { silent?: boolean }) {
 }
 
 async function _doSave(silent: boolean) {
-  if (!currentPath) return;
+  if (!currentPath) {
+    return;
+  }
   dispatchEditorAction({ type: "save", path: currentPath, trigger: silent ? "auto" : "manual" });
   const savePath = currentPath;
   const tab = getTabs().find((t) => t.path === savePath) ?? getActiveTab();
-  if (!tab) return;
+  if (!tab) {
+    return;
+  }
 
   const content = getCurrentContent();
   // Capture cursor synchronously before the first await
@@ -315,19 +344,24 @@ async function _doSave(silent: boolean) {
   const action = classifySaveResult(result, content, tab.content);
 
   switch (action.type) {
-    case "clean":
+    case "clean": {
       markClean(savePath, action.content, action.mtime);
-      if (cursorOffset >= 0) setCursor(savePath, cursorOffset);
-      emit("files:changed", undefined);
+      if (cursorOffset >= 0) {
+        setCursor(savePath, cursorOffset);
+      }
+      emit("files:changed");
       break;
+    }
     case "false-conflict": {
       const retry = await saveNote(savePath, content, 0);
       markClean(savePath, content, retry.mtime);
-      if (cursorOffset >= 0) setCursor(savePath, cursorOffset);
-      emit("files:changed", undefined);
+      if (cursorOffset >= 0) {
+        setCursor(savePath, cursorOffset);
+      }
+      emit("files:changed");
       break;
     }
-    case "real-conflict":
+    case "real-conflict": {
       // Suppress banner for background autosaves; next manual save will surface it.
       if (!silent && container) {
         showConflictBanner(
@@ -340,6 +374,10 @@ async function _doSave(silent: boolean) {
         );
       }
       break;
+    }
+    default: {
+      break;
+    }
   }
 }
 
@@ -352,12 +390,16 @@ export function classifyReload(isDirty: boolean): ReloadAction {
 
 export function reloadFromDisk(content: string, mtime: number) {
   const tab = getActiveTab();
-  if (!tab || !currentPath) return;
+  if (!tab || !currentPath) {
+    return;
+  }
 
   const action = classifyReload(tab.dirty);
 
   if (action.type === "load") {
-    if (getCurrentContent() !== content) loadContent(content);
+    if (getCurrentContent() !== content) {
+      loadContent(content);
+    }
     markClean(currentPath, content, mtime);
     return;
   }
@@ -376,11 +418,17 @@ export function reloadFromDisk(content: string, mtime: number) {
 }
 
 function saveCursorOffset(): number {
-  if (!contentEl) return -1;
+  if (!contentEl) {
+    return -1;
+  }
   const sel = window.getSelection();
-  if (!sel || !sel.rangeCount) return -1;
+  if (!sel || !sel.rangeCount) {
+    return -1;
+  }
   const range = sel.getRangeAt(0);
-  if (!contentEl.contains(range.startContainer)) return -1;
+  if (!contentEl.contains(range.startContainer)) {
+    return -1;
+  }
   return getCursorMarkdownOffset(contentEl, range);
 }
 
@@ -390,19 +438,23 @@ function saveCursorOffset(): number {
 /// Returns null if there is no selection or it is outside contentEl.
 function getSelectionMarkdownOffsets(el: HTMLElement): { start: number; end: number } | null {
   const sel = window.getSelection();
-  if (!sel || sel.rangeCount === 0) return null;
+  if (!sel || sel.rangeCount === 0) {
+    return null;
+  }
   const range = sel.getRangeAt(0);
-  if (!el.contains(range.startContainer) || !el.contains(range.endContainer)) return null;
+  if (!el.contains(range.startContainer) || !el.contains(range.endContainer)) {
+    return null;
+  }
 
   // Insert end marker first (higher DOM position → inserting it doesn't shift start).
   const endMarker = document.createElement("span");
-  endMarker.setAttribute("data-md-cursor", "true");
+  endMarker.dataset["mdCursor"] = "true";
   const endRange = range.cloneRange();
   endRange.collapse(false);
   endRange.insertNode(endMarker);
 
   const startMarker = document.createElement("span");
-  startMarker.setAttribute("data-md-cursor", "true");
+  startMarker.dataset["mdCursor"] = "true";
   const startRange = range.cloneRange();
   startRange.collapse(true);
   startRange.insertNode(startMarker);
@@ -419,7 +471,9 @@ function getSelectionMarkdownOffsets(el: HTMLElement): { start: number; end: num
   startMarker.remove();
   endMarker.remove();
   startParent?.normalize();
-  if (endParent && endParent !== startParent) endParent.normalize();
+  if (endParent && endParent !== startParent) {
+    endParent.normalize();
+  }
 
   // Restore selection
   try {
@@ -429,7 +483,9 @@ function getSelectionMarkdownOffsets(el: HTMLElement): { start: number; end: num
     // Ignore if range is no longer valid
   }
 
-  if (firstIdx === -1) return null;
+  if (firstIdx === -1) {
+    return null;
+  }
   const start = firstIdx;
   // If collapsed, secondIdx will be -1; treat as collapsed selection
   const end = secondIdx !== -1 ? secondIdx - 1 : start; // -1 because first sentinel char was removed
@@ -437,15 +493,21 @@ function getSelectionMarkdownOffsets(el: HTMLElement): { start: number; end: num
 }
 
 function restoreCursorOffset(offset: number, markdown: string, scroll = false) {
-  if (!contentEl || offset < 0) return;
+  if (!contentEl || offset < 0) {
+    return;
+  }
   setContentWithCursor(contentEl, markdown, offset);
   restoreCursorMarker(scroll);
 }
 
 function restoreCursorMarker(scroll = false) {
-  if (!contentEl) return;
+  if (!contentEl) {
+    return;
+  }
   const sel = window.getSelection();
-  if (!sel) return;
+  if (!sel) {
+    return;
+  }
   const marker = contentEl.querySelector('[data-md-cursor="true"]');
   if (!(marker instanceof HTMLElement)) {
     placeCursorAtEnd();
@@ -456,7 +518,9 @@ function restoreCursorMarker(scroll = false) {
   range.collapse(true);
   sel.removeAllRanges();
   sel.addRange(range);
-  if (scroll) marker.parentElement?.scrollIntoView({ block: "center", behavior: "instant" });
+  if (scroll) {
+    marker.parentElement?.scrollIntoView({ block: "center", behavior: "instant" });
+  }
   marker.remove();
 }
 
@@ -464,18 +528,24 @@ function loadContent(markdown: string, explicitOffset?: number) {
   if (isSourceMode && sourceEl) {
     const pos = sourceEl.selectionStart;
     sourceEl.value = markdown;
-    sourceEl.selectionStart = sourceEl.selectionEnd = pos;
+    sourceEl.selectionStart = pos;
+    sourceEl.selectionEnd = pos;
   } else if (contentEl) {
     const focused =
       contentEl === document.activeElement || contentEl.contains(document.activeElement);
     const offset = explicitOffset ?? (focused ? saveCursorOffset() : -1);
-    if (offset >= 0) restoreCursorOffset(offset, markdown, explicitOffset !== undefined);
-    else setContent(contentEl, markdown);
+    if (offset >= 0) {
+      restoreCursorOffset(offset, markdown, explicitOffset !== undefined);
+    } else {
+      setContent(contentEl, markdown);
+    }
   }
 }
 
 function toggleSourceMode() {
-  if (!contentEl || !sourceEl) return;
+  if (!contentEl || !sourceEl) {
+    return;
+  }
   hideRevisions();
 
   if (isSourceMode) {
@@ -494,7 +564,9 @@ function toggleSourceMode() {
 
   toolbarEl?.querySelector(".editor-toolbar-btn--source")?.classList.toggle("active", isSourceMode);
   const fmtGroup = toolbarEl?.querySelector(".editor-toolbar-fmt-group") as HTMLElement | null;
-  if (fmtGroup) fmtGroup.style.display = isSourceMode ? "none" : "flex";
+  if (fmtGroup) {
+    fmtGroup.style.display = isSourceMode ? "none" : "flex";
+  }
 }
 
 function getAnchorBlockTag(): string | null {
@@ -502,7 +574,9 @@ function getAnchorBlockTag(): string | null {
   while (node && node !== contentEl) {
     if (node instanceof HTMLElement) {
       const tag = node.tagName.toLowerCase();
-      if (/^(h[1-6]|p|ul|ol|li|blockquote|pre)$/.test(tag)) return tag;
+      if (/^(h[1-6]|p|ul|ol|li|blockquote|pre)$/.test(tag)) {
+        return tag;
+      }
     }
     node = node.parentNode;
   }
@@ -510,13 +584,19 @@ function getAnchorBlockTag(): string | null {
 }
 
 function setupEditorEvents() {
-  if (!contentEl || !sourceEl) return;
+  if (!contentEl || !sourceEl) {
+    return;
+  }
 
-  if (formatToolbarCleanup) formatToolbarCleanup();
+  if (formatToolbarCleanup) {
+    formatToolbarCleanup();
+  }
   formatToolbarCleanup = initFormatToolbar({
     contentEl,
     applyIndent: (dedent) => {
-      if (indentCurrentSelection(dedent)) onEditorTabMutation();
+      if (indentCurrentSelection(dedent)) {
+        onEditorTabMutation();
+      }
     },
     applySourceFormat: applySourceFormatInEditor,
     onMutation: onEditorTabMutation,
@@ -528,11 +608,15 @@ function setupEditorEvents() {
     // intercepted by the keydown handler before it reaches the browser's undo path.
     if (ie.inputType === "historyUndo" || ie.inputType === "historyRedo") {
       dispatchEditorAction({ type: ie.inputType === "historyUndo" ? "undo" : "redo" });
-      if (currentPath) markDirty(currentPath);
+      if (currentPath) {
+        markDirty(currentPath);
+      }
       scheduleAutosave();
       return;
     }
-    if (currentPath) markDirty(currentPath);
+    if (currentPath) {
+      markDirty(currentPath);
+    }
     scheduleAutosave();
     scheduleTypingSnapshot();
     if (contentEl && checkBlockInputTransform(contentEl)) {
@@ -544,12 +628,18 @@ function setupEditorEvents() {
       return;
     }
     const inlineTag = checkInlineTransform();
-    if (inlineTag) dispatchEditorAction({ type: "inline-transform", tag: inlineTag });
-    if (contentEl) checkWikiLinkTrigger(contentEl, currentPath);
+    if (inlineTag) {
+      dispatchEditorAction({ type: "inline-transform", tag: inlineTag });
+    }
+    if (contentEl) {
+      checkWikiLinkTrigger(contentEl, currentPath);
+    }
   });
 
   sourceEl.addEventListener("input", () => {
-    if (currentPath) markDirty(currentPath);
+    if (currentPath) {
+      markDirty(currentPath);
+    }
     scheduleAutosave();
   });
 
@@ -598,20 +688,20 @@ function setupEditorEvents() {
       return;
     }
 
-    if (e.key === "Tab") {
-      if (handleContentTabKey(e)) {
-        dispatchEditorAction({ type: "indent", direction: e.shiftKey ? "out" : "in" });
-        return;
-      }
+    if (e.key === "Tab" && handleContentTabKey(e)) {
+      dispatchEditorAction({ type: "indent", direction: e.shiftKey ? "out" : "in" });
+      return;
     }
 
-    if (e.key === "Backspace") {
-      if (handleEmptyListItemBackspace(e)) return;
+    if (e.key === "Backspace" && handleEmptyListItemBackspace(e)) {
+      return;
     }
 
     if (e.key === "Enter" && !e.shiftKey) {
       handleBlockTransform(e, contentEl!, () => {
-        if (currentPath) markDirty(currentPath);
+        if (currentPath) {
+          markDirty(currentPath);
+        }
       });
       if (e.defaultPrevented) {
         dispatchEditorAction({
@@ -626,9 +716,11 @@ function setupEditorEvents() {
   contentEl.addEventListener("paste", (e) => {
     e.preventDefault();
     const clipData = e.clipboardData;
-    if (!clipData) return;
+    if (!clipData) {
+      return;
+    }
 
-    const imageItem = Array.from(clipData.items).find((item) => item.type.startsWith("image/"));
+    const imageItem = [...clipData.items].find((item) => item.type.startsWith("image/"));
     if (imageItem) {
       handleImagePaste(imageItem, currentPath);
       dispatchEditorAction({ type: "paste", kind: "image" });
@@ -641,7 +733,9 @@ function setupEditorEvents() {
   });
 
   initImageResize(contentEl, () => {
-    if (currentPath) markDirty(currentPath);
+    if (currentPath) {
+      markDirty(currentPath);
+    }
     scheduleAutosave();
   });
 
@@ -654,15 +748,19 @@ function setupEditorEvents() {
       return;
     }
 
-    if (e.key === "Tab") handleSourceTabKey(e);
+    if (e.key === "Tab") {
+      handleSourceTabKey(e);
+    }
   });
 }
 
 function handleSourceTabKey(e: KeyboardEvent): boolean {
-  if (!sourceEl) return false;
+  if (!sourceEl) {
+    return false;
+  }
 
   e.preventDefault();
-  const value = sourceEl.value;
+  const { value } = sourceEl;
   const start = sourceEl.selectionStart;
   const end = sourceEl.selectionEnd;
 
@@ -689,9 +787,13 @@ function handleSourceTabKey(e: KeyboardEvent): boolean {
 }
 
 function indentCurrentSelection(dedent: boolean): boolean {
-  if (!contentEl) return false;
+  if (!contentEl) {
+    return false;
+  }
   const sel = window.getSelection();
-  if (!sel || sel.rangeCount === 0) return false;
+  if (!sel || sel.rangeCount === 0) {
+    return false;
+  }
   const range = sel.getRangeAt(0);
   if (!contentEl.contains(range.startContainer) || !contentEl.contains(range.endContainer)) {
     return false;
@@ -700,8 +802,11 @@ function indentCurrentSelection(dedent: boolean): boolean {
   const listItem = getListItemBlock(range.startContainer);
   if (range.collapsed && listItem) {
     const marker = insertMarker(range);
-    if (dedent) dedentListItems([listItem]);
-    else indentListItems([listItem]);
+    if (dedent) {
+      dedentListItems([listItem]);
+    } else {
+      indentListItems([listItem]);
+    }
     restoreCollapsedSelection(marker);
     return true;
   }
@@ -714,7 +819,9 @@ function indentCurrentSelection(dedent: boolean): boolean {
   const targetRange = range.cloneRange();
   const blocks = getSelectedBlocks(targetRange);
   if (blocks.length === 0) {
-    if (dedent) return true;
+    if (dedent) {
+      return true;
+    }
     insertTabAtRange(range);
     return true;
   }
@@ -722,8 +829,11 @@ function indentCurrentSelection(dedent: boolean): boolean {
   if (blocks.every(isListItemBlock)) {
     const endMarker = insertBoundaryMarker(range, "end");
     const startMarker = insertBoundaryMarker(range, "start");
-    if (dedent) dedentListItems(blocks);
-    else indentListItems(blocks);
+    if (dedent) {
+      dedentListItems(blocks);
+    } else {
+      indentListItems(blocks);
+    }
     restoreSelectionFromMarkers(startMarker, endMarker);
     return true;
   }
@@ -731,40 +841,62 @@ function indentCurrentSelection(dedent: boolean): boolean {
   const endMarker = insertBoundaryMarker(range, "end");
   const startMarker = insertBoundaryMarker(range, "start");
   if (dedent) {
-    for (const block of blocks) dedentBlock(block);
+    for (const block of blocks) {
+      dedentBlock(block);
+    }
   } else {
-    for (const block of blocks) indentBlock(block);
+    for (const block of blocks) {
+      indentBlock(block);
+    }
   }
   restoreSelectionFromMarkers(startMarker, endMarker);
   return true;
 }
 
 function handleContentTabKey(e: KeyboardEvent): boolean {
-  if (!contentEl) return false;
+  if (!contentEl) {
+    return false;
+  }
   const sel = window.getSelection();
-  if (!sel || sel.rangeCount === 0) return false;
+  if (!sel || sel.rangeCount === 0) {
+    return false;
+  }
   const range = sel.getRangeAt(0);
   if (!contentEl.contains(range.startContainer) || !contentEl.contains(range.endContainer)) {
     return false;
   }
   e.preventDefault();
   const did = indentCurrentSelection(e.shiftKey);
-  if (did) onEditorTabMutation();
+  if (did) {
+    onEditorTabMutation();
+  }
   return did;
 }
 
 function handleEmptyListItemBackspace(e: KeyboardEvent): boolean {
-  if (!contentEl) return false;
+  if (!contentEl) {
+    return false;
+  }
   const sel = window.getSelection();
-  if (!sel || sel.rangeCount === 0 || !sel.isCollapsed) return false;
+  if (!sel || sel.rangeCount === 0 || !sel.isCollapsed) {
+    return false;
+  }
 
   const range = sel.getRangeAt(0);
-  if (!contentEl.contains(range.startContainer)) return false;
+  if (!contentEl.contains(range.startContainer)) {
+    return false;
+  }
 
   const listItem = getListItemBlock(range.startContainer);
-  if (!listItem) return false;
-  if (!isRangeAtStartOfBlock(range, listItem)) return false;
-  if (!isListItemEmpty(listItem)) return false;
+  if (!listItem) {
+    return false;
+  }
+  if (!isRangeAtStartOfBlock(range, listItem)) {
+    return false;
+  }
+  if (!isListItemEmpty(listItem)) {
+    return false;
+  }
 
   e.preventDefault();
   if (isNestedListItem(listItem)) {
@@ -779,9 +911,13 @@ function handleEmptyListItemBackspace(e: KeyboardEvent): boolean {
 }
 
 function onEditorTabMutation() {
-  if (currentPath) markDirty(currentPath);
+  if (currentPath) {
+    markDirty(currentPath);
+  }
   scheduleAutosave();
-  if (contentEl && !isSourceMode) checkWikiLinkTrigger(contentEl, currentPath);
+  if (contentEl && !isSourceMode) {
+    checkWikiLinkTrigger(contentEl, currentPath);
+  }
 }
 
 function pushUndo(md: string, selStart: number, selEnd: number): void {
@@ -796,10 +932,14 @@ function pushUndo(md: string, selStart: number, selEnd: number): void {
 }
 
 function scheduleTypingSnapshot(): void {
-  if (typingSnapshotTimer !== null) clearTimeout(typingSnapshotTimer);
+  if (typingSnapshotTimer !== null) {
+    clearTimeout(typingSnapshotTimer);
+  }
   typingSnapshotTimer = setTimeout(() => {
     typingSnapshotTimer = null;
-    if (!contentEl) return;
+    if (!contentEl) {
+      return;
+    }
     const md = domToMarkdown(contentEl);
     const sel = getSelectionMarkdownOffsets(contentEl);
     pushUndo(md, sel?.start ?? 0, sel?.end ?? 0);
@@ -807,7 +947,9 @@ function scheduleTypingSnapshot(): void {
 }
 
 function undoEdit(): void {
-  if (undoIndex <= 0 || !contentEl) return;
+  if (undoIndex <= 0 || !contentEl) {
+    return;
+  }
   undoIndex--;
   const entry = undoStack[undoIndex]!;
   setContentWithSelection(contentEl, entry.md, entry.selStart, entry.selEnd);
@@ -816,7 +958,9 @@ function undoEdit(): void {
 }
 
 function redoEdit(): void {
-  if (undoIndex >= undoStack.length - 1 || !contentEl) return;
+  if (undoIndex >= undoStack.length - 1 || !contentEl) {
+    return;
+  }
   undoIndex++;
   const entry = undoStack[undoIndex]!;
   setContentWithSelection(contentEl, entry.md, entry.selStart, entry.selEnd);
@@ -829,9 +973,13 @@ function redoEdit(): void {
 function applySourceFormatInEditor(
   transform: (md: string, s: number, e: number) => FormatResult,
 ): void {
-  if (!contentEl) return;
+  if (!contentEl) {
+    return;
+  }
   const sel = getSelectionMarkdownOffsets(contentEl);
-  if (!sel) return;
+  if (!sel) {
+    return;
+  }
   const md = domToMarkdown(contentEl);
   // Save before-state to undo stack
   pushUndo(md, sel.start, sel.end);
@@ -853,7 +1001,9 @@ function insertTabAtRange(range: Range) {
   range.deleteContents();
   range.insertNode(tab);
   const sel = window.getSelection();
-  if (!sel) return;
+  if (!sel) {
+    return;
+  }
   const next = document.createRange();
   next.setStartAfter(tab);
   next.collapse(true);
@@ -862,8 +1012,12 @@ function insertTabAtRange(range: Range) {
 }
 
 function isIndentableBlock(el: HTMLElement): boolean {
-  if (el === contentEl) return false;
-  if (!INDENTABLE_BLOCKS.has(el.tagName)) return false;
+  if (el === contentEl) {
+    return false;
+  }
+  if (!INDENTABLE_BLOCKS.has(el.tagName)) {
+    return false;
+  }
   return el.tagName !== "CODE" || el.parentElement?.tagName === "PRE";
 }
 
@@ -881,30 +1035,39 @@ function isNestedListItem(el: HTMLElement): boolean {
 function getIndentableBlock(node: Node): HTMLElement | null {
   let current: Node | null = node;
   while (current && current !== contentEl) {
-    if (current instanceof HTMLElement && isIndentableBlock(current)) return current;
+    if (current instanceof HTMLElement && isIndentableBlock(current)) {
+      return current;
+    }
     current = current.parentNode;
   }
   return null;
 }
 
 function getSelectedBlocks(range: Range): HTMLElement[] {
-  if (!contentEl) return [];
+  if (!contentEl) {
+    return [];
+  }
 
   const blocks: HTMLElement[] = [];
   const seen = new Set<HTMLElement>();
   const walker = document.createTreeWalker(contentEl, NodeFilter.SHOW_ELEMENT);
   let node: Node | null = walker.currentNode;
   while (node) {
-    if (node instanceof HTMLElement && isIndentableBlock(node) && range.intersectsNode(node)) {
-      if (!seen.has(node)) {
-        seen.add(node);
-        blocks.push(node);
-      }
+    if (
+      node instanceof HTMLElement &&
+      isIndentableBlock(node) &&
+      range.intersectsNode(node) &&
+      !seen.has(node)
+    ) {
+      seen.add(node);
+      blocks.push(node);
     }
     node = walker.nextNode();
   }
 
-  if (blocks.length > 0) return blocks;
+  if (blocks.length > 0) {
+    return blocks;
+  }
   const block = getIndentableBlock(range.startContainer);
   return block ? [block] : [];
 }
@@ -915,12 +1078,14 @@ function getListItemBlock(node: Node): HTMLElement | null {
 }
 
 function indentBlock(block: HTMLElement) {
-  block.insertBefore(createTabNode(), block.firstChild);
+  block.prepend(createTabNode());
 }
 
 function dedentBlock(block: HTMLElement) {
   const first = block.firstChild;
-  if (!first) return;
+  if (!first) {
+    return;
+  }
 
   if (
     first instanceof HTMLElement &&
@@ -931,7 +1096,9 @@ function dedentBlock(block: HTMLElement) {
     return;
   }
 
-  if (first.nodeType !== Node.TEXT_NODE) return;
+  if (first.nodeType !== Node.TEXT_NODE) {
+    return;
+  }
 
   const text = first.textContent ?? "";
   if (text.startsWith(INDENT_UNIT)) {
@@ -940,16 +1107,17 @@ function dedentBlock(block: HTMLElement) {
   }
 
   const match = text.match(/^[ \u00A0]{1,4}/);
-  if (match) first.textContent = text.slice(match[0].length);
+  if (match) {
+    first.textContent = text.slice(match[0].length);
+  }
 }
 
 function isListItemEmpty(item: HTMLElement): boolean {
   const clone = item.cloneNode(true) as HTMLElement;
-  for (const nested of clone.querySelectorAll("ul, ol")) nested.remove();
-  const text = (clone.textContent ?? "")
-    .replace(/\u200B/g, "")
-    .replace(/\u00A0/g, " ")
-    .trim();
+  for (const nested of clone.querySelectorAll("ul, ol")) {
+    nested.remove();
+  }
+  const text = (clone.textContent ?? "").replaceAll("​", "").replaceAll("\u00A0", " ").trim();
   return text === "";
 }
 
@@ -957,14 +1125,20 @@ function indentListItems(items: readonly HTMLElement[]) {
   const groups = groupSiblingListItems(items);
 
   for (const group of groups) {
-    const first = group.items[0];
-    if (!first) continue;
+    const [first] = group.items;
+    if (!first) {
+      continue;
+    }
 
     const previous = first.previousElementSibling;
-    if (!(previous instanceof HTMLElement) || previous.tagName !== "LI") continue;
+    if (!(previous instanceof HTMLElement) || previous.tagName !== "LI") {
+      continue;
+    }
 
     const nestedList = ensureNestedList(previous, group.parent.tagName);
-    for (const item of group.items) nestedList.appendChild(item);
+    for (const item of group.items) {
+      nestedList.append(item);
+    }
   }
 }
 
@@ -974,7 +1148,9 @@ function dedentListItems(items: readonly HTMLElement[]) {
   for (const group of groups) {
     const parentList = group.parent;
     const parentItem = parentList.parentElement;
-    if (!(parentItem instanceof HTMLElement) || parentItem.tagName !== "LI") continue;
+    if (!(parentItem instanceof HTMLElement) || parentItem.tagName !== "LI") {
+      continue;
+    }
 
     const grandList = parentItem.parentElement;
     if (
@@ -984,39 +1160,44 @@ function dedentListItems(items: readonly HTMLElement[]) {
       continue;
     }
 
-    const lastSelected = group.items[group.items.length - 1];
-    if (!lastSelected) continue;
+    const lastSelected = group.items.at(-1);
+    if (!lastSelected) {
+      continue;
+    }
     const trailingSiblings = collectTrailingListSiblings(lastSelected);
     let insertAfter: HTMLElement = parentItem;
 
     for (const item of group.items) {
-      insertAfter.insertAdjacentElement("afterend", item);
+      insertAfter.after(item);
       insertAfter = item;
     }
 
     if (trailingSiblings.length > 0) {
       const nestedList = ensureNestedList(insertAfter, parentList.tagName);
-      for (const sibling of trailingSiblings) nestedList.appendChild(sibling);
+      for (const sibling of trailingSiblings) {
+        nestedList.append(sibling);
+      }
     }
 
-    if (!parentList.children.length) parentList.remove();
+    if (parentList.children.length === 0) {
+      parentList.remove();
+    }
   }
 }
 
 function groupSiblingListItems(
   items: readonly HTMLElement[],
-): Array<{ parent: HTMLElement; items: HTMLElement[] }> {
-  const groups: Array<{ parent: HTMLElement; items: HTMLElement[] }> = [];
+): { parent: HTMLElement; items: HTMLElement[] }[] {
+  const groups: { parent: HTMLElement; items: HTMLElement[] }[] = [];
   let current: { parent: HTMLElement; items: HTMLElement[] } | null = null;
 
   for (const item of items) {
     const parent = item.parentElement;
-    if (!(parent instanceof HTMLElement) || (parent.tagName !== "UL" && parent.tagName !== "OL"))
+    if (!(parent instanceof HTMLElement) || (parent.tagName !== "UL" && parent.tagName !== "OL")) {
       continue;
+    }
 
-    const previous: HTMLElement | null = current
-      ? (current.items[current.items.length - 1] ?? null)
-      : null;
+    const previous: HTMLElement | null = current ? (current.items.at(-1) ?? null) : null;
     if (current && current.parent === parent && isAdjacentSibling(previous, item)) {
       current.items.push(item);
       continue;
@@ -1031,9 +1212,11 @@ function groupSiblingListItems(
 
 function ensureNestedList(parentItem: HTMLElement, tagName: string): HTMLElement {
   const last = parentItem.lastElementChild;
-  if (last instanceof HTMLElement && last.tagName === tagName) return last;
+  if (last instanceof HTMLElement && last.tagName === tagName) {
+    return last;
+  }
   const list = document.createElement(tagName.toLowerCase());
-  parentItem.appendChild(list);
+  parentItem.append(list);
   return list;
 }
 
@@ -1042,7 +1225,9 @@ function collectTrailingListSiblings(item: HTMLElement): HTMLElement[] {
   let current = item.nextElementSibling;
   while (current) {
     const next = current.nextElementSibling;
-    if (current instanceof HTMLElement && current.tagName === "LI") trailing.push(current);
+    if (current instanceof HTMLElement && current.tagName === "LI") {
+      trailing.push(current);
+    }
     current = next;
   }
   return trailing;
@@ -1055,7 +1240,9 @@ function isAdjacentSibling(previous: HTMLElement | null, item: HTMLElement): boo
 function getNextListElementSibling(node: Node): HTMLElement | null {
   let current = node.nextSibling;
   while (current) {
-    if (current instanceof HTMLElement) return current;
+    if (current instanceof HTMLElement) {
+      return current;
+    }
     current = current.nextSibling;
   }
   return null;
@@ -1064,7 +1251,9 @@ function getNextListElementSibling(node: Node): HTMLElement | null {
 function getPreviousListElementSibling(node: Node): HTMLElement | null {
   let current = node.previousSibling;
   while (current) {
-    if (current instanceof HTMLElement) return current;
+    if (current instanceof HTMLElement) {
+      return current;
+    }
     current = current.previousSibling;
   }
   return null;
@@ -1085,7 +1274,7 @@ function removeEmptyTopLevelListItem(item: HTMLElement) {
 
   if (parentList.children.length === 0) {
     const paragraph = document.createElement("p");
-    paragraph.appendChild(document.createElement("br"));
+    paragraph.append(document.createElement("br"));
     parentList.replaceWith(paragraph);
     placeCursorAtBlockStart(paragraph);
     return;
@@ -1106,7 +1295,9 @@ function removeEmptyTopLevelListItem(item: HTMLElement) {
 
 function placeCursorAtBlockStart(block: HTMLElement) {
   const sel = window.getSelection();
-  if (!sel) return;
+  if (!sel) {
+    return;
+  }
   const range = document.createRange();
   range.selectNodeContents(block);
   range.collapse(true);
@@ -1116,7 +1307,9 @@ function placeCursorAtBlockStart(block: HTMLElement) {
 
 function placeCursorAtBlockEnd(block: HTMLElement) {
   const sel = window.getSelection();
-  if (!sel) return;
+  if (!sel) {
+    return;
+  }
   const range = document.createRange();
   range.selectNodeContents(block);
   range.collapse(false);
@@ -1125,9 +1318,13 @@ function placeCursorAtBlockEnd(block: HTMLElement) {
 }
 
 function placeCursorAtEnd() {
-  if (!contentEl) return;
+  if (!contentEl) {
+    return;
+  }
   const sel = window.getSelection();
-  if (!sel) return;
+  if (!sel) {
+    return;
+  }
   const range = document.createRange();
   range.selectNodeContents(contentEl);
   range.collapse(false);
@@ -1139,12 +1336,12 @@ function isRangeAtStartOfBlock(range: Range, block: HTMLElement): boolean {
   const before = range.cloneRange();
   before.selectNodeContents(block);
   before.setEnd(range.startContainer, clampNodeOffset(range.startContainer, range.startOffset));
-  return before.toString().replace(/\u200B/g, "") === "";
+  return before.toString().replaceAll("​", "") === "";
 }
 
 function createMarker(kind: "start" | "end" | "cursor"): HTMLSpanElement {
   const marker = document.createElement("span");
-  marker.setAttribute("data-tab-marker", kind);
+  marker.dataset["tabMarker"] = kind;
   return marker;
 }
 
@@ -1164,7 +1361,9 @@ function insertBoundaryMarker(range: Range, kind: "start" | "end"): HTMLSpanElem
 
 function restoreCollapsedSelection(marker: HTMLElement) {
   const sel = window.getSelection();
-  if (!sel) return;
+  if (!sel) {
+    return;
+  }
   const range = document.createRange();
   range.setStartAfter(marker);
   range.collapse(true);
@@ -1175,7 +1374,9 @@ function restoreCollapsedSelection(marker: HTMLElement) {
 
 function restoreSelectionFromMarkers(startMarker: HTMLElement, endMarker: HTMLElement) {
   const sel = window.getSelection();
-  if (!sel) return;
+  if (!sel) {
+    return;
+  }
   const range = document.createRange();
   range.setStartAfter(startMarker);
   range.setEndBefore(endMarker);
@@ -1186,13 +1387,17 @@ function restoreSelectionFromMarkers(startMarker: HTMLElement, endMarker: HTMLEl
 }
 
 function dedentLine(line: string): string {
-  if (line.startsWith(INDENT_UNIT)) return line.slice(INDENT_UNIT.length);
+  if (line.startsWith(INDENT_UNIT)) {
+    return line.slice(INDENT_UNIT.length);
+  }
   const match = line.match(/^[ ]{1,4}/);
   return match ? line.slice(match[0].length) : line;
 }
 
 function clampNodeOffset(node: Node, offset: number): number {
-  if (offset < 0) return 0;
+  if (offset < 0) {
+    return 0;
+  }
   if (node.nodeType === Node.TEXT_NODE) {
     return Math.min(offset, node.textContent?.length ?? 0);
   }

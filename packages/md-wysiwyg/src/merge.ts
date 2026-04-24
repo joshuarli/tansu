@@ -17,18 +17,26 @@ export function merge3(base: string, ours: string, theirs: string): string | nul
     const theirIns = theirEdits.insertions.get(bi);
     if (ourIns && theirIns) {
       if (arrEq(ourIns, theirIns)) {
-        for (const l of ourIns) result.push(l);
+        for (const l of ourIns) {
+          result.push(l);
+        }
       } else {
         return null;
       }
     } else if (ourIns) {
-      for (const l of ourIns) result.push(l);
+      for (const l of ourIns) {
+        result.push(l);
+      }
     } else if (theirIns) {
-      for (const l of theirIns) result.push(l);
+      for (const l of theirIns) {
+        result.push(l);
+      }
     }
 
     // Then, handle the base line itself (skip for the sentinel position after end)
-    if (bi >= baseLines.length) break;
+    if (bi >= baseLines.length) {
+      break;
+    }
 
     const ourRep = ourEdits.replacements.get(bi);
     const theirRep = theirEdits.replacements.get(bi);
@@ -38,13 +46,19 @@ export function merge3(base: string, ours: string, theirs: string): string | nul
     if (!hasOur && !hasTheir) {
       result.push(baseLines[bi]!);
     } else if (hasOur && !hasTheir) {
-      if (ourRep!.length > 0) result.push(ourRep![0]!);
+      if (ourRep!.length > 0) {
+        result.push(ourRep![0]!);
+      }
       // length 0 = deletion
     } else if (!hasOur && hasTheir) {
-      if (theirRep!.length > 0) result.push(theirRep![0]!);
+      if (theirRep!.length > 0) {
+        result.push(theirRep![0]!);
+      }
     } else {
       if (arrEq(ourRep!, theirRep!)) {
-        if (ourRep!.length > 0) result.push(ourRep![0]!);
+        if (ourRep!.length > 0) {
+          result.push(ourRep![0]!);
+        }
       } else {
         return null;
       }
@@ -101,7 +115,9 @@ function processRegion(
   const bCount = bEnd - bStart;
   const mCount = mEnd - mStart;
 
-  if (bCount === 0 && mCount === 0) return;
+  if (bCount === 0 && mCount === 0) {
+    return;
+  }
 
   if (bCount === 0) {
     // Pure insertion before bStart
@@ -136,11 +152,10 @@ function lcs(base: string[], modified: string[]): [number, number][] {
   );
   for (let i = 1; i <= n; i++) {
     for (let j = 1; j <= m; j++) {
-      if (base[i - 1] === modified[j - 1]) {
-        table[i]![j] = table[i - 1]![j - 1]! + 1;
-      } else {
-        table[i]![j] = Math.max(table[i - 1]![j]!, table[i]![j - 1]!);
-      }
+      table[i]![j] =
+        base[i - 1] === modified[j - 1]
+          ? table[i - 1]![j - 1]! + 1
+          : Math.max(table[i - 1]![j]!, table[i]![j - 1]!);
     }
   }
 

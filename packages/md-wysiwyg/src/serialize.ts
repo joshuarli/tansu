@@ -31,7 +31,7 @@ export function getCursorMarkdownOffset(contentEl: HTMLElement, range: Range): n
   const anchorOffset = range.startOffset;
 
   const marker = document.createElement("span");
-  marker.setAttribute("data-md-cursor", "true");
+  marker.dataset["mdCursor"] = "true";
   range.insertNode(marker);
 
   const md = domToMarkdown(contentEl);
@@ -62,14 +62,16 @@ export function getCursorMarkdownOffset(contentEl: HTMLElement, range: Range): n
     }
   }
 
-  return offset >= 0 ? offset : domToMarkdown(contentEl).length;
+  return offset !== -1 ? offset : domToMarkdown(contentEl).length;
 }
 
 export function domToMarkdown(root: HTMLElement): string {
   const blocks: SerializedBlock[] = [];
   for (const child of root.children) {
     const block = blockToMd(child as HTMLElement);
-    if (block !== null && block.md !== "") blocks.push(block);
+    if (block !== null && block.md !== "") {
+      blocks.push(block);
+    }
   }
   return joinBlocks(blocks);
 }
@@ -77,14 +79,26 @@ export function domToMarkdown(root: HTMLElement): string {
 function blockToMd(el: HTMLElement): SerializedBlock | null {
   const tag = el.tagName;
 
-  if (tag === "H1") return { md: `# ${inlineToMd(el)}`, kind: "heading" };
-  if (tag === "H2") return { md: `## ${inlineToMd(el)}`, kind: "heading" };
-  if (tag === "H3") return { md: `### ${inlineToMd(el)}`, kind: "heading" };
-  if (tag === "H4") return { md: `#### ${inlineToMd(el)}`, kind: "heading" };
-  if (tag === "H5") return { md: `##### ${inlineToMd(el)}`, kind: "heading" };
-  if (tag === "H6") return { md: `###### ${inlineToMd(el)}`, kind: "heading" };
+  if (tag === "H1") {
+    return { md: `# ${inlineToMd(el)}`, kind: "heading" };
+  }
+  if (tag === "H2") {
+    return { md: `## ${inlineToMd(el)}`, kind: "heading" };
+  }
+  if (tag === "H3") {
+    return { md: `### ${inlineToMd(el)}`, kind: "heading" };
+  }
+  if (tag === "H4") {
+    return { md: `#### ${inlineToMd(el)}`, kind: "heading" };
+  }
+  if (tag === "H5") {
+    return { md: `##### ${inlineToMd(el)}`, kind: "heading" };
+  }
+  if (tag === "H6") {
+    return { md: `###### ${inlineToMd(el)}`, kind: "heading" };
+  }
   if (el.classList.contains("callout")) {
-    const type = el.getAttribute("data-callout") ?? "note";
+    const type = el.dataset["callout"] ?? "note";
     const titleEl = el.querySelector(".callout-title");
     const bodyEl = el.querySelector(".callout-body");
     const icon = titleEl?.textContent?.match(/^.\s*/)?.[0] ?? "";
@@ -96,22 +110,30 @@ function blockToMd(el: HTMLElement): SerializedBlock | null {
       const bodyBlocks: SerializedBlock[] = [];
       for (const child of bodyEl.children) {
         const inner = blockToMd(child as HTMLElement);
-        if (inner !== null && inner.md !== "") bodyBlocks.push(inner);
+        if (inner !== null && inner.md !== "") {
+          bodyBlocks.push(inner);
+        }
       }
       const bodyMd = joinBlocks(bodyBlocks);
-      if (bodyMd !== "") lines += "\n" + quoteMarkdown(bodyMd);
+      if (bodyMd !== "") {
+        lines += `\n${quoteMarkdown(bodyMd)}`;
+      }
     }
     return { md: lines, kind: "blockquote" };
   }
 
   if (tag === "P" || tag === "DIV") {
-    if (isBlankLineBlock(el)) return { md: BLANK_LINE_SENTINEL, kind: "blank" };
+    if (isBlankLineBlock(el)) {
+      return { md: BLANK_LINE_SENTINEL, kind: "blank" };
+    }
     return {
       md: hasDirectBlockChildren(el) ? containerToMd(el) : inlineToMd(el),
       kind: "paragraph",
     };
   }
-  if (tag === "HR") return { md: "---", kind: "hr" };
+  if (tag === "HR") {
+    return { md: "---", kind: "hr" };
+  }
 
   if (tag === "UL") {
     return { md: listToMd(el, 0, false), kind: "list" };
@@ -125,7 +147,9 @@ function blockToMd(el: HTMLElement): SerializedBlock | null {
     const innerBlocks: SerializedBlock[] = [];
     for (const child of el.children) {
       const md = blockToMd(child as HTMLElement);
-      if (md !== null && md.md !== "") innerBlocks.push(md);
+      if (md !== null && md.md !== "") {
+        innerBlocks.push(md);
+      }
     }
     return { md: quoteMarkdown(joinBlocks(innerBlocks)), kind: "blockquote" };
   }
@@ -134,7 +158,7 @@ function blockToMd(el: HTMLElement): SerializedBlock | null {
     const code = el.querySelector("code");
     const text = code?.textContent ?? el.textContent ?? "";
     const lang = code?.className?.match(/language-(\S+)/)?.[1] ?? "";
-    return { md: "```" + lang + "\n" + text.replace(/\n$/, "") + "\n```", kind: "code" };
+    return { md: `\`\`\`${lang}\n${text.replace(/\n$/, "")}\n\`\`\``, kind: "code" };
   }
 
   if (tag === "TABLE") {
@@ -154,9 +178,13 @@ function containerToMd(el: HTMLElement): string {
   const inlineNodes: Node[] = [];
 
   const flushInline = () => {
-    if (inlineNodes.length === 0) return;
-    const inline = inlineNodesToMd(inlineNodes).replace(/^\n+|\n+$/g, "");
-    if (inline !== "") blocks.push({ md: inline, kind: "paragraph" });
+    if (inlineNodes.length === 0) {
+      return;
+    }
+    const inline = inlineNodesToMd(inlineNodes).replaceAll(/^\n+|\n+$/g, "");
+    if (inline !== "") {
+      blocks.push({ md: inline, kind: "paragraph" });
+    }
     inlineNodes.length = 0;
   };
 
@@ -164,7 +192,9 @@ function containerToMd(el: HTMLElement): string {
     if (child instanceof HTMLElement && isBlockElement(child)) {
       flushInline();
       const block = blockToMd(child);
-      if (block !== null && block.md !== "") blocks.push(block);
+      if (block !== null && block.md !== "") {
+        blocks.push(block);
+      }
       continue;
     }
 
@@ -178,15 +208,17 @@ function containerToMd(el: HTMLElement): string {
 function inlineNodesToMd(nodes: Iterable<Node>, skip?: (node: Node) => boolean): string {
   let md = "";
   for (const node of nodes) {
-    if (skip?.(node)) continue;
+    if (skip?.(node)) {
+      continue;
+    }
 
     if (node.nodeType === Node.TEXT_NODE) {
-      md += (node.textContent ?? "").replace(/\u200B/g, "");
+      md += (node.textContent ?? "").replaceAll("​", "");
     } else if (node.nodeType === Node.ELEMENT_NODE) {
       const child = node as HTMLElement;
       const childTag = child.tagName;
 
-      if (child.getAttribute("data-md-cursor") === "true") {
+      if (child.dataset["mdCursor"] === "true") {
         md += CURSOR_SENTINEL;
         continue;
       }
@@ -200,28 +232,20 @@ function inlineNodesToMd(nodes: Iterable<Node>, skip?: (node: Node) => boolean):
       } else if (childTag === "MARK") {
         md += `==${inlineToMd(child)}==`;
       } else if (childTag === "CODE") {
-        md += "`" + (child.textContent ?? "") + "`";
+        md += `\`${child.textContent ?? ""}\``;
       } else if (childTag === "A") {
-        const target = child.getAttribute("data-target");
+        const { target } = child.dataset;
         if (target) {
           const display = child.textContent ?? target;
-          if (display === target) {
-            md += `[[${target}]]`;
-          } else {
-            md += `[[${target}|${display}]]`;
-          }
+          md += display === target ? `[[${target}]]` : `[[${target}|${display}]]`;
         } else {
           const href = child.getAttribute("href") ?? "";
           const text = child.textContent ?? "";
           // Bare autolinked URL: preserve as plain text so it round-trips
-          if (text === href && /^https?:\/\//.test(href)) {
-            md += href;
-          } else {
-            md += `[${text}](${href})`;
-          }
+          md += text === href && /^https?:\/\//.test(href) ? href : `[${text}](${href})`;
         }
       } else if (childTag === "IMG") {
-        const wikiImage = child.getAttribute("data-wiki-image");
+        const { wikiImage } = child.dataset;
         if (wikiImage) {
           const width = child.getAttribute("width");
           md += width ? `![[${wikiImage}|${width}]]` : `![[${wikiImage}]]`;
@@ -247,59 +271,69 @@ function listToMd(listEl: HTMLElement, depth: number, ordered: boolean): string 
   const lines: string[] = [];
   let hasListItem = false;
 
-  Array.from(listEl.children).forEach((child, i) => {
-    if (!(child instanceof HTMLElement)) return;
+  for (const [i, child] of [...listEl.children].entries()) {
+    if (!(child instanceof HTMLElement)) {
+      continue;
+    }
 
     if (child.tagName === "LI") {
       hasListItem = true;
       const checkbox = getDirectCheckbox(child);
       const text = normalizeListItemText(inlineNodesToMd(child.childNodes, isNestedListOrCheckbox));
-      const prefix =
-        checkbox && !ordered
-          ? `- [${checkbox.checked ? "x" : " "}] `
-          : ordered
-            ? `${i + 1}. `
-            : "- ";
+      let prefix: string;
+      if (checkbox && !ordered) {
+        prefix = `- [${checkbox.checked ? "x" : " "}] `;
+      } else if (ordered) {
+        prefix = `${i + 1}. `;
+      } else {
+        prefix = "- ";
+      }
 
       lines.push(indent + prefix + text);
 
       for (const nested of getDirectNestedLists(child)) {
         lines.push(listToMd(nested, depth + 1, nested.tagName === "OL"));
       }
-      return;
+      continue;
     }
 
     if (child.tagName === "UL" || child.tagName === "OL") {
       lines.push(listToMd(child, depth + (hasListItem ? 1 : 0), child.tagName === "OL"));
     }
-  });
+  }
 
   return lines.join("\n");
 }
 
 function getDirectCheckbox(li: HTMLElement): HTMLInputElement | null {
   for (const child of li.children) {
-    if (child instanceof HTMLInputElement && child.type === "checkbox") return child;
+    if (child instanceof HTMLInputElement && child.type === "checkbox") {
+      return child;
+    }
   }
   return null;
 }
 
 function getDirectNestedLists(li: HTMLElement): HTMLElement[] {
-  return Array.from(li.children).filter(
+  return [...li.children].filter(
     (child): child is HTMLElement =>
       child instanceof HTMLElement && (child.tagName === "UL" || child.tagName === "OL"),
   );
 }
 
 function isNestedListOrCheckbox(node: Node): boolean {
-  if (!(node instanceof HTMLElement)) return false;
+  if (!(node instanceof HTMLElement)) {
+    return false;
+  }
   return node.tagName === "UL" || node.tagName === "OL" || node.tagName === "INPUT";
 }
 
 function normalizeListItemText(text: string): string {
-  const stripped = text.replace(/\u200B/g, "");
-  if (stripped.trim() === "") return "";
-  return stripped.replace(/^\n+|\n+$/g, "");
+  const stripped = text.replaceAll("​", "");
+  if (stripped.trim() === "") {
+    return "";
+  }
+  return stripped.replaceAll(/^\n+|\n+$/g, "");
 }
 
 function joinBlocks(blocks: readonly SerializedBlock[]): string {
@@ -311,15 +345,21 @@ function joinBlocks(blocks: readonly SerializedBlock[]): string {
       const previous = blocks[i - 1]!;
       out += blockSeparator(previous, block);
     }
-    if (block.md !== BLANK_LINE_SENTINEL) out += block.md;
+    if (block.md !== BLANK_LINE_SENTINEL) {
+      out += block.md;
+    }
   }
 
   return out;
 }
 
 function blockSeparator(previous: SerializedBlock, current: SerializedBlock): string {
-  if (previous.md === BLANK_LINE_SENTINEL || current.md === BLANK_LINE_SENTINEL) return "\n";
-  if (previous.kind === "paragraph" && current.kind === "paragraph") return "\n";
+  if (previous.md === BLANK_LINE_SENTINEL || current.md === BLANK_LINE_SENTINEL) {
+    return "\n";
+  }
+  if (previous.kind === "paragraph" && current.kind === "paragraph") {
+    return "\n";
+  }
   if (
     (previous.kind === "paragraph" && current.kind === "list") ||
     (previous.kind === "list" && current.kind === "paragraph")
@@ -337,20 +377,26 @@ function quoteMarkdown(md: string): string {
 }
 
 function hasDirectBlockChildren(el: HTMLElement): boolean {
-  return Array.from(el.children).some(isBlockElement);
+  return [...el.children].some(isBlockElement);
 }
 
 function isBlankLineBlock(el: HTMLElement): boolean {
-  if (el.getAttribute("data-md-blank") === "true") return true;
+  if (el.dataset["mdBlank"] === "true") {
+    return true;
+  }
 
   let sawBreak = false;
   for (const child of el.childNodes) {
     if (child.nodeType === Node.TEXT_NODE) {
-      if ((child.textContent ?? "").replace(/\u200B/g, "").trim() !== "") return false;
+      if ((child.textContent ?? "").replaceAll("​", "").trim() !== "") {
+        return false;
+      }
       continue;
     }
 
-    if (!(child instanceof HTMLElement)) return false;
+    if (!(child instanceof HTMLElement)) {
+      return false;
+    }
     if (child.tagName === "BR") {
       sawBreak = true;
       continue;
@@ -362,8 +408,12 @@ function isBlankLineBlock(el: HTMLElement): boolean {
 }
 
 function isBlockElement(el: Element): el is HTMLElement {
-  if (!(el instanceof HTMLElement)) return false;
-  if (el.classList.contains("callout")) return true;
+  if (!(el instanceof HTMLElement)) {
+    return false;
+  }
+  if (el.classList.contains("callout")) {
+    return true;
+  }
   return BLOCK_TAGS.has(el.tagName);
 }
 
@@ -394,18 +444,20 @@ function tableToMd(table: HTMLElement): string {
     rows.push(cells);
   }
 
-  if (rows.length === 0) return "";
+  if (rows.length === 0) {
+    return "";
+  }
 
   const colCount = Math.max(...rows.map((r) => r.length));
   const lines: string[] = [];
 
   const header = rows[0] ?? [];
-  lines.push("| " + Array.from({ length: colCount }, (_, i) => header[i] ?? "").join(" | ") + " |");
-  lines.push("| " + Array.from({ length: colCount }, () => "---").join(" | ") + " |");
+  lines.push(`| ${Array.from({ length: colCount }, (_, i) => header[i] ?? "").join(" | ")} |`);
+  lines.push(`| ${Array.from({ length: colCount }, () => "---").join(" | ")} |`);
 
   for (let i = 1; i < rows.length; i++) {
     const row = rows[i] ?? [];
-    lines.push("| " + Array.from({ length: colCount }, (_, j) => row[j] ?? "").join(" | ") + " |");
+    lines.push(`| ${Array.from({ length: colCount }, (_, j) => row[j] ?? "").join(" | ")} |`);
   }
 
   return lines.join("\n");

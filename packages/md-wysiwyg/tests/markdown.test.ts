@@ -1,278 +1,276 @@
-import { describe, test, expect } from "vitest";
-
 import { renderMarkdown } from "../src/markdown.ts";
 
 describe("headings", () => {
-  test("h1", () => {
+  it("h1", () => {
     expect(renderMarkdown("# Hello")).toContain("<h1>Hello</h1>");
   });
-  test("h2", () => {
+  it("h2", () => {
     expect(renderMarkdown("## Sub")).toContain("<h2>Sub</h2>");
   });
-  test("h6", () => {
+  it("h6", () => {
     expect(renderMarkdown("###### Deep")).toContain("<h6>Deep</h6>");
   });
 });
 
 describe("paragraphs", () => {
-  test("paragraph", () => {
+  it("paragraph", () => {
     expect(renderMarkdown("Hello world")).toContain("<p>Hello world</p>");
   });
-  test("para 1", () => {
+  it("para 1", () => {
     expect(renderMarkdown("First\n\nSecond")).toContain("<p>First</p>");
   });
-  test("para 2", () => {
+  it("para 2", () => {
     expect(renderMarkdown("First\n\nSecond")).toContain("<p>Second</p>");
   });
-  test("extra blank line renders placeholder paragraph", () => {
+  it("extra blank line renders placeholder paragraph", () => {
     const html = renderMarkdown("First\n\n\nSecond");
-    expect((html.match(/data-md-blank="true"/g) ?? []).length).toBe(2);
+    expect(html.match(/data-md-blank="true"/g) ?? []).toHaveLength(2);
   });
-  test("leading and trailing blank lines render placeholders", () => {
+  it("leading and trailing blank lines render placeholders", () => {
     const html = renderMarkdown("\nFirst\n");
-    expect((html.match(/data-md-blank="true"/g) ?? []).length).toBe(2);
+    expect(html.match(/data-md-blank="true"/g) ?? []).toHaveLength(2);
   });
 });
 
 describe("inline formatting", () => {
-  test("bold", () => {
+  it("bold", () => {
     expect(renderMarkdown("**bold**")).toContain("<strong>bold</strong>");
   });
-  test("italic", () => {
+  it("italic", () => {
     expect(renderMarkdown("*italic*")).toContain("<em>italic</em>");
   });
-  test("inline code", () => {
+  it("inline code", () => {
     expect(renderMarkdown("use `foo` here")).toContain("<code>foo</code>");
   });
-  test("strikethrough", () => {
+  it("strikethrough", () => {
     expect(renderMarkdown("~~deleted~~")).toContain("<del>deleted</del>");
   });
-  test("highlight", () => {
+  it("highlight", () => {
     expect(renderMarkdown("==marked==")).toContain("<mark>marked</mark>");
   });
 });
 
 describe("wiki-links", () => {
-  test("wiki-link class", () => {
+  it("wiki-link class", () => {
     expect(renderMarkdown("See [[my note]]")).toContain('class="wiki-link"');
   });
-  test("wiki-link target", () => {
+  it("wiki-link target", () => {
     expect(renderMarkdown("See [[my note]]")).toContain('data-target="my note"');
   });
-  test("wiki-link pipe target", () => {
+  it("wiki-link pipe target", () => {
     expect(renderMarkdown("See [[target|display]]")).toContain('data-target="target"');
   });
-  test("wiki-link pipe display", () => {
+  it("wiki-link pipe display", () => {
     expect(renderMarkdown("See [[target|display]]")).toContain(">display</a>");
   });
 });
 
 describe("wiki-images", () => {
-  test("wiki-image tag", () => {
+  it("wiki-image tag", () => {
     expect(renderMarkdown("![[photo.webp]]")).toContain("<img");
   });
-  test("wiki-image data", () => {
+  it("wiki-image data", () => {
     expect(renderMarkdown("![[photo.webp]]")).toContain('data-wiki-image="photo.webp"');
   });
-  test("wiki-image src", () => {
+  it("wiki-image src", () => {
     expect(renderMarkdown("![[photo.webp]]")).toContain("/z-images/");
   });
 });
 
 describe("links and images", () => {
-  test("link", () => {
+  it("link", () => {
     expect(renderMarkdown("[text](http://url)")).toContain('<a href="http://url">text</a>');
   });
-  test("image", () => {
+  it("image", () => {
     expect(renderMarkdown("![alt](src.png)")).toContain("<img");
   });
-  test("image alt", () => {
+  it("image alt", () => {
     expect(renderMarkdown("![alt](src.png)")).toContain('alt="alt"');
   });
 });
 
 describe("bare URL autolink", () => {
-  test("https link rendered", () => {
+  it("https link rendered", () => {
     expect(renderMarkdown("https://example.com")).toContain(
       '<a href="https://example.com">https://example.com</a>',
     );
   });
-  test("http link rendered", () => {
+  it("http link rendered", () => {
     expect(renderMarkdown("http://example.com")).toContain(
       '<a href="http://example.com">http://example.com</a>',
     );
   });
-  test("trailing period stripped", () => {
+  it("trailing period stripped", () => {
     expect(renderMarkdown("See https://example.com.")).toContain('<a href="https://example.com">');
   });
-  test("url mid-sentence", () => {
+  it("url mid-sentence", () => {
     expect(renderMarkdown("Visit https://example.com today")).toContain(
       '<a href="https://example.com">',
     );
   });
-  test("markdown link not double-linked", () => {
+  it("markdown link not double-linked", () => {
     const out = renderMarkdown("[text](https://example.com)");
     expect(out).toContain('<a href="https://example.com">text</a>');
-    expect((out.match(/<a /g) ?? []).length).toBe(1);
+    expect(out.match(/<a /g) ?? []).toHaveLength(1);
   });
 });
 
 describe("code blocks", () => {
-  test("code block lang", () => {
+  it("code block lang", () => {
     const code = renderMarkdown("```js\nconst x = 1;\n```");
     expect(code).toContain('<pre><code class="language-js">');
   });
-  test("code block has keyword", () => {
+  it("code block has keyword", () => {
     const code = renderMarkdown("```js\nconst x = 1;\n```");
     expect(code).toContain("const");
   });
-  test("code block has highlight class", () => {
+  it("code block has highlight class", () => {
     const code = renderMarkdown("```js\nconst x = 1;\n```");
     expect(code).toContain("hl-kw");
   });
-  test("code no lang", () => {
+  it("code no lang", () => {
     expect(renderMarkdown("```\nhello\n```")).toContain("<pre><code>");
   });
 });
 
 describe("lists", () => {
-  test("ul tag", () => {
+  it("ul tag", () => {
     expect(renderMarkdown("- one\n- two\n- three")).toContain("<ul>");
   });
-  test("ul item", () => {
+  it("ul item", () => {
     expect(renderMarkdown("- one\n- two\n- three")).toContain("<li>one</li>");
   });
-  test("ol tag", () => {
+  it("ol tag", () => {
     expect(renderMarkdown("1. first\n2. second")).toContain("<ol>");
   });
-  test("ol item", () => {
+  it("ol item", () => {
     expect(renderMarkdown("1. first\n2. second")).toContain("<li>first</li>");
   });
-  test("task checkbox", () => {
+  it("task checkbox", () => {
     expect(renderMarkdown("- [ ] todo\n- [x] done")).toContain('type="checkbox"');
   });
-  test("task checked", () => {
+  it("task checked", () => {
     expect(renderMarkdown("- [ ] todo\n- [x] done")).toContain("checked");
   });
-  test("task unchecked text", () => {
+  it("task unchecked text", () => {
     expect(renderMarkdown("- [ ] todo\n- [x] done")).toContain("todo");
   });
-  test("nested ul renders nested list", () => {
+  it("nested ul renders nested list", () => {
     const html = renderMarkdown("- parent\n  - child");
     expect((html.match(/<ul>/g) ?? []).length).toBeGreaterThan(1);
     expect(html).toContain("<li>child</li>");
   });
-  test("nested ul handles tab indentation", () => {
+  it("nested ul handles tab indentation", () => {
     const html = renderMarkdown("- parent\n\t- child");
     expect(html).toContain("<li>child</li>");
   });
-  test("empty list item renders with placeholder", () => {
+  it("empty list item renders with placeholder", () => {
     expect(renderMarkdown("- one\n- ")).toContain("<li><br></li>");
   });
-  test("bare empty list marker renders as empty list item", () => {
+  it("bare empty list marker renders as empty list item", () => {
     expect(renderMarkdown("- one\n-")).toContain("<li><br></li>");
   });
 });
 
 describe("blockquotes", () => {
-  test("blockquote", () => {
+  it("blockquote", () => {
     expect(renderMarkdown("> quoted text")).toContain("<blockquote>");
   });
-  test("blockquote text", () => {
+  it("blockquote text", () => {
     expect(renderMarkdown("> quoted text")).toContain("quoted text");
   });
 });
 
 describe("callouts", () => {
-  test("callout type", () => {
+  it("callout type", () => {
     expect(renderMarkdown("> [!warning] Be careful\n> This is important")).toContain(
       "callout-warning",
     );
   });
-  test("callout title", () => {
+  it("callout title", () => {
     expect(renderMarkdown("> [!warning] Be careful\n> This is important")).toContain("Be careful");
   });
-  test("callout body", () => {
+  it("callout body", () => {
     expect(renderMarkdown("> [!warning] Be careful\n> This is important")).toContain(
       "This is important",
     );
   });
-  test("callout default title", () => {
+  it("callout default title", () => {
     expect(renderMarkdown("> [!note]\n> Body here")).toContain("Note");
   });
 });
 
 describe("tables", () => {
-  test("table", () => {
+  it("table", () => {
     expect(renderMarkdown("| A | B |\n| --- | --- |\n| 1 | 2 |")).toContain("<table>");
   });
-  test("table header", () => {
+  it("table header", () => {
     expect(renderMarkdown("| A | B |\n| --- | --- |\n| 1 | 2 |")).toContain("<th>A</th>");
   });
-  test("table cell", () => {
+  it("table cell", () => {
     expect(renderMarkdown("| A | B |\n| --- | --- |\n| 1 | 2 |")).toContain("<td>1</td>");
   });
 });
 
 describe("horizontal rules", () => {
-  test("hr dashes", () => {
+  it("hr dashes", () => {
     expect(renderMarkdown("---")).toContain("<hr>");
   });
-  test("hr stars", () => {
+  it("hr stars", () => {
     expect(renderMarkdown("***")).toContain("<hr>");
   });
 });
 
 describe("escaping", () => {
-  test("escaped not italic", () => {
-    expect(renderMarkdown("\\*not italic\\*")).not.toContain("<em>");
+  it("escaped not italic", () => {
+    expect(renderMarkdown(String.raw`\*not italic\*`)).not.toContain("<em>");
   });
-  test("escaped shows literal", () => {
-    expect(renderMarkdown("\\*not italic\\*")).toContain("*");
+  it("escaped shows literal", () => {
+    expect(renderMarkdown(String.raw`\*not italic\*`)).toContain("*");
   });
 });
 
 describe("nested inline", () => {
-  test("nested bold", () => {
+  it("nested bold", () => {
     expect(renderMarkdown("**bold *and italic***")).toContain("<strong>");
   });
 });
 
 describe("HTML escaping", () => {
-  test("no raw script tag", () => {
+  it("no raw script tag", () => {
     expect(renderMarkdown('<script>alert("xss")</script>')).not.toContain("<script>");
   });
-  test("escaped script", () => {
+  it("escaped script", () => {
     expect(renderMarkdown('<script>alert("xss")</script>')).toContain("&lt;script&gt;");
   });
 });
 
 describe("line model", () => {
-  test("adjacent lines render as separate paragraphs", () => {
+  it("adjacent lines render as separate paragraphs", () => {
     const html = renderMarkdown("line1\nline2");
     expect(html).toContain("<p>line1</p>");
     expect(html).toContain("<p>line2</p>");
   });
-  test("adjacent lines do not produce a br", () => {
+  it("adjacent lines do not produce a br", () => {
     expect(renderMarkdown("line1\nline2")).not.toContain("<br>");
   });
-  test("three consecutive lines become three paragraphs", () => {
+  it("three consecutive lines become three paragraphs", () => {
     const html = renderMarkdown("a\nb\nc");
     expect(html).toContain("<p>a</p>");
     expect(html).toContain("<p>b</p>");
     expect(html).toContain("<p>c</p>");
   });
-  test("blank line between paragraphs renders placeholder", () => {
+  it("blank line between paragraphs renders placeholder", () => {
     expect(renderMarkdown("foo\n\nbar")).toContain('data-md-blank="true"');
   });
-  test("blank line placeholder has br inside", () => {
+  it("blank line placeholder has br inside", () => {
     expect(renderMarkdown("foo\n\nbar")).toContain('data-md-blank="true"><br>');
   });
-  test("two blank lines produce two placeholders", () => {
+  it("two blank lines produce two placeholders", () => {
     const html = renderMarkdown("foo\n\n\nbar");
-    expect((html.match(/data-md-blank/g) ?? []).length).toBe(2);
+    expect(html.match(/data-md-blank/g) ?? []).toHaveLength(2);
   });
-  test("text before heading becomes its own paragraph", () => {
+  it("text before heading becomes its own paragraph", () => {
     const html = renderMarkdown("intro\n## Heading");
     expect(html).toContain("<p>intro</p>");
     expect(html).toContain("<h2>Heading</h2>");
@@ -280,43 +278,43 @@ describe("line model", () => {
 });
 
 describe("inline branches", () => {
-  test("escaped characters prevent formatting", () => {
-    const html = renderMarkdown("\\*not bold\\*");
+  it("escaped characters prevent formatting", () => {
+    const html = renderMarkdown(String.raw`\*not bold\*`);
     expect(html).not.toContain("<strong>");
     expect(html).not.toContain("<em>");
     expect(html).toContain("*");
   });
 
-  test("wiki-image renders img tag with src", () => {
+  it("wiki-image renders img tag with src", () => {
     const html = renderMarkdown("![[image.png]]");
     expect(html).toContain("<img");
     expect(html).toContain('data-wiki-image="image.png"');
     expect(html).toContain("/z-images/image.png");
   });
 
-  test("highlight renders mark tag", () => {
+  it("highlight renders mark tag", () => {
     const html = renderMarkdown("==highlighted==");
     expect(html).toContain("<mark>highlighted</mark>");
   });
 
-  test("strikethrough renders del tag", () => {
+  it("strikethrough renders del tag", () => {
     const html = renderMarkdown("~~struck~~");
     expect(html).toContain("<del>struck</del>");
   });
 
-  test("standard image renders img tag", () => {
+  it("standard image renders img tag", () => {
     const html = renderMarkdown("![alt text](http://example.com/img.png)");
     expect(html).toContain("<img");
     expect(html).toContain('alt="alt text"');
     expect(html).toContain('src="http://example.com/img.png"');
   });
 
-  test("standard link renders anchor tag", () => {
+  it("standard link renders anchor tag", () => {
     const html = renderMarkdown("[click here](http://example.com)");
     expect(html).toContain('<a href="http://example.com">click here</a>');
   });
 
-  test("table renders with headers and cells", () => {
+  it("table renders with headers and cells", () => {
     const html = renderMarkdown("| a | b |\n|---|---|\n| 1 | 2 |");
     expect(html).toContain("<table>");
     expect(html).toContain("<th>a</th>");
@@ -325,23 +323,23 @@ describe("inline branches", () => {
     expect(html).toContain("<td>2</td>");
   });
 
-  test("inline code inside link text", () => {
+  it("inline code inside link text", () => {
     const html = renderMarkdown("[`code`](http://url)");
     expect(html).toContain("<code>code</code>");
     expect(html).toContain('<a href="http://url">');
   });
 
-  test("ampersand is escaped", () => {
+  it("ampersand is escaped", () => {
     const html = renderMarkdown("a & b");
     expect(html).toContain("&amp;");
   });
 });
 
 describe("edge cases", () => {
-  test("empty input", () => {
+  it("empty input", () => {
     expect(renderMarkdown("")).toBe("");
   });
-  test("code escapes html", () => {
+  it("code escapes html", () => {
     expect(renderMarkdown("```\n<div>test</div>\n```")).toContain("&lt;div&gt;");
   });
 });

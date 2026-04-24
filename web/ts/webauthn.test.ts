@@ -1,5 +1,3 @@
-import { describe, test, expect } from "vitest";
-
 import {
   getPrfSalt,
   bufToBase64,
@@ -11,16 +9,16 @@ import {
 } from "./webauthn.ts";
 
 describe("bufToBase64", () => {
-  test("base64 ArrayBuffer", () => {
+  it("base64 ArrayBuffer", () => {
     expect(bufToBase64(new Uint8Array([72, 101, 108, 108, 111]).buffer)).toBe(btoa("Hello"));
   });
-  test("base64 Uint8Array", () => {
+  it("base64 Uint8Array", () => {
     expect(bufToBase64(new Uint8Array([72, 101, 108, 108, 111]))).toBe(btoa("Hello"));
   });
-  test("base64 empty", () => {
+  it("base64 empty", () => {
     expect(bufToBase64(new ArrayBuffer(0))).toBe("");
   });
-  test("base64 subarray offset", () => {
+  it("base64 subarray offset", () => {
     const full = new Uint8Array([0, 0, 72, 101, 108, 108, 111]);
     const sub = full.subarray(2);
     expect(bufToBase64(sub)).toBe(btoa("Hello"));
@@ -31,26 +29,26 @@ describe("bufToBase64url", () => {
   // 0xfb,0xff,0xfe -> base64 "u//+" -> base64url "u__-"
   const specialBytes = new Uint8Array([0xfb, 0xff, 0xfe]);
 
-  test("base64url no plus", () => {
-    expect(bufToBase64url(specialBytes.buffer).includes("+")).toBe(false);
+  it("base64url no plus", () => {
+    expect(bufToBase64url(specialBytes.buffer)).not.toContain("+");
   });
-  test("base64url no slash", () => {
-    expect(bufToBase64url(specialBytes.buffer).includes("/")).toBe(false);
+  it("base64url no slash", () => {
+    expect(bufToBase64url(specialBytes.buffer)).not.toContain("/");
   });
-  test("base64url no padding", () => {
-    expect(bufToBase64url(specialBytes.buffer).includes("=")).toBe(false);
+  it("base64url no padding", () => {
+    expect(bufToBase64url(specialBytes.buffer)).not.toContain("=");
   });
 });
 
 describe("base64urlToBuf round-trip", () => {
-  test("roundtrip length", () => {
+  it("roundtrip length", () => {
     const original = new Uint8Array([1, 2, 3, 4, 5, 100, 200, 255]);
     const encoded = bufToBase64url(original.buffer);
     const decoded = new Uint8Array(base64urlToBuf(encoded));
-    expect(decoded.length).toBe(original.length);
+    expect(decoded).toHaveLength(original.length);
   });
 
-  test("roundtrip bytes", () => {
+  it("roundtrip bytes", () => {
     const original = new Uint8Array([1, 2, 3, 4, 5, 100, 200, 255]);
     const encoded = bufToBase64url(original.buffer);
     const decoded = new Uint8Array(base64urlToBuf(encoded));
@@ -59,25 +57,25 @@ describe("base64urlToBuf round-trip", () => {
     }
   });
 
-  test("roundtrip single byte", () => {
+  it("roundtrip single byte", () => {
     const one = new Uint8Array([42]);
     const oneRt = new Uint8Array(base64urlToBuf(bufToBase64url(one.buffer)));
     expect(oneRt[0]).toBe(42);
   });
 
-  test("roundtrip two bytes length", () => {
+  it("roundtrip two bytes length", () => {
     const two = new Uint8Array([42, 43]);
     const twoRt = new Uint8Array(base64urlToBuf(bufToBase64url(two.buffer)));
-    expect(twoRt.length).toBe(2);
+    expect(twoRt).toHaveLength(2);
   });
 });
 
 describe("getPrfSalt", () => {
-  test("salt is 32 bytes", async () => {
+  it("salt is 32 bytes", async () => {
     const salt1 = new Uint8Array(await getPrfSalt());
     expect(salt1.byteLength).toBe(32);
   });
-  test("salt is deterministic (cached)", async () => {
+  it("salt is deterministic (cached)", async () => {
     const salt1 = new Uint8Array(await getPrfSalt());
     const salt2 = new Uint8Array(await getPrfSalt());
     expect(bufToBase64(salt1)).toBe(bufToBase64(salt2));
@@ -103,7 +101,7 @@ describe("createPrfCredential / getPrfKey", () => {
     };
     (globalThis as Record<string, unknown>)["navigator"] = nav;
     // createPrfCredential uses location.hostname
-    if (typeof globalThis.location === "undefined") {
+    if (globalThis.location === undefined) {
       (globalThis as Record<string, unknown>)["location"] = { hostname: "localhost" } as Location;
     }
     return () => {
@@ -114,29 +112,29 @@ describe("createPrfCredential / getPrfKey", () => {
   // Also need PublicKeyCredential for isPrfLikelySupported
   const origPKC = (globalThis as Record<string, unknown>)["PublicKeyCredential"];
 
-  test("create returns credentialId string", async () => {
+  it("create returns credentialId string", async () => {
     const restore = mockCredentials({ results: { first: fakePrfOutput.buffer } });
     const result = await createPrfCredential();
-    expect(typeof result.credentialId).toBe("string");
+    expectTypeOf(result.credentialId).toBeString();
     restore();
   });
 
-  test("create returns prfKeyB64 string", async () => {
+  it("create returns prfKeyB64 string", async () => {
     const restore = mockCredentials({ results: { first: fakePrfOutput.buffer } });
     const result = await createPrfCredential();
-    expect(typeof result.prfKeyB64).toBe("string");
+    expectTypeOf(result.prfKeyB64).toBeString();
     restore();
   });
 
-  test("credentialId decodes to correct length", async () => {
+  it("credentialId decodes to correct length", async () => {
     const restore = mockCredentials({ results: { first: fakePrfOutput.buffer } });
     const result = await createPrfCredential();
     const decodedId = new Uint8Array(base64urlToBuf(result.credentialId));
-    expect(decodedId.length).toBe(fakeRawId.length);
+    expect(decodedId).toHaveLength(fakeRawId.length);
     restore();
   });
 
-  test("credentialId bytes match", async () => {
+  it("credentialId bytes match", async () => {
     const restore = mockCredentials({ results: { first: fakePrfOutput.buffer } });
     const result = await createPrfCredential();
     const decodedId = new Uint8Array(base64urlToBuf(result.credentialId));
@@ -146,57 +144,57 @@ describe("createPrfCredential / getPrfKey", () => {
     restore();
   });
 
-  test("prfKey decodes to correct length", async () => {
+  it("prfKey decodes to correct length", async () => {
     const restore = mockCredentials({ results: { first: fakePrfOutput.buffer } });
     const result = await createPrfCredential();
-    const decodedKey = Uint8Array.from(atob(result.prfKeyB64), (c) => c.charCodeAt(0));
-    expect(decodedKey.length).toBe(fakePrfOutput.length);
+    const decodedKey = Uint8Array.from(atob(result.prfKeyB64), (c) => c.codePointAt(0)!);
+    expect(decodedKey).toHaveLength(fakePrfOutput.length);
     restore();
   });
 
-  test("create rejects without PRF results", async () => {
+  it("create rejects without PRF results", async () => {
     const restore = mockCredentials({ results: {} });
     await expect(createPrfCredential()).rejects.toThrow();
     restore();
   });
 
-  test("create rejects with null PRF", async () => {
+  it("create rejects with null PRF", async () => {
     const restore = mockCredentials(null);
     await expect(createPrfCredential()).rejects.toThrow();
     restore();
   });
 
-  test("getPrfKey returns string", async () => {
+  it("getPrfKey returns string", async () => {
     const restore = mockCredentials({ results: { first: fakePrfOutput.buffer } });
     const credId = bufToBase64url(fakeRawId.buffer);
     const key = await getPrfKey([credId]);
-    expect(typeof key).toBe("string");
+    expectTypeOf(key).toBeString();
     restore();
   });
 
-  test("getPrfKey output correct length", async () => {
+  it("getPrfKey output correct length", async () => {
     const restore = mockCredentials({ results: { first: fakePrfOutput.buffer } });
     const credId = bufToBase64url(fakeRawId.buffer);
     const key = await getPrfKey([credId]);
-    const decoded = Uint8Array.from(atob(key), (c) => c.charCodeAt(0));
-    expect(decoded.length).toBe(fakePrfOutput.length);
+    const decoded = Uint8Array.from(atob(key), (c) => c.codePointAt(0)!);
+    expect(decoded).toHaveLength(fakePrfOutput.length);
     restore();
   });
 
-  test("getPrfKey rejects without PRF output", async () => {
+  it("getPrfKey rejects without PRF output", async () => {
     const restore = mockCredentials({ results: {} });
     await expect(getPrfKey(["AAAA"])).rejects.toThrow();
     restore();
   });
 
-  test("supported when globals exist", () => {
+  it("supported when globals exist", () => {
     (globalThis as Record<string, unknown>)["PublicKeyCredential"] = class {
       isUserVerifyingPlatformAuthenticatorAvailable() {
         return Promise.resolve(true);
       }
     };
     const restore = mockCredentials({});
-    expect(isPrfLikelySupported()).toBe(true);
+    expect(isPrfLikelySupported()).toBeTruthy();
     restore();
     (globalThis as Record<string, unknown>)["PublicKeyCredential"] = origPKC;
   });

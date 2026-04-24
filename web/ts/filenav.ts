@@ -29,24 +29,24 @@ function showNavContextMenu(e: MouseEvent, path: string, title: string): void {
       },
       {
         label: isPinned ? "Unpin" : "Pin",
-        onclick: () => {
+        onclick: async () => {
           const action = isPinned ? unpinFile(path) : pinFile(path);
-          action.then(async () => {
-            await refreshPinned();
-            render();
-            emit("pinned:changed", undefined);
-          });
+          await action;
+          await refreshPinned();
+          render();
+          emit("pinned:changed");
         },
       },
       {
         label: "Delete",
         danger: true,
-        onclick: () => {
-          if (!confirm(`Delete ${title}?`)) return;
-          deleteNote(path).then(() => {
-            closeTabByPath(path);
-            emit("files:changed", undefined);
-          });
+        onclick: async () => {
+          if (!confirm(`Delete ${title}?`)) {
+            return;
+          }
+          await deleteNote(path);
+          closeTabByPath(path);
+          emit("files:changed");
         },
       },
     ],
@@ -65,15 +65,15 @@ let renderInFlight = false;
 export async function initFileNav(): Promise<() => void> {
   render();
 
-  const collapseBtn = document.getElementById("sidebar-collapse") as HTMLButtonElement;
+  const collapseBtn = document.querySelector("#sidebar-collapse") as HTMLButtonElement;
   collapseBtn.addEventListener("click", () => {
-    const app = document.getElementById("app")!;
+    const app = document.querySelector("#app")!;
     const collapsed = app.classList.toggle("sidebar-collapsed");
     collapseBtn.innerHTML = collapsed ? "&#x203A;" : "&#x2039;";
     collapseBtn.title = collapsed ? "Expand sidebar" : "Collapse sidebar";
   });
 
-  const searchInput = document.getElementById("sidebar-search") as HTMLInputElement;
+  const searchInput = document.querySelector("#sidebar-search") as HTMLInputElement;
 
   searchInput.addEventListener("input", (e) => {
     const q = (e.target as HTMLInputElement).value;
@@ -143,7 +143,9 @@ async function refreshPinned(): Promise<void> {
 // Update active highlight and scroll into view on tab change — no network calls.
 function onTabChange(): void {
   const container = getContainer();
-  if (!container) return;
+  if (!container) {
+    return;
+  }
 
   const active = getActiveTab();
   for (const el of container.querySelectorAll<HTMLElement>(".nav-file")) {
@@ -153,16 +155,16 @@ function onTabChange(): void {
 }
 
 async function render(): Promise<void> {
-  if (currentMode === "search" && currentQuery.trim()) {
-    await renderSearch(currentQuery);
-  } else {
-    await renderRecent();
-  }
+  await (currentMode === "search" && currentQuery.trim()
+    ? renderSearch(currentQuery)
+    : renderRecent());
 }
 
 async function renderRecent(): Promise<void> {
   const container = getContainer();
-  if (!container) return;
+  if (!container) {
+    return;
+  }
 
   let pinned: { path: string; title: string }[] = [];
   let recent: { path: string; title: string; mtime: number }[] = [];
@@ -186,16 +188,18 @@ async function renderRecent(): Promise<void> {
   }
 
   for (const file of pinned) {
-    container.appendChild(makeFileRow(file.path, file.title, active?.path, null));
+    container.append(makeFileRow(file.path, file.title, active?.path, null));
   }
   for (const file of recentNonPinned) {
-    container.appendChild(makeFileRow(file.path, file.title, active?.path, timeAgo(file.mtime)));
+    container.append(makeFileRow(file.path, file.title, active?.path, timeAgo(file.mtime)));
   }
 }
 
 async function renderSearch(q: string): Promise<void> {
   const container = getContainer();
-  if (!container) return;
+  if (!container) {
+    return;
+  }
   let results: { path: string; title: string }[];
   try {
     results = await searchFileNames(q);
@@ -211,37 +215,47 @@ async function renderSearch(q: string): Promise<void> {
   }
   for (const r of results) {
     const el = makeFileRow(r.path, r.title, active?.path, null);
-    const dir = r.path.includes("/") ? r.path.substring(0, r.path.lastIndexOf("/")) : "";
+    const dir = r.path.includes("/") ? r.path.slice(0, r.path.lastIndexOf("/")) : "";
     if (dir) {
       const nameSpan = el.querySelector(".nav-file-name") as HTMLElement;
       const textWrapper = document.createElement("div");
       textWrapper.className = "nav-file-text";
-      el.insertBefore(textWrapper, nameSpan);
-      textWrapper.appendChild(nameSpan);
+      nameSpan.before(textWrapper);
+      textWrapper.append(nameSpan);
       const dirLine = document.createElement("div");
       dirLine.className = "nav-file-dir";
       dirLine.textContent = dir;
-      textWrapper.appendChild(dirLine);
+      textWrapper.append(dirLine);
     }
-    container.appendChild(el);
+    container.append(el);
   }
 }
 
 function getContainer(): HTMLElement | null {
-  return document.getElementById("sidebar-tree");
+  return document.querySelector("#sidebar-tree");
 }
 
 function timeAgo(mtime: number): string {
   const seconds = Math.floor(Date.now() / 1000 - mtime);
-  if (seconds < 60) return "<1m";
+  if (seconds < 60) {
+    return "<1m";
+  }
   const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m`;
+  if (minutes < 60) {
+    return `${minutes}m`;
+  }
   const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h`;
+  if (hours < 24) {
+    return `${hours}h`;
+  }
   const days = Math.floor(hours / 24);
-  if (days < 7) return `${days}d`;
+  if (days < 7) {
+    return `${days}d`;
+  }
   const weeks = Math.floor(days / 7);
-  if (weeks < 5) return `${weeks}w`;
+  if (weeks < 5) {
+    return `${weeks}w`;
+  }
   return `${Math.floor(days / 30)}mo`;
 }
 
@@ -252,19 +266,19 @@ function makeFileRow(
   timeLabel: string | null,
 ): HTMLElement {
   const el = document.createElement("div");
-  el.className = "nav-file" + (path === activePath ? " active" : "");
+  el.className = `nav-file${path === activePath ? " active" : ""}`;
   el.title = path;
 
   const nameSpan = document.createElement("span");
   nameSpan.className = "nav-file-name";
   nameSpan.textContent = title || stemFromPath(path);
-  el.appendChild(nameSpan);
+  el.append(nameSpan);
 
   if (timeLabel) {
     const timeSpan = document.createElement("span");
     timeSpan.className = "nav-file-time";
     timeSpan.textContent = timeLabel;
-    el.appendChild(timeSpan);
+    el.append(timeSpan);
   }
 
   el.addEventListener("click", () => openTab(path));

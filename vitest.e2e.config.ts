@@ -9,6 +9,7 @@ export default defineConfig({
     },
   },
   test: {
+    globals: true,
     environment: "node",
     include: ["web/ts/e2e/*.test.ts"],
     reporters: ["agent"],

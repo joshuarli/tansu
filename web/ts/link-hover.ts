@@ -8,13 +8,15 @@ export function registerLinkHover() {
   tooltip.className = "link-hover-tooltip";
   tooltip.textContent = hint;
   tooltip.style.display = "none";
-  document.body.appendChild(tooltip);
+  document.body.append(tooltip);
 
   let hideTimer: ReturnType<typeof setTimeout> | null = null;
 
   document.addEventListener("mouseover", (e) => {
     const anchor = (e.target as HTMLElement).closest<HTMLAnchorElement>(".editor-content a[href]");
-    if (!anchor) return;
+    if (!anchor) {
+      return;
+    }
     if (hideTimer !== null) {
       clearTimeout(hideTimer);
       hideTimer = null;
@@ -35,7 +37,9 @@ export function registerLinkHover() {
 
   document.addEventListener("click", (e) => {
     const anchor = (e.target as HTMLElement).closest<HTMLAnchorElement>(".editor-content a[href]");
-    if (!anchor) return;
+    if (!anchor) {
+      return;
+    }
     if (e.metaKey || e.ctrlKey) {
       e.preventDefault();
       window.open(anchor.getAttribute("href")!, "_blank", "noopener,noreferrer");

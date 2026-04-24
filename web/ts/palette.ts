@@ -14,10 +14,18 @@ interface Command {
 /// Check if a keyboard event matches a key binding.
 export function matchesKey(e: KeyboardEvent, k: KeyBinding): boolean {
   const meta = e.metaKey || e.ctrlKey;
-  if (k.meta && !meta) return false;
-  if (!k.meta && meta) return false;
-  if (k.shift && !e.shiftKey) return false;
-  if (!k.shift && e.shiftKey) return false;
+  if (k.meta && !meta) {
+    return false;
+  }
+  if (!k.meta && meta) {
+    return false;
+  }
+  if (k.shift && !e.shiftKey) {
+    return false;
+  }
+  if (!k.shift && e.shiftKey) {
+    return false;
+  }
   return e.key === k.key;
 }
 
@@ -31,9 +39,9 @@ interface Palette {
 }
 
 export function createPalette(): Palette {
-  const overlay = document.getElementById("palette-overlay")!;
-  const input = document.getElementById("palette-input")! as HTMLInputElement;
-  const listEl = document.getElementById("palette-list")!;
+  const overlay = document.querySelector("#palette-overlay")!;
+  const input = document.querySelector("#palette-input")! as HTMLInputElement;
+  const listEl = document.querySelector("#palette-list")!;
 
   let isOpen = false;
   let selectedIndex = 0;
@@ -41,7 +49,9 @@ export function createPalette(): Palette {
 
   function getFiltered(): Command[] {
     const q = input.value.trim().toLowerCase();
-    if (!q) return commands;
+    if (!q) {
+      return commands;
+    }
     return commands.filter((c) => c.label.toLowerCase().includes(q));
   }
 
@@ -56,9 +66,9 @@ export function createPalette(): Palette {
   function renderList() {
     const filtered = getFiltered();
     listEl.innerHTML = "";
-    filtered.forEach((cmd, i) => {
+    for (const [i, cmd] of filtered.entries()) {
       const el = document.createElement("div");
-      el.className = "palette-item" + (i === selectedIndex ? " selected" : "");
+      el.className = `palette-item${i === selectedIndex ? " selected" : ""}`;
 
       const label = document.createElement("span");
       label.className = "palette-label";
@@ -73,8 +83,8 @@ export function createPalette(): Palette {
         close();
         cmd.action();
       };
-      listEl.appendChild(el);
-    });
+      listEl.append(el);
+    }
   }
 
   function open() {
@@ -93,8 +103,11 @@ export function createPalette(): Palette {
   }
 
   function toggle() {
-    if (isOpen) close();
-    else open();
+    if (isOpen) {
+      close();
+    } else {
+      open();
+    }
   }
 
   input.addEventListener("input", () => {
@@ -127,7 +140,9 @@ export function createPalette(): Palette {
   });
 
   overlay.addEventListener("click", (e) => {
-    if (e.target === overlay) close();
+    if (e.target === overlay) {
+      close();
+    }
   });
 
   return {

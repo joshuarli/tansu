@@ -11,7 +11,6 @@ import {
   clearInlineFormats,
   toggleHeading,
   toggleCodeFence,
-  shiftIndent,
   type FormatResult,
 } from "./format-ops.ts";
 
@@ -35,7 +34,7 @@ interface FormatButtonsOpts {
 
 export function populateFormatButtons(container: HTMLElement, opts: FormatButtonsOpts): void {
   const { applyIndent, afterInline, afterBlock, applySourceFormat } = opts;
-  const afterIndent = opts.afterIndent ?? (() => {});
+  const afterIndent = opts.afterIndent ?? (() => void 0);
 
   function btn(innerHTML: string, title: string, action: () => void) {
     const el = document.createElement("button");
@@ -46,13 +45,13 @@ export function populateFormatButtons(container: HTMLElement, opts: FormatButton
       e.preventDefault();
       action();
     });
-    container.appendChild(el);
+    container.append(el);
   }
 
   function sep() {
     const el = document.createElement("div");
     el.className = "format-toolbar-sep";
-    container.appendChild(el);
+    container.append(el);
   }
 
   btn("<b>B</b>", "Bold", () => {
@@ -138,12 +137,14 @@ export function initFormatToolbar(opts: FormatToolbarOptions): () => void {
 
   const toolbar = document.createElement("div");
   toolbar.className = "format-toolbar";
-  document.body.appendChild(toolbar);
+  document.body.append(toolbar);
 
   let mouseIsDown = false;
 
   function updateVisibility() {
-    if (mouseIsDown) return;
+    if (mouseIsDown) {
+      return;
+    }
     const sel = window.getSelection();
     if (!sel || sel.rangeCount === 0 || sel.isCollapsed) {
       hideToolbar();
@@ -184,11 +185,15 @@ export function initFormatToolbar(opts: FormatToolbarOptions): () => void {
   });
 
   const onSelectionChange = () => {
-    if (!mouseIsDown) requestAnimationFrame(updateVisibility);
+    if (!mouseIsDown) {
+      requestAnimationFrame(updateVisibility);
+    }
   };
 
   const onMouseDown = (e: MouseEvent) => {
-    if (!toolbar.contains(e.target as Node)) mouseIsDown = true;
+    if (!toolbar.contains(e.target as Node)) {
+      mouseIsDown = true;
+    }
   };
 
   const onMouseUp = () => {
@@ -197,7 +202,9 @@ export function initFormatToolbar(opts: FormatToolbarOptions): () => void {
   };
 
   const onKeyDown = (e: KeyboardEvent) => {
-    if (e.key === "Escape") hideToolbar();
+    if (e.key === "Escape") {
+      hideToolbar();
+    }
   };
 
   document.addEventListener("selectionchange", onSelectionChange);
@@ -225,18 +232,24 @@ function positionToolbar(toolbar: HTMLElement, range: Range) {
       r.setStart(sel.focusNode, sel.focusOffset);
       r.collapse(true);
       const rect = r.getBoundingClientRect();
-      if (rect.height > 0) refRect = rect;
-    } catch (_) {
+      if (rect.height > 0) {
+        refRect = rect;
+      }
+    } catch {
       // focusNode may be in an edge-case state
     }
   }
-  if (!refRect) refRect = range.getBoundingClientRect();
+  if (!refRect) {
+    refRect = range.getBoundingClientRect();
+  }
 
   const tbRect = toolbar.getBoundingClientRect();
   const GAP = 8;
 
   let top = refRect.top - tbRect.height - GAP;
-  if (top < 8) top = refRect.bottom + GAP;
+  if (top < 8) {
+    top = refRect.bottom + GAP;
+  }
 
   let left = refRect.left - tbRect.width / 2;
   left = Math.max(8, Math.min(left, window.innerWidth - tbRect.width - 8));

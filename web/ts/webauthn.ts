@@ -16,19 +16,21 @@ export function bufToBase64(buf: BufferSource): string {
     buf instanceof ArrayBuffer
       ? new Uint8Array(buf)
       : new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
-  return btoa(String.fromCharCode(...bytes));
+  return btoa(String.fromCodePoint(...bytes));
 }
 
 export function bufToBase64url(buf: ArrayBuffer): string {
-  return bufToBase64(buf).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  return bufToBase64(buf).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
 }
 
 export function base64urlToBuf(b64: string): ArrayBuffer {
   const padded =
-    b64.replace(/-/g, "+").replace(/_/g, "/") + "==".slice(0, (4 - (b64.length % 4)) % 4);
+    b64.replaceAll("-", "+").replaceAll("_", "/") + "==".slice(0, (4 - (b64.length % 4)) % 4);
   const binary = atob(padded);
   const buf = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) buf[i] = binary.charCodeAt(i);
+  for (let i = 0; i < binary.length; i++) {
+    buf[i] = binary.codePointAt(i)!;
+  }
   return buf.buffer;
 }
 
@@ -106,5 +108,5 @@ export async function getPrfKey(credentialIds: string[]): Promise<string> {
 
 // Check if WebAuthn + PRF is likely supported in this browser.
 export function isPrfLikelySupported(): boolean {
-  return typeof PublicKeyCredential !== "undefined" && typeof navigator.credentials !== "undefined";
+  return typeof PublicKeyCredential !== "undefined" && navigator.credentials !== undefined;
 }

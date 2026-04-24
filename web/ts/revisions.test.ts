@@ -1,11 +1,10 @@
-import { describe, test, expect, beforeAll, afterAll } from "vitest";
-
+import type { RevisionsOpts } from "./revisions.ts";
 import { setupDOM, mockFetch } from "./test-helper.ts";
 
 describe("revisions", () => {
   let cleanup: () => void;
   let mock: ReturnType<typeof mockFetch>;
-  let toggleRevisions: (opts: any) => void;
+  let toggleRevisions: (opts: RevisionsOpts) => void;
   let hideRevisions: () => void;
   let isRevisionsOpen: () => boolean;
   let offRestore: () => void;
@@ -38,16 +37,16 @@ describe("revisions", () => {
     mock.on("POST", "/api/restore", { mtime: 5000 });
 
     const revMod = await import("./revisions.ts");
-    toggleRevisions = revMod.toggleRevisions;
-    hideRevisions = revMod.hideRevisions;
-    isRevisionsOpen = revMod.isRevisionsOpen;
+    ({ toggleRevisions } = revMod);
+    ({ hideRevisions } = revMod);
+    ({ isRevisionsOpen } = revMod);
 
     const { on } = await import("./events.ts");
     offRestore = on("revision:restore", () => {});
 
     host = document.createElement("div");
     host.className = "revisions-container";
-    document.body.appendChild(host);
+    document.body.append(host);
   });
 
   afterAll(() => {
@@ -57,7 +56,7 @@ describe("revisions", () => {
     cleanup();
   });
 
-  test("revisions lifecycle", async () => {
+  it("revisions lifecycle", async () => {
     // Show revisions
     let opts = makeOpts("test.md");
     toggleRevisions(opts);
@@ -65,48 +64,48 @@ describe("revisions", () => {
 
     // Header
     const header = host.querySelector(".revisions-header");
-    expect(header !== null).toBe(true);
-    expect(header!.textContent!.includes("Revisions")).toBe(true);
+    expect(header !== null).toBeTruthy();
+    expect(header!.textContent!).toContain("Revisions");
 
     // Revision items
     const items = host.querySelectorAll(".revision-item");
-    expect(items.length).toBe(3);
+    expect(items).toHaveLength(3);
 
     // Each item has a restore button
     const restoreBtn = items[0]!.querySelector(".restore-btn");
-    expect(restoreBtn !== null).toBe(true);
+    expect(restoreBtn !== null).toBeTruthy();
     expect(restoreBtn!.textContent).toBe("Restore");
 
     // Hide revisions
     opts.hideCalled = false;
     hideRevisions();
-    expect(isRevisionsOpen()).toBe(false);
-    expect(opts.hideCalled).toBe(true);
+    expect(isRevisionsOpen()).toBeFalsy();
+    expect(opts.hideCalled).toBeTruthy();
     expect(host.innerHTML).toBe("");
 
     // Toggle: show then toggle again hides
     opts = makeOpts("test.md");
     toggleRevisions(opts);
     await new Promise((r) => setTimeout(r, 200));
-    expect(isRevisionsOpen()).toBe(true);
+    expect(isRevisionsOpen()).toBeTruthy();
     opts.hideCalled = false;
     toggleRevisions(opts);
-    expect(isRevisionsOpen()).toBe(false);
-    expect(opts.hideCalled).toBe(true);
+    expect(isRevisionsOpen()).toBeFalsy();
+    expect(opts.hideCalled).toBeTruthy();
 
     // Toggle different path shows new panel
     opts = makeOpts("a.md");
     toggleRevisions(opts);
     await new Promise((r) => setTimeout(r, 200));
-    expect(isRevisionsOpen()).toBe(true);
+    expect(isRevisionsOpen()).toBeTruthy();
     hideRevisions();
   });
 
-  test("clicking restore button emits revision:restore", async () => {
+  it("clicking restore button emits revision:restore", async () => {
     const { on } = await import("./events.ts");
 
-    let restoreEvent: any = null;
-    const offR = on("revision:restore", (data: any) => {
+    let restoreEvent: { content: string; mtime: number } | null = null;
+    const offR = on<{ content: string; mtime: number }>("revision:restore", (data) => {
       restoreEvent = data;
     });
 
@@ -115,7 +114,7 @@ describe("revisions", () => {
     await new Promise((r) => setTimeout(r, 200));
 
     const restoreBtn = host.querySelector(".restore-btn") as HTMLElement;
-    expect(restoreBtn !== null).toBe(true);
+    expect(restoreBtn !== null).toBeTruthy();
 
     // confirm is already mocked to return true by setupDOM
     // Use dispatchEvent instead of click() for happy-dom compatibility
@@ -123,16 +122,16 @@ describe("revisions", () => {
     // The onclick handler is async — needs enough time for two fetch calls
     await new Promise((r) => setTimeout(r, 500));
 
-    expect(restoreEvent !== null).toBe(true);
-    expect(restoreEvent.content).toBe("# Old version");
-    expect(restoreEvent.mtime).toBe(5000);
+    expect(restoreEvent !== null).toBeTruthy();
+    expect(restoreEvent!.content).toBe("# Old version");
+    expect(restoreEvent!.mtime).toBe(5000);
 
     offR();
     // Panel is hidden after restore
-    expect(isRevisionsOpen()).toBe(false);
+    expect(isRevisionsOpen()).toBeFalsy();
   });
 
-  test("empty revisions shows 'No revisions yet.' message", async () => {
+  it("empty revisions shows 'No revisions yet.' message", async () => {
     // Mock empty revisions list
     mock.on("GET", /\/api\/revisions\?/, []);
 
@@ -140,8 +139,8 @@ describe("revisions", () => {
     toggleRevisions(opts);
     await new Promise((r) => setTimeout(r, 200));
 
-    expect(isRevisionsOpen()).toBe(true);
-    expect(host.querySelectorAll(".revision-item").length).toBe(0);
+    expect(isRevisionsOpen()).toBeTruthy();
+    expect(host.querySelectorAll(".revision-item")).toHaveLength(0);
     expect(host.textContent).toContain("No revisions yet.");
 
     hideRevisions();
@@ -150,21 +149,21 @@ describe("revisions", () => {
     mock.on("GET", /\/api\/revisions\?/, [1000, 2000, 3000]);
   });
 
-  test("clicking a revision item shows diff preview", async () => {
+  it("clicking a revision item shows diff preview", async () => {
     const opts = makeOpts("test.md");
     toggleRevisions(opts);
     await new Promise((r) => setTimeout(r, 200));
 
     const items = host.querySelectorAll(".revision-item");
-    expect(items.length).toBe(3);
+    expect(items).toHaveLength(3);
 
     // Click the first revision item (not the restore button)
     (items[0] as HTMLElement).click();
     await new Promise((r) => setTimeout(r, 200));
 
     const preview = host.querySelector(".revision-preview");
-    expect(preview !== null).toBe(true);
-    expect(preview!.classList.contains("diff-view")).toBe(true);
+    expect(preview !== null).toBeTruthy();
+    expect(preview!.classList.contains("diff-view")).toBeTruthy();
 
     hideRevisions();
   });

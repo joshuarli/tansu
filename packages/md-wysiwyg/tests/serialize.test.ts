@@ -1,5 +1,3 @@
-import { describe, test, expect, beforeAll, afterAll } from "vitest";
-
 import { domToMarkdown } from "../src/serialize.ts";
 import { setupDOM } from "./test-helper.ts";
 
@@ -20,94 +18,94 @@ describe("serialize", () => {
     cleanup();
   });
 
-  test("h1", () => {
+  it("h1", () => {
     expect(domToMarkdown(html("<h1>Title</h1>"))).toBe("# Title");
   });
-  test("h2", () => {
+  it("h2", () => {
     expect(domToMarkdown(html("<h2>Sub</h2>"))).toBe("## Sub");
   });
-  test("h3", () => {
+  it("h3", () => {
     expect(domToMarkdown(html("<h3>Deep</h3>"))).toBe("### Deep");
   });
-  test("h6", () => {
+  it("h6", () => {
     expect(domToMarkdown(html("<h6>H6</h6>"))).toBe("###### H6");
   });
-  test("paragraph", () => {
+  it("paragraph", () => {
     expect(domToMarkdown(html("<p>Hello world</p>"))).toBe("Hello world");
   });
 
-  test("heading + paragraph", () => {
+  it("heading + paragraph", () => {
     expect(domToMarkdown(html("<h1>Title</h1><p>Body</p>"))).toBe("# Title\n\nBody");
   });
 
-  test("two adjacent paragraphs use single newline", () => {
+  it("two adjacent paragraphs use single newline", () => {
     expect(domToMarkdown(html("<p>foo</p><p>bar</p>"))).toBe("foo\nbar");
   });
-  test("three adjacent paragraphs", () => {
+  it("three adjacent paragraphs", () => {
     expect(domToMarkdown(html("<p>a</p><p>b</p><p>c</p>"))).toBe("a\nb\nc");
   });
-  test("h2 + paragraph uses double newline", () => {
+  it("h2 + paragraph uses double newline", () => {
     expect(domToMarkdown(html("<h2>Title</h2><p>Body</p>"))).toBe("## Title\n\nBody");
   });
-  test("paragraph + h2 uses double newline", () => {
+  it("paragraph + h2 uses double newline", () => {
     expect(domToMarkdown(html("<p>intro</p><h2>Title</h2>"))).toBe("intro\n\n## Title");
   });
-  test("paragraph + code block uses double newline", () => {
+  it("paragraph + code block uses double newline", () => {
     expect(domToMarkdown(html('<p>before</p><pre><code class="language-js">x</code></pre>'))).toBe(
       "before\n\n```js\nx\n```",
     );
   });
 
-  test("bold", () => {
+  it("bold", () => {
     expect(domToMarkdown(html("<p><strong>bold</strong></p>"))).toBe("**bold**");
   });
-  test("b tag", () => {
+  it("b tag", () => {
     expect(domToMarkdown(html("<p><b>bold</b></p>"))).toBe("**bold**");
   });
-  test("italic", () => {
+  it("italic", () => {
     expect(domToMarkdown(html("<p><em>italic</em></p>"))).toBe("*italic*");
   });
-  test("i tag", () => {
+  it("i tag", () => {
     expect(domToMarkdown(html("<p><i>italic</i></p>"))).toBe("*italic*");
   });
-  test("strikethrough del", () => {
+  it("strikethrough del", () => {
     expect(domToMarkdown(html("<p><del>deleted</del></p>"))).toBe("~~deleted~~");
   });
-  test("strikethrough s", () => {
+  it("strikethrough s", () => {
     expect(domToMarkdown(html("<p><s>deleted</s></p>"))).toBe("~~deleted~~");
   });
-  test("highlight", () => {
+  it("highlight", () => {
     expect(domToMarkdown(html("<p><mark>marked</mark></p>"))).toBe("==marked==");
   });
-  test("inline code", () => {
+  it("inline code", () => {
     expect(domToMarkdown(html("<p><code>code</code></p>"))).toBe("`code`");
   });
 
-  test("link", () => {
+  it("link", () => {
     expect(domToMarkdown(html('<p><a href="http://example.com">click</a></p>'))).toBe(
       "[click](http://example.com)",
     );
   });
 
-  test("wiki-link same display", () => {
+  it("wiki-link same display", () => {
     expect(
       domToMarkdown(html('<p><a class="wiki-link" data-target="My Note">My Note</a></p>')),
     ).toBe("[[My Note]]");
   });
 
-  test("wiki-link different display", () => {
+  it("wiki-link different display", () => {
     expect(
       domToMarkdown(html('<p><a class="wiki-link" data-target="target">display</a></p>')),
     ).toBe("[[target|display]]");
   });
 
-  test("image", () => {
+  it("image", () => {
     expect(domToMarkdown(html('<p><img src="photo.png" alt="desc"></p>'))).toBe(
       "![desc](photo.png)",
     );
   });
 
-  test("wiki-image", () => {
+  it("wiki-image", () => {
     expect(
       domToMarkdown(
         html(
@@ -117,46 +115,46 @@ describe("serialize", () => {
     ).toBe("![[photo.webp]]");
   });
 
-  test("hr", () => {
+  it("hr", () => {
     expect(domToMarkdown(html("<hr>"))).toBe("---");
   });
-  test("ul", () => {
+  it("ul", () => {
     expect(domToMarkdown(html("<ul><li>one</li><li>two</li></ul>"))).toBe("- one\n- two");
   });
 
-  test("ol", () => {
+  it("ol", () => {
     expect(domToMarkdown(html("<ol><li>first</li><li>second</li></ol>"))).toBe(
       "1. first\n2. second",
     );
   });
 
-  test("nested ul", () => {
+  it("nested ul", () => {
     expect(domToMarkdown(html("<ul><li>parent<ul><li>child</li></ul></li></ul>"))).toBe(
       "- parent\n  - child",
     );
   });
 
-  test("browser-style sibling nested ul", () => {
+  it("browser-style sibling nested ul", () => {
     expect(domToMarkdown(html("<ul><li>parent</li><ul><li><br></li></ul></ul>"))).toBe(
       "- parent\n  - ",
     );
   });
 
-  test("empty top-level list item", () => {
+  it("empty top-level list item", () => {
     expect(domToMarkdown(html("<ul><li>one</li><li><br></li></ul>"))).toBe("- one\n- ");
   });
 
-  test("malformed paragraph wrapping a list", () => {
+  it("malformed paragraph wrapping a list", () => {
     expect(domToMarkdown(html("<p><ul><li>a</li></ul></p>"))).toBe("- a");
   });
 
-  test("blank paragraph marker preserves extra blank line", () => {
+  it("blank paragraph marker preserves extra blank line", () => {
     expect(domToMarkdown(html('<p>First</p><p data-md-blank="true"><br></p><p>Second</p>'))).toBe(
       "First\n\nSecond",
     );
   });
 
-  test("blank paragraph marker preserves leading and trailing blank lines", () => {
+  it("blank paragraph marker preserves leading and trailing blank lines", () => {
     expect(
       domToMarkdown(
         html('<p data-md-blank="true"><br></p><p>First</p><p data-md-blank="true"><br></p>'),
@@ -164,102 +162,102 @@ describe("serialize", () => {
     ).toBe("\nFirst\n");
   });
 
-  test("paragraph followed by list uses a single newline", () => {
+  it("paragraph followed by list uses a single newline", () => {
     expect(domToMarkdown(html("<p>foo:</p><ul><li>one</li></ul>"))).toBe("foo:\n- one");
   });
 
-  test("list followed by paragraph uses a single newline", () => {
+  it("list followed by paragraph uses a single newline", () => {
     expect(domToMarkdown(html("<ul><li>one</li><li><br></li></ul><p>dsf</p>"))).toBe(
       "- one\n- \ndsf",
     );
   });
 
-  test("task list", () => {
+  it("task list", () => {
     const root = document.createElement("div");
     const ul = document.createElement("ul");
     const li1 = document.createElement("li");
     const cb1 = document.createElement("input");
     cb1.type = "checkbox";
-    li1.appendChild(cb1);
-    li1.appendChild(document.createTextNode("todo"));
+    li1.append(cb1);
+    li1.append(document.createTextNode("todo"));
     const li2 = document.createElement("li");
     const cb2 = document.createElement("input");
     cb2.type = "checkbox";
     cb2.checked = true;
-    li2.appendChild(cb2);
-    li2.appendChild(document.createTextNode("done"));
+    li2.append(cb2);
+    li2.append(document.createTextNode("done"));
     ul.append(li1, li2);
-    root.appendChild(ul);
+    root.append(ul);
     expect(domToMarkdown(root)).toBe("- [ ] todo\n- [x] done");
   });
 
-  test("code block with lang", () => {
+  it("code block with lang", () => {
     expect(domToMarkdown(html('<pre><code class="language-js">const x = 1;</code></pre>'))).toBe(
       "```js\nconst x = 1;\n```",
     );
   });
 
-  test("code block no lang", () => {
+  it("code block no lang", () => {
     expect(domToMarkdown(html("<pre><code>plain code</code></pre>"))).toBe("```\nplain code\n```");
   });
 
-  test("blockquote", () => {
+  it("blockquote", () => {
     expect(domToMarkdown(html("<blockquote><p>quoted</p></blockquote>"))).toContain("> quoted");
   });
 
-  test("table header", () => {
+  it("table header", () => {
     const tableHtml = "<table><tr><th>A</th><th>B</th></tr><tr><td>1</td><td>2</td></tr></table>";
     expect(domToMarkdown(html(tableHtml))).toContain("| A | B |");
   });
 
-  test("table separator", () => {
+  it("table separator", () => {
     const tableHtml = "<table><tr><th>A</th><th>B</th></tr><tr><td>1</td><td>2</td></tr></table>";
     expect(domToMarkdown(html(tableHtml))).toContain("| --- | --- |");
   });
 
-  test("table row", () => {
+  it("table row", () => {
     const tableHtml = "<table><tr><th>A</th><th>B</th></tr><tr><td>1</td><td>2</td></tr></table>";
     expect(domToMarkdown(html(tableHtml))).toContain("| 1 | 2 |");
   });
 
-  test("callout type", () => {
+  it("callout type", () => {
     const calloutHtml = `<div class="callout callout-warning" data-callout="warning">
-  <div class="callout-title">\u26a0\ufe0f Be careful</div>
+  <div class="callout-title">\u26A0\uFE0F Be careful</div>
   <div class="callout-body"><p>This is important</p></div>
 </div>`;
     expect(domToMarkdown(html(calloutHtml))).toContain("> [!warning]");
   });
 
-  test("callout title", () => {
+  it("callout title", () => {
     const calloutHtml = `<div class="callout callout-warning" data-callout="warning">
-  <div class="callout-title">\u26a0\ufe0f Be careful</div>
+  <div class="callout-title">\u26A0\uFE0F Be careful</div>
   <div class="callout-body"><p>This is important</p></div>
 </div>`;
     expect(domToMarkdown(html(calloutHtml))).toContain("Be careful");
   });
 
-  test("callout body", () => {
+  it("callout body", () => {
     const calloutHtml = `<div class="callout callout-warning" data-callout="warning">
-  <div class="callout-title">\u26a0\ufe0f Be careful</div>
+  <div class="callout-title">\u26A0\uFE0F Be careful</div>
   <div class="callout-body"><p>This is important</p></div>
 </div>`;
     expect(domToMarkdown(html(calloutHtml))).toContain("> This is important");
   });
 
-  test("nested bold italic", () => {
+  it("nested bold italic", () => {
     expect(domToMarkdown(html("<p><strong><em>bold italic</em></strong></p>"))).toBe(
       "***bold italic***",
     );
   });
 
-  test("br to newline", () => {
+  it("br to newline", () => {
     expect(domToMarkdown(html("<p>line1<br>line2</p>"))).toContain("line1\nline2");
   });
 
-  test("empty", () => {
+  it("empty", () => {
     expect(domToMarkdown(html(""))).toBe("");
   });
-  test("div as paragraph", () => {
+  it("div as paragraph", () => {
     expect(domToMarkdown(html("<div>text</div>"))).toBe("text");
   });
 });

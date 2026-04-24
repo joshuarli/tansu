@@ -1,5 +1,4 @@
-import { describe, test, expect, beforeAll, afterAll } from "vitest";
-
+import type { Tab } from "./tab-state.ts";
 import { setupDOM, mockFetch } from "./test-helper.ts";
 
 const tick = () => new Promise<void>((r) => setTimeout(r, 0));
@@ -7,9 +6,9 @@ const tick = () => new Promise<void>((r) => setTimeout(r, 0));
 describe("tabs", () => {
   let cleanup: () => void;
   let mock: ReturnType<typeof mockFetch>;
-  let openTab: (path: string) => Promise<any>;
+  let openTab: (path: string) => Promise<Tab>;
   let closeTab: (i: number) => void;
-  let getTabs: () => any[];
+  let getTabs: () => Tab[];
   let markDirty: (path: string) => void;
   let createNewNoteViaDialog: () => Promise<void>;
 
@@ -27,14 +26,16 @@ describe("tabs", () => {
     mock.on("DELETE", "/api/pin", {});
 
     const mod = await import("./tabs.ts");
-    openTab = mod.openTab;
-    closeTab = mod.closeTab;
-    getTabs = mod.getTabs;
-    markDirty = mod.markDirty;
+    ({ openTab } = mod);
+    ({ closeTab } = mod);
+    ({ getTabs } = mod);
+    ({ markDirty } = mod);
     createNewNoteViaDialog = mod.createNewNote;
 
     // Clean up any leaked state from other test files sharing the module.
-    while (getTabs().length > 0) closeTab(0);
+    while (getTabs().length > 0) {
+      closeTab(0);
+    }
   });
 
   afterAll(() => {
@@ -44,22 +45,26 @@ describe("tabs", () => {
 
   // Helper: ensure a clean slate before each DOM test.
   async function openTwo() {
-    while (getTabs().length > 0) closeTab(0);
+    while (getTabs().length > 0) {
+      closeTab(0);
+    }
     await openTab("notes/alpha.md");
     await openTab("notes/beta.md");
     await tick();
   }
 
-  test("tab bar renders correct number of tabs", async () => {
+  it("tab bar renders correct number of tabs", async () => {
     await openTwo();
-    const tabBar = document.getElementById("tab-bar")!;
+    const tabBar = document.querySelector("#tab-bar")!;
     const tabEls = tabBar.querySelectorAll(".tab:not(.tab-new)");
-    expect(tabEls.length).toBe(2);
-    while (getTabs().length > 0) closeTab(0);
+    expect(tabEls).toHaveLength(2);
+    while (getTabs().length > 0) {
+      closeTab(0);
+    }
   });
 
-  test("empty-state hides when tabs are open, shows when all closed", async () => {
-    const emptyState = document.getElementById("empty-state")!;
+  it("empty-state hides when tabs are open, shows when all closed", async () => {
+    const emptyState = document.querySelector("#empty-state") as HTMLElement;
     await openTwo();
     expect(emptyState.style.display).toBe("none");
     while (getTabs().length > 0) {
@@ -69,50 +74,58 @@ describe("tabs", () => {
     expect(emptyState.style.display).toBe("flex");
   });
 
-  test("active tab gets .active class; others do not", async () => {
+  it("active tab gets .active class; others do not", async () => {
     await openTwo();
-    const tabBar = document.getElementById("tab-bar")!;
+    const tabBar = document.querySelector("#tab-bar")!;
     const tabEls = tabBar.querySelectorAll(".tab:not(.tab-new)");
     // beta was opened second so it is active (index 1)
-    expect(tabEls[1]!.classList.contains("active")).toBe(true);
-    expect(tabEls[0]!.classList.contains("active")).toBe(false);
-    while (getTabs().length > 0) closeTab(0);
+    expect(tabEls[1]!.classList.contains("active")).toBeTruthy();
+    expect(tabEls[0]!.classList.contains("active")).toBeFalsy();
+    while (getTabs().length > 0) {
+      closeTab(0);
+    }
   });
 
-  test("tab labels match note titles", async () => {
+  it("tab labels match note titles", async () => {
     await openTwo();
-    const tabBar = document.getElementById("tab-bar")!;
+    const tabBar = document.querySelector("#tab-bar")!;
     const labels = tabBar.querySelectorAll(".tab:not(.tab-new) span:not(.close):not(.dirty)");
     expect(labels[0]!.textContent).toBe("alpha");
     expect(labels[1]!.textContent).toBe("beta");
-    while (getTabs().length > 0) closeTab(0);
+    while (getTabs().length > 0) {
+      closeTab(0);
+    }
   });
 
-  test("+ button is always present", async () => {
+  it("+ button is always present", async () => {
     await openTwo();
-    const tabBar = document.getElementById("tab-bar")!;
+    const tabBar = document.querySelector("#tab-bar")!;
     const addBtn = tabBar.querySelector(".tab-new");
-    expect(addBtn !== null).toBe(true);
+    expect(addBtn !== null).toBeTruthy();
     expect(addBtn!.textContent).toBe("+");
-    while (getTabs().length > 0) closeTab(0);
+    while (getTabs().length > 0) {
+      closeTab(0);
+    }
   });
 
-  test("dirty indicator appears after markDirty, absent otherwise", async () => {
+  it("dirty indicator appears after markDirty, absent otherwise", async () => {
     await openTwo();
-    const tabBar = document.getElementById("tab-bar")!;
+    const tabBar = document.querySelector("#tab-bar")!;
     const tabEls = () => tabBar.querySelectorAll(".tab:not(.tab-new)");
 
-    expect(tabEls()[0]!.querySelector(".dirty")).toBe(null);
+    expect(tabEls()[0]!.querySelector(".dirty")).toBeNull();
     markDirty("notes/alpha.md");
     await tick();
-    expect(tabEls()[0]!.querySelector(".dirty") !== null).toBe(true);
-    expect(tabEls()[1]!.querySelector(".dirty")).toBe(null);
-    while (getTabs().length > 0) closeTab(0);
+    expect(tabEls()[0]!.querySelector(".dirty") !== null).toBeTruthy();
+    expect(tabEls()[1]!.querySelector(".dirty")).toBeNull();
+    while (getTabs().length > 0) {
+      closeTab(0);
+    }
   });
 
-  test("close button on tab removes that tab", async () => {
+  it("close button on tab removes that tab", async () => {
     await openTwo();
-    const tabBar = document.getElementById("tab-bar")!;
+    const tabBar = document.querySelector("#tab-bar")!;
     markDirty("notes/alpha.md");
     await tick();
     const tabEls = tabBar.querySelectorAll(".tab:not(.tab-new)");
@@ -120,38 +133,46 @@ describe("tabs", () => {
     closeBtn.click();
     await tick();
     const remaining = tabBar.querySelectorAll(".tab:not(.tab-new)");
-    expect(remaining.length).toBe(1);
+    expect(remaining).toHaveLength(1);
     expect(remaining[0]!.querySelector("span:not(.close):not(.dirty)")!.textContent).toBe("beta");
-    while (getTabs().length > 0) closeTab(0);
+    while (getTabs().length > 0) {
+      closeTab(0);
+    }
   });
 
-  test("context menu appears on right-click with Rename / Pin / Delete / Close", async () => {
-    while (getTabs().length > 0) closeTab(0);
+  it("context menu appears on right-click with Rename / Pin / Delete / Close", async () => {
+    while (getTabs().length > 0) {
+      closeTab(0);
+    }
     await openTab("notes/gamma.md");
     await tick();
-    const tabBar = document.getElementById("tab-bar")!;
+    const tabBar = document.querySelector("#tab-bar")!;
     const tabEl = tabBar.querySelectorAll(".tab:not(.tab-new)")[0]!;
     (tabEl as HTMLElement).dispatchEvent(
       new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 50, clientY: 50 }),
     );
     await tick();
     const menu = document.body.querySelector(".context-menu");
-    expect(menu !== null).toBe(true);
+    expect(menu !== null).toBeTruthy();
     const items = menu!.querySelectorAll(".context-menu-item");
-    expect(items.length).toBe(4);
+    expect(items).toHaveLength(4);
     expect(items[0]!.textContent).toBe("Rename...");
     expect(items[1]!.textContent).toBe("Pin");
     expect(items[2]!.textContent).toBe("Delete");
     expect(items[3]!.textContent).toBe("Close");
-    while (getTabs().length > 0) closeTab(0);
+    while (getTabs().length > 0) {
+      closeTab(0);
+    }
   });
 
-  test("context menu Close removes the tab", async () => {
-    while (getTabs().length > 0) closeTab(0);
+  it("context menu Close removes the tab", async () => {
+    while (getTabs().length > 0) {
+      closeTab(0);
+    }
     await openTab("notes/gamma.md");
     await openTab("notes/delta.md");
     await tick();
-    const tabBar = document.getElementById("tab-bar")!;
+    const tabBar = document.querySelector("#tab-bar")!;
     const countBefore = tabBar.querySelectorAll(".tab:not(.tab-new)").length;
     const tabEl = tabBar.querySelectorAll(".tab:not(.tab-new)")[0]!;
     (tabEl as HTMLElement).dispatchEvent(
@@ -161,16 +182,20 @@ describe("tabs", () => {
     const items = document.body.querySelectorAll(".context-menu-item");
     (items[3] as HTMLElement).click();
     await tick();
-    expect(document.body.querySelector(".context-menu")).toBe(null);
-    expect(tabBar.querySelectorAll(".tab:not(.tab-new)").length).toBe(countBefore - 1);
-    while (getTabs().length > 0) closeTab(0);
+    expect(document.body.querySelector(".context-menu")).toBeNull();
+    expect(tabBar.querySelectorAll(".tab:not(.tab-new)")).toHaveLength(countBefore - 1);
+    while (getTabs().length > 0) {
+      closeTab(0);
+    }
   });
 
-  test("context menu Delete removes tab after confirm", async () => {
-    while (getTabs().length > 0) closeTab(0);
+  it("context menu Delete removes tab after confirm", async () => {
+    while (getTabs().length > 0) {
+      closeTab(0);
+    }
     await openTab("notes/to-delete.md");
     await tick();
-    const tabBar = document.getElementById("tab-bar")!;
+    const tabBar = document.querySelector("#tab-bar")!;
     const countBefore = getTabs().length;
     const tabEl = tabBar.querySelectorAll(".tab:not(.tab-new)")[countBefore - 1]!;
     (tabEl as HTMLElement).dispatchEvent(
@@ -185,33 +210,35 @@ describe("tabs", () => {
     const menu = document.body.querySelector(".context-menu");
     const items = menu!.querySelectorAll(".context-menu-item");
     expect(items[2]!.textContent).toBe("Delete");
-    expect(items[2]!.classList.contains("danger")).toBe(true);
+    expect(items[2]!.classList.contains("danger")).toBeTruthy();
     (items[2] as HTMLElement).click();
     await tick();
     await new Promise((r) => setTimeout(r, 50));
-    expect(getTabs().length).toBe(countBefore - 1);
-    expect(document.body.querySelector(".context-menu")).toBe(null);
+    expect(getTabs()).toHaveLength(countBefore - 1);
+    expect(document.body.querySelector(".context-menu")).toBeNull();
   });
 
-  test("tab tooltip shows on mouseenter and hides on mouseleave", async () => {
+  it("tab tooltip shows on mouseenter and hides on mouseleave", async () => {
     await openTwo();
-    const tabBar = document.getElementById("tab-bar")!;
+    const tabBar = document.querySelector("#tab-bar")!;
     const tabEl = tabBar.querySelectorAll(".tab:not(.tab-new)")[0]! as HTMLElement;
 
     tabEl.dispatchEvent(new MouseEvent("mouseenter", { bubbles: true }));
     const tooltip = document.body.querySelector(".tab-tooltip") as HTMLElement;
-    expect(tooltip !== null).toBe(true);
+    expect(tooltip !== null).toBeTruthy();
     expect(tooltip.style.display).toBe("block");
 
     tabEl.dispatchEvent(new MouseEvent("mouseleave", { bubbles: true }));
     expect(tooltip.style.display).toBe("none");
 
-    while (getTabs().length > 0) closeTab(0);
+    while (getTabs().length > 0) {
+      closeTab(0);
+    }
   });
 
-  test("space key closes the currently hovered tab", async () => {
+  it("space key closes the currently hovered tab", async () => {
     await openTwo();
-    const tabBar = document.getElementById("tab-bar")!;
+    const tabBar = document.querySelector("#tab-bar")!;
     const countBefore = tabBar.querySelectorAll(".tab:not(.tab-new)").length;
     const tabEl = tabBar.querySelectorAll(".tab:not(.tab-new)")[0]! as HTMLElement;
 
@@ -219,14 +246,16 @@ describe("tabs", () => {
     document.dispatchEvent(new KeyboardEvent("keydown", { key: " ", bubbles: true }));
     await tick();
 
-    expect(tabBar.querySelectorAll(".tab:not(.tab-new)").length).toBe(countBefore - 1);
+    expect(tabBar.querySelectorAll(".tab:not(.tab-new)")).toHaveLength(countBefore - 1);
 
-    while (getTabs().length > 0) closeTab(0);
+    while (getTabs().length > 0) {
+      closeTab(0);
+    }
   });
 
-  test("space key with modifier keys ignored", async () => {
+  it("space key with modifier keys ignored", async () => {
     await openTwo();
-    const tabBar = document.getElementById("tab-bar")!;
+    const tabBar = document.querySelector("#tab-bar")!;
     const countBefore = tabBar.querySelectorAll(".tab:not(.tab-new)").length;
     const tabEl = tabBar.querySelectorAll(".tab:not(.tab-new)")[0]! as HTMLElement;
 
@@ -236,58 +265,68 @@ describe("tabs", () => {
     );
     await tick();
 
-    expect(tabBar.querySelectorAll(".tab:not(.tab-new)").length).toBe(countBefore);
+    expect(tabBar.querySelectorAll(".tab:not(.tab-new)")).toHaveLength(countBefore);
 
-    while (getTabs().length > 0) closeTab(0);
+    while (getTabs().length > 0) {
+      closeTab(0);
+    }
   });
 
-  test("space key does nothing when no tab is hovered", async () => {
+  it("space key does nothing when no tab is hovered", async () => {
     await openTwo();
-    const tabBar = document.getElementById("tab-bar")!;
+    const tabBar = document.querySelector("#tab-bar")!;
     const countBefore = tabBar.querySelectorAll(".tab:not(.tab-new)").length;
 
     // Don't mouseenter any tab
     document.dispatchEvent(new KeyboardEvent("keydown", { key: " ", bubbles: true }));
     await tick();
 
-    expect(tabBar.querySelectorAll(".tab:not(.tab-new)").length).toBe(countBefore);
+    expect(tabBar.querySelectorAll(".tab:not(.tab-new)")).toHaveLength(countBefore);
 
-    while (getTabs().length > 0) closeTab(0);
+    while (getTabs().length > 0) {
+      closeTab(0);
+    }
   });
 
-  test("middle click (auxclick button=1) closes the tab", async () => {
+  it("middle click (auxclick button=1) closes the tab", async () => {
     await openTwo();
-    const tabBar = document.getElementById("tab-bar")!;
+    const tabBar = document.querySelector("#tab-bar")!;
     const countBefore = tabBar.querySelectorAll(".tab:not(.tab-new)").length;
     const tabEl = tabBar.querySelectorAll(".tab:not(.tab-new)")[0]! as HTMLElement;
 
     tabEl.dispatchEvent(new MouseEvent("auxclick", { button: 1, bubbles: true, cancelable: true }));
     await tick();
 
-    expect(tabBar.querySelectorAll(".tab:not(.tab-new)").length).toBe(countBefore - 1);
+    expect(tabBar.querySelectorAll(".tab:not(.tab-new)")).toHaveLength(countBefore - 1);
 
-    while (getTabs().length > 0) closeTab(0);
+    while (getTabs().length > 0) {
+      closeTab(0);
+    }
   });
 
-  test("auxclick with button != 1 does not close tab", async () => {
+  it("auxclick with button != 1 does not close tab", async () => {
     await openTwo();
-    const tabBar = document.getElementById("tab-bar")!;
+    const tabBar = document.querySelector("#tab-bar")!;
     const countBefore = tabBar.querySelectorAll(".tab:not(.tab-new)").length;
     const tabEl = tabBar.querySelectorAll(".tab:not(.tab-new)")[0]! as HTMLElement;
 
     tabEl.dispatchEvent(new MouseEvent("auxclick", { button: 2, bubbles: true }));
     await tick();
 
-    expect(tabBar.querySelectorAll(".tab:not(.tab-new)").length).toBe(countBefore);
+    expect(tabBar.querySelectorAll(".tab:not(.tab-new)")).toHaveLength(countBefore);
 
-    while (getTabs().length > 0) closeTab(0);
+    while (getTabs().length > 0) {
+      closeTab(0);
+    }
   });
 
-  test("context menu Pin action calls pinFile for unpinned tab", async () => {
-    while (getTabs().length > 0) closeTab(0);
+  it("context menu Pin action calls pinFile for unpinned tab", async () => {
+    while (getTabs().length > 0) {
+      closeTab(0);
+    }
     await openTab("notes/to-pin.md");
     await tick();
-    const tabBar = document.getElementById("tab-bar")!;
+    const tabBar = document.querySelector("#tab-bar")!;
     const tabEl = tabBar.querySelectorAll(".tab:not(.tab-new)")[0]!;
 
     mock.on("GET", "/api/pinned", []);
@@ -303,73 +342,87 @@ describe("tabs", () => {
     await tick();
     await new Promise((r) => setTimeout(r, 50));
 
-    while (getTabs().length > 0) closeTab(0);
+    while (getTabs().length > 0) {
+      closeTab(0);
+    }
   });
 
-  test("context menu context menu shown even when tab index is invalid", async () => {
-    while (getTabs().length > 0) closeTab(0);
+  it("context menu context menu shown even when tab index is invalid", async () => {
+    while (getTabs().length > 0) {
+      closeTab(0);
+    }
     // Just ensure showTabContextMenu guards against missing tab
     // This exercises the `if (!tab) return` guard when index is out of range
     await openTab("notes/valid.md");
     await tick();
     // Close before triggering context menu to create stale state
-    while (getTabs().length > 0) closeTab(0);
+    while (getTabs().length > 0) {
+      closeTab(0);
+    }
     await tick();
     // No assertion needed — just verifying no crash
   });
 
-  test("+ button createNewNote opens dialog and creates note on Enter", async () => {
+  it("+ button createNewNote opens dialog and creates note on Enter", async () => {
     // Ensure render() has been called so .tab-new exists (render only fires on tab events)
     await openTab("notes/ensure-render.md");
     await tick();
-    while (getTabs().length > 0) closeTab(0);
+    while (getTabs().length > 0) {
+      closeTab(0);
+    }
     await tick();
-    const tabBar = document.getElementById("tab-bar")!;
+    const tabBar = document.querySelector("#tab-bar")!;
     const addBtn = tabBar.querySelector(".tab-new") as HTMLElement;
 
     addBtn.click();
     await tick();
 
-    const overlay = document.getElementById("input-dialog-overlay")!;
-    expect(overlay.classList.contains("hidden")).toBe(false);
+    const overlay = document.querySelector("#input-dialog-overlay")!;
+    expect(overlay.classList.contains("hidden")).toBeFalsy();
 
-    const dialogInput = document.getElementById("input-dialog-input") as HTMLInputElement;
+    const dialogInput = document.querySelector("#input-dialog-input") as HTMLInputElement;
     dialogInput.value = "via-dialog";
     dialogInput.dispatchEvent(
       new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }),
     );
     await new Promise((r) => setTimeout(r, 50));
 
-    expect(getTabs().length).toBe(1);
+    expect(getTabs()).toHaveLength(1);
     expect(getTabs()[0]!.path).toBe("via-dialog.md");
-    while (getTabs().length > 0) closeTab(0);
+    while (getTabs().length > 0) {
+      closeTab(0);
+    }
   });
 
-  test("createNewNote does nothing when dialog is cancelled with Escape", async () => {
-    while (getTabs().length > 0) closeTab(0);
+  it("createNewNote does nothing when dialog is cancelled with Escape", async () => {
+    while (getTabs().length > 0) {
+      closeTab(0);
+    }
 
     const p = createNewNoteViaDialog();
     await tick();
 
-    const dialogInput = document.getElementById("input-dialog-input") as HTMLInputElement;
+    const dialogInput = document.querySelector("#input-dialog-input") as HTMLInputElement;
     dialogInput.dispatchEvent(
       new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }),
     );
     await p;
 
-    expect(getTabs().length).toBe(0);
+    expect(getTabs()).toHaveLength(0);
   });
 
-  test("context menu Rename dispatches tansu:rename event via input dialog", async () => {
-    while (getTabs().length > 0) closeTab(0);
+  it("context menu Rename dispatches tansu:rename event via input dialog", async () => {
+    while (getTabs().length > 0) {
+      closeTab(0);
+    }
     await openTab("notes/to-rename.md");
     await tick();
-    const tabBar = document.getElementById("tab-bar")!;
+    const tabBar = document.querySelector("#tab-bar")!;
     const tabEl = tabBar.querySelectorAll(".tab:not(.tab-new)")[getTabs().length - 1]!;
 
-    let renameDetail: any = null;
+    let renameDetail: { path: string; newName: string } | null = null;
     const handler = (e: Event) => {
-      renameDetail = (e as CustomEvent).detail;
+      renameDetail = (e as CustomEvent<{ path: string; newName: string }>).detail;
     };
     window.addEventListener("tansu:rename", handler);
 
@@ -383,21 +436,23 @@ describe("tabs", () => {
 
     // context-menu defers onclick via setTimeout; after tick the dialog is open
     await tick();
-    const dialogInput = document.getElementById("input-dialog-input") as HTMLInputElement;
-    expect(document.getElementById("input-dialog-overlay")!.classList.contains("hidden")).toBe(
-      false,
-    );
+    const dialogInput = document.querySelector("#input-dialog-input") as HTMLInputElement;
+    expect(
+      document.querySelector("#input-dialog-overlay")!.classList.contains("hidden"),
+    ).toBeFalsy();
     dialogInput.value = "renamed-note";
     dialogInput.dispatchEvent(
       new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }),
     );
     await tick();
 
-    expect(renameDetail !== null).toBe(true);
-    expect(renameDetail.path).toBe("notes/to-rename.md");
-    expect(renameDetail.newName).toBe("renamed-note");
+    expect(renameDetail !== null).toBeTruthy();
+    expect(renameDetail!.path).toBe("notes/to-rename.md");
+    expect(renameDetail!.newName).toBe("renamed-note");
 
     window.removeEventListener("tansu:rename", handler);
-    while (getTabs().length > 0) closeTab(0);
+    while (getTabs().length > 0) {
+      closeTab(0);
+    }
   });
 });

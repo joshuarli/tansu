@@ -27,7 +27,9 @@ export function setContentWithSelection(
 export function restoreSelectionFromRenderedMarkers(el: HTMLElement): void {
   const startSpan = el.querySelector("[data-md-sel-start]");
   const endSpan = el.querySelector("[data-md-sel-end]");
-  if (!(startSpan instanceof HTMLElement) || !(endSpan instanceof HTMLElement)) return;
+  if (!(startSpan instanceof HTMLElement) || !(endSpan instanceof HTMLElement)) {
+    return;
+  }
 
   const sel = window.getSelection();
   if (!sel) {

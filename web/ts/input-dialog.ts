@@ -5,11 +5,13 @@ let pendingResolve: ((val: string | null) => void) | null = null;
 
 export function showInputDialog(placeholder: string, defaultValue = ""): Promise<string | null> {
   // Cancel any in-flight dialog (shouldn't happen, but be safe)
-  if (pendingResolve) pendingResolve(null);
+  if (pendingResolve) {
+    pendingResolve(null);
+  }
 
   return new Promise((resolve) => {
-    const overlay = document.getElementById("input-dialog-overlay")!;
-    const input = document.getElementById("input-dialog-input")! as HTMLInputElement;
+    const overlay = document.querySelector("#input-dialog-overlay")!;
+    const input = document.querySelector("#input-dialog-input")! as HTMLInputElement;
 
     pendingResolve = resolve;
     input.placeholder = placeholder;
@@ -46,8 +48,10 @@ export function showInputDialog(placeholder: string, defaultValue = ""): Promise
       }
     }
 
-    function onBackdrop(e: MouseEvent) {
-      if (e.target === overlay) cancel();
+    function onBackdrop(e: Event) {
+      if (e.target === overlay) {
+        cancel();
+      }
     }
 
     input.addEventListener("keydown", onKeydown);

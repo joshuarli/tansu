@@ -5,8 +5,10 @@ export function registerWikiLinkClickHandler(onLinkClick: (target: string) => vo
     const target = e.target as HTMLElement;
     if (target.classList.contains("wiki-link")) {
       e.preventDefault();
-      const linkTarget = target.getAttribute("data-target");
-      if (linkTarget) onLinkClick(linkTarget);
+      const linkTarget = target.dataset["target"];
+      if (linkTarget) {
+        onLinkClick(linkTarget);
+      }
     }
   });
 }

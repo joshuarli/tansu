@@ -132,10 +132,10 @@ export function setupDOM(): () => void {
 
 /// Mock fetch: returns a function to set up responses, and installs a global fetch mock.
 export function mockFetch(): MockFetch {
-  const handlers: Array<{
+  const handlers: {
     match: (url: string, init?: RequestInit) => boolean;
     respond: () => Response | Promise<Response>;
-  }> = [];
+  }[] = [];
   const origFetch = globalThis.fetch;
 
   const mock: MockFetch = {
@@ -143,11 +143,13 @@ export function mockFetch(): MockFetch {
       handlers.push({
         match: (url, init) => {
           const m = (init?.method ?? "GET").toUpperCase() === method.toUpperCase();
-          if (typeof urlPattern === "string") return m && url.includes(urlPattern);
+          if (typeof urlPattern === "string") {
+            return m && url.includes(urlPattern);
+          }
           return m && urlPattern.test(url);
         },
         respond: () =>
-          new Response(JSON.stringify(body), {
+          Response.json(body, {
             status,
             headers: { "Content-Type": "application/json" },
           }),
@@ -164,7 +166,9 @@ export function mockFetch(): MockFetch {
       handlers.push({
         match: (url, init) => {
           const m = (init?.method ?? "GET").toUpperCase() === method.toUpperCase();
-          if (typeof urlPattern === "string") return m && url.includes(urlPattern);
+          if (typeof urlPattern === "string") {
+            return m && url.includes(urlPattern);
+          }
           /* c8 ignore next */
           return m && urlPattern.test(url);
         },
@@ -173,7 +177,7 @@ export function mockFetch(): MockFetch {
             setTimeout(
               () =>
                 resolve(
-                  new Response(JSON.stringify(body), {
+                  Response.json(body, {
                     status,
                     headers: { "Content-Type": "application/json" },
                   }),
@@ -190,11 +194,19 @@ export function mockFetch(): MockFetch {
   };
 
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-    const url =
-      typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+    let url: string;
+    if (typeof input === "string") {
+      url = input;
+    } else if (input instanceof URL) {
+      url = input.toString();
+    } else {
+      ({ url } = input);
+    }
     // Later handlers take precedence (search in reverse)
     for (let i = handlers.length - 1; i >= 0; i--) {
-      if (handlers[i]!.match(url, init)) return handlers[i]!.respond();
+      if (handlers[i]!.match(url, init)) {
+        return handlers[i]!.respond();
+      }
     }
     return new Response("not found", { status: 404 });
   }) as typeof fetch;

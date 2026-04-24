@@ -4,17 +4,17 @@
 import { escapeHtml } from "./util.js";
 
 const enum Hl {
-  Normal,
-  Keyword,
-  Type,
-  String,
-  Comment,
-  Number,
-  Bracket,
-  Operator,
-  Function,
-  Constant,
-  Macro,
+  Normal = 0,
+  Keyword = 1,
+  Type = 2,
+  String = 3,
+  Comment = 4,
+  Number = 5,
+  Bracket = 6,
+  Operator = 7,
+  Function = 8,
+  Constant = 9,
+  Macro = 10,
 }
 
 const hlClass: (string | null)[] = [
@@ -32,9 +32,9 @@ const hlClass: (string | null)[] = [
 ];
 
 const enum State {
-  Normal,
-  BlockComment,
-  MultiLineString, // index stored separately
+  Normal = 0,
+  BlockComment = 1,
+  MultiLineString = 2, // index stored separately
 }
 
 interface HlState {
@@ -103,9 +103,13 @@ function isUpper(c: number): boolean {
 }
 
 function startsWith(src: string, needle: string, pos: number): boolean {
-  if (needle.length === 0 || pos + needle.length > src.length) return false;
+  if (needle.length === 0 || pos + needle.length > src.length) {
+    return false;
+  }
   for (let j = 0; j < needle.length; j++) {
-    if (src.charCodeAt(pos + j) !== needle.charCodeAt(j)) return false;
+    if (src.codePointAt(pos + j) !== needle.codePointAt(j)) {
+      return false;
+    }
   }
   return true;
 }
@@ -121,13 +125,21 @@ function kwSearch(src: string, start: number, end: number, words: string[]): boo
     let cmp = 0;
     const mlen = w.length < len ? w.length : len;
     for (let j = 0; j < mlen; j++) {
-      cmp = w.charCodeAt(j) - src.charCodeAt(start + j);
-      if (cmp !== 0) break;
+      cmp = w.codePointAt(j)! - src.codePointAt(start + j)!;
+      if (cmp !== 0) {
+        break;
+      }
     }
-    if (cmp === 0) cmp = w.length - len;
-    if (cmp < 0) lo = mid + 1;
-    else if (cmp > 0) hi = mid - 1;
-    else return true;
+    if (cmp === 0) {
+      cmp = w.length - len;
+    }
+    if (cmp < 0) {
+      lo = mid + 1;
+    } else if (cmp > 0) {
+      hi = mid - 1;
+    } else {
+      return true;
+    }
   }
   return false;
 }
@@ -141,7 +153,7 @@ function buildHl(src: string, st: HlState, rules: Rules): Uint8Array {
 
   // Resume from multiline state
   if (st.state === State.BlockComment) {
-    const close = rules.blockComment[1];
+    const [, close] = rules.blockComment;
     while (i < len) {
       if (startsWith(src, close, i)) {
         const end = i + close.length;
@@ -154,11 +166,13 @@ function buildHl(src: string, st: HlState, rules: Rules): Uint8Array {
       hl[i] = Hl.Comment;
       i++;
     }
-    if (st.state === State.BlockComment) return hl;
+    if (st.state === State.BlockComment) {
+      return hl;
+    }
   } else if (st.state === State.MultiLineString) {
     const [, close] = rules.strings[st.stringIdx]!;
     while (i < len) {
-      if (src.charCodeAt(i) === 0x5c && i + 1 < len) {
+      if (src.codePointAt(i) === 0x5c && i + 1 < len) {
         // backslash
         hl[i] = Hl.String;
         hl[i + 1] = Hl.String;
@@ -176,12 +190,13 @@ function buildHl(src: string, st: HlState, rules: Rules): Uint8Array {
       hl[i] = Hl.String;
       i++;
     }
-    if (st.state === State.MultiLineString) return hl;
+    if (st.state === State.MultiLineString) {
+      return hl;
+    }
   }
 
   const lineCom = rules.lineComment;
-  const blockOpen = rules.blockComment[0];
-  const blockClose = rules.blockComment[1];
+  const [blockOpen, blockClose] = rules.blockComment;
 
   while (i < len) {
     // Line comment
@@ -221,7 +236,7 @@ function buildHl(src: string, st: HlState, rules: Rules): Uint8Array {
         i += open.length;
         let found = false;
         while (i < len) {
-          if (src.charCodeAt(i) === 0x5c && i + 1 < len) {
+          if (src.codePointAt(i) === 0x5c && i + 1 < len) {
             // backslash escape
             i += 2;
             continue;
@@ -247,22 +262,27 @@ function buildHl(src: string, st: HlState, rules: Rules): Uint8Array {
         break;
       }
     }
-    if (matched) continue;
+    if (matched) {
+      continue;
+    }
 
-    const c = src.charCodeAt(i);
+    const c = src.codePointAt(i)!;
 
     // Numbers
     if (
       rules.highlightNumbers &&
       prevSep &&
-      (isDigit(c) || (c === 0x2e && i + 1 < len && isDigit(src.charCodeAt(i + 1))))
+      (isDigit(c) || (c === 0x2e && i + 1 < len && isDigit(src.codePointAt(i + 1)!)))
     ) {
       const start = i;
       i++;
       while (i < len) {
-        const d = src.charCodeAt(i);
-        if (isAlnum(d) || d === 0x5f || d === 0x2e) i++;
-        else break;
+        const d = src.codePointAt(i)!;
+        if (isAlnum(d) || d === 0x5f || d === 0x2e) {
+          i++;
+        } else {
+          break;
+        }
       }
       hl.fill(Hl.Number, start, i);
       prevSep = false;
@@ -273,12 +293,17 @@ function buildHl(src: string, st: HlState, rules: Rules): Uint8Array {
     if (prevSep && isAlpha(c)) {
       const start = i;
       i++;
-      while (i < len && isAlnum(src.charCodeAt(i))) i++;
-      const ident = kwSearch(src, start, i, rules.keywords)
-        ? Hl.Keyword
-        : kwSearch(src, start, i, rules.types)
-          ? Hl.Type
-          : null;
+      while (i < len && isAlnum(src.codePointAt(i)!)) {
+        i++;
+      }
+      let ident: Hl | null;
+      if (kwSearch(src, start, i, rules.keywords)) {
+        ident = Hl.Keyword;
+      } else if (kwSearch(src, start, i, rules.types)) {
+        ident = Hl.Type;
+      } else {
+        ident = null;
+      }
       if (ident !== null) {
         hl.fill(ident, start, i);
         prevSep = false;
@@ -288,8 +313,8 @@ function buildHl(src: string, st: HlState, rules: Rules): Uint8Array {
       if (
         rules.highlightBangMacros &&
         i < len &&
-        src.charCodeAt(i) === 0x21 && // !
-        (i + 1 >= len || src.charCodeAt(i + 1) !== 0x3d)
+        src.codePointAt(i) === 0x21 && // !
+        (i + 1 >= len || src.codePointAt(i + 1) !== 0x3d)
       ) {
         // not !=
         hl.fill(Hl.Macro, start, i + 1);
@@ -298,7 +323,7 @@ function buildHl(src: string, st: HlState, rules: Rules): Uint8Array {
         continue;
       }
       // Function calls
-      if (rules.highlightFnCalls && i < len && src.charCodeAt(i) === 0x28) {
+      if (rules.highlightFnCalls && i < len && src.codePointAt(i) === 0x28) {
         // (
         hl.fill(Hl.Function, start, i);
         prevSep = true;
@@ -309,14 +334,17 @@ function buildHl(src: string, st: HlState, rules: Rules): Uint8Array {
         let allUpper = true;
         let hasLetter = false;
         for (let j = start; j < i; j++) {
-          const b = src.charCodeAt(j);
-          if (isUpper(b)) hasLetter = true;
-          else if (!isDigit(b) && b !== 0x5f) {
+          const b = src.codePointAt(j)!;
+          if (isUpper(b)) {
+            hasLetter = true;
+          } else if (!isDigit(b) && b !== 0x5f) {
             allUpper = false;
             break;
           }
         }
-        if (allUpper && hasLetter) hl.fill(Hl.Constant, start, i);
+        if (allUpper && hasLetter) {
+          hl.fill(Hl.Constant, start, i);
+        }
       }
       prevSep = false;
       continue;
@@ -324,8 +352,7 @@ function buildHl(src: string, st: HlState, rules: Rules): Uint8Array {
 
     // Operators
     matched = false;
-    for (let oi = 0; oi < rules.operators.length; oi++) {
-      const op = rules.operators[oi]!;
+    for (const op of rules.operators) {
       if (startsWith(src, op, i)) {
         hl.fill(Hl.Operator, i, i + op.length);
         i += op.length;
@@ -334,7 +361,9 @@ function buildHl(src: string, st: HlState, rules: Rules): Uint8Array {
         break;
       }
     }
-    if (matched) continue;
+    if (matched) {
+      continue;
+    }
 
     // Brackets
     if (c === 0x28 || c === 0x29 || c === 0x5b || c === 0x5d || c === 0x7b || c === 0x7d) {
@@ -355,32 +384,48 @@ function applyHlHtml(src: string, hl: Uint8Array): string {
   for (let i = 0; i < src.length; i++) {
     const h: Hl = i < hl.length ? hl[i]! : Hl.Normal;
     if (h !== cur) {
-      if (cur !== Hl.Normal) out += "</span>";
+      if (cur !== Hl.Normal) {
+        out += "</span>";
+      }
       const cls = hlClass[h];
-      if (cls) out += `<span class="${cls}">`;
+      if (cls) {
+        out += `<span class="${cls}">`;
+      }
       cur = h;
     }
-    const c = src.charCodeAt(i);
-    if (c === 0x26) out += "&amp;";
-    else if (c === 0x3c) out += "&lt;";
-    else if (c === 0x3e) out += "&gt;";
-    else if (c === 0x22) out += "&quot;";
-    else out += src[i];
+    const c = src.codePointAt(i);
+    if (c === 0x26) {
+      out += "&amp;";
+    } else if (c === 0x3c) {
+      out += "&lt;";
+    } else if (c === 0x3e) {
+      out += "&gt;";
+    } else if (c === 0x22) {
+      out += "&quot;";
+    } else {
+      out += src[i];
+    }
   }
-  if (cur !== Hl.Normal) out += "</span>";
+  if (cur !== Hl.Normal) {
+    out += "</span>";
+  }
   return out;
 }
 
 /// Highlight a full code block (multi-line). Returns HTML with spans.
 export function highlightCode(code: string, lang: string): string {
   const rules = rulesForLang(lang);
-  if (!rules) return escapeHtml(code);
+  if (!rules) {
+    return escapeHtml(code);
+  }
 
   const lines = code.split("\n");
   const st: HlState = { state: State.Normal, stringIdx: 0 };
   const parts: string[] = [];
   for (let i = 0; i < lines.length; i++) {
-    if (i > 0) parts.push("\n");
+    if (i > 0) {
+      parts.push("\n");
+    }
     const hl = buildHl(lines[i]!, st, rules);
     parts.push(applyHlHtml(lines[i]!, hl));
   }
@@ -566,43 +611,54 @@ const YAML: Rules = {
 function rulesForLang(tag: string): Rules | null {
   switch (tag.toLowerCase()) {
     case "rust":
-    case "rs":
+    case "rs": {
       return RUST;
+    }
     case "python":
-    case "py":
+    case "py": {
       return PYTHON;
+    }
     case "go":
-    case "golang":
+    case "golang": {
       return GO;
+    }
     case "typescript":
-    case "ts":
+    case "ts": {
       return TS;
+    }
     case "javascript":
     case "js":
     case "jsx":
-    case "tsx":
+    case "tsx": {
       return JS;
+    }
     case "bash":
     case "sh":
     case "shell":
-    case "zsh":
+    case "zsh": {
       return BASH;
+    }
     case "c":
     case "cpp":
     case "c++":
     case "h":
     case "cc":
-    case "cxx":
+    case "cxx": {
       return C;
-    case "toml":
+    }
+    case "toml": {
       return TOML;
+    }
     case "json":
-    case "jsonc":
+    case "jsonc": {
       return JSON_RULES;
+    }
     case "yaml":
-    case "yml":
+    case "yml": {
       return YAML;
-    default:
+    }
+    default: {
       return null;
+    }
   }
 }

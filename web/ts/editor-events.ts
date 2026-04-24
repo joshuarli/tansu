@@ -12,4 +12,6 @@ type EditorEvent =
   | { type: "save"; path: string; trigger: "manual" | "auto" };
 
 // No-op hook point. Wire in subscribers here when needed.
-export function dispatchEditorAction(_e: EditorEvent): void {}
+export function dispatchEditorAction(_e: EditorEvent): void {
+  /* intentional no-op */
+}

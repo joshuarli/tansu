@@ -35,7 +35,9 @@ const SEL_START_SENTINEL = "\uFDD1";
 const SEL_END_SENTINEL = "\uFDD2";
 
 export function renderMarkdown(src: string): string {
-  if (src === "") return "";
+  if (src === "") {
+    return "";
+  }
   const lines = src.split("\n");
   const blocks = parseBlocks(lines);
   return blocks.map(renderBlock).join("\n");
@@ -146,7 +148,9 @@ function parseBlocks(lines: string[]): Block[] {
         (lines[i]!.startsWith(">") ||
           (lines[i]!.trim() !== "" && bqLines.length > 0 && !lines[i]!.startsWith("#")))
       ) {
-        if (!lines[i]!.startsWith(">")) break;
+        if (!lines[i]!.startsWith(">")) {
+          break;
+        }
         // Strip the leading > and optional space
         bqLines.push(lines[i]!.replace(/^>\s?/, ""));
         i++;
@@ -159,20 +163,27 @@ function parseBlocks(lines: string[]): Block[] {
     const paraLines: string[] = [];
     while (i < lines.length) {
       const l = lines[i]!;
-      if (l.trim() === "") break;
-      if (/^(#{1,6}\s|```|~~~|>|(-{3,}|\*{3,}|_{3,})\s*$)/.test(l)) break;
-      if (parseListLine(l)) break;
+      if (l.trim() === "") {
+        break;
+      }
+      if (/^(#{1,6}\s|```|~~~|>|(-{3,}|\*{3,}|_{3,})\s*$)/.test(l)) {
+        break;
+      }
+      if (parseListLine(l)) {
+        break;
+      }
       if (
         l.trimStart().startsWith("|") &&
         i + 1 < lines.length &&
         /^\|?[\s:]*-+/.test(lines[i + 1] ?? "")
-      )
+      ) {
         break;
+      }
       paraLines.push(l);
       i++;
     }
-    for (const line of paraLines) {
-      blocks.push({ type: "paragraph", text: line });
+    for (const paraLine of paraLines) {
+      blocks.push({ type: "paragraph", text: paraLine });
     }
   }
 
@@ -181,14 +192,18 @@ function parseBlocks(lines: string[]): Block[] {
 
 function renderBlock(block: Block): string {
   switch (block.type) {
-    case "heading":
+    case "heading": {
       return `<h${block.level}>${inline(block.text)}</h${block.level}>`;
-    case "paragraph":
+    }
+    case "paragraph": {
       return `<p>${inline(block.text)}</p>`;
-    case "blank":
+    }
+    case "blank": {
       return '<p data-md-blank="true"><br></p>';
-    case "hr":
+    }
+    case "hr": {
       return "<hr>";
+    }
     case "code": {
       const highlighted = block.lang
         ? highlightCode(block.text, block.lang)
@@ -199,14 +214,18 @@ function renderBlock(block: Block): string {
     case "list": {
       return renderListNode({ ordered: block.ordered, items: block.items });
     }
-    case "blockquote":
+    case "blockquote": {
       return renderBlockquote(block.lines);
+    }
     case "table": {
       const head = block.header.map((c) => `<th>${inline(c)}</th>`).join("");
       const body = block.rows
-        .map((row) => "<tr>" + row.map((c) => `<td>${inline(c)}</td>`).join("") + "</tr>")
+        .map((row) => `<tr>${row.map((c) => `<td>${inline(c)}</td>`).join("")}</tr>`)
         .join("\n");
       return `<table>\n<tr>${head}</tr>\n${body}\n</table>`;
+    }
+    default: {
+      return (block satisfies never, "");
     }
   }
 }
@@ -222,12 +241,7 @@ function renderBlockquote(bqLines: string[]): string {
     const bodyLines = bqLines.slice(1);
     const bodyBlocks = parseBlocks(bodyLines);
     const bodyHtml = bodyBlocks.map(renderBlock).join("\n");
-    return (
-      `<div class="callout callout-${escapeHtml(type)}" data-callout="${escapeHtml(type)}">` +
-      `<div class="callout-title">${icon} ${escapeHtml(titleText)}</div>` +
-      (bodyHtml ? `<div class="callout-body">${bodyHtml}</div>` : "") +
-      `</div>`
-    );
+    return `<div class="callout callout-${escapeHtml(type)}" data-callout="${escapeHtml(type)}"><div class="callout-title">${icon} ${escapeHtml(titleText)}</div>${bodyHtml ? `<div class="callout-body">${bodyHtml}</div>` : ""}</div>`;
   }
   // Regular blockquote: recursively parse inner content
   const innerBlocks = parseBlocks(bqLines);
@@ -265,13 +279,19 @@ function parseList(
 
   while (i < lines.length) {
     const parsed = parseListLine(lines[i]!);
-    if (!parsed) break;
+    if (!parsed) {
+      break;
+    }
 
-    if (parsed.indent < baseIndent) break;
+    if (parsed.indent < baseIndent) {
+      break;
+    }
 
     if (parsed.indent > baseIndent) {
-      const lastItem = items[items.length - 1];
-      if (!lastItem) break;
+      const lastItem = items.at(-1);
+      if (!lastItem) {
+        break;
+      }
       const nested = parseList(lines, i, parsed.indent);
       lastItem.nested ??= [];
       lastItem.nested.push(nested.list);
@@ -279,7 +299,9 @@ function parseList(
       continue;
     }
 
-    if (parsed.ordered !== first.ordered) break;
+    if (parsed.ordered !== first.ordered) {
+      break;
+    }
 
     items.push({ text: parsed.text, checked: parsed.checked });
     i++;
@@ -292,7 +314,9 @@ function parseListLine(
   line: string,
 ): { indent: number; ordered: boolean; text: string; checked: boolean | null } | null {
   const match = line.match(/^([ \t]*)([-*+]|\d+\.)(?:\s(.*))?$/);
-  if (!match) return null;
+  if (!match) {
+    return null;
+  }
 
   let text = match[3] ?? "";
   let checked: boolean | null = null;
@@ -321,8 +345,12 @@ function countIndent(indent: string): number {
 function parseTableRow(line: string): string[] {
   // Strip leading/trailing pipe and split
   let s = line.trim();
-  if (s.startsWith("|")) s = s.slice(1);
-  if (s.endsWith("|")) s = s.slice(0, -1);
+  if (s.startsWith("|")) {
+    s = s.slice(1);
+  }
+  if (s.endsWith("|")) {
+    s = s.slice(0, -1);
+  }
   return s.split("|").map((c) => c.trim());
 }
 
@@ -468,8 +496,12 @@ function inline(text: string): string {
     // Bare URL: http:// or https://
     if (ch === "h" && (text.slice(i, i + 7) === "http://" || text.slice(i, i + 8) === "https://")) {
       let end = i;
-      while (end < len && !" \n\t<>\"'`".includes(text[end]!)) end++;
-      while (end > i && ".,)!?;:".includes(text[end - 1]!)) end--;
+      while (end < len && !" \n\t<>\"'`".includes(text[end]!)) {
+        end++;
+      }
+      while (end > i && ".,)!?;:".includes(text[end - 1]!)) {
+        end--;
+      }
       const url = text.slice(i, end);
       out += `<a href="${escapeHtml(url)}">${escapeHtml(url)}</a>`;
       i = end;
@@ -520,7 +552,9 @@ function findClosing(text: string, delim: string, start: number): number {
       i++;
       continue;
     }
-    if (text[i] === delim) return i;
+    if (text[i] === delim) {
+      return i;
+    }
   }
   return -1;
 }

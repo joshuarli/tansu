@@ -44,17 +44,23 @@ export function buildReplacementHtml(pat: InlinePattern, content: string): strin
 /// name that was applied (e.g. "strong"), or null if no transform fired.
 export function checkInlineTransform(): string | null {
   const sel = window.getSelection();
-  if (!sel || sel.rangeCount === 0 || !sel.isCollapsed) return null;
+  if (!sel || sel.rangeCount === 0 || !sel.isCollapsed) {
+    return null;
+  }
 
   const node = sel.anchorNode;
-  if (!node || node.nodeType !== Node.TEXT_NODE) return null;
+  if (!node || node.nodeType !== Node.TEXT_NODE) {
+    return null;
+  }
 
   const text = node.textContent ?? "";
   const pos = clampNodeOffset(node, sel.anchorOffset);
 
   for (const pat of patterns) {
     const m = matchPattern(text, pos, pat);
-    if (m === null) continue;
+    if (m === null) {
+      continue;
+    }
 
     const { start, end } = computeReplaceRange(pat, m.start, pos);
     const html = buildReplacementHtml(pat, m.content);
@@ -106,40 +112,62 @@ export function matchPattern(
   // For trailingSpace patterns, the char at pos-1 must be space/nbsp
   let end = pos;
   if (pat.trailingSpace) {
-    if (pos < 1) return null;
+    if (pos < 1) {
+      return null;
+    }
     const last = text[pos - 1];
-    if (last !== " " && last !== "\u00A0") return null;
+    if (last !== " " && last !== "\u00A0") {
+      return null;
+    }
     end = pos - 1;
   }
 
-  if (end < open.length + close.length + 1) return null;
+  if (end < open.length + close.length + 1) {
+    return null;
+  }
 
   // Closing marker must be right before cursor (or before trailing space)
-  if (text.slice(end - close.length, end) !== close) return null;
+  if (text.slice(end - close.length, end) !== close) {
+    return null;
+  }
 
   // Single * closing must not be part of **
-  if (close === "*" && end >= 2 && text[end - 2] === "*") return null;
+  if (close === "*" && end >= 2 && text[end - 2] === "*") {
+    return null;
+  }
 
   // Single ` closing must not be part of `` or ```
-  if (close === "`" && end >= 2 && text[end - 2] === "`") return null;
+  if (close === "`" && end >= 2 && text[end - 2] === "`") {
+    return null;
+  }
 
   // Search backwards for opening marker
   const contentEnd = end - close.length;
   const searchStart = Math.max(0, contentEnd - MAX_SEARCH);
 
   for (let i = contentEnd - 1; i >= searchStart; i--) {
-    if (text.slice(i, i + open.length) !== open) continue;
+    if (text.slice(i, i + open.length) !== open) {
+      continue;
+    }
 
     // Single * opening must not be part of **
-    if (open === "*" && ((i > 0 && text[i - 1] === "*") || text[i + 1] === "*")) continue;
+    if (open === "*" && ((i > 0 && text[i - 1] === "*") || text[i + 1] === "*")) {
+      continue;
+    }
 
     // Single ` opening/closing must not be part of `` or ```
-    if (open === "`" && ((i > 0 && text[i - 1] === "`") || text[i + 1] === "`")) continue;
+    if (open === "`" && ((i > 0 && text[i - 1] === "`") || text[i + 1] === "`")) {
+      continue;
+    }
 
     const content = text.slice(i + open.length, contentEnd);
-    if (content.length === 0) continue;
+    if (content.length === 0) {
+      continue;
+    }
     // Markdown convention: content must not start or end with space
-    if (content.startsWith(" ") || content.endsWith(" ")) continue;
+    if (content.startsWith(" ") || content.endsWith(" ")) {
+      continue;
+    }
 
     return { start: i, content };
   }
@@ -148,7 +176,9 @@ export function matchPattern(
 }
 
 function clampNodeOffset(node: Node, offset: number): number {
-  if (offset < 0) return 0;
+  if (offset < 0) {
+    return 0;
+  }
   if (node.nodeType === Node.TEXT_NODE) {
     return Math.min(offset, node.textContent?.length ?? 0);
   }

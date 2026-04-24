@@ -5,7 +5,9 @@ import { escapeHtml, stemFromPath } from "./util.ts";
 /// Handle pasted image: convert to webp, upload, insert wiki-link.
 export async function handleImagePaste(item: DataTransferItem, currentPath: string | null) {
   const file = item.getAsFile();
-  if (!file) return;
+  if (!file) {
+    return;
+  }
 
   const bitmap = await createImageBitmap(file);
   const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
@@ -31,10 +33,11 @@ export async function handleImagePaste(item: DataTransferItem, currentPath: stri
     const src = `/z-images/${encodeURIComponent(savedName)}`;
     const html = `<img src="${escapeHtml(src)}" alt="${escapeHtml(savedName)}" data-wiki-image="${escapeHtml(savedName)}" loading="lazy">`;
     document.execCommand("insertHTML", false, html);
-    if (currentPath) markDirty(currentPath);
-    /* c8 ignore start */
-  } catch (e) {
-    console.error("Image upload failed:", e);
+    if (currentPath) {
+      markDirty(currentPath);
+    }
+    /* c8 ignore next */
+  } catch {
+    /* upload failed silently */
   }
-  /* c8 ignore stop */
 }

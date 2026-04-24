@@ -1,7 +1,5 @@
 /// Tests for renderMarkdownWithSelection.
 
-import { describe, test, expect, beforeAll, afterAll } from "vitest";
-
 import { setupDOM } from "./test-helper.ts";
 
 describe("renderMarkdownWithSelection", () => {
@@ -11,7 +9,7 @@ describe("renderMarkdownWithSelection", () => {
   beforeAll(async () => {
     cleanup = setupDOM();
     const mod = await import("../src/markdown.ts");
-    renderMarkdownWithSelection = mod.renderMarkdownWithSelection;
+    ({ renderMarkdownWithSelection } = mod);
   });
 
   afterAll(() => cleanup());
@@ -25,7 +23,7 @@ describe("renderMarkdownWithSelection", () => {
     };
   }
 
-  test("collapsed selection (selStart === selEnd) emits two adjacent spans", () => {
+  it("collapsed selection (selStart === selEnd) emits two adjacent spans", () => {
     const html = renderMarkdownWithSelection("hello", 2, 2);
     const el = document.createElement("div");
     el.innerHTML = html;
@@ -37,14 +35,14 @@ describe("renderMarkdownWithSelection", () => {
     expect(start!.nextSibling).toBe(end);
   });
 
-  test("selection across plain text emits start and end markers", () => {
+  it("selection across plain text emits start and end markers", () => {
     const html = renderMarkdownWithSelection("hello world", 0, 5);
     const m = markers(html);
-    expect(m.start).toBe(true);
-    expect(m.end).toBe(true);
+    expect(m.start).toBeTruthy();
+    expect(m.end).toBeTruthy();
   });
 
-  test("selection inside bold text places markers inside <strong>", () => {
+  it("selection inside bold text places markers inside <strong>", () => {
     // "**hello**" — select chars 2..7 (inside the word "hello")
     const html = renderMarkdownWithSelection("**hello**", 2, 7);
     const el = document.createElement("div");
@@ -55,42 +53,42 @@ describe("renderMarkdownWithSelection", () => {
     expect(strong!.querySelector("[data-md-sel-end]")).not.toBeNull();
   });
 
-  test("selStart clamped to 0 when negative", () => {
+  it("selStart clamped to 0 when negative", () => {
     const html = renderMarkdownWithSelection("abc", -5, 2);
     const m = markers(html);
-    expect(m.start).toBe(true);
-    expect(m.end).toBe(true);
+    expect(m.start).toBeTruthy();
+    expect(m.end).toBeTruthy();
   });
 
-  test("selEnd clamped to src.length when beyond", () => {
+  it("selEnd clamped to src.length when beyond", () => {
     const html = renderMarkdownWithSelection("abc", 1, 999);
     const m = markers(html);
-    expect(m.start).toBe(true);
-    expect(m.end).toBe(true);
+    expect(m.start).toBeTruthy();
+    expect(m.end).toBeTruthy();
   });
 
-  test("selEnd is clamped to be >= selStart when selEnd < selStart", () => {
+  it("selEnd is clamped to be >= selStart when selEnd < selStart", () => {
     // Passing swapped offsets: selStart=5, selEnd=2 → both should clamp to selStart=2, selEnd=2 effectively
     // Actually the function clamps selEnd to max(selStart, ...) so they both become valid
     const html = renderMarkdownWithSelection("hello", 5, 2);
     const m = markers(html);
-    expect(m.start).toBe(true);
-    expect(m.end).toBe(true);
+    expect(m.start).toBeTruthy();
+    expect(m.end).toBeTruthy();
   });
 
-  test("empty string: both markers still appear", () => {
+  it("empty string: both markers still appear", () => {
     const html = renderMarkdownWithSelection("", 0, 0);
     // empty string renders as empty — no blocks — markers won't appear in rendered HTML
     // since there's no inline content to carry them through.
     // This is acceptable behavior: the function returns "" when src is empty.
-    expect(typeof html).toBe("string");
+    expectTypeOf(html).toBeString();
   });
 
-  test("selection spanning multiple paragraphs shows both markers", () => {
+  it("selection spanning multiple paragraphs shows both markers", () => {
     const src = "foo\nbar";
     const html = renderMarkdownWithSelection(src, 1, 5);
     const m = markers(html);
-    expect(m.start).toBe(true);
-    expect(m.end).toBe(true);
+    expect(m.start).toBeTruthy();
+    expect(m.end).toBeTruthy();
   });
 });

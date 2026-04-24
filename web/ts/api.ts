@@ -25,15 +25,21 @@ export interface NoteEntry {
 
 export async function searchNotes(q: string, path?: string): Promise<SearchResult[]> {
   let url = `/api/search?q=${encodeURIComponent(q)}`;
-  if (path) url += `&path=${encodeURIComponent(path)}`;
+  if (path) {
+    url += `&path=${encodeURIComponent(path)}`;
+  }
   const res = await fetch(url);
-  if (!res.ok) throw new Error(`search failed: ${res.status}`);
+  if (!res.ok) {
+    throw new Error(`search failed: ${res.status}`);
+  }
   return res.json() as Promise<SearchResult[]>;
 }
 
 export async function getNote(path: string): Promise<Note> {
   const res = await fetch(`/api/note?path=${encodeURIComponent(path)}`);
-  if (!res.ok) throw new Error(`get note failed: ${res.status}`);
+  if (!res.ok) {
+    throw new Error(`get note failed: ${res.status}`);
+  }
   return res.json() as Promise<Note>;
 }
 
@@ -57,7 +63,9 @@ export async function saveNote(
   if (res.status === 409) {
     return { mtime: data["mtime"] as number, conflict: true, content: data["content"] as string };
   }
-  if (!res.ok) throw new Error(`save failed: ${res.status}`);
+  if (!res.ok) {
+    throw new Error(`save failed: ${res.status}`);
+  }
   return { mtime: data["mtime"] as number };
 }
 
@@ -67,13 +75,17 @@ export async function createNote(path: string): Promise<{ mtime: number }> {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ content: "" }),
   });
-  if (!res.ok) throw new Error(`create failed: ${res.status}`);
+  if (!res.ok) {
+    throw new Error(`create failed: ${res.status}`);
+  }
   return res.json() as Promise<{ mtime: number }>;
 }
 
 export async function deleteNote(path: string): Promise<void> {
   const res = await fetch(`/api/note?path=${encodeURIComponent(path)}`, { method: "DELETE" });
-  if (!res.ok) throw new Error(`delete failed: ${res.status}`);
+  if (!res.ok) {
+    throw new Error(`delete failed: ${res.status}`);
+  }
 }
 
 export async function renameNote(oldPath: string, newPath: string): Promise<{ updated: string[] }> {
@@ -82,13 +94,17 @@ export async function renameNote(oldPath: string, newPath: string): Promise<{ up
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ old_path: oldPath, new_path: newPath }),
   });
-  if (!res.ok) throw new Error(`rename failed: ${res.status}`);
+  if (!res.ok) {
+    throw new Error(`rename failed: ${res.status}`);
+  }
   return res.json() as Promise<{ updated: string[] }>;
 }
 
 export async function listNotes(): Promise<NoteEntry[]> {
   const res = await fetch("/api/notes");
-  if (!res.ok) throw new Error(`list failed: ${res.status}`);
+  if (!res.ok) {
+    throw new Error(`list failed: ${res.status}`);
+  }
   return res.json() as Promise<NoteEntry[]>;
 }
 
@@ -105,13 +121,17 @@ export interface RecentFileEntry {
 
 export async function searchFileNames(q: string): Promise<FileSearchResult[]> {
   const res = await fetch(`/api/filesearch?q=${encodeURIComponent(q)}`);
-  if (!res.ok) throw new Error(`filesearch failed: ${res.status}`);
+  if (!res.ok) {
+    throw new Error(`filesearch failed: ${res.status}`);
+  }
   return res.json() as Promise<FileSearchResult[]>;
 }
 
 export async function getRecentFiles(): Promise<RecentFileEntry[]> {
   const res = await fetch("/api/recentfiles");
-  if (!res.ok) throw new Error(`recentfiles failed: ${res.status}`);
+  if (!res.ok) {
+    throw new Error(`recentfiles failed: ${res.status}`);
+  }
   return res.json() as Promise<RecentFileEntry[]>;
 }
 
@@ -122,7 +142,9 @@ interface PinnedFileEntry {
 
 export async function getPinnedFiles(): Promise<PinnedFileEntry[]> {
   const res = await fetch("/api/pinned");
-  if (!res.ok) throw new Error(`pinned failed: ${res.status}`);
+  if (!res.ok) {
+    throw new Error(`pinned failed: ${res.status}`);
+  }
   return res.json() as Promise<PinnedFileEntry[]>;
 }
 
@@ -132,7 +154,9 @@ export async function pinFile(path: string): Promise<void> {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ path }),
   });
-  if (!res.ok) throw new Error(`pin failed: ${res.status}`);
+  if (!res.ok) {
+    throw new Error(`pin failed: ${res.status}`);
+  }
 }
 
 export async function unpinFile(path: string): Promise<void> {
@@ -141,12 +165,16 @@ export async function unpinFile(path: string): Promise<void> {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ path }),
   });
-  if (!res.ok) throw new Error(`unpin failed: ${res.status}`);
+  if (!res.ok) {
+    throw new Error(`unpin failed: ${res.status}`);
+  }
 }
 
 export async function getBacklinks(path: string): Promise<string[]> {
   const res = await fetch(`/api/backlinks?path=${encodeURIComponent(path)}`);
-  if (!res.ok) throw new Error(`backlinks failed: ${res.status}`);
+  if (!res.ok) {
+    throw new Error(`backlinks failed: ${res.status}`);
+  }
   return res.json() as Promise<string[]>;
 }
 
@@ -156,20 +184,26 @@ export async function uploadImage(blob: Blob, filename: string): Promise<string>
     headers: { "X-Filename": filename },
     body: blob,
   });
-  if (!res.ok) throw new Error(`upload failed: ${res.status}`);
+  if (!res.ok) {
+    throw new Error(`upload failed: ${res.status}`);
+  }
   const data = (await res.json()) as { filename: string };
   return data.filename;
 }
 
 export async function listRevisions(path: string): Promise<number[]> {
   const res = await fetch(`/api/revisions?path=${encodeURIComponent(path)}`);
-  if (!res.ok) throw new Error(`revisions failed: ${res.status}`);
+  if (!res.ok) {
+    throw new Error(`revisions failed: ${res.status}`);
+  }
   return res.json() as Promise<number[]>;
 }
 
 export async function getRevision(path: string, ts: number): Promise<string> {
   const res = await fetch(`/api/revision?path=${encodeURIComponent(path)}&ts=${ts}`);
-  if (!res.ok) throw new Error(`revision failed: ${res.status}`);
+  if (!res.ok) {
+    throw new Error(`revision failed: ${res.status}`);
+  }
   const data = (await res.json()) as { content: string };
   return data.content;
 }
@@ -178,7 +212,9 @@ export async function restoreRevision(path: string, ts: number): Promise<{ mtime
   const res = await fetch(`/api/restore?path=${encodeURIComponent(path)}&ts=${ts}`, {
     method: "POST",
   });
-  if (!res.ok) throw new Error(`restore failed: ${res.status}`);
+  if (!res.ok) {
+    throw new Error(`restore failed: ${res.status}`);
+  }
   return res.json() as Promise<{ mtime: number }>;
 }
 
@@ -191,7 +227,9 @@ export interface SessionState {
 
 export async function getState(): Promise<SessionState> {
   const res = await fetch("/api/state");
-  if (!res.ok) throw new Error(`state failed: ${res.status}`);
+  if (!res.ok) {
+    throw new Error(`state failed: ${res.status}`);
+  }
   return res.json() as Promise<SessionState>;
 }
 
@@ -225,7 +263,9 @@ export interface AppStatus {
 
 export async function getStatus(): Promise<AppStatus> {
   const res = await fetch("/api/status");
-  if (!res.ok) throw new Error(`status failed: ${res.status}`);
+  if (!res.ok) {
+    throw new Error(`status failed: ${res.status}`);
+  }
   return res.json() as Promise<AppStatus>;
 }
 
@@ -275,7 +315,9 @@ export async function removePrf(credentialId: string): Promise<boolean> {
 
 export async function getSettings(): Promise<Settings> {
   const res = await fetch("/api/settings");
-  if (!res.ok) throw new Error(`settings failed: ${res.status}`);
+  if (!res.ok) {
+    throw new Error(`settings failed: ${res.status}`);
+  }
   return res.json() as Promise<Settings>;
 }
 
@@ -285,5 +327,7 @@ export async function saveSettings(settings: Settings): Promise<void> {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(settings),
   });
-  if (!res.ok) throw new Error(`save settings failed: ${res.status}`);
+  if (!res.ok) {
+    throw new Error(`save settings failed: ${res.status}`);
+  }
 }

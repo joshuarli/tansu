@@ -1,13 +1,11 @@
-import { describe, test, expect, beforeAll, afterAll } from "vitest";
-
 import {
   matchPattern,
   patterns,
   checkInlineTransform,
   computeReplaceRange,
   buildReplacementHtml,
+  type InlinePattern,
 } from "../src/inline-transforms.ts";
-import type { InlinePattern } from "../src/inline-transforms.ts";
 import { setupDOM } from "./test-helper.ts";
 
 const bold = patterns[0]!;
@@ -21,98 +19,98 @@ function m(text: string, pos: number, pat: InlinePattern) {
 }
 
 describe("bold (**text**)", () => {
-  test("bold basic", () => {
+  it("bold basic", () => {
     expect(m("**bold**", 8, bold)?.content).toBe("bold");
   });
-  test("bold start", () => {
+  it("bold start", () => {
     expect(m("**bold**", 8, bold)?.start).toBe(0);
   });
-  test("bold mid-text", () => {
+  it("bold mid-text", () => {
     expect(m("hello **world**", 15, bold)?.content).toBe("world");
   });
-  test("bold single char", () => {
+  it("bold single char", () => {
     expect(m("**a**", 5, bold)?.content).toBe("a");
   });
-  test("bold empty content", () => {
-    expect(m("****", 4, bold)).toBe(null);
+  it("bold empty content", () => {
+    expect(m("****", 4, bold)).toBeNull();
   });
-  test("bold leading space", () => {
-    expect(m("** bold**", 9, bold)).toBe(null);
+  it("bold leading space", () => {
+    expect(m("** bold**", 9, bold)).toBeNull();
   });
-  test("bold trailing space", () => {
-    expect(m("**bold **", 9, bold)).toBe(null);
+  it("bold trailing space", () => {
+    expect(m("**bold **", 9, bold)).toBeNull();
   });
-  test("bold no opening pair", () => {
-    expect(m("*bold**", 7, bold)).toBe(null);
+  it("bold no opening pair", () => {
+    expect(m("*bold**", 7, bold)).toBeNull();
   });
 });
 
 describe("italic (*text*)", () => {
-  test("italic basic", () => {
+  it("italic basic", () => {
     expect(m("*italic*", 8, em)?.content).toBe("italic");
   });
-  test("italic single char", () => {
+  it("italic single char", () => {
     expect(m("*a*", 3, em)?.content).toBe("a");
   });
-  test("italic rejects ** closing", () => {
-    expect(m("**bold**", 8, em)).toBe(null);
+  it("italic rejects ** closing", () => {
+    expect(m("**bold**", 8, em)).toBeNull();
   });
-  test("italic rejects ** opening", () => {
-    expect(m("**bold*", 7, em)).toBe(null);
+  it("italic rejects ** opening", () => {
+    expect(m("**bold*", 7, em)).toBeNull();
   });
-  test("italic mid-text", () => {
+  it("italic mid-text", () => {
     expect(m("hello *world*", 13, em)?.content).toBe("world");
   });
-  test("italic leading space", () => {
-    expect(m("* italic*", 9, em)).toBe(null);
+  it("italic leading space", () => {
+    expect(m("* italic*", 9, em)).toBeNull();
   });
-  test("italic trailing space", () => {
-    expect(m("*italic *", 9, em)).toBe(null);
+  it("italic trailing space", () => {
+    expect(m("*italic *", 9, em)).toBeNull();
   });
 });
 
 describe("code (`text`)", () => {
-  test("code basic (space trigger)", () => {
+  it("code basic (space trigger)", () => {
     expect(m("`code` ", 7, code)?.content).toBe("code");
   });
-  test("code single char (space trigger)", () => {
+  it("code single char (space trigger)", () => {
     expect(m("hello `x` ", 10, code)?.content).toBe("x");
   });
-  test("code nbsp trigger", () => {
+  it("code nbsp trigger", () => {
     expect(m("`code`\u00A0", 7, code)?.content).toBe("code");
   });
-  test("code no trailing space", () => {
-    expect(m("`code`", 6, code)).toBe(null);
+  it("code no trailing space", () => {
+    expect(m("`code`", 6, code)).toBeNull();
   });
-  test("code empty", () => {
-    expect(m("`` ", 3, code)).toBe(null);
+  it("code empty", () => {
+    expect(m("`` ", 3, code)).toBeNull();
   });
-  test("triple backtick not matched as code", () => {
-    expect(m("``` ", 4, code)).toBe(null);
+  it("triple backtick not matched as code", () => {
+    expect(m("``` ", 4, code)).toBeNull();
   });
 });
 
 describe("strikethrough (~~text~~)", () => {
-  test("del basic", () => {
+  it("del basic", () => {
     expect(m("~~strike~~", 10, del_)?.content).toBe("strike");
   });
-  test("del empty", () => {
-    expect(m("~~~~", 4, del_)).toBe(null);
+  it("del empty", () => {
+    expect(m("~~~~", 4, del_)).toBeNull();
   });
 });
 
 describe("highlight (==text==)", () => {
-  test("mark basic", () => {
+  it("mark basic", () => {
     expect(m("==mark==", 8, mark)?.content).toBe("mark");
   });
 });
 
 describe("cross-pattern", () => {
-  test("no italic inside bold markers", () => {
-    expect(m("**bold**", 8, em)).toBe(null);
+  it("no italic inside bold markers", () => {
+    expect(m("**bold**", 8, em)).toBeNull();
   });
 
-  test("bold matches before italic", () => {
+  it("bold matches before italic", () => {
     let matched = false;
     for (const pat of patterns) {
       const result = matchPattern("**bold**", 8, pat);
@@ -122,43 +120,43 @@ describe("cross-pattern", () => {
         break;
       }
     }
-    expect(matched).toBe(true);
+    expect(matched).toBeTruthy();
   });
 
-  test("italic after bold text", () => {
+  it("italic after bold text", () => {
     expect(m("**bold** then *italic*", 22, em)?.content).toBe("italic");
   });
 });
 
 describe("edge cases", () => {
-  test("bold with trailing text", () => {
+  it("bold with trailing text", () => {
     expect(m("**bold** more", 8, bold)?.content).toBe("bold");
   });
-  test("bold nearest match", () => {
+  it("bold nearest match", () => {
     expect(m("a **b** c **d**", 15, bold)?.content).toBe("d");
   });
 });
 
 describe("computeReplaceRange", () => {
-  test("non-trailingSpace: range ends at cursor", () => {
+  it("non-trailingSpace: range ends at cursor", () => {
     const r = computeReplaceRange(bold, 5, 15);
     expect(r.start).toBe(5);
     expect(r.end).toBe(15);
   });
 
-  test("trailingSpace: range ends one before cursor (excludes trailing space)", () => {
+  it("trailingSpace: range ends one before cursor (excludes trailing space)", () => {
     const r = computeReplaceRange(code, 3, 10);
     expect(r.start).toBe(3);
     expect(r.end).toBe(9);
   });
 
-  test("italic range", () => {
+  it("italic range", () => {
     const r = computeReplaceRange(em, 0, 8);
     expect(r.start).toBe(0);
     expect(r.end).toBe(8);
   });
 
-  test("strikethrough range", () => {
+  it("strikethrough range", () => {
     const r = computeReplaceRange(del_, 2, 12);
     expect(r.start).toBe(2);
     expect(r.end).toBe(12);
@@ -166,32 +164,32 @@ describe("computeReplaceRange", () => {
 });
 
 describe("buildReplacementHtml", () => {
-  test("bold wraps in strong with ZWS suffix", () => {
+  it("bold wraps in strong with ZWS suffix", () => {
     const html = buildReplacementHtml(bold, "hello");
     expect(html).toBe("<strong>hello</strong>\u200B");
   });
 
-  test("italic wraps in em with ZWS suffix", () => {
+  it("italic wraps in em with ZWS suffix", () => {
     const html = buildReplacementHtml(em, "world");
     expect(html).toBe("<em>world</em>\u200B");
   });
 
-  test("code wraps in code without ZWS (trailingSpace)", () => {
+  it("code wraps in code without ZWS (trailingSpace)", () => {
     const html = buildReplacementHtml(code, "fn()");
     expect(html).toBe("<code>fn()</code>");
   });
 
-  test("strikethrough wraps in del with ZWS", () => {
+  it("strikethrough wraps in del with ZWS", () => {
     const html = buildReplacementHtml(del_, "removed");
     expect(html).toBe("<del>removed</del>\u200B");
   });
 
-  test("highlight wraps in mark with ZWS", () => {
+  it("highlight wraps in mark with ZWS", () => {
     const html = buildReplacementHtml(mark, "important");
     expect(html).toBe("<mark>important</mark>\u200B");
   });
 
-  test("escapes HTML in content", () => {
+  it("escapes HTML in content", () => {
     const html = buildReplacementHtml(bold, "<script>&</script>");
     expect(html).toContain("&lt;script&gt;");
     expect(html).toContain("&amp;");
@@ -210,16 +208,16 @@ describe("checkInlineTransform", () => {
     cleanup();
   });
 
-  test("returns null when no selection exists", () => {
+  it("returns null when no selection exists", () => {
     const result = checkInlineTransform();
-    expect(result).toBe(null);
+    expect(result).toBeNull();
   });
 
-  test("clamps stale selection offsets after DOM mutation", () => {
+  it("clamps stale selection offsets after DOM mutation", () => {
     const host = document.createElement("div");
     const text = document.createTextNode("plain");
-    host.appendChild(text);
-    document.body.appendChild(host);
+    host.append(text);
+    document.body.append(host);
 
     const sel = window.getSelection()!;
     const range = document.createRange();
@@ -234,7 +232,7 @@ describe("checkInlineTransform", () => {
     });
 
     expect(() => checkInlineTransform()).not.toThrow();
-    expect(checkInlineTransform()).toBe(null);
+    expect(checkInlineTransform()).toBeNull();
 
     host.remove();
   });

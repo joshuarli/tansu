@@ -1,5 +1,4 @@
 import type { Page } from "playwright";
-import { describe, test, expect, beforeAll, afterAll } from "vitest";
 
 import { setup, teardown } from "./setup.ts";
 
@@ -9,8 +8,8 @@ describe("e2e: firefox regressions", () => {
 
   beforeAll(async () => {
     const ctx = await setup({ browserName: "firefox" });
-    page = ctx.page;
-    baseUrl = ctx.baseUrl;
+    ({ page } = ctx);
+    ({ baseUrl } = ctx);
   }, 30_000);
 
   afterAll(async () => {
@@ -35,7 +34,7 @@ describe("e2e: firefox regressions", () => {
     await page.waitForTimeout(100);
   }
 
-  test("Backspace on empty nested bullet preserves markdown through autosave and reload", async () => {
+  it("Backspace on empty nested bullet preserves markdown through autosave and reload", async () => {
     await openTestNote();
     await setSource("- one\n- two");
 
@@ -67,7 +66,7 @@ describe("e2e: firefox regressions", () => {
     await page.waitForTimeout(2000); // autosave debounce
 
     await page.click("button:has-text('Source')");
-    expect(await page.$eval(".editor-source", (el: HTMLTextAreaElement) => el.value)).toBe(
+    await expect(page.$eval(".editor-source", (el: HTMLTextAreaElement) => el.value)).resolves.toBe(
       "- one\n  - ",
     );
     await page.click("button:has-text('Source')");
@@ -75,12 +74,12 @@ describe("e2e: firefox regressions", () => {
     await page.reload({ waitUntil: "load" });
     await page.waitForSelector(".editor-content", { timeout: 3000 });
     await page.click("button:has-text('Source')");
-    expect(await page.$eval(".editor-source", (el: HTMLTextAreaElement) => el.value)).toBe(
+    await expect(page.$eval(".editor-source", (el: HTMLTextAreaElement) => el.value)).resolves.toBe(
       "- one\n  - ",
     );
   }, 30_000);
 
-  test("Backspace on empty top-level bullet preserves list structure through autosave and reload", async () => {
+  it("Backspace on empty top-level bullet preserves list structure through autosave and reload", async () => {
     await openTestNote();
     await setSource("- a\n- b");
 
@@ -109,16 +108,20 @@ describe("e2e: firefox regressions", () => {
     await page.waitForTimeout(2000);
 
     await page.click("button:has-text('Source')");
-    expect(await page.$eval(".editor-source", (el: HTMLTextAreaElement) => el.value)).toBe("- a");
+    await expect(page.$eval(".editor-source", (el: HTMLTextAreaElement) => el.value)).resolves.toBe(
+      "- a",
+    );
     await page.click("button:has-text('Source')");
 
     await page.reload({ waitUntil: "load" });
     await page.waitForSelector(".editor-content", { timeout: 3000 });
     await page.click("button:has-text('Source')");
-    expect(await page.$eval(".editor-source", (el: HTMLTextAreaElement) => el.value)).toBe("- a");
+    await expect(page.$eval(".editor-source", (el: HTMLTextAreaElement) => el.value)).resolves.toBe(
+      "- a",
+    );
   }, 30_000);
 
-  test("autosave preserves repeated and edge blank lines", async () => {
+  it("autosave preserves repeated and edge blank lines", async () => {
     await openTestNote();
 
     const source = "\nline1\n\n\nline2\n";
@@ -126,16 +129,20 @@ describe("e2e: firefox regressions", () => {
     await page.waitForTimeout(2000);
 
     await page.click("button:has-text('Source')");
-    expect(await page.$eval(".editor-source", (el: HTMLTextAreaElement) => el.value)).toBe(source);
+    await expect(page.$eval(".editor-source", (el: HTMLTextAreaElement) => el.value)).resolves.toBe(
+      source,
+    );
     await page.click("button:has-text('Source')");
 
     await page.reload({ waitUntil: "load" });
     await page.waitForSelector(".editor-content", { timeout: 3000 });
     await page.click("button:has-text('Source')");
-    expect(await page.$eval(".editor-source", (el: HTMLTextAreaElement) => el.value)).toBe(source);
+    await expect(page.$eval(".editor-source", (el: HTMLTextAreaElement) => el.value)).resolves.toBe(
+      source,
+    );
   }, 30_000);
 
-  test("autosave preserves a tight paragraph-list boundary", async () => {
+  it("autosave preserves a tight paragraph-list boundary", async () => {
     await openTestNote();
 
     const source = "foo:\n- one";
@@ -143,16 +150,20 @@ describe("e2e: firefox regressions", () => {
     await page.waitForTimeout(2000);
 
     await page.click("button:has-text('Source')");
-    expect(await page.$eval(".editor-source", (el: HTMLTextAreaElement) => el.value)).toBe(source);
+    await expect(page.$eval(".editor-source", (el: HTMLTextAreaElement) => el.value)).resolves.toBe(
+      source,
+    );
     await page.click("button:has-text('Source')");
 
     await page.reload({ waitUntil: "load" });
     await page.waitForSelector(".editor-content", { timeout: 3000 });
     await page.click("button:has-text('Source')");
-    expect(await page.$eval(".editor-source", (el: HTMLTextAreaElement) => el.value)).toBe(source);
+    await expect(page.$eval(".editor-source", (el: HTMLTextAreaElement) => el.value)).resolves.toBe(
+      source,
+    );
   }, 30_000);
 
-  test("autosave preserves a tight empty-list-item paragraph boundary", async () => {
+  it("autosave preserves a tight empty-list-item paragraph boundary", async () => {
     await openTestNote();
 
     const source = "foo:\n- one\n- \ndsf";
@@ -160,16 +171,20 @@ describe("e2e: firefox regressions", () => {
     await page.waitForTimeout(2000);
 
     await page.click("button:has-text('Source')");
-    expect(await page.$eval(".editor-source", (el: HTMLTextAreaElement) => el.value)).toBe(source);
+    await expect(page.$eval(".editor-source", (el: HTMLTextAreaElement) => el.value)).resolves.toBe(
+      source,
+    );
     await page.click("button:has-text('Source')");
 
     await page.reload({ waitUntil: "load" });
     await page.waitForSelector(".editor-content", { timeout: 3000 });
     await page.click("button:has-text('Source')");
-    expect(await page.$eval(".editor-source", (el: HTMLTextAreaElement) => el.value)).toBe(source);
+    await expect(page.$eval(".editor-source", (el: HTMLTextAreaElement) => el.value)).resolves.toBe(
+      source,
+    );
   }, 30_000);
 
-  test("reload replaces the SSE connection instead of returning 409", async () => {
+  it("reload replaces the SSE connection instead of returning 409", async () => {
     const eventStatuses: number[] = [];
     page.on("response", (response) => {
       if (response.url().includes("/events")) {
@@ -182,6 +197,6 @@ describe("e2e: firefox regressions", () => {
     await page.reload({ waitUntil: "load" });
     await page.waitForTimeout(1000);
 
-    expect(eventStatuses.every((status) => status === 200)).toBe(true);
+    expect(eventStatuses.every((status) => status === 200)).toBeTruthy();
   }, 20_000);
 });

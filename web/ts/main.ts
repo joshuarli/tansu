@@ -33,13 +33,13 @@ import {
   createNewNote,
   reopenClosedTab,
   syncToServer,
+  type Tab,
 } from "./tabs.ts";
-import type { Tab } from "./tabs.ts";
 import { stemFromPath } from "./util.ts";
 import { isPrfLikelySupported, getPrfKey } from "./webauthn.ts";
 import { registerWikiLinkClickHandler } from "./wikilinks.ts";
 
-const appEl = document.getElementById("app")!;
+const appEl = document.querySelector("#app") as HTMLElement;
 let sse: EventSource | null = null;
 let appInitialized = false;
 let sseReconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -48,11 +48,11 @@ let pageUnloading = false;
 function showUnlockScreen(status?: AppStatus) {
   appEl.style.display = "none";
 
-  let screen = document.getElementById("unlock-screen");
+  let screen = document.querySelector("#unlock-screen");
   if (!screen) {
     screen = document.createElement("div");
     screen.id = "unlock-screen";
-    document.body.appendChild(screen);
+    document.body.append(screen);
   }
 
   const hasPrf = status && status.prf_credential_ids.length > 0 && isPrfLikelySupported();
@@ -69,10 +69,10 @@ function showUnlockScreen(status?: AppStatus) {
     </form>
   `;
 
-  const form = document.getElementById("unlock-form") as HTMLFormElement;
-  const input = document.getElementById("unlock-key") as HTMLInputElement;
-  const errorEl = document.getElementById("unlock-error")!;
-  const statusEl = document.getElementById("unlock-status")!;
+  const form = document.querySelector("#unlock-form") as HTMLFormElement;
+  const input = document.querySelector("#unlock-key") as HTMLInputElement;
+  const errorEl = document.querySelector("#unlock-error")!;
+  const statusEl = document.querySelector("#unlock-status")!;
 
   function onUnlockSuccess() {
     statusEl.textContent = "Unlocked. Loading...";
@@ -83,7 +83,7 @@ function showUnlockScreen(status?: AppStatus) {
 
   // Biometric unlock button
   if (hasPrf) {
-    const bioBtn = document.getElementById("unlock-biometric")!;
+    const bioBtn = document.querySelector("#unlock-biometric")!;
     bioBtn.addEventListener("click", async () => {
       errorEl.textContent = "";
       statusEl.textContent = "Waiting for biometrics...";
@@ -97,13 +97,13 @@ function showUnlockScreen(status?: AppStatus) {
           errorEl.textContent = "Biometric unlock failed.";
           statusEl.textContent = "";
         }
-      } catch (e) {
-        errorEl.textContent = e instanceof Error ? e.message : "Biometric unlock failed.";
+      } catch (error) {
+        errorEl.textContent = error instanceof Error ? error.message : "Biometric unlock failed.";
         statusEl.textContent = "";
       }
     });
     // Auto-trigger biometric on load
-    (document.getElementById("unlock-biometric") as HTMLButtonElement).click();
+    (document.querySelector("#unlock-biometric") as HTMLButtonElement).click();
   } else {
     input.focus();
   }
@@ -112,7 +112,9 @@ function showUnlockScreen(status?: AppStatus) {
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
     const key = input.value.trim();
-    if (!key) return;
+    if (!key) {
+      return;
+    }
 
     errorEl.textContent = "";
     statusEl.textContent = "Unlocking...";
@@ -155,9 +157,9 @@ function initApp() {
 
   registerWikiLinkClickHandler(async (target: string) => {
     const notes = await listNotes();
-    const normalized = target.toLowerCase().replace(/\s+/g, "-");
+    const normalized = target.toLowerCase().replaceAll(/\s+/g, "-");
     const match = notes.find((n) => {
-      const stem = stemFromPath(n.path).toLowerCase().replace(/\s+/g, "-");
+      const stem = stemFromPath(n.path).toLowerCase().replaceAll(/\s+/g, "-");
       return stem === normalized;
     });
 
@@ -193,13 +195,16 @@ function initApp() {
       keys: { key: "f", meta: true },
       action: () => {
         const tab = getActiveTab();
-        if (tab) search.open(tab.path);
-        else search.open();
+        if (tab) {
+          search.open(tab.path);
+        } else {
+          search.open();
+        }
       },
     },
     {
       label: "Global search",
-      shortcut: "\u21e7\u2318F",
+      shortcut: "\u21E7\u2318F",
       keys: { key: "f", meta: true, shift: true },
       action: () => search.open(),
     },
@@ -211,7 +216,7 @@ function initApp() {
     },
     {
       label: "Reopen closed tab",
-      shortcut: "\u21e7\u2318T",
+      shortcut: "\u21E7\u2318T",
       keys: { key: "t", meta: true, shift: true },
       action: () => reopenClosedTab(),
     },
@@ -229,19 +234,19 @@ function initApp() {
     },
     {
       label: "Next tab",
-      shortcut: "\u21e7\u2318]",
+      shortcut: "\u21E7\u2318]",
       keys: { key: "]", meta: true, shift: true },
       action: () => nextTab(),
     },
     {
       label: "Previous tab",
-      shortcut: "\u21e7\u2318[",
+      shortcut: "\u21E7\u2318[",
       keys: { key: "[", meta: true, shift: true },
       action: () => prevTab(),
     },
     {
       label: "Settings",
-      shortcut: "\u21e7\u2318S",
+      shortcut: "\u21E7\u2318S",
       keys: { key: "s", meta: true, shift: true },
       action: () => settings.toggle(),
     },
@@ -285,13 +290,13 @@ function initApp() {
   window.addEventListener("tansu:rename", async (ev: Event) => {
     const detail = (ev as CustomEvent).detail as { path: string; newName: string };
     const oldPath = detail.path;
-    const dir = oldPath.includes("/") ? oldPath.substring(0, oldPath.lastIndexOf("/") + 1) : "";
+    const dir = oldPath.includes("/") ? oldPath.slice(0, oldPath.lastIndexOf("/") + 1) : "";
     const newPath = `${dir}${detail.newName}.md`;
 
     try {
       const result = await renameNote(oldPath, newPath);
       invalidateNoteCache();
-      emit("files:changed", undefined);
+      emit("files:changed");
       updateTabPath(oldPath, newPath);
 
       await Promise.all(
@@ -299,8 +304,8 @@ function initApp() {
           try {
             const note = await getNote(updated);
             updateTabContent(updated, note.content, note.mtime);
-          } catch (e) {
-            console.warn("Failed to reload tab after rename:", e);
+          } catch {
+            /* reload failed silently */
           }
         }),
       );
@@ -309,20 +314,22 @@ function initApp() {
       if (active && active.path === newPath) {
         showEditor(active.path, active.content);
       }
-    } catch (e) {
-      console.error("Rename failed:", e);
+    } catch {
+      /* rename failed silently */
     }
   });
 }
 
 // Notification pill
-const notif = document.getElementById("notification")!;
+const notif = document.querySelector("#notification")!;
 let notifTimer: ReturnType<typeof setTimeout> | null = null;
 
 function showNotification(msg: string, type: "error" | "info" | "success" = "error") {
   notif.textContent = msg;
   notif.className = `notification ${type}`;
-  if (notifTimer) clearTimeout(notifTimer);
+  if (notifTimer) {
+    clearTimeout(notifTimer);
+  }
   notifTimer = setTimeout(() => {
     notif.className = "notification hidden";
   }, 5000);
@@ -343,7 +350,9 @@ function formatRetryDelay(delay: number): string {
 }
 
 function requestImmediateSSEReconnect() {
-  if (pageUnloading || sse) return;
+  if (pageUnloading || sse) {
+    return;
+  }
   if (sseReconnectTimer) {
     clearTimeout(sseReconnectTimer);
     sseReconnectTimer = null;
@@ -360,7 +369,9 @@ function connectSSE() {
     clearTimeout(sseReconnectTimer);
     sseReconnectTimer = null;
   }
-  if (pageUnloading) return;
+  if (pageUnloading) {
+    return;
+  }
   const es = new EventSource("/events");
   sse = es;
 
@@ -377,14 +388,14 @@ function connectSSE() {
 
   es.addEventListener("changed", async (e) => {
     const path = e.data;
-    emit("files:changed", undefined);
+    emit("files:changed");
     const active = getActiveTab();
     if (active && active.path === path) {
       try {
         const note = await getNote(path);
         reloadFromDisk(note.content, note.mtime);
-      } catch (err) {
-        console.warn("Failed to reload note from disk:", err);
+      } catch {
+        /* reload failed silently */
       }
     }
   });
@@ -392,7 +403,7 @@ function connectSSE() {
   es.addEventListener("deleted", (e) => {
     const path = e.data;
     invalidateNoteCache();
-    emit("files:changed", undefined);
+    emit("files:changed");
     const active = getActiveTab();
     if (active && active.path === path) {
       alert(`"${stemFromPath(path)}" was deleted externally.`);
@@ -409,7 +420,9 @@ function connectSSE() {
   es.onerror = () => {
     es.close();
     sse = null;
-    if (pageUnloading) return;
+    if (pageUnloading) {
+      return;
+    }
     sseWasUnavailable = true;
     const delay = nextSseRetryDelay();
     showNotification(`Server unavailable — retrying in ${formatRetryDelay(delay)}...`);
@@ -436,7 +449,9 @@ window.addEventListener("pagehide", closeSSEForUnload);
 window.addEventListener("beforeunload", closeSSEForUnload);
 window.addEventListener("focus", requestImmediateSSEReconnect);
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible") requestImmediateSSEReconnect();
+  if (document.visibilityState === "visible") {
+    requestImmediateSSEReconnect();
+  }
 });
 
 // Boot: check if encrypted + locked, show unlock or start app

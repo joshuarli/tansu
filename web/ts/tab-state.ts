@@ -1,7 +1,6 @@
 /// Pure tab state management — no DOM dependencies.
 
-import { getNote, createNote, saveState, getState } from "./api.ts";
-import type { SessionState } from "./api.ts";
+import { getNote, createNote, saveState, getState, type SessionState } from "./api.ts";
 import { emit } from "./events.ts";
 import { kvGet, kvPut, noteGet, notePut } from "./local-store.ts";
 
@@ -13,9 +12,9 @@ export interface Tab {
   mtime: number;
 }
 
-let tabs: Tab[] = [];
+const tabs: Tab[] = [];
 let activeIndex = -1;
-let closedTabs: string[] = [];
+const closedTabs: string[] = [];
 let cursors: Record<string, number> = {};
 const MAX_CLOSED = 20;
 
@@ -37,8 +36,8 @@ function persistState() {
     cursors,
   };
   /* c8 ignore start */
-  kvPut("session", state).catch(() => {});
-  saveState(state).catch(() => {});
+  kvPut("session", state).catch(() => void 0);
+  saveState(state).catch(() => void 0);
   /* c8 ignore stop */
 }
 
@@ -54,31 +53,35 @@ export function getCursor(path: string): number | undefined {
 /// Push cached session state to the server. Call on SSE reconnect.
 export async function syncToServer() {
   const cached = await kvGet<SessionState>("session");
-  if (cached) saveState(cached).catch(() => {});
+  if (cached) {
+    saveState(cached).catch(() => void 0);
+  }
 }
 
 /// Try server, cache to IDB on success, fall back to IDB cache on failure.
 async function fetchNote(path: string): Promise<{ content: string; mtime: number }> {
   try {
     const note = await getNote(path);
-    notePut(path, note.content, note.mtime).catch(() => {});
+    notePut(path, note.content, note.mtime).catch(() => void 0);
     return note;
   } catch {
     const cached = await noteGet(path);
-    if (cached) return cached;
+    if (cached) {
+      return cached;
+    }
     throw new Error(`Note ${path} not available offline`);
   }
 }
 
 function notifyChange() {
-  emit("tab:render", undefined);
+  emit("tab:render");
   emit("tab:change", tabs[activeIndex] ?? null);
   persistState();
 }
 
 export async function openTab(path: string): Promise<Tab> {
   const existing = tabs.findIndex((t) => t.path === path);
-  if (existing >= 0) {
+  if (existing !== -1) {
     await switchTab(existing);
     return tabs[existing]!;
   }
@@ -92,7 +95,9 @@ export async function openTab(path: string): Promise<Tab> {
 }
 
 export async function switchTab(index: number) {
-  if (index < 0 || index >= tabs.length) return;
+  if (index < 0 || index >= tabs.length) {
+    return;
+  }
   activeIndex = index;
   const tab = tabs[activeIndex];
   if (tab && tab.mtime === 0 && !tab.dirty) {
@@ -101,7 +106,7 @@ export async function switchTab(index: number) {
       tab.content = note.content;
       tab.mtime = note.mtime;
     } catch {
-      console.warn("Note not available offline:", tab.path);
+      /* offline fallback unavailable */
     }
   }
   notifyChange();
@@ -109,14 +114,20 @@ export async function switchTab(index: number) {
 
 export function closeTab(index: number) {
   const tab = tabs[index];
-  if (!tab) return;
+  if (!tab) {
+    return;
+  }
 
-  if (tab.dirty && !confirm("Discard unsaved changes?")) return;
+  if (tab.dirty && !confirm("Discard unsaved changes?")) {
+    return;
+  }
 
   closedTabs.push(tab.path);
-  if (closedTabs.length > MAX_CLOSED) closedTabs.shift();
+  if (closedTabs.length > MAX_CLOSED) {
+    closedTabs.shift();
+  }
   /* c8 ignore start */
-  notePut(tab.path, tab.content, tab.mtime).catch(() => {});
+  notePut(tab.path, tab.content, tab.mtime).catch(() => void 0);
   /* c8 ignore stop */
 
   emit("tab:close", tab);
@@ -134,12 +145,16 @@ export function closeTab(index: number) {
 }
 
 export function closeActiveTab() {
-  if (activeIndex >= 0) closeTab(activeIndex);
+  if (activeIndex >= 0) {
+    closeTab(activeIndex);
+  }
 }
 
 export function closeTabByPath(path: string) {
   const index = tabs.findIndex((t) => t.path === path);
-  if (index >= 0) closeTab(index);
+  if (index !== -1) {
+    closeTab(index);
+  }
 }
 
 export function clearClosedTabs() {
@@ -148,30 +163,36 @@ export function clearClosedTabs() {
 
 export async function reopenClosedTab() {
   const path = closedTabs.pop();
-  if (!path) return;
+  if (!path) {
+    return;
+  }
   persistState();
   try {
     await openTab(path);
     /* c8 ignore start */
-  } catch (e) {
-    console.warn("Could not reopen closed tab:", path, e);
+  } catch {
+    /* reopen failed silently */
   }
   /* c8 ignore stop */
 }
 
 export function nextTab() {
-  if (tabs.length > 1) switchTab((activeIndex + 1) % tabs.length);
+  if (tabs.length > 1) {
+    switchTab((activeIndex + 1) % tabs.length);
+  }
 }
 
 export function prevTab() {
-  if (tabs.length > 1) switchTab((activeIndex - 1 + tabs.length) % tabs.length);
+  if (tabs.length > 1) {
+    switchTab((activeIndex - 1 + tabs.length) % tabs.length);
+  }
 }
 
 export function markDirty(path: string) {
   const tab = tabs.find((t) => t.path === path);
   if (tab && !tab.dirty) {
     tab.dirty = true;
-    emit("tab:render", undefined);
+    emit("tab:render");
   }
 }
 
@@ -183,9 +204,9 @@ export function markClean(path: string, content: string, mtime: number) {
     tab.mtime = mtime;
     tab.title = titleFromPath(path);
     /* c8 ignore start */
-    notePut(path, content, mtime).catch(() => {});
+    notePut(path, content, mtime).catch(() => void 0);
     /* c8 ignore stop */
-    emit("tab:render", undefined);
+    emit("tab:render");
   }
 }
 
@@ -211,10 +232,10 @@ export async function createNewNote(name: string) {
   const path = name.endsWith(".md") ? name : `${name}.md`;
   try {
     await createNote(path);
-    emit("files:changed", undefined);
+    emit("files:changed");
     await openTab(path);
-  } catch (e) {
-    console.error("Failed to create note:", e);
+  } catch {
+    /* create failed silently */
   }
 }
 
@@ -223,16 +244,22 @@ export async function restoreSession() {
   try {
     state = await getState();
     /* c8 ignore start */
-    kvPut("session", state).catch(() => {});
+    kvPut("session", state).catch(() => void 0);
     /* c8 ignore stop */
   } catch {
     state = (await kvGet<SessionState>("session")) ?? {};
   }
 
   closedTabs.length = 0;
-  if (state.closed?.length) closedTabs.push(...state.closed.slice(-MAX_CLOSED));
-  if (state.cursors) cursors = { ...state.cursors };
-  if (!state.tabs?.length) return;
+  if (state.closed?.length) {
+    closedTabs.push(...state.closed.slice(-MAX_CLOSED));
+  }
+  if (state.cursors) {
+    cursors = { ...state.cursors };
+  }
+  if (!state.tabs?.length) {
+    return;
+  }
 
   const activeIdx =
     typeof state.active === "number" && state.active >= 0 && state.active < state.tabs.length
@@ -246,10 +273,10 @@ export async function restoreSession() {
       let mtime = 0;
       try {
         const note = await fetchNote(path);
-        content = note.content;
-        mtime = note.mtime;
-      } catch (e) {
-        console.warn("Failed to load note for session restore:", e);
+        ({ content } = note);
+        ({ mtime } = note);
+      } catch {
+        /* load failed, use empty content */
       }
       tabs.push({ path, title: titleFromPath(path), dirty: false, content, mtime });
     } else {

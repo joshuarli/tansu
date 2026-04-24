@@ -1,5 +1,3 @@
-import { describe, test, expect, beforeAll, afterAll } from "vitest";
-
 import { initImageResize } from "./image-resize.ts";
 import { setupDOM } from "./test-helper.ts";
 
@@ -17,10 +15,12 @@ describe("image-resize", () => {
   function makeImg(withAttr = true): { contentEl: HTMLElement; img: HTMLImageElement } {
     const contentEl = document.createElement("div");
     const img = document.createElement("img");
-    if (withAttr) img.setAttribute("data-wiki-image", "true");
+    if (withAttr) {
+      img.dataset["wikiImage"] = "true";
+    }
     img.setAttribute("width", "200");
-    contentEl.appendChild(img);
-    document.body.appendChild(contentEl);
+    contentEl.append(img);
+    document.body.append(contentEl);
     img.getBoundingClientRect = () =>
       ({
         width: 200,
@@ -44,7 +44,7 @@ describe("image-resize", () => {
     return event;
   }
 
-  test("Ctrl+wheel on wiki-image scales width and calls callback", () => {
+  it("Ctrl+wheel on wiki-image scales width and calls callback", () => {
     const { contentEl, img } = makeImg();
     let resizeCalled = false;
     initImageResize(contentEl, () => {
@@ -54,13 +54,13 @@ describe("image-resize", () => {
     // deltaY = -10 → scroll up → zoom in: newWidth = max(50, round(200 - (-10)*1.5)) = 215
     img.dispatchEvent(makeCtrlWheel(-10));
 
-    expect(resizeCalled).toBe(true);
+    expect(resizeCalled).toBeTruthy();
     expect(img.getAttribute("width")).toBe("215");
 
     contentEl.remove();
   });
 
-  test("Ctrl+wheel clamps width to minimum 50", () => {
+  it("Ctrl+wheel clamps width to minimum 50", () => {
     const { contentEl, img } = makeImg();
     img.getBoundingClientRect = () => ({ width: 50 }) as DOMRect;
     img.setAttribute("width", "50");
@@ -70,12 +70,12 @@ describe("image-resize", () => {
     // deltaY large positive → zoom out: newWidth = max(50, round(50 - 1000*1.5)) clamped to 50
     img.dispatchEvent(makeCtrlWheel(1000));
 
-    expect(parseInt(img.getAttribute("width")!)).toBeGreaterThanOrEqual(50);
+    expect(Number.parseInt(img.getAttribute("width")!, 10)).toBeGreaterThanOrEqual(50);
 
     contentEl.remove();
   });
 
-  test("non-Ctrl wheel is ignored", () => {
+  it("non-Ctrl wheel is ignored", () => {
     const { contentEl, img } = makeImg();
     let resizeCalled = false;
     initImageResize(contentEl, () => {
@@ -85,17 +85,17 @@ describe("image-resize", () => {
     const event = new WheelEvent("wheel", { bubbles: true, ctrlKey: false });
     img.dispatchEvent(event);
 
-    expect(resizeCalled).toBe(false);
+    expect(resizeCalled).toBeFalsy();
 
     contentEl.remove();
   });
 
-  test("Ctrl+wheel on non-IMG element is ignored", () => {
+  it("Ctrl+wheel on non-IMG element is ignored", () => {
     const contentEl = document.createElement("div");
     const p = document.createElement("p");
     p.textContent = "text";
-    contentEl.appendChild(p);
-    document.body.appendChild(contentEl);
+    contentEl.append(p);
+    document.body.append(contentEl);
 
     let resizeCalled = false;
     initImageResize(contentEl, () => {
@@ -105,12 +105,12 @@ describe("image-resize", () => {
     const event = new WheelEvent("wheel", { bubbles: true, ctrlKey: true });
     p.dispatchEvent(event);
 
-    expect(resizeCalled).toBe(false);
+    expect(resizeCalled).toBeFalsy();
 
     contentEl.remove();
   });
 
-  test("Ctrl+wheel on IMG without data-wiki-image is ignored", () => {
+  it("Ctrl+wheel on IMG without data-wiki-image is ignored", () => {
     const { contentEl, img } = makeImg(false);
     let resizeCalled = false;
     initImageResize(contentEl, () => {
@@ -120,7 +120,7 @@ describe("image-resize", () => {
     const event = new WheelEvent("wheel", { bubbles: true, ctrlKey: true });
     img.dispatchEvent(event);
 
-    expect(resizeCalled).toBe(false);
+    expect(resizeCalled).toBeFalsy();
 
     contentEl.remove();
   });

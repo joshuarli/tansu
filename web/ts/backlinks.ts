@@ -17,7 +17,7 @@ export async function loadBacklinks(el: HTMLElement, path: string) {
     const header = document.createElement("div");
     header.className = "backlinks-header";
     header.textContent = `${links.length} backlink${links.length > 1 ? "s" : ""}`;
-    el.appendChild(header);
+    el.append(header);
 
     const list = document.createElement("div");
     list.className = "backlinks-list";
@@ -26,11 +26,10 @@ export async function loadBacklinks(el: HTMLElement, path: string) {
       item.className = "backlink-item";
       item.textContent = stemFromPath(linkPath);
       item.onclick = () => openTab(linkPath);
-      list.appendChild(item);
+      list.append(item);
     }
-    el.appendChild(list);
-  } catch (e) {
-    console.warn("Failed to load backlinks:", e);
+    el.append(list);
+  } catch {
     el.style.display = "none";
   }
 }

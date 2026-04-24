@@ -1,8 +1,6 @@
 /// Roundtrip tests: markdown → HTML → markdown.
 /// Verifies that domToMarkdown(renderMarkdown(md)) produces equivalent output.
 
-import { describe, test, expect, beforeAll, afterAll } from "vitest";
-
 import { setupDOM } from "./test-helper.ts";
 
 describe("roundtrip", () => {
@@ -20,210 +18,210 @@ describe("roundtrip", () => {
     cleanup = setupDOM();
     const mdMod = await import("../src/markdown.ts");
     const serMod = await import("../src/serialize.ts");
-    renderMarkdown = mdMod.renderMarkdown;
-    domToMarkdown = serMod.domToMarkdown;
+    ({ renderMarkdown } = mdMod);
+    ({ domToMarkdown } = serMod);
   });
 
   afterAll(() => {
     cleanup();
   });
 
-  test("h1 roundtrip", () => {
+  it("h1 roundtrip", () => {
     expect(roundtrip("# Hello")).toBe("# Hello");
   });
-  test("h2 roundtrip", () => {
+  it("h2 roundtrip", () => {
     expect(roundtrip("## Sub")).toBe("## Sub");
   });
-  test("h6 roundtrip", () => {
+  it("h6 roundtrip", () => {
     expect(roundtrip("###### Deep")).toBe("###### Deep");
   });
-  test("paragraph roundtrip", () => {
+  it("paragraph roundtrip", () => {
     expect(roundtrip("Hello world")).toBe("Hello world");
   });
-  test("single newline is preserved", () => {
+  it("single newline is preserved", () => {
     expect(roundtrip("foo\nbar")).toBe("foo\nbar");
   });
-  test("three consecutive lines", () => {
+  it("three consecutive lines", () => {
     expect(roundtrip("a\nb\nc")).toBe("a\nb\nc");
   });
-  test("two paragraphs", () => {
+  it("two paragraphs", () => {
     expect(roundtrip("First\n\nSecond")).toBe("First\n\nSecond");
   });
-  test("single newline vs double newline are distinct", () => {
+  it("single newline vs double newline are distinct", () => {
     const single = roundtrip("foo\nbar");
     const double = roundtrip("foo\n\nbar");
     expect(single).toBe("foo\nbar");
     expect(double).toBe("foo\n\nbar");
     expect(single).not.toBe(double);
   });
-  test("mixed lines and blank lines", () => {
+  it("mixed lines and blank lines", () => {
     expect(roundtrip("a\nb\n\nc\nd")).toBe("a\nb\n\nc\nd");
   });
-  test("text before heading gains blank line on roundtrip", () => {
+  it("text before heading gains blank line on roundtrip", () => {
     // Serializer always puts \n\n between non-para block types
     expect(roundtrip("intro\n## Heading")).toBe("intro\n\n## Heading");
   });
-  test("text after heading is stable", () => {
+  it("text after heading is stable", () => {
     expect(roundtrip("## Heading\n\ntext")).toBe("## Heading\n\ntext");
   });
-  test("extra blank line between paragraphs", () => {
+  it("extra blank line between paragraphs", () => {
     expect(roundtrip("First\n\n\nSecond")).toBe("First\n\n\nSecond");
   });
-  test("leading and trailing blank lines", () => {
+  it("leading and trailing blank lines", () => {
     expect(roundtrip("\nFirst\n\nSecond\n")).toBe("\nFirst\n\nSecond\n");
   });
-  test("multiple trailing blank lines", () => {
+  it("multiple trailing blank lines", () => {
     expect(roundtrip("First\n\n\n")).toBe("First\n\n\n");
   });
-  test("bold roundtrip", () => {
+  it("bold roundtrip", () => {
     expect(roundtrip("**bold**")).toBe("**bold**");
   });
-  test("italic roundtrip", () => {
+  it("italic roundtrip", () => {
     expect(roundtrip("*italic*")).toBe("*italic*");
   });
-  test("inline code roundtrip", () => {
+  it("inline code roundtrip", () => {
     expect(roundtrip("use `foo` here")).toBe("use `foo` here");
   });
-  test("strikethrough roundtrip", () => {
+  it("strikethrough roundtrip", () => {
     expect(roundtrip("~~deleted~~")).toBe("~~deleted~~");
   });
-  test("highlight roundtrip", () => {
+  it("highlight roundtrip", () => {
     expect(roundtrip("==marked==")).toBe("==marked==");
   });
-  test("link roundtrip", () => {
+  it("link roundtrip", () => {
     expect(roundtrip("[text](http://url)")).toBe("[text](http://url)");
   });
-  test("bare https url roundtrip", () => {
+  it("bare https url roundtrip", () => {
     expect(roundtrip("https://example.com")).toBe("https://example.com");
   });
-  test("bare url in sentence roundtrip", () => {
+  it("bare url in sentence roundtrip", () => {
     expect(roundtrip("Visit https://example.com today")).toBe("Visit https://example.com today");
   });
-  test("wiki-link roundtrip", () => {
+  it("wiki-link roundtrip", () => {
     expect(roundtrip("[[my note]]")).toBe("[[my note]]");
   });
-  test("wiki-link pipe roundtrip", () => {
+  it("wiki-link pipe roundtrip", () => {
     expect(roundtrip("[[target|display]]")).toBe("[[target|display]]");
   });
-  test("image roundtrip", () => {
+  it("image roundtrip", () => {
     expect(roundtrip("![alt](src.png)")).toBe("![alt](src.png)");
   });
-  test("wiki-image roundtrip", () => {
+  it("wiki-image roundtrip", () => {
     expect(roundtrip("![[photo.webp]]")).toBe("![[photo.webp]]");
   });
-  test("hr roundtrip", () => {
+  it("hr roundtrip", () => {
     expect(roundtrip("---")).toBe("---");
   });
-  test("ul roundtrip", () => {
+  it("ul roundtrip", () => {
     expect(roundtrip("- one\n- two\n- three")).toBe("- one\n- two\n- three");
   });
-  test("paragraph followed by list stays tight", () => {
+  it("paragraph followed by list stays tight", () => {
     expect(roundtrip("foo:\n- one")).toBe("foo:\n- one");
   });
-  test("empty list item followed by paragraph stays tight", () => {
+  it("empty list item followed by paragraph stays tight", () => {
     expect(roundtrip("foo:\n- one\n-\ndsf")).toBe("foo:\n- one\n- \ndsf");
   });
-  test("nested ul roundtrip", () => {
+  it("nested ul roundtrip", () => {
     expect(roundtrip("- parent\n  - child")).toBe("- parent\n  - child");
   });
-  test("empty list item roundtrip", () => {
+  it("empty list item roundtrip", () => {
     expect(roundtrip("- one\n- ")).toBe("- one\n- ");
   });
-  test("ol roundtrip", () => {
+  it("ol roundtrip", () => {
     expect(roundtrip("1. first\n2. second")).toBe("1. first\n2. second");
   });
 
-  test("code block roundtrip", () => {
+  it("code block roundtrip", () => {
     expect(roundtrip("```js\nconst x = 1;\n```")).toBe("```js\nconst x = 1;\n```");
   });
 
-  test("code block no lang roundtrip", () => {
+  it("code block no lang roundtrip", () => {
     expect(roundtrip("```\nhello\n```")).toBe("```\nhello\n```");
   });
 
-  test("blockquote roundtrip", () => {
+  it("blockquote roundtrip", () => {
     expect(roundtrip("> quoted text")).toBe("> quoted text");
   });
 
-  test("table header roundtrip", () => {
+  it("table header roundtrip", () => {
     const table = "| A | B |\n| --- | --- |\n| 1 | 2 |";
     const rt = roundtrip(table);
     expect(rt).toContain("| A | B |");
   });
 
-  test("table row roundtrip", () => {
+  it("table row roundtrip", () => {
     const table = "| A | B |\n| --- | --- |\n| 1 | 2 |";
     const rt = roundtrip(table);
     expect(rt).toContain("| 1 | 2 |");
   });
 
-  test("table separator roundtrip", () => {
+  it("table separator roundtrip", () => {
     const table = "| A | B |\n| --- | --- |\n| 1 | 2 |";
     const rt = roundtrip(table);
     expect(rt).toContain("---");
   });
 
-  test("callout type roundtrip", () => {
+  it("callout type roundtrip", () => {
     const callout = "> [!warning] Be careful\n> This is important";
     const rt = roundtrip(callout);
     expect(rt).toContain("[!warning]");
   });
 
-  test("callout title roundtrip", () => {
+  it("callout title roundtrip", () => {
     const callout = "> [!warning] Be careful\n> This is important";
     const rt = roundtrip(callout);
     expect(rt).toContain("Be careful");
   });
 
-  test("callout body roundtrip", () => {
+  it("callout body roundtrip", () => {
     const callout = "> [!warning] Be careful\n> This is important";
     const rt = roundtrip(callout);
     expect(rt).toContain("This is important");
   });
 
-  test("nested inline roundtrip", () => {
+  it("nested inline roundtrip", () => {
     expect(roundtrip("**bold *and italic***")).toBe("**bold *and italic***");
   });
 
-  test("code block html entities roundtrip", () => {
+  it("code block html entities roundtrip", () => {
     expect(roundtrip("```\n<div>test</div>\n```")).toBe("```\n<div>test</div>\n```");
   });
 
-  test("heading + paragraph roundtrip", () => {
+  it("heading + paragraph roundtrip", () => {
     expect(roundtrip("# Title\n\nBody text")).toBe("# Title\n\nBody text");
   });
 
-  test("complex doc heading", () => {
+  it("complex doc heading", () => {
     const doc =
       "# Title\n\nSome **bold** and *italic* text.\n\n- item 1\n- item 2\n\n```js\nconst x = 1;\n```\n\n> A quote";
     expect(roundtrip(doc)).toContain("# Title");
   });
 
-  test("complex doc bold", () => {
+  it("complex doc bold", () => {
     const doc =
       "# Title\n\nSome **bold** and *italic* text.\n\n- item 1\n- item 2\n\n```js\nconst x = 1;\n```\n\n> A quote";
     expect(roundtrip(doc)).toContain("**bold**");
   });
 
-  test("complex doc italic", () => {
+  it("complex doc italic", () => {
     const doc =
       "# Title\n\nSome **bold** and *italic* text.\n\n- item 1\n- item 2\n\n```js\nconst x = 1;\n```\n\n> A quote";
     expect(roundtrip(doc)).toContain("*italic*");
   });
 
-  test("complex doc list", () => {
+  it("complex doc list", () => {
     const doc =
       "# Title\n\nSome **bold** and *italic* text.\n\n- item 1\n- item 2\n\n```js\nconst x = 1;\n```\n\n> A quote";
     expect(roundtrip(doc)).toContain("- item 1");
   });
 
-  test("complex doc code", () => {
+  it("complex doc code", () => {
     const doc =
       "# Title\n\nSome **bold** and *italic* text.\n\n- item 1\n- item 2\n\n```js\nconst x = 1;\n```\n\n> A quote";
     expect(roundtrip(doc)).toContain("```js");
   });
 
-  test("complex doc quote", () => {
+  it("complex doc quote", () => {
     const doc =
       "# Title\n\nSome **bold** and *italic* text.\n\n- item 1\n- item 2\n\n```js\nconst x = 1;\n```\n\n> A quote";
     expect(roundtrip(doc)).toContain("> A quote");
@@ -232,7 +230,8 @@ describe("roundtrip", () => {
 
 // Deterministic LCG pseudo-random number generator — no external dependency.
 function lcg(seed: number): number {
-  return (1664525 * seed + 1013904223) >>> 0;
+  // eslint-disable-next-line unicorn/prefer-math-trunc -- >>> 0 wraps to uint32, Math.trunc() does not
+  return (1_664_525 * seed + 1_013_904_223) >>> 0;
 }
 function pick<T>(arr: readonly T[], seed: number): T {
   return arr[seed % arr.length]!;
@@ -262,15 +261,15 @@ describe("fuzz roundtrip", () => {
     cleanup = setupDOM();
     const mdMod = await import("../src/markdown.ts");
     const serMod = await import("../src/serialize.ts");
-    renderMarkdown = mdMod.renderMarkdown;
-    domToMarkdown = serMod.domToMarkdown;
+    ({ renderMarkdown } = mdMod);
+    ({ domToMarkdown } = serMod);
   });
 
   afterAll(() => {
     cleanup();
   });
 
-  test("paragraph-only sequences with single newlines", () => {
+  it("paragraph-only sequences with single newlines", () => {
     for (let i = 0; i < 60; i++) {
       let seed = lcg(i + 1);
       const count = 2 + (seed % 4);
@@ -284,7 +283,7 @@ describe("fuzz roundtrip", () => {
     }
   });
 
-  test("paragraph-only sequences with double newlines", () => {
+  it("paragraph-only sequences with double newlines", () => {
     for (let i = 0; i < 60; i++) {
       let seed = lcg(i + 100);
       const count = 2 + (seed % 3);
@@ -298,7 +297,7 @@ describe("fuzz roundtrip", () => {
     }
   });
 
-  test("paragraphs with inline formatting roundtrip", () => {
+  it("paragraphs with inline formatting roundtrip", () => {
     for (let i = 0; i < 40; i++) {
       let seed = lcg(i + 200);
       const count = 2 + (seed % 3);
@@ -312,7 +311,7 @@ describe("fuzz roundtrip", () => {
     }
   });
 
-  test("heading followed by paragraphs", () => {
+  it("heading followed by paragraphs", () => {
     const levels = [1, 2, 3, 4, 5, 6] as const;
     for (let i = 0; i < 30; i++) {
       let seed = lcg(i + 300);
@@ -329,7 +328,7 @@ describe("fuzz roundtrip", () => {
     }
   });
 
-  test("two headings with paragraph between", () => {
+  it("two headings with paragraph between", () => {
     for (let i = 0; i < 20; i++) {
       let seed = lcg(i + 400);
       const w1 = pick(WORDS, seed);
@@ -342,7 +341,7 @@ describe("fuzz roundtrip", () => {
     }
   });
 
-  test("list followed by heading", () => {
+  it("list followed by heading", () => {
     for (let i = 0; i < 20; i++) {
       let seed = lcg(i + 500);
       const item1 = pick(WORDS, seed);
@@ -355,7 +354,7 @@ describe("fuzz roundtrip", () => {
     }
   });
 
-  test("code block surrounded by paragraphs", () => {
+  it("code block surrounded by paragraphs", () => {
     for (let i = 0; i < 20; i++) {
       let seed = lcg(i + 600);
       const before = pick(WORDS, seed);
@@ -370,7 +369,7 @@ describe("fuzz roundtrip", () => {
     }
   });
 
-  test("mixed blank lines in paragraph sequences", () => {
+  it("mixed blank lines in paragraph sequences", () => {
     // Patterns: single \n, double \n\n, and triple \n\n\n all roundtrip
     for (let i = 0; i < 30; i++) {
       let seed = lcg(i + 700);

@@ -1,13 +1,11 @@
 /// Tests for renderer.ts helpers and an enforcement test that render functions
 /// are only called from renderer.ts (not scattered across other source files).
 
-import { readFileSync, readdirSync } from "fs";
-import { join } from "path";
-
-import { describe, test, expect } from "vitest";
+import { readFileSync, readdirSync } from "node:fs";
+import { join } from "node:path";
 
 describe("renderer invariants", () => {
-  test("renderMarkdown/renderMarkdownWithCursor/renderMarkdownWithSelection only imported in renderer.ts", () => {
+  it("renderMarkdown/renderMarkdownWithCursor/renderMarkdownWithSelection only imported in renderer.ts", () => {
     const webTsDir = join(import.meta.dirname, ".");
     const files = readdirSync(webTsDir).filter(
       (f) => f.endsWith(".ts") && !f.endsWith(".test.ts") && f !== "renderer.ts",
@@ -24,6 +22,6 @@ describe("renderer invariants", () => {
       }
     }
 
-    expect(violations).toEqual([]);
+    expect(violations).toStrictEqual([]);
   });
 });

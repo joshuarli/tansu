@@ -1,18 +1,15 @@
-import { describe, test, expect, beforeAll, afterAll } from "vitest";
-
-import { classifySaveResult, classifyReload } from "./editor.ts";
-import type { SaveAction } from "./editor.ts";
+import { classifySaveResult, classifyReload, type SaveAction } from "./editor.ts";
 import { setupDOM, mockFetch } from "./test-helper.ts";
 
 describe("classifySaveResult", () => {
-  test("no conflict → clean", () => {
+  it("no conflict → clean", () => {
     const action = classifySaveResult({ mtime: 100 }, "editor content", "tab content");
     expect(action.type).toBe("clean");
     expect((action as Extract<SaveAction, { type: "clean" }>).mtime).toBe(100);
     expect((action as Extract<SaveAction, { type: "clean" }>).content).toBe("editor content");
   });
 
-  test("conflict but disk matches editor → false-conflict", () => {
+  it("conflict but disk matches editor → false-conflict", () => {
     const action = classifySaveResult(
       { conflict: true, content: "same", mtime: 200 },
       "same",
@@ -21,7 +18,7 @@ describe("classifySaveResult", () => {
     expect(action.type).toBe("false-conflict");
   });
 
-  test("conflict but disk matches tab saved content → false-conflict", () => {
+  it("conflict but disk matches tab saved content → false-conflict", () => {
     const action = classifySaveResult(
       { conflict: true, content: "tab saved", mtime: 200 },
       "editor different",
@@ -30,7 +27,7 @@ describe("classifySaveResult", () => {
     expect(action.type).toBe("false-conflict");
   });
 
-  test("conflict with genuinely different disk content → real-conflict", () => {
+  it("conflict with genuinely different disk content → real-conflict", () => {
     const action = classifySaveResult(
       { conflict: true, content: "disk version", mtime: 300 },
       "editor version",
@@ -42,24 +39,24 @@ describe("classifySaveResult", () => {
     expect(rc.diskMtime).toBe(300);
   });
 
-  test("conflict with missing disk content → real-conflict with empty string", () => {
+  it("conflict with missing disk content → real-conflict with empty string", () => {
     const action = classifySaveResult({ conflict: true, mtime: 400 }, "editor", "tab");
     expect(action.type).toBe("real-conflict");
     expect((action as Extract<SaveAction, { type: "real-conflict" }>).diskContent).toBe("");
   });
 
-  test("conflict with empty disk content matching empty editor → false-conflict", () => {
+  it("conflict with empty disk content matching empty editor → false-conflict", () => {
     const action = classifySaveResult({ conflict: true, content: "", mtime: 500 }, "", "tab");
     expect(action.type).toBe("false-conflict");
   });
 });
 
 describe("classifyReload", () => {
-  test("not dirty → load", () => {
+  it("not dirty → load", () => {
     expect(classifyReload(false).type).toBe("load");
   });
 
-  test("dirty → conflict", () => {
+  it("dirty → conflict", () => {
     expect(classifyReload(true).type).toBe("conflict");
   });
 });
@@ -87,12 +84,12 @@ describe("editor", () => {
     mock.on("GET", "/api/revisions", []);
 
     const mod = await import("./editor.ts");
-    initEditor = mod.initEditor;
-    showEditor = mod.showEditor;
-    hideEditor = mod.hideEditor;
-    getCurrentContent = mod.getCurrentContent;
-    saveCurrentNote = mod.saveCurrentNote;
-    reloadFromDisk = mod.reloadFromDisk;
+    ({ initEditor } = mod);
+    ({ showEditor } = mod);
+    ({ hideEditor } = mod);
+    ({ getCurrentContent } = mod);
+    ({ saveCurrentNote } = mod);
+    ({ reloadFromDisk } = mod);
 
     initEditor();
   });
@@ -102,12 +99,12 @@ describe("editor", () => {
     cleanup();
   });
 
-  test("showEditor renders content as HTML", async () => {
+  it("showEditor renders content as HTML", async () => {
     showEditor("test.md", "# Hello\n\nWorld");
     await new Promise((r) => setTimeout(r, 50));
 
     const contentEl = document.querySelector(".editor-content") as HTMLElement;
-    expect(contentEl !== null).toBe(true);
+    expect(contentEl !== null).toBeTruthy();
     expect(contentEl.innerHTML).toContain("<h1>Hello</h1>");
     expect(contentEl.innerHTML).toContain("<p>World</p>");
     expect(contentEl.contentEditable).toBe("true");
@@ -115,31 +112,31 @@ describe("editor", () => {
     hideEditor();
   });
 
-  test("showEditor creates hidden source textarea", async () => {
+  it("showEditor creates hidden source textarea", async () => {
     showEditor("test.md", "# Hi");
     await new Promise((r) => setTimeout(r, 50));
 
     const sourceEl = document.querySelector(".editor-source") as HTMLTextAreaElement;
-    expect(sourceEl !== null).toBe(true);
+    expect(sourceEl !== null).toBeTruthy();
     expect(sourceEl.style.display).toBe("none");
 
     hideEditor();
   });
 
-  test("showEditor creates toolbar with source and menu buttons", async () => {
+  it("showEditor creates toolbar with source and menu buttons", async () => {
     showEditor("test.md", "# Hi");
     await new Promise((r) => setTimeout(r, 50));
 
     const toolbar = document.querySelector(".editor-toolbar");
-    expect(toolbar !== null).toBe(true);
-    expect(toolbar!.querySelector(".editor-toolbar-btn--source") !== null).toBe(true);
-    const menuBtn = Array.from(toolbar!.querySelectorAll("button")).find((b) => b.title === "More");
-    expect(menuBtn !== undefined).toBe(true);
+    expect(toolbar !== null).toBeTruthy();
+    expect(toolbar!.querySelector(".editor-toolbar-btn--source") !== null).toBeTruthy();
+    const menuBtn = [...toolbar!.querySelectorAll("button")].find((b) => b.title === "More");
+    expect(menuBtn !== undefined).toBeTruthy();
 
     hideEditor();
   });
 
-  test("getCurrentContent returns serialized markdown in WYSIWYG mode", async () => {
+  it("getCurrentContent returns serialized markdown in WYSIWYG mode", async () => {
     showEditor("test.md", "# Content");
     await new Promise((r) => setTimeout(r, 50));
     const content = getCurrentContent();
@@ -147,7 +144,7 @@ describe("editor", () => {
     hideEditor();
   });
 
-  test("showEditor restores saved cursor inside a paragraph after a list", async () => {
+  it("showEditor restores saved cursor inside a paragraph after a list", async () => {
     const { setCursor } = await import("./tab-state.ts");
     const content = "foo:\n- one\nx\ndsf";
     setCursor("cursor-paragraph.md", content.indexOf("x") + 1);
@@ -163,7 +160,7 @@ describe("editor", () => {
     hideEditor();
   });
 
-  test("showEditor restores saved cursor inside a list item", async () => {
+  it("showEditor restores saved cursor inside a list item", async () => {
     const { setCursor } = await import("./tab-state.ts");
     const content = "foo:\n- one\n- x\ndsf";
     setCursor("cursor-list.md", content.indexOf("x") + 1);
@@ -179,21 +176,21 @@ describe("editor", () => {
     hideEditor();
   });
 
-  test("hideEditor removes editor elements and shows empty state", () => {
+  it("hideEditor removes editor elements and shows empty state", () => {
     showEditor("test.md", "# X");
     hideEditor();
-    expect(document.querySelector(".editor-content")).toBe(null);
-    expect(document.querySelector(".editor-source")).toBe(null);
-    const emptyState = document.getElementById("empty-state");
-    expect(emptyState!.style.display).toBe("flex");
+    expect(document.querySelector(".editor-content")).toBeNull();
+    expect(document.querySelector(".editor-source")).toBeNull();
+    const emptyState = document.querySelector("#empty-state") as HTMLElement;
+    expect(emptyState.style.display).toBe("flex");
   });
 
-  test("getCurrentContent returns empty string when no editor open", () => {
+  it("getCurrentContent returns empty string when no editor open", () => {
     hideEditor();
     expect(getCurrentContent()).toBe("");
   });
 
-  test("source mode: clicking Source shows textarea and hides contentEl", async () => {
+  it("source mode: clicking Source shows textarea and hides contentEl", async () => {
     showEditor("toggle.md", "# Toggle");
     await new Promise((r) => setTimeout(r, 50));
 
@@ -203,12 +200,12 @@ describe("editor", () => {
 
     sourceBtn.click();
     expect(contentEl.style.display).toBe("none");
-    expect(sourceEl.style.display !== "none").toBe(true);
+    expect(sourceEl.style.display !== "none").toBeTruthy();
 
     hideEditor();
   });
 
-  test("source mode: getCurrentContent returns textarea value", async () => {
+  it("source mode: getCurrentContent returns textarea value", async () => {
     showEditor("toggle.md", "# Toggle");
     await new Promise((r) => setTimeout(r, 50));
 
@@ -222,7 +219,7 @@ describe("editor", () => {
     hideEditor();
   });
 
-  test("source mode: clicking Source again returns to WYSIWYG", async () => {
+  it("source mode: clicking Source again returns to WYSIWYG", async () => {
     showEditor("toggle.md", "# Toggle");
     await new Promise((r) => setTimeout(r, 50));
 
@@ -232,13 +229,13 @@ describe("editor", () => {
 
     sourceBtn.click();
     sourceBtn.click();
-    expect(contentEl.style.display !== "none").toBe(true);
+    expect(contentEl.style.display !== "none").toBeTruthy();
     expect(sourceEl.style.display).toBe("none");
 
     hideEditor();
   });
 
-  test("source mode: Tab inserts a tab character at the caret", async () => {
+  it("source mode: Tab inserts a tab character at the caret", async () => {
     showEditor("tab-source.md", "# Tab");
     await new Promise((r) => setTimeout(r, 50));
 
@@ -258,7 +255,7 @@ describe("editor", () => {
     hideEditor();
   });
 
-  test("source mode: Tab indents all selected lines and Shift+Tab dedents them", async () => {
+  it("source mode: Tab indents all selected lines and Shift+Tab dedents them", async () => {
     showEditor("tab-source-lines.md", "# Tab");
     await new Promise((r) => setTimeout(r, 50));
 
@@ -286,7 +283,7 @@ describe("editor", () => {
     hideEditor();
   });
 
-  test("WYSIWYG: Tab inserts a visible tab and preserves markdown", async () => {
+  it("WYSIWYG: Tab inserts a visible tab and preserves markdown", async () => {
     showEditor("tab-wysiwyg.md", "hello");
     await new Promise((r) => setTimeout(r, 50));
 
@@ -302,12 +299,12 @@ describe("editor", () => {
     contentEl.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true }));
 
     expect(getCurrentContent()).toBe("he\tllo");
-    expect(contentEl.querySelector(`.${"md-tab"}`)).not.toBe(null);
+    expect(contentEl.querySelector(`.${"md-tab"}`)).not.toBeNull();
 
     hideEditor();
   });
 
-  test("WYSIWYG: Cmd/Ctrl+H wraps selection in mark and preserves markdown", async () => {
+  it("WYSIWYG: Cmd/Ctrl+H wraps selection in mark and preserves markdown", async () => {
     showEditor("highlight-shortcut.md", "hello world");
     await new Promise((r) => setTimeout(r, 50));
 
@@ -330,14 +327,14 @@ describe("editor", () => {
     hideEditor();
   });
 
-  test("WYSIWYG: Cmd/Ctrl+H across multiple paragraphs wraps entire selection", async () => {
+  it("WYSIWYG: Cmd/Ctrl+H across multiple paragraphs wraps entire selection", async () => {
     // Source-text highlight inserts == at start and end offsets regardless of block boundaries.
     // For "foo\n\nbar" selecting all: produces "==foo\n\nbar==" (markers at offsets 0 and 8).
     showEditor("highlight-multiblock.md", "foo\n\nbar");
     await new Promise((r) => setTimeout(r, 50));
 
     const contentEl = document.querySelector(".editor-content") as HTMLElement;
-    const paragraphs = Array.from(contentEl.querySelectorAll("p")).filter(
+    const paragraphs = [...contentEl.querySelectorAll("p")].filter(
       (p) => (p.textContent ?? "").trim() !== "",
     );
     const startNode = paragraphs[0]!.firstChild as Text;
@@ -358,12 +355,12 @@ describe("editor", () => {
     hideEditor();
   });
 
-  test("WYSIWYG: Tab and Shift+Tab indent and dedent selected blocks", async () => {
+  it("WYSIWYG: Tab and Shift+Tab indent and dedent selected blocks", async () => {
     showEditor("tab-wysiwyg-blocks.md", "alpha\n\nbeta");
     await new Promise((r) => setTimeout(r, 50));
 
     const contentEl = document.querySelector(".editor-content") as HTMLElement;
-    const paragraphs = Array.from(contentEl.querySelectorAll("p")).filter(
+    const paragraphs = [...contentEl.querySelectorAll("p")].filter(
       (p) => (p.textContent ?? "").trim() !== "",
     );
     const startNode = paragraphs[0]!.firstChild as Text;
@@ -384,12 +381,12 @@ describe("editor", () => {
     expect(getCurrentContent()).toBe("alpha\n\nbeta");
     const preserved = window.getSelection()!;
     expect(preserved.rangeCount).toBe(1);
-    expect(preserved.isCollapsed).toBe(false);
+    expect(preserved.isCollapsed).toBeFalsy();
 
     hideEditor();
   });
 
-  test("WYSIWYG: Tab on bullet list nests under previous item", async () => {
+  it("WYSIWYG: Tab on bullet list nests under previous item", async () => {
     showEditor("list-indent.md", "- one\n- two");
     await new Promise((r) => setTimeout(r, 50));
 
@@ -414,7 +411,7 @@ describe("editor", () => {
     hideEditor();
   });
 
-  test("WYSIWYG: Shift+Tab on multi-item nested bullet selection preserves selection", async () => {
+  it("WYSIWYG: Shift+Tab on multi-item nested bullet selection preserves selection", async () => {
     showEditor("list-dedent-selection.md", "- one\n  - two\n  - three");
     await new Promise((r) => setTimeout(r, 50));
 
@@ -436,12 +433,12 @@ describe("editor", () => {
     expect(getCurrentContent()).toBe("- one\n- two\n- three");
     const preserved = window.getSelection()!;
     expect(preserved.rangeCount).toBe(1);
-    expect(preserved.isCollapsed).toBe(false);
+    expect(preserved.isCollapsed).toBeFalsy();
 
     hideEditor();
   });
 
-  test("WYSIWYG: Backspace on empty nested bullet outdents instead of flattening the list", async () => {
+  it("WYSIWYG: Backspace on empty nested bullet outdents instead of flattening the list", async () => {
     showEditor("nested-empty-backspace.md", "- one\n  - ");
     await new Promise((r) => setTimeout(r, 50));
 
@@ -460,12 +457,12 @@ describe("editor", () => {
     expect(getCurrentContent()).toBe("- one\n- ");
     const topList = contentEl.firstElementChild as HTMLElement;
     expect(topList.tagName).toBe("UL");
-    expect(topList.children.length).toBe(2);
+    expect(topList.children).toHaveLength(2);
 
     hideEditor();
   });
 
-  test("WYSIWYG: Backspace on empty top-level bullet removes only that bullet", async () => {
+  it("WYSIWYG: Backspace on empty top-level bullet removes only that bullet", async () => {
     showEditor("top-level-empty-backspace.md", "- a\n- ");
     await new Promise((r) => setTimeout(r, 50));
 
@@ -487,7 +484,7 @@ describe("editor", () => {
     hideEditor();
   });
 
-  test("saveCurrentNote success: tab marked clean with new mtime", async () => {
+  it("saveCurrentNote success: tab marked clean with new mtime", async () => {
     const { openTab, getTabs, getActiveTab, closeTab } = await import("./tab-state.ts");
     mock.on("GET", "/api/note", { content: "# Save Test", mtime: 1000 });
     await openTab("save-test.md");
@@ -504,17 +501,19 @@ describe("editor", () => {
     await saveCurrentNote();
 
     const tab = getActiveTab();
-    expect(tab!.dirty).toBe(false);
+    expect(tab!.dirty).toBeFalsy();
     expect(tab!.mtime).toBe(3000);
     expect(tab!.content).toBe("# Updated Content");
 
     hideEditor();
-    while (getTabs().length > 0) closeTab(0);
+    while (getTabs().length > 0) {
+      closeTab(0);
+    }
     mock.on("GET", "/api/note", { content: "# Test", mtime: 1000 });
     mock.on("PUT", "/api/note", { mtime: 2000 });
   });
 
-  test("saveCurrentNote real-conflict: conflict banner appears", async () => {
+  it("saveCurrentNote real-conflict: conflict banner appears", async () => {
     const { openTab, getTabs, closeTab } = await import("./tab-state.ts");
     mock.on("GET", "/api/note", { content: "# Conflict Test", mtime: 1000 });
     await openTab("conflict-test.md");
@@ -532,16 +531,18 @@ describe("editor", () => {
     await saveCurrentNote();
 
     const banner = document.querySelector(".conflict-banner");
-    expect(banner !== null).toBe(true);
+    expect(banner !== null).toBeTruthy();
     expect(banner!.textContent).toContain("conflict");
 
     hideEditor();
-    while (getTabs().length > 0) closeTab(0);
+    while (getTabs().length > 0) {
+      closeTab(0);
+    }
     mock.on("GET", "/api/note", { content: "# Test", mtime: 1000 });
     mock.on("PUT", "/api/note", { mtime: 2000 });
   });
 
-  test("reloadFromDisk on clean tab updates content and mtime", async () => {
+  it("reloadFromDisk on clean tab updates content and mtime", async () => {
     const { openTab, getTabs, getActiveTab, closeTab } = await import("./tab-state.ts");
     mock.on("GET", "/api/note", { content: "# Reload Test", mtime: 1000 });
     await openTab("reload-test.md");
@@ -553,15 +554,17 @@ describe("editor", () => {
     const tab = getActiveTab();
     expect(tab!.content).toBe("# New Disk Content");
     expect(tab!.mtime).toBe(5000);
-    expect(tab!.dirty).toBe(false);
-    expect(document.querySelector(".conflict-banner")).toBe(null);
+    expect(tab!.dirty).toBeFalsy();
+    expect(document.querySelector(".conflict-banner")).toBeNull();
 
     hideEditor();
-    while (getTabs().length > 0) closeTab(0);
+    while (getTabs().length > 0) {
+      closeTab(0);
+    }
     mock.on("GET", "/api/note", { content: "# Test", mtime: 1000 });
   });
 
-  test("reloadFromDisk on unchanged clean tab preserves selection", async () => {
+  it("reloadFromDisk on unchanged clean tab preserves selection", async () => {
     const { openTab, getTabs, getActiveTab, closeTab } = await import("./tab-state.ts");
     const content = "foo:\n- one\nx\ndsf";
     mock.on("GET", "/api/note", { content, mtime: 1000 });
@@ -589,11 +592,13 @@ describe("editor", () => {
     expect(contentEl.querySelectorAll("li")).toHaveLength(1);
 
     hideEditor();
-    while (getTabs().length > 0) closeTab(0);
+    while (getTabs().length > 0) {
+      closeTab(0);
+    }
     mock.on("GET", "/api/note", { content: "# Test", mtime: 1000 });
   });
 
-  test("reloadFromDisk on dirty tab: conflict banner appears when merge fails", async () => {
+  it("reloadFromDisk on dirty tab: conflict banner appears when merge fails", async () => {
     const { openTab, getTabs, markDirty, closeTab } = await import("./tab-state.ts");
     mock.on("GET", "/api/note", { content: "# Base", mtime: 1000 });
     await openTab("dirty-reload.md");
@@ -612,14 +617,16 @@ describe("editor", () => {
     reloadFromDisk("# Totally different theirs", 6000);
 
     const banner = document.querySelector(".conflict-banner");
-    expect(banner !== null).toBe(true);
+    expect(banner !== null).toBeTruthy();
 
     hideEditor();
-    while (getTabs().length > 0) closeTab(0);
+    while (getTabs().length > 0) {
+      closeTab(0);
+    }
     mock.on("GET", "/api/note", { content: "# Test", mtime: 1000 });
   });
 
-  test("showEditor cancels pending autosave timer and silent-saves before loading new file", async () => {
+  it("showEditor cancels pending autosave timer and silent-saves before loading new file", async () => {
     const { openTab, getTabs, closeTab } = await import("./tab-state.ts");
     mock.on("GET", "/api/note", { content: "# Timer Test", mtime: 1000 });
     await openTab("timer-a.md");
@@ -637,26 +644,28 @@ describe("editor", () => {
     await new Promise((r) => setTimeout(r, 100));
 
     hideEditor();
-    while (getTabs().length > 0) closeTab(0);
+    while (getTabs().length > 0) {
+      closeTab(0);
+    }
     mock.on("GET", "/api/note", { content: "# Test", mtime: 1000 });
     mock.on("PUT", "/api/note", { mtime: 2000 });
   });
 
-  test("More menu button click shows context menu with Revisions item", async () => {
+  it("More menu button click shows context menu with Revisions item", async () => {
     showEditor("menu-test.md", "# Menu Test");
     await new Promise((r) => setTimeout(r, 50));
 
     const menuBtn = document.querySelector(
       '.editor-toolbar-btn[title="More"]',
     ) as HTMLButtonElement;
-    expect(menuBtn !== null).toBe(true);
+    expect(menuBtn !== null).toBeTruthy();
     menuBtn.click();
     await new Promise((r) => setTimeout(r, 0));
 
     const menu = document.body.querySelector(".context-menu");
-    expect(menu !== null).toBe(true);
+    expect(menu !== null).toBeTruthy();
     const items = menu!.querySelectorAll(".context-menu-item");
-    const labels = Array.from(items).map((i) => i.textContent);
+    const labels = [...items].map((i) => i.textContent);
     expect(labels).toContain("Revisions");
 
     // Dismiss
@@ -664,7 +673,7 @@ describe("editor", () => {
     hideEditor();
   });
 
-  test("contentEl input event marks tab dirty and schedules autosave", async () => {
+  it("contentEl input event marks tab dirty and schedules autosave", async () => {
     const { openTab, getTabs, getActiveTab, closeTab } = await import("./tab-state.ts");
     mock.on("GET", "/api/note", { content: "# Input Test", mtime: 1000 });
     await openTab("input-test.md");
@@ -674,14 +683,16 @@ describe("editor", () => {
     const contentEl = document.querySelector(".editor-content") as HTMLElement;
     contentEl.dispatchEvent(new Event("input", { bubbles: true }));
 
-    expect(getActiveTab()!.dirty).toBe(true);
+    expect(getActiveTab()!.dirty).toBeTruthy();
 
     hideEditor();
-    while (getTabs().length > 0) closeTab(0);
+    while (getTabs().length > 0) {
+      closeTab(0);
+    }
     mock.on("GET", "/api/note", { content: "# Test", mtime: 1000 });
   });
 
-  test("contentEl input historyUndo marks dirty and collapses selection", async () => {
+  it("contentEl input historyUndo marks dirty and collapses selection", async () => {
     const { openTab, getTabs, closeTab } = await import("./tab-state.ts");
     mock.on("GET", "/api/note", { content: "# Undo Test", mtime: 1000 });
     await openTab("undo-test.md");
@@ -693,11 +704,13 @@ describe("editor", () => {
     contentEl.dispatchEvent(inputEvent);
 
     hideEditor();
-    while (getTabs().length > 0) closeTab(0);
+    while (getTabs().length > 0) {
+      closeTab(0);
+    }
     mock.on("GET", "/api/note", { content: "# Test", mtime: 1000 });
   });
 
-  test("sourceEl input event marks tab dirty", async () => {
+  it("sourceEl input event marks tab dirty", async () => {
     const { openTab, getTabs, getActiveTab, closeTab } = await import("./tab-state.ts");
     mock.on("GET", "/api/note", { content: "# Source Input", mtime: 1000 });
     await openTab("source-input.md");
@@ -710,14 +723,16 @@ describe("editor", () => {
     const sourceEl = document.querySelector(".editor-source") as HTMLTextAreaElement;
     sourceEl.dispatchEvent(new Event("input", { bubbles: true }));
 
-    expect(getActiveTab()!.dirty).toBe(true);
+    expect(getActiveTab()!.dirty).toBeTruthy();
 
     hideEditor();
-    while (getTabs().length > 0) closeTab(0);
+    while (getTabs().length > 0) {
+      closeTab(0);
+    }
     mock.on("GET", "/api/note", { content: "# Test", mtime: 1000 });
   });
 
-  test("Cmd+S in WYSIWYG mode triggers save", async () => {
+  it("Cmd+S in WYSIWYG mode triggers save", async () => {
     const { openTab, getTabs, closeTab } = await import("./tab-state.ts");
     mock.on("GET", "/api/note", { content: "# Cmd+S Test", mtime: 1000 });
     mock.on("PUT", "/api/note", { mtime: 5000 });
@@ -732,12 +747,14 @@ describe("editor", () => {
     await new Promise((r) => setTimeout(r, 100));
 
     hideEditor();
-    while (getTabs().length > 0) closeTab(0);
+    while (getTabs().length > 0) {
+      closeTab(0);
+    }
     mock.on("GET", "/api/note", { content: "# Test", mtime: 1000 });
     mock.on("PUT", "/api/note", { mtime: 2000 });
   });
 
-  test("Cmd+B in WYSIWYG mode triggers bold", async () => {
+  it("Cmd+B in WYSIWYG mode triggers bold", async () => {
     showEditor("cmdb-test.md", "hello");
     await new Promise((r) => setTimeout(r, 50));
 
@@ -749,7 +766,7 @@ describe("editor", () => {
     hideEditor();
   });
 
-  test("Cmd+I in WYSIWYG mode triggers italic", async () => {
+  it("Cmd+I in WYSIWYG mode triggers italic", async () => {
     showEditor("cmdi-test.md", "hello");
     await new Promise((r) => setTimeout(r, 50));
 
@@ -761,7 +778,7 @@ describe("editor", () => {
     hideEditor();
   });
 
-  test("sourceEl Cmd+S triggers save", async () => {
+  it("sourceEl Cmd+S triggers save", async () => {
     const { openTab, getTabs, closeTab } = await import("./tab-state.ts");
     mock.on("GET", "/api/note", { content: "# Source Save", mtime: 1000 });
     mock.on("PUT", "/api/note", { mtime: 6000 });
@@ -779,12 +796,14 @@ describe("editor", () => {
     await new Promise((r) => setTimeout(r, 100));
 
     hideEditor();
-    while (getTabs().length > 0) closeTab(0);
+    while (getTabs().length > 0) {
+      closeTab(0);
+    }
     mock.on("GET", "/api/note", { content: "# Test", mtime: 1000 });
     mock.on("PUT", "/api/note", { mtime: 2000 });
   });
 
-  test("saveCurrentNote false-conflict retry path: marks tab clean", async () => {
+  it("saveCurrentNote false-conflict retry path: marks tab clean", async () => {
     const { openTab, getTabs, getActiveTab, closeTab } = await import("./tab-state.ts");
     mock.on("GET", "/api/note", { content: "# FC", mtime: 1000 });
     await openTab("false-conflict.md");
@@ -803,16 +822,18 @@ describe("editor", () => {
 
     // false-conflict retries with mtime=0; second PUT also returns 409 but mtime is used
     const tab = getActiveTab();
-    expect(tab!.dirty).toBe(false);
+    expect(tab!.dirty).toBeFalsy();
     expect(tab!.mtime).toBe(2000);
 
     hideEditor();
-    while (getTabs().length > 0) closeTab(0);
+    while (getTabs().length > 0) {
+      closeTab(0);
+    }
     mock.on("GET", "/api/note", { content: "# Test", mtime: 1000 });
     mock.on("PUT", "/api/note", { mtime: 2000 });
   });
 
-  test("saveCurrentNote with pending autosave timer clears timer then saves", async () => {
+  it("saveCurrentNote with pending autosave timer clears timer then saves", async () => {
     const { openTab, getTabs, closeTab } = await import("./tab-state.ts");
     mock.on("GET", "/api/note", { content: "# Timer Save", mtime: 1000 });
     mock.on("PUT", "/api/note", { mtime: 7000 });
@@ -828,12 +849,14 @@ describe("editor", () => {
     await saveCurrentNote();
 
     hideEditor();
-    while (getTabs().length > 0) closeTab(0);
+    while (getTabs().length > 0) {
+      closeTab(0);
+    }
     mock.on("GET", "/api/note", { content: "# Test", mtime: 1000 });
     mock.on("PUT", "/api/note", { mtime: 2000 });
   });
 
-  test("loadContent in source mode updates textarea preserving cursor", async () => {
+  it("loadContent in source mode updates textarea preserving cursor", async () => {
     const { openTab, getTabs, closeTab } = await import("./tab-state.ts");
     mock.on("GET", "/api/note", { content: "# Load Source", mtime: 1000 });
     await openTab("load-source.md");
@@ -853,11 +876,13 @@ describe("editor", () => {
     expect(sourceEl.value).toBe("# Updated Source");
 
     hideEditor();
-    while (getTabs().length > 0) closeTab(0);
+    while (getTabs().length > 0) {
+      closeTab(0);
+    }
     mock.on("GET", "/api/note", { content: "# Test", mtime: 1000 });
   });
 
-  test("Enter keydown in WYSIWYG mode handled by block transform", async () => {
+  it("Enter keydown in WYSIWYG mode handled by block transform", async () => {
     showEditor("enter-test.md", "- item");
     await new Promise((r) => setTimeout(r, 50));
 
@@ -880,7 +905,7 @@ describe("editor", () => {
     hideEditor();
   });
 
-  test("paste plain text in WYSIWYG inserts text via execCommand", async () => {
+  it("paste plain text in WYSIWYG inserts text via execCommand", async () => {
     showEditor("paste-test.md", "# Paste");
     await new Promise((r) => setTimeout(r, 50));
 
@@ -900,7 +925,7 @@ describe("editor", () => {
     hideEditor();
   });
 
-  test("revision:restore event updates editor content and marks tab clean", async () => {
+  it("revision:restore event updates editor content and marks tab clean", async () => {
     const { openTab, getTabs, getActiveTab, markDirty, closeTab } = await import("./tab-state.ts");
     const { emit } = await import("./events.ts");
 
@@ -910,7 +935,7 @@ describe("editor", () => {
     await new Promise((r) => setTimeout(r, 50));
 
     markDirty("rev-test.md");
-    expect(getActiveTab()!.dirty).toBe(true);
+    expect(getActiveTab()!.dirty).toBeTruthy();
 
     emit("revision:restore", { content: "# Restored Version", mtime: 8000 });
     await new Promise((r) => setTimeout(r, 50));
@@ -918,10 +943,12 @@ describe("editor", () => {
     const tab = getActiveTab();
     expect(tab!.content).toBe("# Restored Version");
     expect(tab!.mtime).toBe(8000);
-    expect(tab!.dirty).toBe(false);
+    expect(tab!.dirty).toBeFalsy();
 
     hideEditor();
-    while (getTabs().length > 0) closeTab(0);
+    while (getTabs().length > 0) {
+      closeTab(0);
+    }
     mock.on("GET", "/api/note", { content: "# Test", mtime: 1000 });
   });
 });

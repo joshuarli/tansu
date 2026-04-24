@@ -6,9 +6,13 @@ export function initImageResize(editorContent: HTMLElement, onResize: () => void
   editorContent.addEventListener(
     "wheel",
     (e) => {
-      if (!e.ctrlKey) return;
+      if (!e.ctrlKey) {
+        return;
+      }
       const target = e.target as HTMLElement;
-      if (target.tagName !== "IMG" || !target.getAttribute("data-wiki-image")) return;
+      if (target.tagName !== "IMG" || !target.dataset["wikiImage"]) {
+        return;
+      }
       e.preventDefault();
 
       const img = target as HTMLImageElement;

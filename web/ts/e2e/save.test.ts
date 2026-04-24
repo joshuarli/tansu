@@ -1,5 +1,4 @@
-import type { Page } from "playwright";
-import { describe, test, expect, beforeAll, afterAll } from "vitest";
+import type { Page, Response as PlaywrightResponse } from "playwright";
 
 import { setup, teardown } from "./setup.ts";
 
@@ -9,8 +8,8 @@ describe("e2e: save deduplication", () => {
 
   beforeAll(async () => {
     const ctx = await setup();
-    page = ctx.page;
-    baseUrl = ctx.baseUrl;
+    ({ page } = ctx);
+    ({ baseUrl } = ctx);
 
     // Open test.md
     await page.goto(baseUrl);
@@ -32,7 +31,7 @@ describe("e2e: save deduplication", () => {
     fn: () => Promise<void>,
   ): Promise<{ count: number; statuses: number[] }> {
     const statuses: number[] = [];
-    const handler = (response: import("playwright").Response) => {
+    const handler = (response: PlaywrightResponse) => {
       if (response.request().method() === "PUT" && response.url().includes("/api/note")) {
         statuses.push(response.status());
       }
@@ -45,16 +44,16 @@ describe("e2e: save deduplication", () => {
     return { count: statuses.length, statuses };
   }
 
-  test("Cmd+S on unmodified note sends exactly 1 PUT", async () => {
+  it("Cmd+S on unmodified note sends exactly 1 PUT", async () => {
     await page.click(".editor-content");
     const { count, statuses } = await countPuts(async () => {
       await page.keyboard.press("Meta+s");
     });
     expect(count).toBe(1);
-    expect(statuses).toEqual([200]);
+    expect(statuses).toStrictEqual([200]);
   }, 15_000);
 
-  test("Cmd+S on modified note sends exactly 1 PUT with no 409", async () => {
+  it("Cmd+S on modified note sends exactly 1 PUT with no 409", async () => {
     await page.click(".editor-content");
     await page.keyboard.type(" edited");
     await page.waitForSelector(".tab.active .dirty", { timeout: 2000 });
@@ -63,6 +62,6 @@ describe("e2e: save deduplication", () => {
       await page.keyboard.press("Meta+s");
     });
     expect(count).toBe(1);
-    expect(statuses).toEqual([200]);
+    expect(statuses).toStrictEqual([200]);
   }, 15_000);
 });

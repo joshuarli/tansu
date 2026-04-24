@@ -11,11 +11,16 @@ export async function openStore(): Promise<void> {
     const req = indexedDB.open(DB_NAME, DB_VERSION);
     req.onupgradeneeded = () => {
       const d = req.result;
-      if (!d.objectStoreNames.contains("kv")) d.createObjectStore("kv");
-      if (!d.objectStoreNames.contains("notes")) d.createObjectStore("notes");
+      if (!d.objectStoreNames.contains("kv")) {
+        d.createObjectStore("kv");
+      }
+      if (!d.objectStoreNames.contains("notes")) {
+        d.createObjectStore("notes");
+      }
       // Reserved for future offline write queue (note saves, deletes).
-      if (!d.objectStoreNames.contains("queue"))
+      if (!d.objectStoreNames.contains("queue")) {
         d.createObjectStore("queue", { autoIncrement: true });
+      }
     };
     req.onsuccess = () => {
       db = req.result;
@@ -39,7 +44,9 @@ function tx(store: string, mode: IDBTransactionMode): IDBObjectStore {
 }
 
 function idbGet<T>(store: string, key: string): Promise<T | undefined> {
-  if (!db) return Promise.resolve(undefined);
+  if (!db) {
+    return Promise.resolve() as Promise<T | undefined>;
+  }
   return new Promise((resolve, reject) => {
     const req = tx(store, "readonly").get(key);
     req.onsuccess = () => resolve(req.result as T | undefined);
@@ -50,7 +57,9 @@ function idbGet<T>(store: string, key: string): Promise<T | undefined> {
 }
 
 function idbPut(store: string, key: string, value: unknown): Promise<void> {
-  if (!db) return Promise.resolve();
+  if (!db) {
+    return Promise.resolve();
+  }
   return new Promise((resolve, reject) => {
     const req = tx(store, "readwrite").put(value, key);
     req.onsuccess = () => resolve();
@@ -82,7 +91,9 @@ export function notePut(path: string, content: string, mtime: number): Promise<v
 }
 
 export function noteDel(path: string): Promise<void> {
-  if (!db) return Promise.resolve();
+  if (!db) {
+    return Promise.resolve();
+  }
   return new Promise((resolve, reject) => {
     const req = tx("notes", "readwrite").delete(path);
     req.onsuccess = () => resolve();

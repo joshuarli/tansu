@@ -9,7 +9,7 @@ let currentPath: string | null = null;
 let getContent: (() => string) | null = null;
 let onHide: (() => void) | null = null;
 
-interface RevisionsOpts {
+export interface RevisionsOpts {
   path: string;
   host: HTMLElement;
   getCurrentContent: () => string;
@@ -22,7 +22,7 @@ export function toggleRevisions(opts: RevisionsOpts) {
     return;
   }
   getContent = opts.getCurrentContent;
-  onHide = opts.onHide;
+  ({ onHide } = opts);
   showRevisions(opts.path, opts.host);
 }
 
@@ -31,7 +31,9 @@ export function hideRevisions() {
     hostEl.innerHTML = "";
     hostEl = null;
     currentPath = null;
-    if (onHide) onHide();
+    if (onHide) {
+      onHide();
+    }
   }
 }
 
@@ -49,17 +51,17 @@ async function showRevisions(path: string, host: HTMLElement) {
   header.className = "revisions-header";
   header.innerHTML = `<span>Revisions</span>`;
   const closeBtn = document.createElement("span");
-  closeBtn.textContent = "\u00d7";
+  closeBtn.textContent = "\u00D7";
   closeBtn.style.cursor = "pointer";
   closeBtn.onclick = hideRevisions;
-  header.appendChild(closeBtn);
-  host.appendChild(header);
+  header.append(closeBtn);
+  host.append(header);
 
   const loading = document.createElement("div");
   loading.textContent = "Loading...";
   loading.style.fontSize = "13px";
   loading.style.color = "#57606a";
-  host.appendChild(loading);
+  host.append(loading);
 
   try {
     const timestamps = await listRevisions(path);
@@ -70,7 +72,7 @@ async function showRevisions(path: string, host: HTMLElement) {
       empty.textContent = "No revisions yet.";
       empty.style.fontSize = "13px";
       empty.style.color = "#57606a";
-      host.appendChild(empty);
+      host.append(empty);
       return;
     }
 
@@ -86,8 +88,9 @@ async function showRevisions(path: string, host: HTMLElement) {
       restore.textContent = "Restore";
       restore.onclick = async (e) => {
         e.stopPropagation();
-        if (!confirm("Restore this revision? Current content will be saved as a new revision."))
+        if (!confirm("Restore this revision? Current content will be saved as a new revision.")) {
           return;
+        }
         const result = await restoreRevision(path, ts);
         const content = await getRevision(path, ts);
         emit("revision:restore", { content, mtime: result.mtime });
@@ -95,19 +98,22 @@ async function showRevisions(path: string, host: HTMLElement) {
       };
 
       item.append(time, restore);
+      // eslint-disable-next-line no-loop-func
       item.onclick = async () => {
         const revContent = await getRevision(path, ts);
         const preview = host.querySelector(".revision-preview");
-        if (preview) preview.remove();
+        if (preview) {
+          preview.remove();
+        }
         const current = getContent ? getContent() : "";
         // Diff from current → revision: shows what restoring would change
         const hunks = computeDiff(current, revContent);
         const diffEl = renderDiff(hunks);
         diffEl.classList.add("revision-preview");
-        host.appendChild(diffEl);
+        host.append(diffEl);
       };
 
-      host.appendChild(item);
+      host.append(item);
     }
     /* c8 ignore start */
   } catch {

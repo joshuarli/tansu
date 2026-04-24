@@ -65,12 +65,12 @@ export function clearInlineFormats(md: string, start: number, end: number): Form
   const slice = md.slice(start, end);
   // Strip markers in order: ** before * to avoid leaving lone *
   const stripped = slice
-    .replace(/\*\*/g, "")
-    .replace(/~~/g, "")
-    .replace(/==/g, "")
-    .replace(/`/g, "")
-    .replace(/\*/g, "")
-    .replace(/_/g, "");
+    .replaceAll("**", "")
+    .replaceAll("~~", "")
+    .replaceAll(/[=]=/g, "")
+    .replaceAll("`", "")
+    .replaceAll("*", "")
+    .replaceAll("_", "");
   const newMd = md.slice(0, start) + stripped + md.slice(end);
   return { md: newMd, selStart: start, selEnd: start + stripped.length };
 }
@@ -100,13 +100,7 @@ export function toggleHeading(
   const existingPrefix = existingMatch ? existingMatch[0] : "";
   const existingLevel = existingMatch ? existingMatch[1]!.length : 0;
 
-  let newPrefix: string;
-  if (existingLevel === level) {
-    // Toggle off: remove heading prefix
-    newPrefix = "";
-  } else {
-    newPrefix = "#".repeat(level) + " ";
-  }
+  const newPrefix = existingLevel === level ? "" : `${"#".repeat(level)} `;
 
   const delta = newPrefix.length - existingPrefix.length;
   const newLine = newPrefix + line.slice(existingPrefix.length);
@@ -123,7 +117,6 @@ export function toggleCodeFence(md: string, selStart: number, selEnd: number): F
   const le = lineEnd(md, selEnd);
 
   // Check if the line before ls is a ``` fence
-  const beforeLs = ls > 0 ? ls - 1 : 0; // position of \n before ls
   const prevLineEnd = ls > 0 ? ls - 1 : 0;
   const prevLineStart = prevLineEnd > 0 ? lineStart(md, prevLineEnd - 1) : 0;
   const prevLine = prevLineEnd > 0 ? md.slice(prevLineStart, prevLineEnd) : "";
@@ -142,18 +135,10 @@ export function toggleCodeFence(md: string, selStart: number, selEnd: number): F
 
     // After removing preceding fence, the content shifts
     const removedBefore = fenceBeforeEnd - fenceBeforeStart;
-    const newLe = le - removedBefore;
 
-    // The following fence occupies positions after the original le
-    // nextLine: [afterLe, nextLineEnd], but shifted by removedBefore
-    const shiftedAfterLe = newLe < md.length - removedBefore ? newLe + 1 : newLe;
-    const newNextLineEnd = lineEnd(md.slice(fenceBeforeEnd), newLe - fenceBeforeStart);
-
-    // Simpler: build the new string directly
+    // Build the new string directly
     const before = md.slice(0, fenceBeforeStart);
     const content = md.slice(fenceBeforeEnd, le);
-    // The next ``` is at: le+1 to nextLineEnd (but we must use original positions)
-    const afterContent = md.slice(le, afterLe); // the \n at le
     const afterFenceEnd = nextLineEnd < md.length ? nextLineEnd + 1 : nextLineEnd;
     const rest = md.slice(afterFenceEnd);
 
@@ -168,7 +153,7 @@ export function toggleCodeFence(md: string, selStart: number, selEnd: number): F
   const content = md.slice(ls, le);
   const after = md.slice(le);
 
-  const newMd = before + "```\n" + content + "\n```" + after;
+  const newMd = `${before}\`\`\`\n${content}\n\`\`\`${after}`;
   // Offsets shift by 4 (the "```\n" prefix)
   const newSelStart = selStart + 4;
   const newSelEnd = selEnd + 4;
@@ -212,23 +197,23 @@ export function shiftIndent(
         delta = 0;
       }
     } else {
-      newLine = "\t" + line;
+      newLine = `\t${line}`;
       delta = 1;
     }
 
     transformed.push(newLine);
 
     // Adjust selStart: if selStart is on or after the start of this line
-    if (selStart >= lineAbsStart + (i > 0 ? 1 : 0)) {
-      // selStart adjustment: if cursor is inside this line
-      if (selStart >= lineAbsStart && selStart <= lineAbsStart + line.length) {
-        if (dedent && delta === -1) {
-          // Don't move cursor before line start
-          newSelStart = Math.max(lineAbsStart + offset, selStart + offset + delta);
-        } else {
-          newSelStart = selStart + offset + delta;
-        }
-      }
+    if (
+      selStart >= lineAbsStart + (i > 0 ? 1 : 0) &&
+      selStart >= lineAbsStart &&
+      selStart <= lineAbsStart + line.length
+    ) {
+      // Don't move cursor before line start when dedenting
+      newSelStart =
+        dedent && delta === -1
+          ? Math.max(lineAbsStart + offset, selStart + offset + delta)
+          : selStart + offset + delta;
     }
     if (selEnd >= lineAbsStart && selEnd <= lineAbsStart + line.length) {
       newSelEnd = Math.max(

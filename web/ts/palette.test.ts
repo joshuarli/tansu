@@ -1,5 +1,3 @@
-import { describe, test, expect, beforeAll, afterAll } from "vitest";
-
 import { setupDOM } from "./test-helper.ts";
 
 describe("palette", () => {
@@ -8,10 +6,8 @@ describe("palette", () => {
   let openPalette: () => void;
   let closePalette: () => void;
   let isPaletteOpen: () => boolean;
-  let registerCommands: (
-    cmds: Array<{ label: string; shortcut: string; action: () => void }>,
-  ) => void;
-  let getCommands: () => Array<{ label: string; shortcut: string; action: () => void }>;
+  let registerCommands: (cmds: { label: string; shortcut: string; action: () => void }[]) => void;
+  let getCommands: () => { label: string; shortcut: string; action: () => void }[];
   let actionCalled = false;
 
   beforeAll(async () => {
@@ -23,8 +19,8 @@ describe("palette", () => {
     openPalette = p.open;
     closePalette = p.close;
     isPaletteOpen = p.isOpen;
-    registerCommands = p.registerCommands;
-    getCommands = p.getCommands;
+    ({ registerCommands } = p);
+    ({ getCommands } = p);
 
     registerCommands([
       {
@@ -44,47 +40,47 @@ describe("palette", () => {
     cleanup();
   });
 
-  test("palette lifecycle", () => {
+  it("palette lifecycle", () => {
     // Initially closed
-    expect(isPaletteOpen()).toBe(false);
+    expect(isPaletteOpen()).toBeFalsy();
 
     // Open
     openPalette();
-    expect(isPaletteOpen()).toBe(true);
-    const overlay = document.getElementById("palette-overlay")!;
-    expect(overlay.classList.contains("hidden")).toBe(false);
+    expect(isPaletteOpen()).toBeTruthy();
+    const overlay = document.querySelector("#palette-overlay")!;
+    expect(overlay.classList.contains("hidden")).toBeFalsy();
 
     // Items rendered
-    const listEl = document.getElementById("palette-list")!;
-    expect(listEl.children.length).toBe(3);
-    expect(listEl.children[0]!.textContent!.includes("Save")).toBe(true);
+    const listEl = document.querySelector("#palette-list")!;
+    expect(listEl.children).toHaveLength(3);
+    expect(listEl.children[0]!.textContent!).toContain("Save");
 
     // Toggle closes
     togglePalette();
-    expect(isPaletteOpen()).toBe(false);
-    expect(overlay.classList.contains("hidden")).toBe(true);
+    expect(isPaletteOpen()).toBeFalsy();
+    expect(overlay.classList.contains("hidden")).toBeTruthy();
 
     // Toggle opens again
     togglePalette();
-    expect(isPaletteOpen()).toBe(true);
+    expect(isPaletteOpen()).toBeTruthy();
 
     // Filter via input
-    const input = document.getElementById("palette-input")! as HTMLInputElement;
+    const input = document.querySelector("#palette-input")! as HTMLInputElement;
     input.value = "sav";
     input.dispatchEvent(new Event("input"));
-    expect(listEl.children.length).toBe(1);
-    expect(listEl.children[0]!.textContent!.includes("Save")).toBe(true);
+    expect(listEl.children).toHaveLength(1);
+    expect(listEl.children[0]!.textContent!).toContain("Save");
 
     // Clear filter shows all
     input.value = "";
     input.dispatchEvent(new Event("input"));
-    expect(listEl.children.length).toBe(3);
+    expect(listEl.children).toHaveLength(3);
 
     // Keyboard: Escape closes
     closePalette();
     openPalette();
     input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
-    expect(isPaletteOpen()).toBe(false);
+    expect(isPaletteOpen()).toBeFalsy();
 
     // Keyboard: Enter selects
     openPalette();
@@ -92,36 +88,36 @@ describe("palette", () => {
     input.dispatchEvent(new Event("input"));
     actionCalled = false;
     input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
-    expect(actionCalled).toBe(true);
-    expect(isPaletteOpen()).toBe(false);
+    expect(actionCalled).toBeTruthy();
+    expect(isPaletteOpen()).toBeFalsy();
 
     // Keyboard: ArrowDown moves selection
     openPalette();
     input.value = "";
     input.dispatchEvent(new Event("input"));
     input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
-    expect(listEl.children[1]!.classList.contains("selected")).toBe(true);
+    expect(listEl.children[1]!.classList.contains("selected")).toBeTruthy();
 
     // ArrowUp wraps
     input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }));
-    expect(listEl.children[0]!.classList.contains("selected")).toBe(true);
+    expect(listEl.children[0]!.classList.contains("selected")).toBeTruthy();
 
     closePalette();
   });
 
-  test("clicking a command item executes its action", () => {
+  it("clicking a command item executes its action", () => {
     openPalette();
-    const listEl = document.getElementById("palette-list")!;
+    const listEl = document.querySelector("#palette-list")!;
 
     actionCalled = false;
     // Click the first item ("Save")
     const saveItem = listEl.children[0]! as HTMLElement;
     saveItem.click();
-    expect(actionCalled).toBe(true);
-    expect(isPaletteOpen()).toBe(false);
+    expect(actionCalled).toBeTruthy();
+    expect(isPaletteOpen()).toBeFalsy();
   });
 
-  test("matchesKey correctly matches keyboard events", async () => {
+  it("matchesKey correctly matches keyboard events", async () => {
     const { matchesKey } = await import("./palette.ts");
 
     // Exact match: meta+key
@@ -130,7 +126,7 @@ describe("palette", () => {
         key: "s",
         meta: true,
       }),
-    ).toBe(true);
+    ).toBeTruthy();
 
     // ctrlKey also counts as meta
     expect(
@@ -138,17 +134,17 @@ describe("palette", () => {
         key: "s",
         meta: true,
       }),
-    ).toBe(true);
+    ).toBeTruthy();
 
     // Missing meta when required
-    expect(matchesKey(new KeyboardEvent("keydown", { key: "s" }), { key: "s", meta: true })).toBe(
-      false,
-    );
+    expect(
+      matchesKey(new KeyboardEvent("keydown", { key: "s" }), { key: "s", meta: true }),
+    ).toBeFalsy();
 
     // Extra meta when not required
     expect(
       matchesKey(new KeyboardEvent("keydown", { key: "s", metaKey: true }), { key: "s" }),
-    ).toBe(false);
+    ).toBeFalsy();
 
     // Shift matching
     expect(
@@ -157,7 +153,7 @@ describe("palette", () => {
         meta: true,
         shift: true,
       }),
-    ).toBe(true);
+    ).toBeTruthy();
 
     // Missing shift
     expect(
@@ -166,7 +162,7 @@ describe("palette", () => {
         meta: true,
         shift: true,
       }),
-    ).toBe(false);
+    ).toBeFalsy();
 
     // Extra shift when not required
     expect(
@@ -174,7 +170,7 @@ describe("palette", () => {
         key: "k",
         meta: true,
       }),
-    ).toBe(false);
+    ).toBeFalsy();
 
     // Wrong key
     expect(
@@ -182,17 +178,17 @@ describe("palette", () => {
         key: "s",
         meta: true,
       }),
-    ).toBe(false);
+    ).toBeFalsy();
 
     // Simple key with no modifiers
-    expect(matchesKey(new KeyboardEvent("keydown", { key: "Escape" }), { key: "Escape" })).toBe(
-      true,
-    );
+    expect(
+      matchesKey(new KeyboardEvent("keydown", { key: "Escape" }), { key: "Escape" }),
+    ).toBeTruthy();
   });
 
-  test("getCommands returns registered commands", () => {
+  it("getCommands returns registered commands", () => {
     const cmds = getCommands();
-    expect(cmds.length).toBe(3);
+    expect(cmds).toHaveLength(3);
     expect(cmds[0]!.label).toBe("Save");
   });
 });
