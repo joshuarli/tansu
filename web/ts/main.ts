@@ -454,17 +454,46 @@ document.addEventListener("visibilitychange", () => {
   }
 });
 
+function checkBrowserSupport(): string[] {
+  const missing: string[] = [];
+  if (!("indexedDB" in window)) {
+    missing.push("IndexedDB");
+  }
+  if (!("EventSource" in window)) {
+    missing.push("Server-Sent Events");
+  }
+  if (!("setHTML" in Element.prototype)) {
+    missing.push("HTML Sanitizer API");
+  }
+  return missing;
+}
+
+function showUnsupportedPage(missing: string[]) {
+  document.body.innerHTML = `<div style="font-family:sans-serif;max-width:560px;margin:80px auto;padding:0 24px;line-height:1.6">
+    <h2 style="margin-top:0">Browser not supported</h2>
+    <p>tansu requires features your browser doesn't support:</p>
+    <ul>${missing.map((f) => `<li>${f}</li>`).join("")}</ul>
+    <p>Please upgrade to <strong>Firefox 148</strong> or later.</p>
+    <p style="color:#888;font-size:0.85em;word-break:break-all">Your browser: ${navigator.userAgent}</p>
+  </div>`;
+}
+
 // Boot: check if encrypted + locked, show unlock or start app
-(async () => {
-  try {
-    const status = await getStatus();
-    if (status.locked) {
-      showUnlockScreen(status);
-    } else {
+const missingFeatures = checkBrowserSupport();
+if (missingFeatures.length > 0) {
+  showUnsupportedPage(missingFeatures);
+} else {
+  (async () => {
+    try {
+      const status = await getStatus();
+      if (status.locked) {
+        showUnlockScreen(status);
+      } else {
+        startApp();
+      }
+    } catch {
+      // Status check failed — server may be down, start normally
       startApp();
     }
-  } catch {
-    // Status check failed — server may be down, start normally
-    startApp();
-  }
-})();
+  })();
+}

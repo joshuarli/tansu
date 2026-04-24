@@ -715,15 +715,23 @@ function setupEditorEvents() {
       return;
     }
 
-    const text = clipData.getData("text/plain");
-    if (text && contentEl) {
+    const htmlData = clipData.getData("text/html");
+    const pastedText = htmlData
+      ? (() => {
+          const div = document.createElement("div");
+          (div as unknown as { setHTML(html: string): void }).setHTML(htmlData);
+          return domToMarkdown(div);
+        })()
+      : clipData.getData("text/plain");
+
+    if (pastedText && contentEl) {
       const md = domToMarkdown(contentEl);
       const sel = getSelectionMarkdownOffsets(contentEl);
       const start = sel?.start ?? md.length;
       const end = sel?.end ?? start;
       pushUndo(md, start, end);
-      const newMd = md.slice(0, start) + text + md.slice(end);
-      const newCursor = start + text.length;
+      const newMd = md.slice(0, start) + pastedText + md.slice(end);
+      const newCursor = start + pastedText.length;
       setContentWithSelection(contentEl, newMd, newCursor, newCursor);
       restoreSelectionFromRenderedMarkers(contentEl);
       onEditorTabMutation();
