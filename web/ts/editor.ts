@@ -363,6 +363,58 @@ function saveCursorOffset(): number {
   return getCursorMarkdownOffset(contentEl, range);
 }
 
+/// Get the markdown offsets for the current selection's start and end.
+/// Uses a single domToMarkdown pass with two cursor sentinel spans inserted,
+/// so the first and second CURSOR_SENTINEL positions map to start and end.
+/// Returns null if there is no selection or it is outside contentEl.
+function getSelectionMarkdownOffsets(el: HTMLElement): { start: number; end: number } | null {
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0) return null;
+  const range = sel.getRangeAt(0);
+  if (!el.contains(range.startContainer) || !el.contains(range.endContainer)) return null;
+
+  // Insert end marker first (higher DOM position → inserting it doesn't shift start).
+  const endMarker = document.createElement("span");
+  endMarker.setAttribute("data-md-cursor", "true");
+  const endRange = range.cloneRange();
+  endRange.collapse(false);
+  endRange.insertNode(endMarker);
+
+  const startMarker = document.createElement("span");
+  startMarker.setAttribute("data-md-cursor", "true");
+  const startRange = range.cloneRange();
+  startRange.collapse(true);
+  startRange.insertNode(startMarker);
+
+  const md = domToMarkdown(el);
+
+  // Both markers serialize as CURSOR_SENTINEL (﷐). Find them in order.
+  const SENTINEL = "﷐";
+  const firstIdx = md.indexOf(SENTINEL);
+  const secondIdx = firstIdx !== -1 ? md.indexOf(SENTINEL, firstIdx + 1) : -1;
+
+  const startParent = startMarker.parentNode;
+  const endParent = endMarker.parentNode;
+  startMarker.remove();
+  endMarker.remove();
+  startParent?.normalize();
+  if (endParent && endParent !== startParent) endParent.normalize();
+
+  // Restore selection
+  try {
+    sel.removeAllRanges();
+    sel.addRange(range);
+  } catch {
+    // Ignore if range is no longer valid
+  }
+
+  if (firstIdx === -1) return null;
+  const start = firstIdx;
+  // If collapsed, secondIdx will be -1; treat as collapsed selection
+  const end = secondIdx !== -1 ? secondIdx - 1 : start; // -1 because first sentinel char was removed
+  return { start, end };
+}
+
 function restoreCursorOffset(offset: number, markdown: string, scroll = false) {
   if (!contentEl || offset < 0) return;
   contentEl.innerHTML = renderMarkdownWithCursor(markdown, offset);
