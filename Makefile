@@ -5,9 +5,9 @@ dev:
 	pnpm run bundle-dev
 	cargo run --bin tansu -- $(NOTES_DIR) --port 3000
 
-build: check ts build-rs
+build: ts build-rs
 
-release: check release-rs release-ts
+release: release-rs release-ts
 
 build-rs:
 	cargo build
@@ -23,21 +23,18 @@ release-rs:
 publish-pkg:
 	cd packages/md-wysiwyg && pnpm run build && pnpm publish --access public
 
-check:
-	tsgo
-	tsgo -p packages/md-wysiwyg/tsconfig.json --noEmit
-	cargo check
+ts: ts-lint ts-check
+	pnpm run bundle-dev
 
 ts-lint:
 	oxfmt --config oxfmt.config.mjs web/ts/ packages/
 	oxlint --quiet --config oxlint.config.mjs web/ts/ packages/
 
-ts: ts-lint
+ts-check:
 	tsgo --noEmit --pretty false
 	pnpm run bundle-dev
 
-release-ts: ts-lint
-	tsgo --noEmit --pretty false
+release-ts: ts-lint ts-check
 	pnpm run bundle
 
 test: test-pkg test-ts test-rs

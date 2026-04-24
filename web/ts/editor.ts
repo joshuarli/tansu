@@ -348,7 +348,8 @@ export function initEditor(): EditorInstance {
     const action = classifyReload(tab.dirty);
 
     if (action.type === "load") {
-      if (getCurrentContent() !== content) {
+      // Skip domToMarkdown when the SSE is bouncing our own save back.
+      if (tab.lastSavedMd !== content && getCurrentContent() !== content) {
         loadContent(content);
       }
       markClean(currentPath, content, mtime);

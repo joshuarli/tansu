@@ -8,7 +8,7 @@
 
 import { clampNodeOffset, escapeHtml, isBlockTag } from "./util.js";
 
-type TransformFn = (block: HTMLElement, text: string) => boolean;
+type TransformFn = (block: HTMLElement, text: string, contentEl: HTMLElement) => boolean;
 
 // contentEditable inserts   (nbsp) instead of regular spaces in many cases
 const SP = String.raw`[  ]`;
@@ -21,33 +21,36 @@ const CURSOR_ATTR = "data-block-cursor";
 const inputTransforms: [RegExp, TransformFn][] = [
   [
     new RegExp(`^#{1,6}${SP}$`),
-    (block, text) => {
+    (block, text, contentEl) => {
       const level = text.trimEnd().length;
-      return replaceBlock(block, `<h${level} ${CURSOR_ATTR}="1"><br></h${level}>`);
+      return replaceBlock(block, `<h${level} ${CURSOR_ATTR}="1"><br></h${level}>`, contentEl);
     },
   ],
 
   [
     new RegExp(`^[-*]${SP}$`),
-    (block) => replaceBlock(block, `<ul><li ${CURSOR_ATTR}="1"><br></li></ul>`),
+    (block, _text, contentEl) =>
+      replaceBlock(block, `<ul><li ${CURSOR_ATTR}="1"><br></li></ul>`, contentEl),
   ],
 
   [
     new RegExp(`^\\d+\\.${SP}$`),
-    (block) => replaceBlock(block, `<ol><li ${CURSOR_ATTR}="1"><br></li></ol>`),
+    (block, _text, contentEl) =>
+      replaceBlock(block, `<ol><li ${CURSOR_ATTR}="1"><br></li></ol>`, contentEl),
   ],
 
   [
     new RegExp(`^>${SP}$`),
-    (block) => replaceBlock(block, `<blockquote><p ${CURSOR_ATTR}="1"><br></p></blockquote>`),
+    (block, _text, contentEl) =>
+      replaceBlock(block, `<blockquote><p ${CURSOR_ATTR}="1"><br></p></blockquote>`, contentEl),
   ],
 
   [
     new RegExp(`^\`{3}\\S*${SP}$`),
-    (block, text) => {
+    (block, text, contentEl) => {
       const lang = text.slice(3).replace(/[  ]+$/, "");
       const cls = lang ? ` class="language-${lang}"` : "";
-      return replaceBlock(block, `<pre><code${cls} ${CURSOR_ATTR}="1">\n</code></pre>`);
+      return replaceBlock(block, `<pre><code${cls} ${CURSOR_ATTR}="1">\n</code></pre>`, contentEl);
     },
   ],
 ];
@@ -56,7 +59,7 @@ const inputTransforms: [RegExp, TransformFn][] = [
 const transforms: [RegExp, TransformFn][] = [
   [
     /^(#{1,6})\s(.*)$/,
-    (block, text) => {
+    (block, text, contentEl) => {
       const match = text.match(/^(#{1,6})\s(.*)$/);
       if (!match) {
         return false;
@@ -65,24 +68,33 @@ const transforms: [RegExp, TransformFn][] = [
       return replaceBlock(
         block,
         `<h${level}>${escapeHtml(match[2] ?? "")}</h${level}><p ${CURSOR_ATTR}="1"><br></p>`,
+        contentEl,
       );
     },
   ],
 
-  [/^---$/, (block) => replaceBlock(block, `<hr><p ${CURSOR_ATTR}="1"><br></p>`)],
+  [
+    /^---$/,
+    (block, _text, contentEl) =>
+      replaceBlock(block, `<hr><p ${CURSOR_ATTR}="1"><br></p>`, contentEl),
+  ],
 
   [
     /^```/,
-    (block, text) => {
+    (block, text, contentEl) => {
       const lang = text.slice(3).trim();
       const cls = lang ? ` class="language-${lang}"` : "";
-      return replaceBlock(block, `<pre><code${cls} ${CURSOR_ATTR}="1">\n</code></pre><p><br></p>`);
+      return replaceBlock(
+        block,
+        `<pre><code${cls} ${CURSOR_ATTR}="1">\n</code></pre><p><br></p>`,
+        contentEl,
+      );
     },
   ],
 
   [
     /^[-*]\s(.*)$/,
-    (block, text) => {
+    (block, text, contentEl) => {
       const match = text.match(/^[-*]\s(.*)$/);
       if (!match) {
         return false;
@@ -90,13 +102,14 @@ const transforms: [RegExp, TransformFn][] = [
       return replaceBlock(
         block,
         `<ul><li ${CURSOR_ATTR}="1">${escapeHtml(match[1] ?? "")}</li></ul>`,
+        contentEl,
       );
     },
   ],
 
   [
     /^\d+\.\s(.*)$/,
-    (block, text) => {
+    (block, text, contentEl) => {
       const match = text.match(/^\d+\.\s(.*)$/);
       if (!match) {
         return false;
@@ -104,13 +117,14 @@ const transforms: [RegExp, TransformFn][] = [
       return replaceBlock(
         block,
         `<ol><li ${CURSOR_ATTR}="1">${escapeHtml(match[1] ?? "")}</li></ol>`,
+        contentEl,
       );
     },
   ],
 
   [
     /^>\s(.*)$/,
-    (block, text) => {
+    (block, text, contentEl) => {
       const match = text.match(/^>\s(.*)$/);
       if (!match) {
         return false;
@@ -118,6 +132,7 @@ const transforms: [RegExp, TransformFn][] = [
       return replaceBlock(
         block,
         `<blockquote><p ${CURSOR_ATTR}="1">${escapeHtml(match[1] ?? "")}</p></blockquote>`,
+        contentEl,
       );
     },
   ],
@@ -128,7 +143,7 @@ const transforms: [RegExp, TransformFn][] = [
 /// environments (e.g. tests) where execCommand is not implemented.
 /// Moves the cursor to the element carrying CURSOR_ATTR and returns true on
 /// success.
-function replaceBlock(block: HTMLElement, html: string): boolean {
+function replaceBlock(block: HTMLElement, html: string, contentEl: HTMLElement): boolean {
   let marker: HTMLElement | null = null;
   if (typeof document.execCommand === "function") {
     const sel = window.getSelection();
@@ -140,7 +155,7 @@ function replaceBlock(block: HTMLElement, html: string): boolean {
       sel.addRange(range);
       if (document.execCommand("insertHTML", false, html)) {
         // incremental edit; bypasses renderer intentionally for undo stack
-        const found = document.querySelector(`[${CURSOR_ATTR}]`);
+        const found = contentEl.querySelector(`[${CURSOR_ATTR}]`);
         marker = found instanceof HTMLElement ? found : null;
       }
     }
@@ -204,7 +219,7 @@ export function checkBlockInputTransform(contentEl: HTMLElement): boolean {
       const level = match[0].trimEnd().length;
       const rest = text.slice(match[0].length);
       const inner = rest ? escapeHtml(rest) : "<br>";
-      return replaceBlock(block, `<h${level} ${CURSOR_ATTR}="1">${inner}</h${level}>`);
+      return replaceBlock(block, `<h${level} ${CURSOR_ATTR}="1">${inner}</h${level}>`, contentEl);
     }
     return false;
   }
@@ -216,7 +231,7 @@ export function checkBlockInputTransform(contentEl: HTMLElement): boolean {
   const text = block.textContent ?? "";
 
   for (const [pattern, handler] of inputTransforms) {
-    if (pattern.test(text) && handler(block, text)) {
+    if (pattern.test(text) && handler(block, text, contentEl)) {
       return true;
     }
   }
@@ -241,7 +256,7 @@ export function handleBlockTransform(
   const text = block.textContent ?? "";
 
   for (const [pattern, handler] of transforms) {
-    if (pattern.test(text) && handler(block, text)) {
+    if (pattern.test(text) && handler(block, text, contentEl)) {
       e.preventDefault();
       onDirty?.();
       return;
