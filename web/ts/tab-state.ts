@@ -3,10 +3,11 @@
 import { stemFromPath } from "@joshuarli98/md-wysiwyg";
 
 import { getNote, createNote, saveState, getState, type SessionState } from "./api.ts";
+import { MAX_CLOSED_TABS } from "./constants.ts";
 import { emit } from "./events.ts";
 import { kvGet, kvPut, noteGet, notePut } from "./local-store.ts";
 
-export interface Tab {
+export type Tab = {
   path: string;
   title: string;
   dirty: boolean;
@@ -15,14 +16,12 @@ export interface Tab {
   mtime: number;
   lastSavedMd: string;
   lastSavedTags: string[];
-}
+};
 
 const tabs: Tab[] = [];
 let activeIndex = -1;
 export const closedTabs: string[] = [];
 let cursors: Record<string, number> = {};
-const MAX_CLOSED = 20;
-
 export function getTabs(): Tab[] {
   return tabs;
 }
@@ -156,7 +155,7 @@ export function closeTab(index: number) {
   }
 
   closedTabs.push(tab.path);
-  if (closedTabs.length > MAX_CLOSED) {
+  if (closedTabs.length > MAX_CLOSED_TABS) {
     closedTabs.shift();
   }
   /* c8 ignore start */
@@ -324,7 +323,7 @@ export async function restoreSession() {
 
   closedTabs.length = 0;
   if (state.closed?.length) {
-    closedTabs.push(...state.closed.slice(-MAX_CLOSED));
+    closedTabs.push(...state.closed.slice(-MAX_CLOSED_TABS));
   }
   if (state.cursors) {
     cursors = { ...state.cursors };

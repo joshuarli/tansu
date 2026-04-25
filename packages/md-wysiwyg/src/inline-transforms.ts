@@ -3,14 +3,15 @@
 /// with styled elements. Uses execCommand('insertHTML') so transforms
 /// participate in the browser's undo stack.
 
+import { INLINE_TRANSFORM_SEARCH_LIMIT } from "./constants.js";
 import { clampNodeOffset, escapeHtml } from "./util.js";
 
-interface InlinePattern {
+type InlinePattern = {
   open: string;
   close: string;
   tag: string;
   trailingSpace?: boolean; // require space/nbsp after close to trigger
-}
+};
 
 // Longer markers first — ** must be checked before *
 export { type InlinePattern };
@@ -21,8 +22,6 @@ export const patterns: InlinePattern[] = [
   { open: "`", close: "`", tag: "code", trailingSpace: true },
   { open: "*", close: "*", tag: "em" },
 ];
-
-const MAX_SEARCH = 200;
 
 /// Compute the range [start, end) of text to replace for a matched pattern.
 export function computeReplaceRange(
@@ -142,7 +141,7 @@ export function matchPattern(
 
   // Search backwards for opening marker
   const contentEnd = end - close.length;
-  const searchStart = Math.max(0, contentEnd - MAX_SEARCH);
+  const searchStart = Math.max(0, contentEnd - INLINE_TRANSFORM_SEARCH_LIMIT);
 
   for (let i = contentEnd - 1; i >= searchStart; i--) {
     if (text.slice(i, i + open.length) !== open) {

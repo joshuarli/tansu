@@ -74,13 +74,13 @@ function arrEq(a: string[], b: string[]): boolean {
   return a.length === b.length && a.every((l, i) => l === b[i]);
 }
 
-interface EditSet {
+type EditSet = {
   // Replacements: base line index → replacement (single line or empty for deletion)
   replacements: Map<number, string[]>;
   // Insertions: position index → lines inserted before that base position
   // Position baseLines.length = appended after end
   insertions: Map<number, string[]>;
-}
+};
 
 /// Compute edits from base to modified using LCS as anchors.
 function computeEdits(base: string[], modified: string[]): EditSet {

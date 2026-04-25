@@ -1,3 +1,5 @@
+import { IMAGE_RESIZE_MIN_WIDTH_PX, IMAGE_RESIZE_WHEEL_SCALE } from "./constants.ts";
+
 let resizeCallback: (() => void) | null = null;
 
 export function initImageResize(editorContent: HTMLElement, onResize: () => void) {
@@ -17,7 +19,10 @@ export function initImageResize(editorContent: HTMLElement, onResize: () => void
 
       const img = target as HTMLImageElement;
       const currentWidth = img.getBoundingClientRect().width;
-      const newWidth = Math.max(50, Math.round(currentWidth - e.deltaY * 1.5));
+      const newWidth = Math.max(
+        IMAGE_RESIZE_MIN_WIDTH_PX,
+        Math.round(currentWidth - e.deltaY * IMAGE_RESIZE_WHEEL_SCALE),
+      );
       img.setAttribute("width", String(newWidth));
       if (hoveredImg === img) positionOverlay(img);
       resizeCallback?.();
@@ -99,7 +104,7 @@ export function initImageResize(editorContent: HTMLElement, onResize: () => void
     const dx = e.clientX - dragStartX;
     // west handles: dragging left increases width (negative dx = bigger)
     const sign = dragDir.includes("w") ? -1 : 1;
-    const newWidth = Math.max(50, Math.round(dragStartWidth + sign * dx));
+    const newWidth = Math.max(IMAGE_RESIZE_MIN_WIDTH_PX, Math.round(dragStartWidth + sign * dx));
     hoveredImg.setAttribute("width", String(newWidth));
     positionOverlay(hoveredImg);
     resizeCallback?.();

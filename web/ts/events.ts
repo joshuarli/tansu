@@ -2,7 +2,7 @@
 
 import type { Tab } from "./tab-state.ts";
 
-interface EventMap {
+type EventMap = {
   "tab:render": undefined;
   "tab:change": Tab | null;
   "tab:close": Tab;
@@ -12,7 +12,7 @@ interface EventMap {
   "file:rename": { oldPath: string; newPath: string };
   "vault:switched": undefined;
   notification: { msg: string; type: "error" | "info" | "success" };
-}
+};
 
 type Handler<T> = (data: T) => void;
 

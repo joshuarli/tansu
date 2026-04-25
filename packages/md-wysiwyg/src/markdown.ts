@@ -2,6 +2,7 @@
 /// headings, paragraphs, lists (ul/ol/task), blockquotes, callouts,
 /// fenced code blocks, tables, HR, and inline formatting.
 
+import { CODE_FENCE_MARKER_LENGTH, LIST_INDENT_SPACES, MAX_HEADING_LEVEL } from "./constants.js";
 import { highlightCode } from "./highlight.js";
 import { escapeHtml, CURSOR_SENTINEL, SEL_START_SENTINEL, SEL_END_SENTINEL } from "./util.js";
 
@@ -55,20 +56,22 @@ type Block =
   | { type: "blockquote"; lines: string[] }
   | { type: "table"; header: string[]; rows: string[][] };
 
-interface ListItem {
+type ListItem = {
   text: string;
   checked: boolean | null; // null = not a task item
   nested?: ListNode[];
-}
+};
 
-interface ListNode {
+type ListNode = {
   ordered: boolean;
   items: ListItem[];
-}
+};
 
 function isBlockStart(line: string): boolean {
   return (
-    /^(#{1,6}\s|`{3,}|~{3,}|>|(-{3,}|\*{3,}|_{3,})\s*$)/.test(line) || parseListLine(line) !== null
+    new RegExp(
+      `^(#{1,${MAX_HEADING_LEVEL}}\\s|[\`~]{${CODE_FENCE_MARKER_LENGTH},}|>|(-{3,}|\\*{3,}|_{3,})\\s*$)`,
+    ).test(line) || parseListLine(line) !== null
   );
 }
 
@@ -87,7 +90,7 @@ function parseBlocks(lines: string[]): Block[] {
     }
 
     // Fenced code block
-    const fenceMatch = line.match(/^(`{3,}|~{3,})(.*)/);
+    const fenceMatch = line.match(new RegExp(`^([\`~]{${CODE_FENCE_MARKER_LENGTH},})(.*)`));
     if (fenceMatch) {
       const fence = fenceMatch[1]!;
       const lang = fenceMatch[2]!.trim();
@@ -103,7 +106,7 @@ function parseBlocks(lines: string[]): Block[] {
     }
 
     // Heading
-    const headingMatch = line.match(/^(#{1,6})\s+(.*)/);
+    const headingMatch = line.match(new RegExp(`^(#{1,${MAX_HEADING_LEVEL}})\\s+(.*)`));
     if (headingMatch) {
       blocks.push({ type: "heading", level: headingMatch[1]!.length, text: headingMatch[2]! });
       i++;
@@ -366,7 +369,7 @@ function parseTaskLine(line: string): { checked: boolean; text: string } | null 
 function countIndent(indent: string): number {
   let width = 0;
   for (const ch of indent) {
-    width += ch === "\t" ? 2 : 1;
+    width += ch === "\t" ? LIST_INDENT_SPACES : 1;
   }
   return width;
 }

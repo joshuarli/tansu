@@ -77,11 +77,11 @@ export function kvPut(key: string, value: unknown): Promise<void> {
   return idbPut("kv", key, value);
 }
 
-interface CachedNote {
+type CachedNote = {
   content: string;
   mtime: number;
   tags: string[];
-}
+};
 
 export async function noteGet(path: string): Promise<CachedNote | undefined> {
   const note = await idbGet<Partial<CachedNote>>("notes", path);

@@ -9,12 +9,12 @@ let currentPath: string | null = null;
 let getContent: (() => string) | null = null;
 let onHide: (() => void) | null = null;
 
-export interface RevisionsOpts {
+export type RevisionsOpts = {
   path: string;
   host: HTMLElement;
   getCurrentContent: () => string;
   onHide: () => void;
-}
+};
 
 export function toggleRevisions(opts: RevisionsOpts) {
   if (hostEl && currentPath === opts.path) {

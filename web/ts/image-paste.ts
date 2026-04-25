@@ -1,6 +1,7 @@
 import { escapeHtml, stemFromPath } from "@joshuarli98/md-wysiwyg";
 
 import { uploadImage } from "./api.ts";
+import { IMAGE_WEBP_QUALITY } from "./constants.ts";
 import { markDirty } from "./tab-state.ts";
 
 /// Handle pasted image: convert to webp, upload, insert wiki-link.
@@ -14,7 +15,7 @@ export async function handleImagePaste(item: DataTransferItem, currentPath: stri
   const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
   const ctx = canvas.getContext("2d")!;
   ctx.drawImage(bitmap, 0, 0);
-  const blob = await canvas.convertToBlob({ type: "image/webp", quality: 0.85 });
+  const blob = await canvas.convertToBlob({ type: "image/webp", quality: IMAGE_WEBP_QUALITY });
   bitmap.close();
 
   const now = new Date();

@@ -9,6 +9,11 @@ import {
   unlockWithPrf,
   type AppStatus,
 } from "./api.ts";
+import {
+  MIN_SUPPORTED_FIREFOX_VERSION,
+  NOTIFICATION_AUTO_DISMISS_MS,
+  SSE_BACKOFF_DELAYS_MS,
+} from "./constants.ts";
 import { initEditor, invalidateNoteCache, type EditorInstance } from "./editor.ts";
 import { emit, on } from "./events.ts";
 import { initFileNav } from "./filenav.ts";
@@ -335,7 +340,7 @@ function showNotification(msg: string, type: "error" | "info" | "success" = "err
   }
   notifTimer = setTimeout(() => {
     hideNotification();
-  }, 5000);
+  }, NOTIFICATION_AUTO_DISMISS_MS);
 }
 
 notif.addEventListener("click", hideNotification);
@@ -376,7 +381,7 @@ function createBackoff(delays: number[]) {
   };
 }
 
-const sseBackoff = createBackoff([250, 250, 500, 1000, 1000, 2000, 5000]);
+const sseBackoff = createBackoff([...SSE_BACKOFF_DELAYS_MS]);
 
 function requestImmediateSSEReconnect() {
   if (pageUnloading || sse) {
@@ -510,7 +515,7 @@ function showUnsupportedPage(missing: string[]) {
     <h2 style="margin-top:0">Browser not supported</h2>
     <p>tansu requires features your browser doesn't support:</p>
     <ul>${missing.map((f) => `<li>${f}</li>`).join("")}</ul>
-    <p>Please upgrade to <strong>Firefox 148</strong> or later.</p>
+    <p>Please upgrade to <strong>Firefox ${MIN_SUPPORTED_FIREFOX_VERSION}</strong> or later.</p>
     <p style="color:#888;font-size:0.85em;word-break:break-all">Your browser: ${navigator.userAgent}</p>
   </div>`;
 }

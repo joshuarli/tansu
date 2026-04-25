@@ -18,3 +18,10 @@ export {
   BLOCK_TAGS,
   isBlockTag,
 } from "./util.js";
+export {
+  MAX_HEADING_LEVEL,
+  CODE_FENCE_MARKER_LENGTH,
+  LIST_INDENT_SPACES,
+  INLINE_TRANSFORM_SEARCH_LIMIT,
+  DIFF_CONTEXT_LINES,
+} from "./constants.js";

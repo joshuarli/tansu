@@ -20,6 +20,12 @@ import {
 export { invalidateTagCache } from "./tag-autocomplete.ts";
 import { loadBacklinks } from "./backlinks.ts";
 import { showConflictBanner, handleReloadConflict } from "./conflict.ts";
+import {
+  AUTOSAVE_DELAY_MS,
+  AUTOSAVE_RETRY_DELAY_MS,
+  MAX_INDENT_SPACES,
+  UNDO_STACK_MAX_ENTRIES,
+} from "./constants.ts";
 import { showContextMenu } from "./context-menu.ts";
 import { on, emit } from "./events.ts";
 import {
@@ -206,17 +212,17 @@ function dedentLine(line: string): string {
   if (line.startsWith(INDENT_UNIT)) {
     return line.slice(INDENT_UNIT.length);
   }
-  const match = line.match(/^[ ]{1,4}/);
+  const match = line.match(new RegExp(`^[ ]{1,${MAX_INDENT_SPACES}}`));
   return match ? line.slice(match[0].length) : line;
 }
 
-export interface EditorInstance {
+export type EditorInstance = {
   showEditor(path: string, content: string, tags?: string[]): void;
   hideEditor(): void;
   getCurrentContent(): string;
   saveCurrentNote(opts?: { silent?: boolean }): Promise<void>;
   reloadFromDisk(content: string, mtime: number): void;
-}
+};
 
 export function initEditor(): EditorInstance {
   const editorArea = document.querySelector("#editor-area")!;
@@ -354,7 +360,7 @@ export function initEditor(): EditorInstance {
   function handleTagSelected(tag: string) {
     rememberTags([tag]);
     if (!currentTags.includes(tag)) {
-      currentTags = [...currentTags, tag].sort();
+      currentTags = [...currentTags, tag].toSorted();
       renderTagRow();
     }
     onEditorTabMutation();
@@ -365,7 +371,7 @@ export function initEditor(): EditorInstance {
     if (autosaveTimer !== null) {
       clearTimeout(autosaveTimer);
     }
-    autosaveTimer = setTimeout(tryAutosave, 1500);
+    autosaveTimer = setTimeout(tryAutosave, AUTOSAVE_DELAY_MS);
   }
 
   function tryAutosave() {
@@ -374,7 +380,7 @@ export function initEditor(): EditorInstance {
     if (contentEl) {
       const sel = window.getSelection();
       if (sel && !sel.isCollapsed && contentEl.contains(sel.anchorNode)) {
-        autosaveTimer = setTimeout(tryAutosave, 500);
+        autosaveTimer = setTimeout(tryAutosave, AUTOSAVE_RETRY_DELAY_MS);
         return;
       }
     }
@@ -711,7 +717,7 @@ export function initEditor(): EditorInstance {
     // Truncate any redo tail
     undoStack.splice(undoIndex + 1);
     undoStack.push({ md, selStart, selEnd });
-    if (undoStack.length > 200) {
+    if (undoStack.length > UNDO_STACK_MAX_ENTRIES) {
       undoStack.shift();
     } else {
       undoIndex++;

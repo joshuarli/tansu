@@ -3,19 +3,19 @@ import type { MenuItem } from "./context-menu.ts";
 import { emit } from "./events.ts";
 import { showInputDialog } from "./input-dialog.ts";
 
-export interface RenameEventDetail {
+export type RenameEventDetail = {
   path: string;
   newName: string;
-}
+};
 
-interface FileActionsOptions {
+type FileActionsOptions = {
   path: string;
   title: string;
   isPinned: boolean;
   onPinChanged?: () => void | Promise<void>;
   onDeleted?: () => void | Promise<void>;
   onClosed?: () => void;
-}
+};
 
 function buildRenamedPath(path: string, newName: string): string {
   const dir = path.includes("/") ? path.slice(0, path.lastIndexOf("/") + 1) : "";

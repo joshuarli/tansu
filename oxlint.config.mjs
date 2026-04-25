@@ -1,7 +1,12 @@
 import { defineConfig } from "oxlint";
 
 export default defineConfig({
-  ignorePatterns: ["web/ts/api.generated.ts"],
+  ignorePatterns: [
+    "web/ts/api.generated.ts",
+    "oxfmt.config.mjs",
+    "oxlint.config.mjs",
+    "vitest*.config.ts",
+  ],
   env: { browser: true },
   plugins: ["eslint", "unicorn", "typescript", "import", "promise", "vitest"],
   categories: {
@@ -9,7 +14,7 @@ export default defineConfig({
     suspicious: "error",
     perf: "error",
     pedantic: "error",
-    style: "error",
+    style: "warn",
     restriction: "error",
     nursery: "error",
   },
@@ -188,12 +193,17 @@ export default defineConfig({
     "eslint/prefer-destructuring": "off",
     "prefer-destructuring": "off",
 
+    // prefer type over interface
+    "consistent-type-definitions": "off",
+
     // Conflicts with oxfmt: oxfmt lowercases hex digits, this rule wants uppercase
     "unicorn/number-literal-case": "off",
 
     "unicorn/prefer-add-event-listener": "off",
     "unicorn/require-module-specifiers": "off",
     "no-await-in-loop": "off",
+
+    "numeric-separators-style": "off",
   },
   overrides: [
     {

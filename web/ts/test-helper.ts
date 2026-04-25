@@ -218,7 +218,7 @@ export function mockFetch(): MockFetch {
   return mock;
 }
 
-export interface MockFetch {
+export type MockFetch = {
   on(method: string, urlPattern: string | RegExp, body: MockBody, status?: number): MockFetch;
   onDelayed(
     method: string,
@@ -228,4 +228,4 @@ export interface MockFetch {
     status?: number,
   ): MockFetch;
   restore(): void;
-}
+};

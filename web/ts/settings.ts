@@ -8,15 +8,33 @@ import {
   type Settings,
   type AppStatus,
 } from "./api.ts";
+import {
+  SETTINGS_FUZZY_DISTANCE_DEFAULT,
+  SETTINGS_FUZZY_DISTANCE_OPTIONS,
+  SETTINGS_RECENCY_BOOST_DEFAULT,
+  SETTINGS_RECENCY_BOOST_OPTIONS,
+  SETTINGS_RESULT_LIMIT_DEFAULT,
+  SETTINGS_RESULT_LIMIT_MAX,
+  SETTINGS_RESULT_LIMIT_MIN,
+  SETTINGS_RESULT_LIMIT_STEP,
+  SETTINGS_SHOW_SCORE_BREAKDOWN_DEFAULT,
+  SETTINGS_WEIGHT_CONTENT_DEFAULT,
+  SETTINGS_WEIGHT_HEADINGS_DEFAULT,
+  SETTINGS_WEIGHT_MAX,
+  SETTINGS_WEIGHT_MIN,
+  SETTINGS_WEIGHT_STEP,
+  SETTINGS_WEIGHT_TAGS_DEFAULT,
+  SETTINGS_WEIGHT_TITLE_DEFAULT,
+} from "./constants.ts";
 import { showInputDialog } from "./input-dialog.ts";
 import { isPrfLikelySupported, createPrfCredential } from "./webauthn.ts";
 
-interface SettingsPanel {
+type SettingsPanel = {
   toggle(): void;
   open(): Promise<void>;
   close(): void;
   isOpen(): boolean;
-}
+};
 
 export function createSettings(): SettingsPanel {
   const overlay = document.querySelector("#settings-overlay")!;
@@ -37,14 +55,14 @@ export function createSettings(): SettingsPanel {
       current = await getSettings();
     } catch {
       current = {
-        weight_title: 10,
-        weight_headings: 5,
-        weight_tags: 25,
-        weight_content: 1,
-        fuzzy_distance: 1,
-        recency_boost: 2,
-        result_limit: 20,
-        show_score_breakdown: true,
+        weight_title: SETTINGS_WEIGHT_TITLE_DEFAULT,
+        weight_headings: SETTINGS_WEIGHT_HEADINGS_DEFAULT,
+        weight_tags: SETTINGS_WEIGHT_TAGS_DEFAULT,
+        weight_content: SETTINGS_WEIGHT_CONTENT_DEFAULT,
+        fuzzy_distance: SETTINGS_FUZZY_DISTANCE_DEFAULT,
+        recency_boost: SETTINGS_RECENCY_BOOST_DEFAULT,
+        result_limit: SETTINGS_RESULT_LIMIT_DEFAULT,
+        show_score_breakdown: SETTINGS_SHOW_SCORE_BREAKDOWN_DEFAULT,
         excluded_folders: [],
       };
     }
@@ -90,23 +108,34 @@ export function createSettings(): SettingsPanel {
         <label class="settings-row">
           <span>Fuzzy distance</span>
           <select data-key="fuzzy_distance">
-            <option value="0"${s.fuzzy_distance === 0 ? " selected" : ""}>0 (exact only)</option>
-            <option value="1"${s.fuzzy_distance === 1 ? " selected" : ""}>1</option>
-            <option value="2"${s.fuzzy_distance === 2 ? " selected" : ""}>2</option>
+            ${SETTINGS_FUZZY_DISTANCE_OPTIONS.map(
+              (value) =>
+                `<option value="${value}"${s.fuzzy_distance === value ? " selected" : ""}>${
+                  value === 0 ? "0 (exact only)" : value
+                }</option>`,
+            ).join("")}
           </select>
         </label>
         <label class="settings-row">
           <span>Recency boost</span>
           <select data-key="recency_boost">
-            <option value="0"${s.recency_boost === 0 ? " selected" : ""}>Disabled</option>
-            <option value="1"${s.recency_boost === 1 ? " selected" : ""}>24 hours</option>
-            <option value="2"${s.recency_boost === 2 ? " selected" : ""}>7 days</option>
-            <option value="3"${s.recency_boost === 3 ? " selected" : ""}>30 days</option>
+            ${SETTINGS_RECENCY_BOOST_OPTIONS.map(
+              (value) =>
+                `<option value="${value}"${s.recency_boost === value ? " selected" : ""}>${
+                  value === 0
+                    ? "Disabled"
+                    : value === 1
+                      ? "24 hours"
+                      : value === 2
+                        ? "7 days"
+                        : "30 days"
+                }</option>`,
+            ).join("")}
           </select>
         </label>
         <label class="settings-row">
           <span>Result limit</span>
-          <input type="number" data-key="result_limit" value="${s.result_limit}" min="5" max="100" step="5">
+          <input type="number" data-key="result_limit" value="${s.result_limit}" min="${SETTINGS_RESULT_LIMIT_MIN}" max="${SETTINGS_RESULT_LIMIT_MAX}" step="${SETTINGS_RESULT_LIMIT_STEP}">
         </label>
         <label class="settings-row">
           <span>Show score breakdown</span>
@@ -300,7 +329,7 @@ function slider(key: string, label: string, value: number): string {
   return `
     <label class="settings-row">
       <span>${label}</span>
-      <input type="range" data-key="${key}" min="0" max="20" step="0.5" value="${value}">
+      <input type="range" data-key="${key}" min="${SETTINGS_WEIGHT_MIN}" max="${SETTINGS_WEIGHT_MAX}" step="${SETTINGS_WEIGHT_STEP}" value="${value}">
       <span class="slider-value">${value}</span>
     </label>`;
 }

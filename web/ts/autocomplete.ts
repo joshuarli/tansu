@@ -3,6 +3,7 @@
 import { clampNodeOffset, stemFromPath } from "@joshuarli98/md-wysiwyg";
 
 import { listNotes, type NoteEntry } from "./api.ts";
+import { AUTOCOMPLETE_MAX_RESULTS, AUTOCOMPLETE_OFFSET_PX } from "./constants.ts";
 import { markDirty } from "./tab-state.ts";
 
 let autocompleteEl: HTMLElement | null = null;
@@ -71,7 +72,7 @@ export function checkWikiLinkTrigger(contentEl: HTMLElement, currentPath: string
   });
 }
 
-interface AutocompleteRequest {
+type AutocompleteRequest = {
   requestId: number;
   query: string;
   contentEl: HTMLElement;
@@ -79,7 +80,7 @@ interface AutocompleteRequest {
   triggerIdx: number;
   cursorPos: number;
   currentPath: string | null;
-}
+};
 
 function isActiveTrigger(
   contentEl: HTMLElement,
@@ -138,7 +139,7 @@ async function showAutocomplete({
       const title = n.title.toLowerCase();
       return stem.includes(query) || title.includes(query);
     })
-    .slice(0, 10);
+    .slice(0, AUTOCOMPLETE_MAX_RESULTS);
 
   if (filtered.length === 0) {
     clearAutocomplete();
@@ -154,7 +155,7 @@ async function showAutocomplete({
   range.setEnd(textNode, cursorPos);
   const rect = range.getBoundingClientRect();
   autocompleteEl.style.left = `${rect.left}px`;
-  autocompleteEl.style.top = `${rect.bottom + 4}px`;
+  autocompleteEl.style.top = `${rect.bottom + AUTOCOMPLETE_OFFSET_PX}px`;
 
   let selectedIdx = 0;
 

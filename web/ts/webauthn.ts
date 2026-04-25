@@ -1,12 +1,19 @@
 // WebAuthn PRF extension helpers for biometric unlock
 
+import {
+  PRF_CHALLENGE_LENGTH,
+  PRF_PUBLIC_KEY_PARAMS,
+  PRF_SALT_INPUT,
+  PRF_USER_ID,
+} from "./constants.ts";
+
 // Fixed PRF salt — domain separation so the same authenticator produces
 // different outputs for different apps. Not secret.
 let prfSalt: ArrayBuffer | null = null;
 
 export async function getPrfSalt(): Promise<ArrayBuffer> {
   if (!prfSalt) {
-    prfSalt = await crypto.subtle.digest("SHA-256", new TextEncoder().encode("tansu-prf-salt-v1"));
+    prfSalt = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(PRF_SALT_INPUT));
   }
   return prfSalt;
 }
@@ -34,10 +41,10 @@ export function base64urlToBuf(b64: string): ArrayBuffer {
   return buf.buffer;
 }
 
-interface PrfRegistrationResult {
+type PrfRegistrationResult = {
   credentialId: string;
   prfKeyB64: string;
-}
+};
 
 // Register a new PRF credential (Face ID / Touch ID).
 // Returns the credential ID (base64url) and PRF output (base64).
@@ -47,17 +54,14 @@ export async function createPrfCredential(): Promise<PrfRegistrationResult> {
 
   const credential = (await navigator.credentials.create({
     publicKey: {
-      challenge: crypto.getRandomValues(new Uint8Array(32)),
+      challenge: crypto.getRandomValues(new Uint8Array(PRF_CHALLENGE_LENGTH)),
       rp: { name: "Tansu", id: location.hostname },
       user: {
-        id: new Uint8Array([1]),
+        id: PRF_USER_ID,
         name: "owner",
         displayName: "Owner",
       },
-      pubKeyCredParams: [
-        { alg: -7, type: "public-key" }, // ES256
-        { alg: -257, type: "public-key" }, // RS256 fallback
-      ],
+      pubKeyCredParams: [...PRF_PUBLIC_KEY_PARAMS], // ES256 + RS256 fallback
       authenticatorSelection: { userVerification: "required" },
       extensions: {
         prf: { eval: { first: salt } },
@@ -88,7 +92,7 @@ export async function getPrfKey(credentialIds: string[]): Promise<string> {
 
   const assertion = (await navigator.credentials.get({
     publicKey: {
-      challenge: crypto.getRandomValues(new Uint8Array(32)),
+      challenge: crypto.getRandomValues(new Uint8Array(PRF_CHALLENGE_LENGTH)),
       rpId: location.hostname,
       allowCredentials,
       userVerification: "required",

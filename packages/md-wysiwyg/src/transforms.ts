@@ -6,6 +6,7 @@
 /// by inline-transforms.ts. A direct-DOM fallback handles test environments
 /// where execCommand is not implemented.
 
+import { CODE_FENCE_MARKER_LENGTH, MAX_HEADING_LEVEL } from "./constants.js";
 import { clampNodeOffset, escapeHtml, isBlockTag } from "./util.js";
 
 type TransformFn = (block: HTMLElement, text: string, contentEl: HTMLElement) => boolean;
@@ -38,7 +39,7 @@ const inputTransforms: [RegExp, TransformFn][] = [
   ],
 
   [
-    new RegExp(`^#{1,6}${SP}$`),
+    new RegExp(`^#{1,${MAX_HEADING_LEVEL}}${SP}$`),
     (block, text, contentEl) => {
       const level = text.trimEnd().length;
       return replaceBlock(block, `<h${level} ${CURSOR_ATTR}="1"><br></h${level}>`, contentEl);
@@ -64,9 +65,9 @@ const inputTransforms: [RegExp, TransformFn][] = [
   ],
 
   [
-    new RegExp(`^\`{3}\\S*${SP}$`),
+    new RegExp("^" + "`".repeat(CODE_FENCE_MARKER_LENGTH) + `\\S*${SP}$`),
     (block, text, contentEl) => {
-      const lang = text.slice(3).replace(/[  ]+$/, "");
+      const lang = text.slice(CODE_FENCE_MARKER_LENGTH).replace(/[  ]+$/, "");
       const cls = lang ? ` class="language-${lang}"` : "";
       return replaceBlock(block, `<pre><code${cls} ${CURSOR_ATTR}="1">\n</code></pre>`, contentEl);
     },
@@ -76,9 +77,9 @@ const inputTransforms: [RegExp, TransformFn][] = [
 // Enter-triggered: fire when user presses Enter with content already typed
 const transforms: [RegExp, TransformFn][] = [
   [
-    /^(#{1,6})\s(.*)$/,
+    new RegExp(`^(#{1,${MAX_HEADING_LEVEL}})\\s(.*)$`),
     (block, text, contentEl) => {
-      const match = text.match(/^(#{1,6})\s(.*)$/);
+      const match = text.match(new RegExp(`^(#{1,${MAX_HEADING_LEVEL}})\\s(.*)$`));
       if (!match) {
         return false;
       }
@@ -98,9 +99,9 @@ const transforms: [RegExp, TransformFn][] = [
   ],
 
   [
-    /^```/,
+    new RegExp("^" + "`".repeat(CODE_FENCE_MARKER_LENGTH)),
     (block, text, contentEl) => {
-      const lang = text.slice(3).trim();
+      const lang = text.slice(CODE_FENCE_MARKER_LENGTH).trim();
       const cls = lang ? ` class="language-${lang}"` : "";
       return replaceBlock(
         block,
@@ -231,7 +232,7 @@ export function checkBlockInputTransform(contentEl: HTMLElement): boolean {
   // Re-level existing headings: "### " typed at start of an H1 → converts to H3
   if (tag.startsWith("H") && tag.length === 2) {
     const text = block.textContent ?? "";
-    const re = new RegExp(`^#{1,6}${SP}`);
+    const re = new RegExp(`^#{1,${MAX_HEADING_LEVEL}}${SP}`);
     const match = text.match(re);
     if (match) {
       const level = match[0].trimEnd().length;

@@ -1,6 +1,7 @@
 /// DOM → Markdown serialization for the WYSIWYG editor.
 
 const BLANK_LINE_SENTINEL = "\u0000";
+import { MAX_HEADING_LEVEL, LIST_INDENT_SPACES } from "./constants.js";
 import { CURSOR_SENTINEL, isBlockTag } from "./util.js";
 type BlockKind =
   | "blank"
@@ -13,10 +14,10 @@ type BlockKind =
   | "hr"
   | "other";
 
-interface SerializedBlock {
+type SerializedBlock = {
   md: string;
   kind: BlockKind;
-}
+};
 
 /// Compute the character offset of the cursor (described by `range`) within the
 /// markdown string that `domToMarkdown(contentEl)` would produce.
@@ -79,9 +80,11 @@ export function domToMarkdown(root: HTMLElement): string {
 function blockToMd(el: HTMLElement): SerializedBlock | null {
   const tag = el.tagName;
 
-  if (/^H[1-6]$/.test(tag)) {
+  if (tag.length === 2 && tag[0] === "H") {
     const level = Number(tag[1]!);
-    return { md: `${"#".repeat(level)} ${inlineToMd(el)}`, kind: "heading" };
+    if (Number.isInteger(level) && level >= 1 && level <= MAX_HEADING_LEVEL) {
+      return { md: `${"#".repeat(level)} ${inlineToMd(el)}`, kind: "heading" };
+    }
   }
   if (el.classList.contains("callout")) {
     const type = el.dataset["callout"] ?? "note";
@@ -262,7 +265,7 @@ function inlineNodesToMd(nodes: Iterable<Node>, skip?: (node: Node) => boolean):
 }
 
 function listToMd(listEl: HTMLElement, depth: number, ordered: boolean): string {
-  const indent = "  ".repeat(depth);
+  const indent = " ".repeat(LIST_INDENT_SPACES * depth);
   const lines: string[] = [];
   let hasListItem = false;
 

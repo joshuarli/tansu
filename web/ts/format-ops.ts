@@ -2,11 +2,11 @@
 /// markdown string and selection offsets, returns transformed markdown with
 /// updated offsets.
 
-export interface FormatResult {
+export type FormatResult = {
   md: string;
   selStart: number;
   selEnd: number;
-}
+};
 
 function splitSelectedBlocks(slice: string): string[] {
   return slice.split("\n\n");

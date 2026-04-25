@@ -1,19 +1,18 @@
 /// Line-based diff with compact rendering, like git diff.
 
+import { DIFF_CONTEXT_LINES } from "./constants.js";
 import { escapeHtml, lcs } from "./util.js";
 
-export interface DiffLine {
+export type DiffLine = {
   type: "add" | "del" | "ctx";
   text: string;
-}
+};
 
-export interface DiffHunk {
+export type DiffHunk = {
   oldStart: number;
   newStart: number;
   lines: DiffLine[];
-}
-
-const CONTEXT = 3;
+};
 
 /// Compute diff hunks between old and new text.
 export function computeDiff(oldText: string, newText: string): DiffHunk[] {
@@ -61,7 +60,11 @@ function buildHunks(
 
   for (let i = 0; i < raw.length; i++) {
     if (changed[i]) {
-      for (let j = Math.max(0, i - CONTEXT); j <= Math.min(raw.length - 1, i + CONTEXT); j++) {
+      for (
+        let j = Math.max(0, i - DIFF_CONTEXT_LINES);
+        j <= Math.min(raw.length - 1, i + DIFF_CONTEXT_LINES);
+        j++
+      ) {
         included[j] = true;
       }
     }

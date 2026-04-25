@@ -104,7 +104,7 @@ function render() {
 
     el.addEventListener("mouseenter", () => {
       hoveredTabIndex = i;
-      showTabTooltip(el, tab.title + " (space to close)");
+      showTabTooltip(el, `${tab.title} (space to close)`);
     });
     el.addEventListener("mouseleave", () => {
       hoveredTabIndex = -1;

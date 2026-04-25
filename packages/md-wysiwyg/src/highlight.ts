@@ -39,12 +39,12 @@ const State = {
 } as const;
 type StateValue = (typeof State)[keyof typeof State];
 
-interface HlState {
+type HlState = {
   state: StateValue;
   stringIdx: number;
-}
+};
 
-interface Rules {
+type Rules = {
   lineComment: string;
   blockComment: [string, string];
   strings: [string, string, boolean][]; // [open, close, multiline]
@@ -54,7 +54,7 @@ interface Rules {
   highlightNumbers: boolean;
   highlightFnCalls: boolean;
   highlightBangMacros: boolean;
-}
+};
 
 function isSep(c: number): boolean {
   return (

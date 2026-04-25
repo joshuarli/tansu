@@ -1,16 +1,17 @@
 import { searchNotes, createNote, getSettings, type SearchResult } from "./api.ts";
+import { SEARCH_MIN_QUERY_LENGTH, SEARCH_SCORE_PRECISION } from "./constants.ts";
 
-interface Search {
+type Search = {
   toggle(): void;
   open(filterPath?: string): void;
   close(): void;
   isOpen(): boolean;
-}
+};
 
-interface SearchDeps {
+type SearchDeps = {
   openTab: (path: string) => Promise<unknown>;
   invalidateNoteCache: () => void;
-}
+};
 
 function appendExcerpt(el: HTMLElement, excerpt: string): void {
   const parts = excerpt.split(/(<b>|<\/b>)/);
@@ -97,7 +98,7 @@ export function createSearch(deps: SearchDeps): Search {
     const q = input.value.trim();
     const requestId = ++searchRequestId;
     const requestScopePath = scopePath;
-    if (q.length < 2) {
+    if (q.length < SEARCH_MIN_QUERY_LENGTH) {
       results = [];
       renderResults(q);
       return;
@@ -180,18 +181,18 @@ export function createSearch(deps: SearchDeps): Search {
         const fs = r.field_scores;
         const parts: string[] = [];
         if (fs.title > 0) {
-          parts.push(`title:${fs.title.toPrecision(3)}`);
+          parts.push(`title:${fs.title.toPrecision(SEARCH_SCORE_PRECISION)}`);
         }
         if (fs.headings > 0) {
-          parts.push(`headings:${fs.headings.toPrecision(3)}`);
+          parts.push(`headings:${fs.headings.toPrecision(SEARCH_SCORE_PRECISION)}`);
         }
         if (fs.tags > 0) {
-          parts.push(`tags:${fs.tags.toPrecision(3)}`);
+          parts.push(`tags:${fs.tags.toPrecision(SEARCH_SCORE_PRECISION)}`);
         }
         if (fs.content > 0) {
-          parts.push(`content:${fs.content.toPrecision(3)}`);
+          parts.push(`content:${fs.content.toPrecision(SEARCH_SCORE_PRECISION)}`);
         }
-        score.textContent = `${r.score.toPrecision(3)}${parts.length > 0 ? ` = ${parts.join(" + ")}` : ""}`;
+        score.textContent = `${r.score.toPrecision(SEARCH_SCORE_PRECISION)}${parts.length > 0 ? ` = ${parts.join(" + ")}` : ""}`;
         el.append(score);
       }
 

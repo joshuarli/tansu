@@ -1,15 +1,15 @@
-interface KeyBinding {
+type KeyBinding = {
   key: string;
   meta?: boolean;
   shift?: boolean;
-}
+};
 
-interface Command {
+type Command = {
   label: string;
   shortcut: string;
   keys?: KeyBinding;
   action: () => void;
-}
+};
 
 /// Check if a keyboard event matches a key binding.
 export function matchesKey(e: KeyboardEvent, k: KeyBinding): boolean {
@@ -29,14 +29,14 @@ export function matchesKey(e: KeyboardEvent, k: KeyBinding): boolean {
   return e.key === k.key;
 }
 
-interface Palette {
+type Palette = {
   toggle(): void;
   open(): void;
   close(): void;
   isOpen(): boolean;
   registerCommands(cmds: Command[]): void;
   getCommands(): Command[];
-}
+};
 
 export function createPalette(): Palette {
   const overlay = document.querySelector("#palette-overlay")!;

@@ -1,10 +1,10 @@
 /// Singleton context menu — only one may be visible at a time.
 
-export interface MenuItem {
+export type MenuItem = {
   label: string;
   danger?: boolean;
   onclick: () => void;
-}
+};
 
 let active: HTMLElement | null = null;
 let dismissHandler: (() => void) | null = null;

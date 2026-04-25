@@ -3,6 +3,13 @@
 /// to preserve editor focus and selection while applying formats.
 
 import {
+  FORMAT_TOOLBAR_EDGE_PADDING_PX,
+  FORMAT_TOOLBAR_GAP_PX,
+  FORMAT_TOOLBAR_HEADING_LEVELS,
+  FORMAT_TOOLBAR_ICON_SIZE_PX,
+  FORMAT_TOOLBAR_STROKE_WIDTH,
+} from "./constants.ts";
+import {
   toggleBold,
   toggleItalic,
   toggleStrikethrough,
@@ -13,14 +20,14 @@ import {
   type FormatResult,
 } from "./format-ops.ts";
 
-interface FormatToolbarOptions {
+type FormatToolbarOptions = {
   contentEl: HTMLElement;
   applyIndent: (dedent: boolean) => void;
   onMutation: () => void;
   applySourceFormat: (transform: (md: string, start: number, end: number) => FormatResult) => void;
-}
+};
 
-interface FormatButtonsOpts {
+type FormatButtonsOpts = {
   applyIndent: (dedent: boolean) => void;
   afterInline: () => void;
   afterBlock: () => void;
@@ -28,11 +35,13 @@ interface FormatButtonsOpts {
   // is only needed for side-effects like hiding the floating toolbar.
   afterIndent?: () => void;
   applySourceFormat: (transform: (md: string, start: number, end: number) => FormatResult) => void;
-}
+};
 
 export function populateFormatButtons(container: HTMLElement, opts: FormatButtonsOpts): void {
   const { applyIndent, afterInline, afterBlock, applySourceFormat } = opts;
   const afterIndent = opts.afterIndent ?? (() => void 0);
+  const size = FORMAT_TOOLBAR_ICON_SIZE_PX;
+  const strokeWidth = FORMAT_TOOLBAR_STROKE_WIDTH;
 
   function btn(innerHTML: string, title: string, action: () => void) {
     const el = document.createElement("button");
@@ -73,7 +82,7 @@ export function populateFormatButtons(container: HTMLElement, opts: FormatButton
   });
 
   btn(
-    `<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3L13 7L6.5 13.5H3V10L9 3Z"/><line x1="6" y1="7" x2="10" y2="11"/><line x1="3" y1="13.5" x2="14" y2="13.5"/></svg>`,
+    `<svg width="${size}" height="${size}" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="${strokeWidth}" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3L13 7L6.5 13.5H3V10L9 3Z"/><line x1="6" y1="7" x2="10" y2="11"/><line x1="3" y1="13.5" x2="14" y2="13.5"/></svg>`,
     "Clear formatting",
     () => {
       applySourceFormat(clearInlineFormats);
@@ -83,7 +92,7 @@ export function populateFormatButtons(container: HTMLElement, opts: FormatButton
 
   sep();
 
-  for (const level of [1, 2, 3, 4] as const) {
+  for (const level of FORMAT_TOOLBAR_HEADING_LEVELS) {
     btn(`<span class="ftb-heading">H${level}</span>`, `Heading ${level}`, () => {
       applySourceFormat((md, start) => toggleHeading(md, start, level));
       afterBlock();
@@ -93,7 +102,7 @@ export function populateFormatButtons(container: HTMLElement, opts: FormatButton
   sep();
 
   btn(
-    `<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"><line x1="3" y1="4" x2="9" y2="4"/><line x1="3" y1="8" x2="13" y2="8"/><line x1="3" y1="12" x2="11" y2="12"/><polyline points="11,6 13,8 11,10" stroke-linejoin="round"/></svg>`,
+    `<svg width="${size}" height="${size}" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="${strokeWidth}" stroke-linecap="round"><line x1="3" y1="4" x2="9" y2="4"/><line x1="3" y1="8" x2="13" y2="8"/><line x1="3" y1="12" x2="11" y2="12"/><polyline points="11,6 13,8 11,10" stroke-linejoin="round"/></svg>`,
     "Indent",
     () => {
       applyIndent(false);
@@ -102,7 +111,7 @@ export function populateFormatButtons(container: HTMLElement, opts: FormatButton
   );
 
   btn(
-    `<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"><line x1="3" y1="4" x2="9" y2="4"/><line x1="3" y1="8" x2="13" y2="8"/><line x1="3" y1="12" x2="11" y2="12"/><polyline points="5,6 3,8 5,10" stroke-linejoin="round"/></svg>`,
+    `<svg width="${size}" height="${size}" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="${strokeWidth}" stroke-linecap="round"><line x1="3" y1="4" x2="9" y2="4"/><line x1="3" y1="8" x2="13" y2="8"/><line x1="3" y1="12" x2="11" y2="12"/><polyline points="5,6 3,8 5,10" stroke-linejoin="round"/></svg>`,
     "Dedent",
     () => {
       applyIndent(true);
@@ -113,7 +122,7 @@ export function populateFormatButtons(container: HTMLElement, opts: FormatButton
   sep();
 
   btn(
-    `<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="5,4 1,8 5,12"/><polyline points="11,4 15,8 11,12"/></svg>`,
+    `<svg width="${size}" height="${size}" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="${strokeWidth}" stroke-linecap="round" stroke-linejoin="round"><polyline points="5,4 1,8 5,12"/><polyline points="11,4 15,8 11,12"/></svg>`,
     "Code block",
     () => {
       applySourceFormat(toggleCodeFence);
@@ -246,15 +255,18 @@ function positionToolbar(toolbar: HTMLElement, range: Range) {
   }
 
   const tbRect = toolbar.getBoundingClientRect();
-  const GAP = 8;
+  const GAP = FORMAT_TOOLBAR_GAP_PX;
 
   let top = refRect.top - tbRect.height - GAP;
-  if (top < 8) {
+  if (top < FORMAT_TOOLBAR_EDGE_PADDING_PX) {
     top = refRect.bottom + GAP;
   }
 
   let left = refRect.left - tbRect.width / 2;
-  left = Math.max(8, Math.min(left, window.innerWidth - tbRect.width - 8));
+  left = Math.max(
+    FORMAT_TOOLBAR_EDGE_PADDING_PX,
+    Math.min(left, window.innerWidth - tbRect.width - FORMAT_TOOLBAR_EDGE_PADDING_PX),
+  );
 
   toolbar.style.top = `${top}px`;
   toolbar.style.left = `${left}px`;
