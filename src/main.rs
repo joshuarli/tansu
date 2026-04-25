@@ -5,7 +5,7 @@ use std::{
     net::{Shutdown, TcpListener, TcpStream},
     path::{Path, PathBuf},
     sync::{Arc, Mutex, mpsc},
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 use serde::{Deserialize, Serialize};
@@ -1595,6 +1595,18 @@ fn main() {
         encrypted,
         crypto_config,
     };
+
+    let heartbeat_client = srv.sse_client.clone();
+    std::thread::spawn(move || {
+        loop {
+            std::thread::sleep(Duration::from_secs(15));
+            let mut guard = heartbeat_client.lock().unwrap();
+            if let Some(ref mut stream) = *guard
+                && stream.write_all(b":\n\n").is_err() {
+                    *guard = None;
+                }
+        }
+    });
 
     for stream in listener.incoming() {
         match stream {

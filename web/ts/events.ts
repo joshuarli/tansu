@@ -10,6 +10,7 @@ interface EventMap {
   "pinned:changed": undefined;
   "revision:restore": { content: string; mtime: number };
   "file:rename": { oldPath: string; newPath: string };
+  notification: { msg: string; type: "error" | "info" | "success" };
 }
 
 type Handler<T> = (data: T) => void;

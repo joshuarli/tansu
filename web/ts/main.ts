@@ -141,7 +141,7 @@ async function startApp() {
     appInitialized = true;
   }
   await openStore();
-  connectSSE();
+  if (!sse) connectSSE();
   restoreSession();
 }
 
@@ -327,6 +327,8 @@ function showNotification(msg: string, type: "error" | "info" | "success" = "err
   }, 5000);
 }
 
+on("notification", ({ msg, type }) => showNotification(msg, type));
+
 function createBackoff(delays: number[]) {
   let attempt = 0;
   let unavailable = false;
@@ -380,6 +382,7 @@ function connectSSE() {
   sse = es;
 
   es.addEventListener("connected", () => {
+    if (sse !== es) return;
     sseBackoff.reset();
     if (sseBackoff.wasUnavailable) {
       sseBackoff.wasUnavailable = false;
@@ -416,12 +419,14 @@ function connectSSE() {
   });
 
   es.addEventListener("locked", () => {
+    if (sse !== es) return;
     es.close();
     sse = null;
     showUnlockScreen();
   });
 
   es.onerror = () => {
+    if (sse !== es) return;
     es.close();
     sse = null;
     if (pageUnloading) {

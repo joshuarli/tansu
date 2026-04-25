@@ -1,7 +1,7 @@
 NAME       := tansu
 TARGET     := $(shell rustc -vV | awk '/^host:/ {print $$2}')
 
-dev:
+dev: clean
 	pnpm run bundle-dev
 	cargo run --bin tansu -- $(NOTES_DIR) --port 3000
 
@@ -78,4 +78,4 @@ pc:
 	prek run --all-files
 
 clean:
-	rm -rf $(NOTES_DIR)/.tansu/index
+	trash $(NOTES_DIR)/.tansu

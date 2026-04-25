@@ -246,8 +246,9 @@ export async function createNewNote(name: string) {
     await createNote(path);
     emit("files:changed");
     await openTab(path);
-  } catch {
-    console.error(`Failed to create note ${path}`);
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    emit("notification", { msg: `Failed to create note ${path}: ${reason}`, type: "error" });
   }
 }
 
