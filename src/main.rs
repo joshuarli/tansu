@@ -172,7 +172,11 @@ impl Server {
             part.as_bytes().ct_eq(expected.as_bytes()).into()
         });
         if valid {
-            self.vaults[self.active].session.as_mut().unwrap().last_activity = Instant::now();
+            self.vaults[self.active]
+                .session
+                .as_mut()
+                .unwrap()
+                .last_activity = Instant::now();
         }
         valid
     }
@@ -205,15 +209,23 @@ impl Server {
             match event {
                 WatchEvent::Modified(path) | WatchEvent::Created(path) => {
                     if let Ok(content) = self.read_content(&path) {
-                        let rel = path.strip_prefix(&self.vaults[self.active].dir).unwrap_or(&path);
+                        let rel = path
+                            .strip_prefix(&self.vaults[self.active].dir)
+                            .unwrap_or(&path);
                         let rel_str = rel.to_string_lossy().into_owned();
-                        self.vaults[self.active].index.index_note(&rel_str, &content, &path);
-                        self.vaults[self.active].file_index.index_file(&rel_str, mtime_secs(&path));
+                        self.vaults[self.active]
+                            .index
+                            .index_note(&rel_str, &content, &path);
+                        self.vaults[self.active]
+                            .file_index
+                            .index_file(&rel_str, mtime_secs(&path));
                         self.broadcast_sse("changed", &rel_str);
                     }
                 }
                 WatchEvent::Removed(path) => {
-                    let rel = path.strip_prefix(&self.vaults[self.active].dir).unwrap_or(&path);
+                    let rel = path
+                        .strip_prefix(&self.vaults[self.active].dir)
+                        .unwrap_or(&path);
                     let rel_str = rel.to_string_lossy().into_owned();
                     self.vaults[self.active].index.remove_note(&rel_str);
                     self.vaults[self.active].file_index.remove_file(&rel_str);
@@ -233,7 +245,8 @@ impl Server {
     }
 
     fn mark_self_write(&self, path: &Path) {
-        self.vaults[self.active].self_writes
+        self.vaults[self.active]
+            .self_writes
             .lock()
             .unwrap()
             .insert(path.to_path_buf(), Instant::now());
@@ -288,14 +301,19 @@ impl Server {
             if path.extension().is_some_and(|e| e == "md")
                 && let Ok(content) = vault.read_to_string(path)
             {
-                let rel = path.strip_prefix(&self.vaults[self.active].dir).unwrap_or(path);
-                self.vaults[self.active].index
+                let rel = path
+                    .strip_prefix(&self.vaults[self.active].dir)
+                    .unwrap_or(path);
+                self.vaults[self.active]
+                    .index
                     .index_note(&rel.to_string_lossy(), &content, path);
             }
         }
         self.vaults[self.active].index.commit();
-        self.vaults[self.active].file_index
-            .full_reindex(&self.vaults[self.active].dir, &self.vaults[self.active].settings.excluded_folders);
+        self.vaults[self.active].file_index.full_reindex(
+            &self.vaults[self.active].dir,
+            &self.vaults[self.active].settings.excluded_folders,
+        );
     }
 
     fn handle(&mut self, mut stream: TcpStream) -> io::Result<()> {
@@ -519,8 +537,7 @@ impl Server {
                 && path.starts_with("/api/vaults/")
                 && path.ends_with("/activate") =>
             {
-                let idx_str =
-                    &path["/api/vaults/".len()..path.len() - "/activate".len()];
+                let idx_str = &path["/api/vaults/".len()..path.len() - "/activate".len()];
                 match idx_str.parse::<usize>() {
                     Ok(n) => self.api_activate_vault(stream, n),
                     Err(_) => write_error(stream, 400, "Bad vault index"),
@@ -575,16 +592,18 @@ impl Server {
 
     fn api_status(&self, sock: &TcpStream) -> io::Result<()> {
         let locked = self.is_locked();
-        let needs_setup = self.vaults[self.active].encrypted && self.vaults[self.active].crypto_config.is_none();
+        let needs_setup =
+            self.vaults[self.active].encrypted && self.vaults[self.active].crypto_config.is_none();
         // Credential IDs are needed for WebAuthn allowCredentials (must be public)
-        let prf_ids: Vec<&str> = self
-            .vaults[self.active].crypto_config
+        let prf_ids: Vec<&str> = self.vaults[self.active]
+            .crypto_config
             .as_ref()
             .map(|c| c.prf_credentials.iter().map(|p| p.id.as_str()).collect())
             .unwrap_or_default();
         // Credential names leak device info — only send when unlocked
         let prf_names: Vec<&str> = if !locked {
-            self.vaults[self.active].crypto_config
+            self.vaults[self.active]
+                .crypto_config
                 .as_ref()
                 .map(|c| c.prf_credentials.iter().map(|p| p.name.as_str()).collect())
                 .unwrap_or_default()
@@ -838,8 +857,12 @@ impl Server {
 
         revisions::save_revision(&self.vaults[self.active].dir, &rel, &full);
         self.write_content(&full, req.content.as_bytes())?;
-        self.vaults[self.active].index.index_note(&rel, &req.content, &full);
-        self.vaults[self.active].file_index.index_file(&rel, mtime_secs(&full));
+        self.vaults[self.active]
+            .index
+            .index_note(&rel, &req.content, &full);
+        self.vaults[self.active]
+            .file_index
+            .index_file(&rel, mtime_secs(&full));
 
         respond_json(
             stream,
@@ -882,8 +905,12 @@ impl Server {
         };
 
         self.write_content(&full, content.as_bytes())?;
-        self.vaults[self.active].index.index_note(&rel, &content, &full);
-        self.vaults[self.active].file_index.index_file(&rel, mtime_secs(&full));
+        self.vaults[self.active]
+            .index
+            .index_note(&rel, &content, &full);
+        self.vaults[self.active]
+            .file_index
+            .index_file(&rel, mtime_secs(&full));
 
         respond_json_status(
             stream,
@@ -932,7 +959,9 @@ impl Server {
 
         let old_full = self.vaults[self.active].dir.join(&req.old_path);
         let new_full = self.vaults[self.active].dir.join(&req.new_path);
-        if !old_full.starts_with(&self.vaults[self.active].dir) || !new_full.starts_with(&self.vaults[self.active].dir) {
+        if !old_full.starts_with(&self.vaults[self.active].dir)
+            || !new_full.starts_with(&self.vaults[self.active].dir)
+        {
             return write_error(stream, 403, "Forbidden");
         }
         if !old_full.exists() {
@@ -953,10 +982,15 @@ impl Server {
         fs::rename(&old_full, &new_full)?;
 
         self.vaults[self.active].index.remove_note(&req.old_path);
-        self.vaults[self.active].file_index.remove_file(&req.old_path);
+        self.vaults[self.active]
+            .file_index
+            .remove_file(&req.old_path);
         if let Ok(content) = self.read_content(&new_full) {
-            self.vaults[self.active].index.index_note(&req.new_path, &content, &new_full);
-            self.vaults[self.active].file_index
+            self.vaults[self.active]
+                .index
+                .index_note(&req.new_path, &content, &new_full);
+            self.vaults[self.active]
+                .file_index
                 .index_file(&req.new_path, mtime_secs(&new_full));
         }
 
@@ -985,7 +1019,9 @@ impl Server {
                         eprintln!("rename: failed to update {}: {e}", note_full.display());
                         continue;
                     }
-                    self.vaults[self.active].index.index_note(note_path, &new_content, &note_full);
+                    self.vaults[self.active]
+                        .index
+                        .index_note(note_path, &new_content, &note_full);
                     updated.push(note_path.clone());
                 }
             }
@@ -1096,7 +1132,12 @@ impl Server {
         };
         let ts: u64 = ts_str.parse().map_err(|_| io::Error::other("bad ts"))?;
 
-        match revisions::get_revision(&self.vaults[self.active].dir, &rel, ts, self.vaults[self.active].vault.as_ref()) {
+        match revisions::get_revision(
+            &self.vaults[self.active].dir,
+            &rel,
+            ts,
+            self.vaults[self.active].vault.as_ref(),
+        ) {
             Some(content) => respond_json(sock, &ContentResponse { content: &content }),
             None => write_error(sock, 404, "revision not found"),
         }
@@ -1138,7 +1179,8 @@ impl Server {
         header_len: usize,
     ) -> io::Result<()> {
         let new_settings: Settings = parse_body(stream, headers, raw_buf, header_len)?;
-        let needs_reindex = new_settings.excluded_folders != self.vaults[self.active].settings.excluded_folders;
+        let needs_reindex =
+            new_settings.excluded_folders != self.vaults[self.active].settings.excluded_folders;
         new_settings.save(&self.vaults[self.active].dir)?;
         self.vaults[self.active].settings = new_settings;
         if needs_reindex {
@@ -1173,15 +1215,23 @@ impl Server {
             return write_error(sock, 403, "Forbidden");
         }
 
-        let Some(rev_content) = revisions::get_revision(&self.vaults[self.active].dir, &rel, ts, self.vaults[self.active].vault.as_ref())
-        else {
+        let Some(rev_content) = revisions::get_revision(
+            &self.vaults[self.active].dir,
+            &rel,
+            ts,
+            self.vaults[self.active].vault.as_ref(),
+        ) else {
             return write_error(sock, 404, "revision not found");
         };
 
         revisions::save_revision(&self.vaults[self.active].dir, &rel, &full);
         self.write_content(&full, rev_content.as_bytes())?;
-        self.vaults[self.active].index.index_note(&rel, &rev_content, &full);
-        self.vaults[self.active].file_index.index_file(&rel, mtime_secs(&full));
+        self.vaults[self.active]
+            .index
+            .index_note(&rel, &rev_content, &full);
+        self.vaults[self.active]
+            .file_index
+            .index_file(&rel, mtime_secs(&full));
 
         respond_json(
             sock,
@@ -1247,13 +1297,16 @@ impl Server {
         let entries: Vec<serde_json::Value> = paths
             .iter()
             .map(|p| {
-                let title = self.vaults[self.active].file_index.lookup_path(p).unwrap_or_else(|| {
-                    Path::new(p)
-                        .file_stem()
-                        .and_then(|s| s.to_str())
-                        .unwrap_or(p)
-                        .to_string()
-                });
+                let title = self.vaults[self.active]
+                    .file_index
+                    .lookup_path(p)
+                    .unwrap_or_else(|| {
+                        Path::new(p)
+                            .file_stem()
+                            .and_then(|s| s.to_str())
+                            .unwrap_or(p)
+                            .to_string()
+                    });
                 serde_json::json!({ "path": p, "title": title })
             })
             .collect();
@@ -1419,11 +1472,10 @@ fn expand_tilde(s: &str) -> PathBuf {
         if let Some(home) = env::var_os("HOME") {
             return PathBuf::from(home).join(rest);
         }
-    } else if s == "~" {
-        if let Some(home) = env::var_os("HOME") {
+    } else if s == "~"
+        && let Some(home) = env::var_os("HOME") {
             return PathBuf::from(home);
         }
-    }
     PathBuf::from(s)
 }
 
@@ -1476,9 +1528,7 @@ fn load_vault_configs(config_path: &Path) -> Vec<(String, PathBuf)> {
         .collect()
 }
 
-/// Check that no two configured vaults are nested inside each other, and that no vault
-/// is nested inside a vault not in the config (detected via .tansu/ ancestor dir).
-fn check_vault_nesting(vaults: &[(String, PathBuf)]) {
+fn validate_vault_nesting(vaults: &[(String, PathBuf)]) -> Result<(), String> {
     // Pairwise: catches nesting between freshly-configured vaults with no .tansu/ yet.
     for i in 0..vaults.len() {
         for j in 0..vaults.len() {
@@ -1488,7 +1538,7 @@ fn check_vault_nesting(vaults: &[(String, PathBuf)]) {
             let (name_i, dir_i) = &vaults[i];
             let (name_j, dir_j) = &vaults[j];
             if dir_i.starts_with(dir_j) {
-                die(&format!(
+                return Err(format!(
                     "vault.{name_i} ({}) is nested inside vault.{name_j} ({})",
                     dir_i.display(),
                     dir_j.display()
@@ -1501,7 +1551,7 @@ fn check_vault_nesting(vaults: &[(String, PathBuf)]) {
         let mut ancestor = dir.parent();
         while let Some(p) = ancestor {
             if p.join(".tansu").is_dir() {
-                die(&format!(
+                return Err(format!(
                     "vault.{name} ({}) is nested inside another vault at {}",
                     dir.display(),
                     p.display()
@@ -1509,6 +1559,13 @@ fn check_vault_nesting(vaults: &[(String, PathBuf)]) {
             }
             ancestor = p.parent();
         }
+    }
+    Ok(())
+}
+
+fn check_vault_nesting(vaults: &[(String, PathBuf)]) {
+    if let Err(msg) = validate_vault_nesting(vaults) {
+        die(&msg);
     }
 }
 
@@ -1809,5 +1866,75 @@ fn main() {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn expand_tilde_bare() {
+        let home = env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
+        assert_eq!(expand_tilde("~"), home);
+    }
+
+    #[test]
+    fn expand_tilde_with_path() {
+        let home = env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
+        assert_eq!(expand_tilde("~/foo/bar"), home.join("foo/bar"));
+    }
+
+    #[test]
+    fn expand_tilde_absolute() {
+        assert_eq!(expand_tilde("/absolute/path"), PathBuf::from("/absolute/path"));
+    }
+
+    #[test]
+    fn expand_tilde_relative() {
+        assert_eq!(expand_tilde("relative/path"), PathBuf::from("relative/path"));
+    }
+
+    #[test]
+    fn nesting_ok_disjoint() {
+        let tmp = std::env::temp_dir();
+        let a = tmp.join("tansu-test-a");
+        let b = tmp.join("tansu-test-b");
+        fs::create_dir_all(&a).unwrap();
+        fs::create_dir_all(&b).unwrap();
+        let vaults = vec![("a".to_string(), a.clone()), ("b".to_string(), b.clone())];
+        assert!(validate_vault_nesting(&vaults).is_ok());
+        fs::remove_dir_all(&a).ok();
+        fs::remove_dir_all(&b).ok();
+    }
+
+    #[test]
+    fn nesting_err_pairwise() {
+        let tmp = std::env::temp_dir();
+        let outer = tmp.join("tansu-test-outer");
+        let inner = outer.join("inner");
+        fs::create_dir_all(&inner).unwrap();
+        let vaults = vec![
+            ("outer".to_string(), outer.clone()),
+            ("inner".to_string(), inner.clone()),
+        ];
+        let err = validate_vault_nesting(&vaults).unwrap_err();
+        assert!(err.contains("vault.inner") && err.contains("vault.outer"), "{err}");
+        fs::remove_dir_all(&outer).ok();
+    }
+
+    #[test]
+    fn nesting_err_walkup() {
+        let tmp = std::env::temp_dir();
+        let outer = tmp.join("tansu-test-walkup-outer");
+        let inner = outer.join("notes");
+        let tansu_dir = outer.join(".tansu");
+        fs::create_dir_all(&inner).unwrap();
+        fs::create_dir_all(&tansu_dir).unwrap();
+        let vaults = vec![("notes".to_string(), inner.clone())];
+        let err = validate_vault_nesting(&vaults).unwrap_err();
+        assert!(err.contains("vault.notes") && err.contains("nested inside"), "{err}");
+        fs::remove_dir_all(&outer).ok();
     }
 }

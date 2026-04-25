@@ -12,7 +12,6 @@ import {
 import { initEditor, invalidateNoteCache, type EditorInstance } from "./editor.ts";
 import { emit, on } from "./events.ts";
 import { initFileNav } from "./filenav.ts";
-import { initVaultSwitcher, refreshVaultSwitcher } from "./vault-switcher.ts";
 import { openStore } from "./local-store.ts";
 import { createPalette, matchesKey } from "./palette.ts";
 import { createSearch } from "./search.ts";
@@ -30,6 +29,7 @@ import {
   syncToServer,
 } from "./tab-state.ts";
 import { promptNewNote } from "./tabs.ts";
+import { initVaultSwitcher, refreshVaultSwitcher } from "./vault-switcher.ts";
 import { isPrfLikelySupported, getPrfKey } from "./webauthn.ts";
 import { registerWikiLinkClickHandler } from "./wikilinks.ts";
 
