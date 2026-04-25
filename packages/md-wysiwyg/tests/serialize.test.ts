@@ -244,6 +244,34 @@ describe("serialize", () => {
     expect(domToMarkdown(html(calloutHtml))).toContain("> This is important");
   });
 
+  it("nbsp in plain text normalizes to space", () => {
+    expect(domToMarkdown(html("<p>hello world</p>"))).toBe("hello world");
+  });
+
+  it("trailing nbsp normalizes to space", () => {
+    expect(domToMarkdown(html("<p>hello </p>"))).toBe("hello ");
+  });
+
+  it("consecutive nbsp normalizes to spaces", () => {
+    expect(domToMarkdown(html("<p>a  b</p>"))).toBe("a  b");
+  });
+
+  it("nbsp inside bold normalizes to space", () => {
+    expect(domToMarkdown(html("<p><strong>foo bar</strong></p>"))).toBe("**foo bar**");
+  });
+
+  it("nbsp inside italic normalizes to space", () => {
+    expect(domToMarkdown(html("<p><em>foo bar</em></p>"))).toBe("*foo bar*");
+  });
+
+  it("zero-width space is stripped", () => {
+    expect(domToMarkdown(html("<p>foo​bar</p>"))).toBe("foobar");
+  });
+
+  it("mixed nbsp and zero-width space", () => {
+    expect(domToMarkdown(html("<p>a​ b</p>"))).toBe("a b");
+  });
+
   it("nested bold italic", () => {
     expect(domToMarkdown(html("<p><strong><em>bold italic</em></strong></p>"))).toBe(
       "***bold italic***",

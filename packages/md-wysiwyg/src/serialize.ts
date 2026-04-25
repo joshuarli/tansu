@@ -199,7 +199,7 @@ function inlineNodesToMd(nodes: Iterable<Node>, skip?: (node: Node) => boolean):
     }
 
     if (node.nodeType === Node.TEXT_NODE) {
-      md += (node.textContent ?? "").replaceAll("\u200b", "");
+      md += (node.textContent ?? "").replaceAll("\u200b", "").replaceAll("\u00a0", " ");
     } else if (node.nodeType === Node.ELEMENT_NODE) {
       const child = node as HTMLElement;
       const childTag = child.tagName;
