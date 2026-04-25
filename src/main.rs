@@ -8,8 +8,12 @@ use std::{
     time::Instant,
 };
 
-use serde::{Deserialize, Serialize};
-
+use tansu::api_types::{
+    AppStatus, ContentResponse, CreateNoteRequest, FieldScores, FileSearchResult, FilenameResponse,
+    NoteEntry, NoteResponse, OkResponse, PinRequest, PinnedFileEntry, PrfRegisterRequest,
+    PrfRemoveRequest, PutNoteRequest, RecentFileEntry, RenameRequest, RenameResponse, SaveResult,
+    SearchHit, SessionState as SessionStateJson, UnlockRequest, VaultEntry,
+};
 use tansu::crypto::{self, CryptoConfig, Vault};
 use tansu::filenames::FileNameIndex;
 use tansu::http::*;
@@ -26,91 +30,6 @@ static EMBED_STYLE_CSS: &[u8] = include_bytes!("../web/static/style.css");
 static EMBED_INDEX_HTML: &[u8] = include_bytes!("../web/index.html");
 
 const SESSION_TIMEOUT_SECS: u64 = 24 * 60 * 60; // 24 hours
-
-#[derive(Serialize)]
-struct NoteResponse<'a> {
-    content: &'a str,
-    mtime: u64,
-}
-
-#[derive(Serialize)]
-struct MtimeResponse {
-    mtime: u64,
-}
-
-#[derive(Serialize)]
-struct ConflictResponse<'a> {
-    conflict: bool,
-    content: &'a str,
-    mtime: u64,
-}
-
-#[derive(Serialize)]
-struct SearchHit<'a> {
-    path: &'a str,
-    title: &'a str,
-    excerpt: &'a str,
-    score: f32,
-    field_scores: FieldScoresJson,
-}
-
-#[derive(Serialize)]
-struct FieldScoresJson {
-    title: f32,
-    headings: f32,
-    tags: f32,
-    content: f32,
-}
-
-#[derive(Serialize)]
-struct NoteListEntry<'a> {
-    path: &'a str,
-    title: &'a str,
-}
-
-#[derive(Serialize)]
-struct RenameResponse {
-    updated: Vec<String>,
-}
-
-#[derive(Serialize)]
-struct FilenameResponse<'a> {
-    filename: &'a str,
-}
-
-#[derive(Serialize)]
-struct ContentResponse<'a> {
-    content: &'a str,
-}
-
-#[derive(Serialize)]
-struct OkResponse {
-    ok: bool,
-}
-
-#[derive(Deserialize)]
-struct PutNoteRequest {
-    content: String,
-    #[serde(default)]
-    expected_mtime: u64,
-}
-
-#[derive(Deserialize)]
-struct CreateNoteRequest {
-    #[serde(default)]
-    content: String,
-}
-
-#[derive(Deserialize)]
-struct RenameRequest {
-    old_path: String,
-    new_path: String,
-}
-
-#[derive(Deserialize)]
-struct PinRequest {
-    path: String,
-}
 
 struct SessionState {
     token: [u8; 32],
@@ -595,29 +514,31 @@ impl Server {
         let needs_setup =
             self.vaults[self.active].encrypted && self.vaults[self.active].crypto_config.is_none();
         // Credential IDs are needed for WebAuthn allowCredentials (must be public)
-        let prf_ids: Vec<&str> = self.vaults[self.active]
+        let prf_ids: Vec<String> = self.vaults[self.active]
             .crypto_config
             .as_ref()
-            .map(|c| c.prf_credentials.iter().map(|p| p.id.as_str()).collect())
+            .map(|c| c.prf_credentials.iter().map(|p| p.id.clone()).collect())
             .unwrap_or_default();
         // Credential names leak device info — only send when unlocked
-        let prf_names: Vec<&str> = if !locked {
+        let prf_names: Vec<String> = if !locked {
             self.vaults[self.active]
                 .crypto_config
                 .as_ref()
-                .map(|c| c.prf_credentials.iter().map(|p| p.name.as_str()).collect())
+                .map(|c| c.prf_credentials.iter().map(|p| p.name.clone()).collect())
                 .unwrap_or_default()
         } else {
             vec![]
         };
-        let json = serde_json::json!({
-            "locked": locked,
-            "needs_setup": needs_setup,
-            "encrypted": self.vaults[self.active].encrypted,
-            "prf_credential_ids": prf_ids,
-            "prf_credential_names": prf_names,
-        });
-        write_json(sock, &json.to_string())
+        respond_json(
+            sock,
+            &AppStatus {
+                locked,
+                encrypted: self.vaults[self.active].encrypted,
+                needs_setup,
+                prf_credential_ids: prf_ids,
+                prf_credential_names: prf_names,
+            },
+        )
     }
 
     fn api_unlock(
@@ -635,11 +556,9 @@ impl Server {
             None => return write_error(sock, 500, "No crypto config"),
         };
 
-        let body = read_body(sock, headers, raw_buf, header_len)?;
-        let req: serde_json::Value = serde_json::from_slice(&body)
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+        let req: UnlockRequest = parse_body(sock, headers, raw_buf, header_len)?;
 
-        let master = if let Some(rk_str) = req.get("recovery_key").and_then(|v| v.as_str()) {
+        let master = if let Some(rk_str) = req.recovery_key.as_deref() {
             let recovery = match crypto::parse_recovery_key(rk_str) {
                 Ok(r) => r,
                 Err(_) => return write_error(sock, 403, "Unlock failed"),
@@ -648,7 +567,7 @@ impl Server {
                 Ok(k) => k,
                 Err(_) => return write_error(sock, 403, "Unlock failed"),
             }
-        } else if let Some(prf_b64) = req.get("prf_key").and_then(|v| v.as_str()) {
+        } else if let Some(prf_b64) = req.prf_key.as_deref() {
             let prf_bytes =
                 base64::Engine::decode(&base64::engine::general_purpose::STANDARD, prf_b64)
                     .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
@@ -666,14 +585,16 @@ impl Server {
 
         self.reindex_with_vault();
 
-        write_json_with_cookie(sock, r#"{"ok":true}"#, &cookie)
+        let json = serde_json::to_string(&OkResponse { ok: true })
+            .map_err(|e| io::Error::other(e.to_string()))?;
+        write_json_with_cookie(sock, &json, &cookie)
     }
 
     fn api_lock(&mut self, sock: &TcpStream) -> io::Result<()> {
         if self.vaults[self.active].encrypted {
             self.lock_server();
         }
-        write_json(sock, r#"{"ok":true}"#)
+        respond_json(sock, &OkResponse { ok: true })
     }
 
     fn api_prf_register(
@@ -688,16 +609,7 @@ impl Server {
             None => return write_error(sock, 403, "Locked"),
         };
 
-        let body = read_body(sock, headers, raw_buf, header_len)?;
-
-        #[derive(Deserialize)]
-        struct PrfRegReq {
-            credential_id: String,
-            prf_key: String,
-            name: String,
-        }
-        let req: PrfRegReq = serde_json::from_slice(&body)
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+        let req: PrfRegisterRequest = parse_body(sock, headers, raw_buf, header_len)?;
 
         let prf_bytes =
             base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &req.prf_key)
@@ -734,14 +646,7 @@ impl Server {
             return write_error(sock, 403, "Locked");
         }
 
-        let body = read_body(sock, headers, raw_buf, header_len)?;
-
-        #[derive(Deserialize)]
-        struct PrfRemoveReq {
-            credential_id: String,
-        }
-        let req: PrfRemoveReq = serde_json::from_slice(&body)
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+        let req: PrfRemoveRequest = parse_body(sock, headers, raw_buf, header_len)?;
 
         let dir = self.vaults[self.active].dir.clone();
         let config = match &mut self.vaults[self.active].crypto_config {
@@ -774,11 +679,11 @@ impl Server {
         let hits: Vec<SearchHit> = results
             .iter()
             .map(|r| SearchHit {
-                path: &r.path,
-                title: &r.title,
-                excerpt: &r.excerpt,
+                path: r.path.clone(),
+                title: r.title.clone(),
+                excerpt: r.excerpt.clone(),
                 score: r.score,
-                field_scores: FieldScoresJson {
+                field_scores: FieldScores {
                     title: r.field_scores.title,
                     headings: r.field_scores.headings,
                     tags: r.field_scores.tags,
@@ -802,13 +707,7 @@ impl Server {
         }
         let content = self.read_content(&full)?;
         let mtime = mtime_secs(&full);
-        respond_json(
-            sock,
-            &NoteResponse {
-                content: &content,
-                mtime,
-            },
-        )
+        respond_json(sock, &NoteResponse { content, mtime })
     }
 
     fn api_put_note(
@@ -836,10 +735,10 @@ impl Server {
                 stream,
                 409,
                 "Conflict",
-                &ConflictResponse {
-                    conflict: true,
-                    content: &current_content,
+                &SaveResult {
                     mtime: current_mtime,
+                    conflict: Some(true),
+                    content: Some(current_content),
                 },
             );
         }
@@ -849,8 +748,10 @@ impl Server {
         if current_content == req.content {
             return respond_json(
                 stream,
-                &MtimeResponse {
+                &SaveResult {
                     mtime: current_mtime,
+                    conflict: None,
+                    content: None,
                 },
             );
         }
@@ -866,8 +767,10 @@ impl Server {
 
         respond_json(
             stream,
-            &MtimeResponse {
+            &SaveResult {
                 mtime: mtime_secs(&full),
+                conflict: None,
+                content: None,
             },
         )
     }
@@ -916,8 +819,10 @@ impl Server {
             stream,
             201,
             "Created",
-            &MtimeResponse {
+            &SaveResult {
                 mtime: mtime_secs(&full),
+                conflict: None,
+                content: None,
             },
         )
     }
@@ -1043,11 +948,11 @@ impl Server {
 
     fn api_list_notes(&self, sock: &TcpStream) -> io::Result<()> {
         let notes = self.vaults[self.active].index.get_all_notes();
-        let entries: Vec<NoteListEntry> = notes
+        let entries: Vec<NoteEntry> = notes
             .iter()
-            .map(|n| NoteListEntry {
-                path: &n.path,
-                title: &n.title,
+            .map(|n| NoteEntry {
+                path: n.path.clone(),
+                title: n.title.clone(),
             })
             .collect();
         respond_json(sock, &entries)
@@ -1110,7 +1015,7 @@ impl Server {
             201,
             "Created",
             &FilenameResponse {
-                filename: &filename,
+                filename: filename.clone(),
             },
         )
     }
@@ -1138,7 +1043,7 @@ impl Server {
             ts,
             self.vaults[self.active].vault.as_ref(),
         ) {
-            Some(content) => respond_json(sock, &ContentResponse { content: &content }),
+            Some(content) => respond_json(sock, &ContentResponse { content }),
             None => write_error(sock, 404, "revision not found"),
         }
     }
@@ -1159,8 +1064,8 @@ impl Server {
         header_len: usize,
     ) -> io::Result<()> {
         let body = read_body(stream, headers, raw_buf, header_len)?;
-        // Validate it's valid JSON
-        let _: serde_json::Value =
+        // Validate it matches the session state shape we persist.
+        let _: SessionStateJson =
             serde_json::from_slice(&body).map_err(|e| io::Error::other(e.to_string()))?;
         let path = self.vaults[self.active].dir.join(".tansu/state.json");
         fs::write(&path, &body)?;
@@ -1235,8 +1140,10 @@ impl Server {
 
         respond_json(
             sock,
-            &MtimeResponse {
+            &SaveResult {
                 mtime: mtime_secs(&full),
+                conflict: None,
+                content: None,
             },
         )
     }
@@ -1247,33 +1154,27 @@ impl Server {
             return write_json(sock, "[]");
         }
         let results = self.vaults[self.active].file_index.search_names(&q, 30);
-        let hits: Vec<serde_json::Value> = results
+        let hits: Vec<FileSearchResult> = results
             .iter()
-            .map(|r| {
-                serde_json::json!({
-                    "path": r.path,
-                    "title": r.title,
-                })
+            .map(|r| FileSearchResult {
+                path: r.path.clone(),
+                title: r.title.clone(),
             })
             .collect();
-        let json = serde_json::to_string(&hits).unwrap_or_else(|_| "[]".to_string());
-        write_json(sock, &json)
+        respond_json(sock, &hits)
     }
 
     fn api_recent_files(&self, sock: &TcpStream) -> io::Result<()> {
         let results = self.vaults[self.active].file_index.recent(50);
-        let entries: Vec<serde_json::Value> = results
+        let entries: Vec<RecentFileEntry> = results
             .iter()
-            .map(|r| {
-                serde_json::json!({
-                    "path": r.path,
-                    "title": r.title,
-                    "mtime": r.mtime,
-                })
+            .map(|r| RecentFileEntry {
+                path: r.path.clone(),
+                title: r.title.clone(),
+                mtime: r.mtime,
             })
             .collect();
-        let json = serde_json::to_string(&entries).unwrap_or_else(|_| "[]".to_string());
-        write_json(sock, &json)
+        respond_json(sock, &entries)
     }
 
     fn pinned_path(&self) -> PathBuf {
@@ -1294,7 +1195,7 @@ impl Server {
 
     fn api_get_pinned(&self, sock: &TcpStream) -> io::Result<()> {
         let paths = self.load_pinned();
-        let entries: Vec<serde_json::Value> = paths
+        let entries: Vec<PinnedFileEntry> = paths
             .iter()
             .map(|p| {
                 let title = self.vaults[self.active]
@@ -1307,11 +1208,13 @@ impl Server {
                             .unwrap_or(p)
                             .to_string()
                     });
-                serde_json::json!({ "path": p, "title": title })
+                PinnedFileEntry {
+                    path: p.clone(),
+                    title,
+                }
             })
             .collect();
-        let json = serde_json::to_string(&entries).unwrap_or_else(|_| "[]".to_string());
-        write_json(sock, &json)
+        respond_json(sock, &entries)
     }
 
     fn api_pin(
@@ -1348,18 +1251,16 @@ impl Server {
     }
 
     fn api_get_vaults(&self, sock: &TcpStream) -> io::Result<()> {
-        let vaults: Vec<serde_json::Value> = self
+        let vaults: Vec<VaultEntry> = self
             .vaults
             .iter()
             .enumerate()
-            .map(|(i, vs)| {
-                serde_json::json!({
-                    "index": i,
-                    "name": vs.name,
-                    "active": i == self.active,
-                    "encrypted": vs.encrypted,
-                    "locked": vs.encrypted && vs.vault.is_none(),
-                })
+            .map(|(i, vs)| VaultEntry {
+                index: i,
+                name: vs.name.clone(),
+                active: i == self.active,
+                encrypted: vs.encrypted,
+                locked: vs.encrypted && vs.vault.is_none(),
             })
             .collect();
         respond_json(sock, &vaults)
@@ -1473,9 +1374,10 @@ fn expand_tilde(s: &str) -> PathBuf {
             return PathBuf::from(home).join(rest);
         }
     } else if s == "~"
-        && let Some(home) = env::var_os("HOME") {
-            return PathBuf::from(home);
-        }
+        && let Some(home) = env::var_os("HOME")
+    {
+        return PathBuf::from(home);
+    }
     PathBuf::from(s)
 }
 
@@ -1888,12 +1790,18 @@ mod tests {
 
     #[test]
     fn expand_tilde_absolute() {
-        assert_eq!(expand_tilde("/absolute/path"), PathBuf::from("/absolute/path"));
+        assert_eq!(
+            expand_tilde("/absolute/path"),
+            PathBuf::from("/absolute/path")
+        );
     }
 
     #[test]
     fn expand_tilde_relative() {
-        assert_eq!(expand_tilde("relative/path"), PathBuf::from("relative/path"));
+        assert_eq!(
+            expand_tilde("relative/path"),
+            PathBuf::from("relative/path")
+        );
     }
 
     #[test]
@@ -1920,7 +1828,10 @@ mod tests {
             ("inner".to_string(), inner.clone()),
         ];
         let err = validate_vault_nesting(&vaults).unwrap_err();
-        assert!(err.contains("vault.inner") && err.contains("vault.outer"), "{err}");
+        assert!(
+            err.contains("vault.inner") && err.contains("vault.outer"),
+            "{err}"
+        );
         fs::remove_dir_all(&outer).ok();
     }
 
@@ -1934,7 +1845,10 @@ mod tests {
         fs::create_dir_all(&tansu_dir).unwrap();
         let vaults = vec![("notes".to_string(), inner.clone())];
         let err = validate_vault_nesting(&vaults).unwrap_err();
-        assert!(err.contains("vault.notes") && err.contains("nested inside"), "{err}");
+        assert!(
+            err.contains("vault.notes") && err.contains("nested inside"),
+            "{err}"
+        );
         fs::remove_dir_all(&outer).ok();
     }
 }

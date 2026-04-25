@@ -22,7 +22,9 @@ async function waitForServer(url: string, ms: number) {
     try {
       const r = await fetch(url);
       if (r.ok) return;
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
     await new Promise((r) => setTimeout(r, 100));
   }
   throw new Error(`server at ${url} did not start within ${ms}ms`);
@@ -60,7 +62,9 @@ describe("e2e: SSE connection stability", () => {
     });
     try {
       rmSync(notesDir, { recursive: true });
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   });
 
   it("no reconnect loop on normal load", async () => {

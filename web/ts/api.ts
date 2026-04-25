@@ -1,234 +1,65 @@
-export interface Note {
-  content: string;
-  mtime: number;
-}
+import type {
+  AppStatus,
+  ContentResponse,
+  CreateNoteRequest,
+  FileSearchResult,
+  FilenameResponse,
+  NoteEntry,
+  NoteResponse,
+  OkResponse,
+  PinRequest,
+  PinnedFileEntry,
+  PrfRegisterRequest,
+  PrfRemoveRequest,
+  PutNoteRequest,
+  RecentFileEntry,
+  RenameRequest,
+  RenameResponse,
+  SaveResult,
+  SearchHit,
+  SessionState,
+  Settings,
+  UnlockRequest,
+  VaultEntry,
+} from "./api.generated.ts";
 
-export interface FieldScores {
-  title: number;
-  headings: number;
-  tags: number;
-  content: number;
-}
+export type {
+  AppStatus,
+  ContentResponse,
+  CreateNoteRequest,
+  FileSearchResult,
+  FilenameResponse,
+  NoteEntry,
+  NoteResponse,
+  OkResponse,
+  PinRequest,
+  PinnedFileEntry,
+  PrfRegisterRequest,
+  PrfRemoveRequest,
+  PutNoteRequest,
+  RecentFileEntry,
+  RenameRequest,
+  RenameResponse,
+  SaveResult,
+  SearchHit,
+  SessionState,
+  Settings,
+  UnlockRequest,
+  VaultEntry,
+};
 
-export interface SearchResult {
-  path: string;
-  title: string;
-  excerpt: string;
-  score: number;
-  field_scores: FieldScores;
-}
+export type Note = NoteResponse;
+export type SearchResult = SearchHit;
 
-export interface NoteEntry {
-  path: string;
-  title: string;
-}
-
-export interface FileSearchResult {
-  path: string;
-  title: string;
-}
-
-export interface RecentFileEntry {
-  path: string;
-  title: string;
-  mtime: number;
-}
-
-export interface PinnedFileEntry {
-  path: string;
-  title: string;
-}
-
-type JsonObject = Record<string, unknown>;
-
-function expectObject(value: unknown, ctx: string): JsonObject {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new Error(`${ctx}: expected object`);
-  }
-  return value as JsonObject;
-}
-
-function expectString(value: unknown, ctx: string): string {
-  if (typeof value !== "string") {
-    throw new TypeError(`${ctx}: expected string`);
-  }
-  return value;
-}
-
-function expectNumber(value: unknown, ctx: string): number {
-  if (typeof value !== "number" || Number.isNaN(value)) {
-    throw new TypeError(`${ctx}: expected number`);
-  }
-  return value;
-}
-
-function expectBoolean(value: unknown, ctx: string): boolean {
-  if (typeof value !== "boolean") {
-    throw new TypeError(`${ctx}: expected boolean`);
-  }
-  return value;
-}
-
-function expectStringArray(value: unknown, ctx: string): string[] {
-  if (!Array.isArray(value)) {
-    throw new TypeError(`${ctx}: expected string[]`);
-  }
-  return value.map((entry, index) => expectString(entry, `${ctx}[${index}]`));
-}
-
-function expectNumberArray(value: unknown, ctx: string): number[] {
-  if (!Array.isArray(value)) {
-    throw new TypeError(`${ctx}: expected number[]`);
-  }
-  return value.map((entry, index) => expectNumber(entry, `${ctx}[${index}]`));
-}
-
-function expectArray<T>(
-  value: unknown,
-  ctx: string,
-  map: (entry: unknown, index: number) => T,
-): T[] {
-  if (!Array.isArray(value)) {
-    throw new TypeError(`${ctx}: expected array`);
-  }
-  return value.map((entry, index) => map(entry, index));
-}
-
-async function readJson(res: Response, ctx: string): Promise<unknown> {
+async function readJson<T>(res: Response, ctx: string): Promise<T> {
   try {
-    return await res.json();
+    return (await res.json()) as T;
   } catch (error) {
     throw new Error(
       `${ctx}: invalid JSON${error instanceof Error && error.message ? ` (${error.message})` : ""}`,
       { cause: error },
     );
   }
-}
-
-function parseFieldScores(value: unknown, ctx: string): FieldScores {
-  const obj = expectObject(value, ctx);
-  return {
-    title: expectNumber(obj["title"], `${ctx}.title`),
-    headings: expectNumber(obj["headings"], `${ctx}.headings`),
-    tags: expectNumber(obj["tags"], `${ctx}.tags`),
-    content: expectNumber(obj["content"], `${ctx}.content`),
-  };
-}
-
-function parseSearchResult(value: unknown, ctx: string): SearchResult {
-  const obj = expectObject(value, ctx);
-  return {
-    path: expectString(obj["path"], `${ctx}.path`),
-    title: expectString(obj["title"], `${ctx}.title`),
-    excerpt: expectString(obj["excerpt"], `${ctx}.excerpt`),
-    score: expectNumber(obj["score"], `${ctx}.score`),
-    field_scores: parseFieldScores(obj["field_scores"], `${ctx}.field_scores`),
-  };
-}
-
-function parseNote(value: unknown, ctx: string): Note {
-  const obj = expectObject(value, ctx);
-  return {
-    content: expectString(obj["content"], `${ctx}.content`),
-    mtime: expectNumber(obj["mtime"], `${ctx}.mtime`),
-  };
-}
-
-function parseMtimeResult(value: unknown, ctx: string): { mtime: number } {
-  const obj = expectObject(value, ctx);
-  return { mtime: expectNumber(obj["mtime"], `${ctx}.mtime`) };
-}
-
-function parseUpdatedResult(value: unknown, ctx: string): { updated: string[] } {
-  const obj = expectObject(value, ctx);
-  return { updated: expectStringArray(obj["updated"], `${ctx}.updated`) };
-}
-
-function parseNoteEntry(value: unknown, ctx: string): NoteEntry {
-  const obj = expectObject(value, ctx);
-  return {
-    path: expectString(obj["path"], `${ctx}.path`),
-    title: expectString(obj["title"], `${ctx}.title`),
-  };
-}
-
-function parseRecentFileEntry(value: unknown, ctx: string): RecentFileEntry {
-  const obj = expectObject(value, ctx);
-  return {
-    path: expectString(obj["path"], `${ctx}.path`),
-    title: expectString(obj["title"], `${ctx}.title`),
-    mtime: expectNumber(obj["mtime"], `${ctx}.mtime`),
-  };
-}
-
-function parsePinnedFileEntry(value: unknown, ctx: string): PinnedFileEntry {
-  const obj = expectObject(value, ctx);
-  return {
-    path: expectString(obj["path"], `${ctx}.path`),
-    title: expectString(obj["title"], `${ctx}.title`),
-  };
-}
-
-function parseSaveResult(value: unknown, ctx: string): SaveResult {
-  const obj = expectObject(value, ctx);
-  const { conflict, content } = obj;
-  return {
-    mtime: expectNumber(obj["mtime"], `${ctx}.mtime`),
-    ...(conflict === undefined ? {} : { conflict: expectBoolean(conflict, `${ctx}.conflict`) }),
-    ...(content === undefined ? {} : { content: expectString(content, `${ctx}.content`) }),
-  };
-}
-
-function parseSessionState(value: unknown, ctx: string): SessionState {
-  const obj = expectObject(value, ctx);
-  const { tabs, active, closed, cursors } = obj;
-
-  let parsedCursors: Record<string, number> | undefined;
-  if (cursors !== undefined) {
-    const cursorObj = expectObject(cursors, `${ctx}.cursors`);
-    parsedCursors = Object.fromEntries(
-      Object.entries(cursorObj).map(([path, offset]) => [
-        path,
-        expectNumber(offset, `${ctx}.cursors.${path}`),
-      ]),
-    );
-  }
-
-  return {
-    ...(tabs === undefined ? {} : { tabs: expectStringArray(tabs, `${ctx}.tabs`) }),
-    ...(active === undefined ? {} : { active: expectNumber(active, `${ctx}.active`) }),
-    ...(closed === undefined ? {} : { closed: expectStringArray(closed, `${ctx}.closed`) }),
-    ...(parsedCursors === undefined ? {} : { cursors: parsedCursors }),
-  };
-}
-
-function parseSettings(value: unknown, ctx: string): Settings {
-  const obj = expectObject(value, ctx);
-  return {
-    weight_title: expectNumber(obj["weight_title"], `${ctx}.weight_title`),
-    weight_headings: expectNumber(obj["weight_headings"], `${ctx}.weight_headings`),
-    weight_tags: expectNumber(obj["weight_tags"], `${ctx}.weight_tags`),
-    weight_content: expectNumber(obj["weight_content"], `${ctx}.weight_content`),
-    fuzzy_distance: expectNumber(obj["fuzzy_distance"], `${ctx}.fuzzy_distance`),
-    recency_boost: expectNumber(obj["recency_boost"], `${ctx}.recency_boost`),
-    result_limit: expectNumber(obj["result_limit"], `${ctx}.result_limit`),
-    show_score_breakdown: expectBoolean(obj["show_score_breakdown"], `${ctx}.show_score_breakdown`),
-    excluded_folders: expectStringArray(obj["excluded_folders"], `${ctx}.excluded_folders`),
-  };
-}
-
-function parseAppStatus(value: unknown, ctx: string): AppStatus {
-  const obj = expectObject(value, ctx);
-  return {
-    locked: expectBoolean(obj["locked"], `${ctx}.locked`),
-    encrypted: expectBoolean(obj["encrypted"], `${ctx}.encrypted`),
-    needs_setup: expectBoolean(obj["needs_setup"], `${ctx}.needs_setup`),
-    prf_credential_ids: expectStringArray(obj["prf_credential_ids"], `${ctx}.prf_credential_ids`),
-    prf_credential_names: expectStringArray(
-      obj["prf_credential_names"],
-      `${ctx}.prf_credential_names`,
-    ),
-  };
 }
 
 export async function searchNotes(q: string, path?: string): Promise<SearchResult[]> {
@@ -240,9 +71,7 @@ export async function searchNotes(q: string, path?: string): Promise<SearchResul
   if (!res.ok) {
     throw new Error(`search failed: ${res.status}`);
   }
-  return expectArray(await readJson(res, "search"), "search", (entry, index) =>
-    parseSearchResult(entry, `search[${index}]`),
-  );
+  return readJson<SearchResult[]>(res, "search");
 }
 
 export async function getNote(path: string): Promise<Note> {
@@ -250,13 +79,7 @@ export async function getNote(path: string): Promise<Note> {
   if (!res.ok) {
     throw new Error(`get note failed: ${res.status}`);
   }
-  return parseNote(await readJson(res, "get note"), "get note");
-}
-
-export interface SaveResult {
-  mtime: number;
-  conflict?: boolean;
-  content?: string;
+  return readJson<Note>(res, "get note");
 }
 
 export async function saveNote(
@@ -267,17 +90,16 @@ export async function saveNote(
   const res = await fetch(`/api/note?path=${encodeURIComponent(path)}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ content, expected_mtime: expectedMtime }),
+    body: JSON.stringify({ content, expected_mtime: expectedMtime } satisfies PutNoteRequest),
   });
-  const data = await readJson(res, "save note");
+  const data = await readJson<SaveResult>(res, "save note");
   if (res.status === 409) {
-    const parsed = parseSaveResult(data, "save note conflict");
-    return { ...parsed, conflict: true };
+    return { ...data, conflict: true };
   }
   if (!res.ok) {
     throw new Error(`save failed: ${res.status}`);
   }
-  return parseMtimeResult(data, "save note");
+  return data;
 }
 
 // Unconditional overwrite — server treats expected_mtime=0 as "skip conflict check".
@@ -285,16 +107,16 @@ export function forceSaveNote(path: string, content: string): Promise<SaveResult
   return saveNote(path, content, 0);
 }
 
-export async function createNote(path: string): Promise<{ mtime: number }> {
+export async function createNote(path: string): Promise<SaveResult> {
   const res = await fetch(`/api/note?path=${encodeURIComponent(path)}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ content: "" }),
+    body: JSON.stringify({ content: "" } satisfies CreateNoteRequest),
   });
   if (!res.ok) {
     throw new Error(`create failed: ${res.status}`);
   }
-  return parseMtimeResult(await readJson(res, "create note"), "create note");
+  return readJson<SaveResult>(res, "create note");
 }
 
 export async function deleteNote(path: string): Promise<void> {
@@ -304,16 +126,16 @@ export async function deleteNote(path: string): Promise<void> {
   }
 }
 
-export async function renameNote(oldPath: string, newPath: string): Promise<{ updated: string[] }> {
+export async function renameNote(oldPath: string, newPath: string): Promise<RenameResponse> {
   const res = await fetch("/api/rename", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ old_path: oldPath, new_path: newPath }),
+    body: JSON.stringify({ old_path: oldPath, new_path: newPath } satisfies RenameRequest),
   });
   if (!res.ok) {
     throw new Error(`rename failed: ${res.status}`);
   }
-  return parseUpdatedResult(await readJson(res, "rename note"), "rename note");
+  return readJson<RenameResponse>(res, "rename note");
 }
 
 export async function listNotes(): Promise<NoteEntry[]> {
@@ -321,9 +143,7 @@ export async function listNotes(): Promise<NoteEntry[]> {
   if (!res.ok) {
     throw new Error(`list failed: ${res.status}`);
   }
-  return expectArray(await readJson(res, "list notes"), "list notes", (entry, index) =>
-    parseNoteEntry(entry, `list notes[${index}]`),
-  );
+  return readJson<NoteEntry[]>(res, "list notes");
 }
 
 export async function searchFileNames(q: string): Promise<FileSearchResult[]> {
@@ -331,11 +151,7 @@ export async function searchFileNames(q: string): Promise<FileSearchResult[]> {
   if (!res.ok) {
     throw new Error(`filesearch failed: ${res.status}`);
   }
-  return expectArray(
-    await readJson(res, "search file names"),
-    "search file names",
-    (entry, index) => parseNoteEntry(entry, `search file names[${index}]`),
-  );
+  return readJson<FileSearchResult[]>(res, "search file names");
 }
 
 export async function getRecentFiles(): Promise<RecentFileEntry[]> {
@@ -343,9 +159,7 @@ export async function getRecentFiles(): Promise<RecentFileEntry[]> {
   if (!res.ok) {
     throw new Error(`recentfiles failed: ${res.status}`);
   }
-  return expectArray(await readJson(res, "recent files"), "recent files", (entry, index) =>
-    parseRecentFileEntry(entry, `recent files[${index}]`),
-  );
+  return readJson<RecentFileEntry[]>(res, "recent files");
 }
 
 export async function getPinnedFiles(): Promise<PinnedFileEntry[]> {
@@ -353,16 +167,14 @@ export async function getPinnedFiles(): Promise<PinnedFileEntry[]> {
   if (!res.ok) {
     throw new Error(`pinned failed: ${res.status}`);
   }
-  return expectArray(await readJson(res, "pinned files"), "pinned files", (entry, index) =>
-    parsePinnedFileEntry(entry, `pinned files[${index}]`),
-  );
+  return readJson<PinnedFileEntry[]>(res, "pinned files");
 }
 
 export async function pinFile(path: string): Promise<void> {
   const res = await fetch("/api/pin", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ path }),
+    body: JSON.stringify({ path } satisfies PinRequest),
   });
   if (!res.ok) {
     throw new Error(`pin failed: ${res.status}`);
@@ -373,7 +185,7 @@ export async function unpinFile(path: string): Promise<void> {
   const res = await fetch("/api/pin", {
     method: "DELETE",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ path }),
+    body: JSON.stringify({ path } satisfies PinRequest),
   });
   if (!res.ok) {
     throw new Error(`unpin failed: ${res.status}`);
@@ -385,7 +197,7 @@ export async function getBacklinks(path: string): Promise<string[]> {
   if (!res.ok) {
     throw new Error(`backlinks failed: ${res.status}`);
   }
-  return expectStringArray(await readJson(res, "backlinks"), "backlinks");
+  return readJson<string[]>(res, "backlinks");
 }
 
 export async function uploadImage(blob: Blob, filename: string): Promise<string> {
@@ -397,8 +209,8 @@ export async function uploadImage(blob: Blob, filename: string): Promise<string>
   if (!res.ok) {
     throw new Error(`upload failed: ${res.status}`);
   }
-  const data = expectObject(await readJson(res, "upload image"), "upload image");
-  return expectString(data["filename"], "upload image.filename");
+  const data = await readJson<FilenameResponse>(res, "upload image");
+  return data.filename;
 }
 
 export async function listRevisions(path: string): Promise<number[]> {
@@ -406,7 +218,7 @@ export async function listRevisions(path: string): Promise<number[]> {
   if (!res.ok) {
     throw new Error(`revisions failed: ${res.status}`);
   }
-  return expectNumberArray(await readJson(res, "list revisions"), "list revisions");
+  return readJson<number[]>(res, "list revisions");
 }
 
 export async function getRevision(path: string, ts: number): Promise<string> {
@@ -414,25 +226,18 @@ export async function getRevision(path: string, ts: number): Promise<string> {
   if (!res.ok) {
     throw new Error(`revision failed: ${res.status}`);
   }
-  const data = expectObject(await readJson(res, "get revision"), "get revision");
-  return expectString(data["content"], "get revision.content");
+  const data = await readJson<ContentResponse>(res, "get revision");
+  return data.content;
 }
 
-export async function restoreRevision(path: string, ts: number): Promise<{ mtime: number }> {
+export async function restoreRevision(path: string, ts: number): Promise<SaveResult> {
   const res = await fetch(`/api/restore?path=${encodeURIComponent(path)}&ts=${ts}`, {
     method: "POST",
   });
   if (!res.ok) {
     throw new Error(`restore failed: ${res.status}`);
   }
-  return parseMtimeResult(await readJson(res, "restore revision"), "restore revision");
-}
-
-export interface SessionState {
-  tabs?: string[];
-  active?: number;
-  closed?: string[];
-  cursors?: Record<string, number>;
+  return readJson<SaveResult>(res, "restore revision");
 }
 
 export async function getState(): Promise<SessionState> {
@@ -440,7 +245,7 @@ export async function getState(): Promise<SessionState> {
   if (!res.ok) {
     throw new Error(`state failed: ${res.status}`);
   }
-  return parseSessionState(await readJson(res, "get state"), "get state");
+  return readJson<SessionState>(res, "get state");
 }
 
 export async function saveState(state: SessionState): Promise<void> {
@@ -451,39 +256,19 @@ export async function saveState(state: SessionState): Promise<void> {
   });
 }
 
-export interface Settings {
-  weight_title: number;
-  weight_headings: number;
-  weight_tags: number;
-  weight_content: number;
-  fuzzy_distance: number;
-  recency_boost: number;
-  result_limit: number;
-  show_score_breakdown: boolean;
-  excluded_folders: string[];
-}
-
-export interface AppStatus {
-  locked: boolean;
-  encrypted: boolean;
-  needs_setup: boolean;
-  prf_credential_ids: string[];
-  prf_credential_names: string[];
-}
-
 export async function getStatus(): Promise<AppStatus> {
   const res = await fetch("/api/status");
   if (!res.ok) {
     throw new Error(`status failed: ${res.status}`);
   }
-  return parseAppStatus(await readJson(res, "get status"), "get status");
+  return readJson<AppStatus>(res, "get status");
 }
 
 export async function unlockWithRecoveryKey(recoveryKey: string): Promise<boolean> {
   const res = await fetch("/api/unlock", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ recovery_key: recoveryKey }),
+    body: JSON.stringify({ recovery_key: recoveryKey } satisfies UnlockRequest),
   });
   return res.ok;
 }
@@ -492,7 +277,7 @@ export async function unlockWithPrf(prfKeyB64: string): Promise<boolean> {
   const res = await fetch("/api/unlock", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ prf_key: prfKeyB64 }),
+    body: JSON.stringify({ prf_key: prfKeyB64 } satisfies UnlockRequest),
   });
   return res.ok;
 }
@@ -506,19 +291,25 @@ export async function registerPrf(
   prfKeyB64: string,
   name: string,
 ): Promise<boolean> {
+  const body: PrfRegisterRequest = {
+    credential_id: credentialId,
+    prf_key: prfKeyB64,
+    name,
+  };
   const res = await fetch("/api/prf/register", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ credential_id: credentialId, prf_key: prfKeyB64, name }),
+    body: JSON.stringify(body),
   });
   return res.ok;
 }
 
 export async function removePrf(credentialId: string): Promise<boolean> {
+  const body: PrfRemoveRequest = { credential_id: credentialId };
   const res = await fetch("/api/prf/remove", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ credential_id: credentialId }),
+    body: JSON.stringify(body),
   });
   return res.ok;
 }
@@ -528,7 +319,7 @@ export async function getSettings(): Promise<Settings> {
   if (!res.ok) {
     throw new Error(`settings failed: ${res.status}`);
   }
-  return parseSettings(await readJson(res, "get settings"), "get settings");
+  return readJson<Settings>(res, "get settings");
 }
 
 export async function saveSettings(settings: Settings): Promise<void> {
@@ -542,30 +333,12 @@ export async function saveSettings(settings: Settings): Promise<void> {
   }
 }
 
-export interface VaultEntry {
-  index: number;
-  name: string;
-  active: boolean;
-  encrypted: boolean;
-  locked: boolean;
-}
-
 export async function getVaults(): Promise<VaultEntry[]> {
   const res = await fetch("/api/vaults");
   if (!res.ok) {
     throw new Error(`vaults failed: ${res.status}`);
   }
-  const arr = expectArray(await readJson(res, "get vaults"), "get vaults", (v, i) => {
-    const obj = expectObject(v, `vaults[${i}]`);
-    return {
-      index: expectNumber(obj["index"], `vaults[${i}].index`),
-      name: expectString(obj["name"], `vaults[${i}].name`),
-      active: obj["active"] === true,
-      encrypted: obj["encrypted"] === true,
-      locked: obj["locked"] === true,
-    } satisfies VaultEntry;
-  });
-  return arr;
+  return readJson<VaultEntry[]>(res, "get vaults");
 }
 
 export async function activateVault(index: number): Promise<boolean> {

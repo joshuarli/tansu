@@ -2,8 +2,9 @@ use std::{fs, path::Path};
 
 use crate::index::SearchWeights;
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, TS)]
 #[serde(default)]
 pub struct Settings {
     pub weight_title: f32,

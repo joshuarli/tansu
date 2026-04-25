@@ -82,7 +82,7 @@ export default defineConfig({
     "sort-vars": "off",
 
     // Brace-less single-statement ifs are idiomatic and readable
-    "curly": "off",
+    curly: "off",
 
     // Function declaration vs expression is context-dependent
     "func-style": "off",

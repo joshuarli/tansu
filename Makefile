@@ -1,7 +1,7 @@
 NAME       := tansu
 TARGET     := $(shell rustc -vV | awk '/^host:/ {print $$2}')
 
-dev:
+dev: types
 	pnpm run bundle-dev
 	cargo run --bin tansu -- --port 3000
 
@@ -23,21 +23,24 @@ release-rs:
 publish-pkg:
 	cd packages/md-wysiwyg && pnpm run build && pnpm publish --access public
 
-ts: ts-lint ts-check
+types:
+	cargo run --quiet --bin gen-api-types
+
+ts: types ts-lint ts-check
 	pnpm run bundle-dev
 
 ts-lint:
 	oxfmt --config oxfmt.config.mjs web/ts/ packages/
 	oxlint --quiet --config oxlint.config.mjs web/ts/ packages/
 
-ts-check:
+ts-check: types
 	tsgo --noEmit --pretty false
 	pnpm run bundle-dev
 
-release-ts: ts-lint ts-check
+release-ts: types ts-lint ts-check
 	pnpm run bundle
 
-test: test-pkg test-ts test-rs
+test: types test-pkg test-ts test-rs
 
 test-pkg:
 	cd packages/md-wysiwyg && vitest run
