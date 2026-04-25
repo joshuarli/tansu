@@ -316,7 +316,16 @@ function initApp() {
 
 // Notification pill
 const notif = document.querySelector("#notification")!;
+const serverStatus = document.querySelector("#server-status")!;
 let notifTimer: ReturnType<typeof setTimeout> | null = null;
+
+function hideNotification() {
+  if (notifTimer) {
+    clearTimeout(notifTimer);
+    notifTimer = null;
+  }
+  notif.className = "notification hidden";
+}
 
 function showNotification(msg: string, type: "error" | "info" | "success" = "error") {
   notif.textContent = msg;
@@ -325,11 +334,23 @@ function showNotification(msg: string, type: "error" | "info" | "success" = "err
     clearTimeout(notifTimer);
   }
   notifTimer = setTimeout(() => {
-    notif.className = "notification hidden";
+    hideNotification();
   }, 5000);
 }
 
+notif.addEventListener("click", hideNotification);
+
 on("notification", ({ msg, type }) => showNotification(msg, type));
+
+function showServerStatus(msg: string) {
+  serverStatus.textContent = msg;
+  serverStatus.className = "server-status";
+}
+
+function hideServerStatus() {
+  serverStatus.textContent = "";
+  serverStatus.className = "server-status hidden";
+}
 
 function createBackoff(delays: number[]) {
   let attempt = 0;
@@ -388,10 +409,8 @@ function connectSSE() {
     sseBackoff.reset();
     if (sseBackoff.wasUnavailable) {
       sseBackoff.wasUnavailable = false;
-      showNotification("Server connection restored.", "success");
-    } else {
-      notif.className = "notification hidden";
     }
+    hideServerStatus();
     syncToServer();
   });
 
@@ -443,7 +462,7 @@ function connectSSE() {
     }
     sseBackoff.wasUnavailable = true;
     const delay = sseBackoff.next();
-    showNotification(`Server unavailable — retrying in ${sseBackoff.format(delay)}...`);
+    showServerStatus(`Server unavailable. Retrying in ${sseBackoff.format(delay)}...`);
     sseReconnectTimer = setTimeout(() => {
       sseReconnectTimer = null;
       connectSSE();

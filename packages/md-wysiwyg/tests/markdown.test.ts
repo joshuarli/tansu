@@ -152,8 +152,20 @@ describe("lists", () => {
   it("task checked", () => {
     expect(renderMarkdown("- [ ] todo\n- [x] done")).toContain("checked");
   });
+  it("task checkbox is interactive", () => {
+    expect(renderMarkdown("- [ ] todo\n- [x] done")).not.toContain("disabled");
+  });
+  it("task list hides bullets via class", () => {
+    expect(renderMarkdown("- [ ] todo\n- [x] done")).toContain('class="task-list"');
+  });
   it("task unchecked text", () => {
     expect(renderMarkdown("- [ ] todo\n- [x] done")).toContain("todo");
+  });
+  it("bare task line renders as an interactive checkbox", () => {
+    const html = renderMarkdown("[ ] todo\n[x] done");
+    expect(html).toContain('type="checkbox"');
+    expect(html).toContain("todo");
+    expect(html).not.toContain("disabled");
   });
   it("nested ul renders nested list", () => {
     const html = renderMarkdown("- parent\n  - child");

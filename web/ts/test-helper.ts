@@ -37,19 +37,20 @@ export type MockBody =
 
 const TANSU_HTML = `<!doctype html>
 <html><head></head><body>
-<div id="app">
-  <div id="sidebar">
-    <button id="sidebar-collapse"></button>
-    <div id="sidebar-header">
-      <input id="sidebar-search" type="text">
+  <div id="app">
+    <div id="sidebar">
+      <button id="sidebar-collapse"></button>
+      <div id="sidebar-header">
+        <input id="sidebar-search" type="text">
+      </div>
+      <div id="sidebar-tree"></div>
     </div>
-    <div id="sidebar-tree"></div>
-  </div>
-  <div id="notification" class="notification hidden"></div>
-  <div id="tab-bar"></div>
-  <div id="editor-area">
-    <div id="empty-state">empty</div>
-  </div>
+    <div id="notification" class="notification hidden"></div>
+    <div id="tab-bar"></div>
+    <div id="server-status" class="server-status hidden" aria-live="polite"></div>
+    <div id="editor-area">
+      <div id="empty-state">empty</div>
+    </div>
   <div id="search-overlay" class="hidden">
     <div id="search-modal">
       <input id="search-input" type="text">

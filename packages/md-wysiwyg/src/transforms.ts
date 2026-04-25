@@ -20,6 +20,24 @@ const CURSOR_ATTR = "data-block-cursor";
 // Space-triggered: fire on input when user completes a block-start pattern
 const inputTransforms: [RegExp, TransformFn][] = [
   [
+    new RegExp(`^\\[([ xX])\\]${SP}$`),
+    (block, text, contentEl) => {
+      const match = text.match(new RegExp(`^\\[([ xX])\\]${SP}$`));
+      if (!match) {
+        return false;
+      }
+      const checked = match[1] !== " ";
+      return replaceBlock(
+        block,
+        `<ul class="task-list"><li class="task-item"><input type="checkbox"${
+          checked ? " checked" : ""
+        }>&nbsp;<span ${CURSOR_ATTR}="1"></span></li></ul>`,
+        contentEl,
+      );
+    },
+  ],
+
+  [
     new RegExp(`^#{1,6}${SP}$`),
     (block, text, contentEl) => {
       const level = text.trimEnd().length;
@@ -253,6 +271,14 @@ export function handleBlockTransform(
     return;
   }
 
+  if (isTaskItemBlock(block)) {
+    if (continueTaskItem(block)) {
+      e.preventDefault();
+      onDirty?.();
+    }
+    return;
+  }
+
   const text = block.textContent ?? "";
 
   for (const [pattern, handler] of transforms) {
@@ -262,6 +288,35 @@ export function handleBlockTransform(
       return;
     }
   }
+}
+
+function isTaskItemBlock(block: HTMLElement): boolean {
+  if (block.tagName !== "LI") {
+    return false;
+  }
+  if (block.classList.contains("task-item")) {
+    return true;
+  }
+  return block.querySelector('input[type="checkbox"]') instanceof HTMLInputElement;
+}
+
+function continueTaskItem(block: HTMLElement): boolean {
+  const parent = block.parentElement;
+  if (!parent || parent.tagName !== "UL") {
+    return false;
+  }
+
+  const next = document.createElement("li");
+  next.className = "task-item";
+  next.innerHTML = `<input type="checkbox">&nbsp;<span ${CURSOR_ATTR}="1"></span>`;
+  block.after(next);
+
+  const marker = next.querySelector(`[${CURSOR_ATTR}]`);
+  if (marker instanceof HTMLElement) {
+    marker.removeAttribute(CURSOR_ATTR);
+    setCursorStart(marker);
+  }
+  return true;
 }
 
 function findBlock(node: Node | null, contentEl: HTMLElement): HTMLElement | null {

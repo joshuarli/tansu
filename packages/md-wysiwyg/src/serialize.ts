@@ -112,6 +112,15 @@ function blockToMd(el: HTMLElement): SerializedBlock | null {
     if (isBlankLineBlock(el)) {
       return { md: BLANK_LINE_SENTINEL, kind: "blank" };
     }
+    const checkbox = getDirectCheckbox(el);
+    if (checkbox) {
+      let text = normalizeListItemText(inlineNodesToMd(el.childNodes, isNestedListOrCheckbox));
+      text = text.replace(/^ /, "");
+      return {
+        md: `- [${checkbox.checked ? "x" : " "}] ${text}`,
+        kind: "list",
+      };
+    }
     return {
       md: hasDirectBlockChildren(el) ? containerToMd(el) : inlineToMd(el),
       kind: "paragraph",
@@ -265,10 +274,11 @@ function listToMd(listEl: HTMLElement, depth: number, ordered: boolean): string 
     if (child.tagName === "LI") {
       hasListItem = true;
       const checkbox = getDirectCheckbox(child);
-      const text = normalizeListItemText(inlineNodesToMd(child.childNodes, isNestedListOrCheckbox));
+      let text = normalizeListItemText(inlineNodesToMd(child.childNodes, isNestedListOrCheckbox));
       let prefix: string;
       if (checkbox && !ordered) {
         prefix = `- [${checkbox.checked ? "x" : " "}] `;
+        text = text.replace(/^ /, "");
       } else if (ordered) {
         prefix = `${i + 1}. `;
       } else {

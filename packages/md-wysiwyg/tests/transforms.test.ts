@@ -222,6 +222,46 @@ describe("transforms", () => {
     el.remove();
   });
 
+  it("task input transform", () => {
+    const el = makeContentEl();
+    expect(simulateInputTransform(el, "[ ] ")).toBeTruthy();
+    const ul = el.querySelector("ul.task-list");
+    expect(ul !== null).toBeTruthy();
+    const li = ul!.querySelector("li.task-item");
+    expect(li !== null).toBeTruthy();
+    const checkbox = li!.querySelector('input[type="checkbox"]') as HTMLInputElement;
+    expect(checkbox !== null).toBeTruthy();
+    expect(checkbox.checked).toBeFalsy();
+    el.remove();
+  });
+
+  it("task enter transform creates a new empty task item", () => {
+    const el = makeContentEl();
+    const ul = document.createElement("ul");
+    ul.className = "task-list";
+    const li = document.createElement("li");
+    li.className = "task-item";
+    li.innerHTML = '<input type="checkbox">&nbsp;foo';
+    ul.append(li);
+    el.append(ul);
+
+    const textNode = [...li.childNodes].find((node) => node.nodeType === Node.TEXT_NODE) as Text;
+    const range = document.createRange();
+    range.setStart(textNode, textNode.textContent?.length ?? 0);
+    range.collapse(true);
+    const sel = window.getSelection()!;
+    sel.removeAllRanges();
+    sel.addRange(range);
+
+    const event = new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
+    handleBlockTransform(event, el);
+
+    expect(el.querySelectorAll("li.task-item")).toHaveLength(2);
+    const next = el.querySelectorAll("li.task-item")[1]!;
+    expect(next.querySelector('input[type="checkbox"]')).not.toBeNull();
+    el.remove();
+  });
+
   it("bq input transform", () => {
     const el = makeContentEl();
     expect(simulateInputTransform(el, "> ")).toBeTruthy();

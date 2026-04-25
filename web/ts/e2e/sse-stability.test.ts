@@ -177,6 +177,8 @@ describe("e2e: SSE connection stability", () => {
 
     const notifClass = await page.getAttribute("#notification", "class");
     expect(notifClass).not.toContain("error");
+    const serverStatusClass = await page.getAttribute("#server-status", "class");
+    expect(serverStatusClass).toContain("hidden");
     await page.close();
   }, 40_000);
 });

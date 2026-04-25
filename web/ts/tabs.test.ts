@@ -90,7 +90,7 @@ describe("tabs", () => {
   it("tab labels match note titles", async () => {
     await openTwo();
     const tabBar = document.querySelector("#tab-bar")!;
-    const labels = tabBar.querySelectorAll(".tab:not(.tab-new) span:not(.close):not(.dirty)");
+    const labels = tabBar.querySelectorAll(".tab:not(.tab-new) .tab-label-text");
     expect(labels[0]!.textContent).toBe("alpha");
     expect(labels[1]!.textContent).toBe("beta");
     while (getTabs().length > 0) {
@@ -228,6 +228,7 @@ describe("tabs", () => {
     const tooltip = document.body.querySelector(".tab-tooltip") as HTMLElement;
     expect(tooltip !== null).toBeTruthy();
     expect(tooltip.style.display).toBe("block");
+    expect(tooltip.textContent).toBe("alpha (space to close)");
 
     tabEl.dispatchEvent(new MouseEvent("mouseleave", { bubbles: true }));
     expect(tooltip.style.display).toBe("none");

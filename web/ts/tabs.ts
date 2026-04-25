@@ -27,10 +27,10 @@ let hoveredTabIndex = -1;
 
 const tabTooltip = document.createElement("div");
 tabTooltip.className = "tab-tooltip";
-tabTooltip.textContent = "space to close";
 document.body.append(tabTooltip);
 
-function showTabTooltip(tabEl: HTMLElement) {
+function showTabTooltip(tabEl: HTMLElement, label: string) {
+  tabTooltip.textContent = label;
   const rect = tabEl.getBoundingClientRect();
   tabTooltip.style.top = `${rect.bottom + 6}px`;
   tabTooltip.style.left = `${rect.left + rect.width / 2}px`;
@@ -86,7 +86,11 @@ function render() {
     }
 
     const label = document.createElement("span");
-    label.textContent = tab.title;
+    label.className = "tab-label";
+    const labelText = document.createElement("span");
+    labelText.className = "tab-label-text";
+    labelText.textContent = tab.title;
+    label.append(labelText);
     el.append(label);
 
     const closeBtn = document.createElement("span");
@@ -100,7 +104,7 @@ function render() {
 
     el.addEventListener("mouseenter", () => {
       hoveredTabIndex = i;
-      showTabTooltip(el);
+      showTabTooltip(el, tab.title + " (space to close)");
     });
     el.addEventListener("mouseleave", () => {
       hoveredTabIndex = -1;

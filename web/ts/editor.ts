@@ -762,6 +762,28 @@ export function initEditor(): EditorInstance {
       }
     });
 
+    contentEl.addEventListener("change", (e) => {
+      const target = e.target;
+      if (!(target instanceof HTMLInputElement) || target.type !== "checkbox") {
+        return;
+      }
+      if (currentPath) {
+        markDirty(currentPath);
+      }
+      scheduleAutosave();
+    });
+
+    contentEl.addEventListener("click", (e) => {
+      const target = e.target;
+      if (!(target instanceof HTMLInputElement) || target.type !== "checkbox") {
+        return;
+      }
+      if (currentPath) {
+        markDirty(currentPath);
+      }
+      scheduleAutosave();
+    });
+
     sourceEl.addEventListener("input", () => {
       if (currentPath) {
         markDirty(currentPath);

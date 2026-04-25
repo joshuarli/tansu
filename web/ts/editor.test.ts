@@ -899,6 +899,67 @@ describe("editor", () => {
     hideEditor();
   });
 
+  it("typing bare task marker followed by space transforms into an interactive checkbox", async () => {
+    showEditor("task-input.md", "[ ]");
+    await new Promise((r) => setTimeout(r, 50));
+
+    const contentEl = document.querySelector(".editor-content") as HTMLElement;
+    contentEl.innerHTML = '<ul class="task-list"><li class="task-item">[ ] </li></ul>';
+    const li = contentEl.querySelector("li.task-item") as HTMLLIElement;
+    const textNode = li.firstChild as Text;
+    const range = document.createRange();
+    range.setStart(textNode, textNode.length);
+    range.collapse(true);
+    const sel = window.getSelection()!;
+    sel.removeAllRanges();
+    sel.addRange(range);
+
+    contentEl.dispatchEvent(new Event("input", { bubbles: true }));
+
+    expect(getCurrentContent()).toBe("- [ ] ");
+
+    hideEditor();
+  });
+
+  it("pressing Enter on a task item creates the next empty task item", async () => {
+    showEditor("task-enter.md", "[ ] foo");
+    await new Promise((r) => setTimeout(r, 50));
+
+    const contentEl = document.querySelector(".editor-content") as HTMLElement;
+    const li = contentEl.querySelector("li.task-item") as HTMLLIElement;
+    const textNode = [...li.childNodes].find((node) => node.nodeType === Node.TEXT_NODE) as Text;
+    const range = document.createRange();
+    range.setStart(textNode, textNode.textContent?.length ?? 0);
+    range.collapse(true);
+    const sel = window.getSelection()!;
+    sel.removeAllRanges();
+    sel.addRange(range);
+
+    contentEl.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }),
+    );
+
+    expect(contentEl.querySelectorAll("li.task-item")).toHaveLength(2);
+    expect(getCurrentContent()).toBe("- [ ] foo\n- [ ] ");
+
+    hideEditor();
+  });
+
+  it("WYSIWYG: nested task lists round-trip as markdown-compliant source", async () => {
+    const src =
+      "- [x] Parent Task\n  - [x] Completed Sub-task\n  - [ ] Pending Sub-task\n    - [ ] Deeply nested task";
+    showEditor("task-nesting.md", src);
+    await new Promise((r) => setTimeout(r, 50));
+
+    const contentEl = document.querySelector(".editor-content") as HTMLElement;
+    expect(contentEl.querySelectorAll("li.task-item")).toHaveLength(4);
+    expect(contentEl.querySelectorAll("ul.task-list")).toHaveLength(3);
+    expect(contentEl.querySelectorAll(".task-list li ul.task-list")).toHaveLength(2);
+    expect(getCurrentContent()).toBe(src);
+
+    hideEditor();
+  });
+
   it("paste plain text in WYSIWYG inserts text via execCommand", async () => {
     showEditor("paste-test.md", "# Paste");
     await new Promise((r) => setTimeout(r, 50));
@@ -944,5 +1005,22 @@ describe("editor", () => {
       closeTab(0);
     }
     mock.on("GET", "/api/note", { content: "# Test", mtime: 1000 });
+  });
+
+  it("task list checkboxes toggle and serialize back to markdown", async () => {
+    showEditor("checkbox.md", "- [ ] todo");
+    await new Promise((r) => setTimeout(r, 50));
+
+    const contentEl = document.querySelector(".editor-content") as HTMLElement;
+    const checkbox = contentEl.querySelector('input[type="checkbox"]') as HTMLInputElement;
+    expect(checkbox !== null).toBeTruthy();
+    expect(checkbox.disabled).toBeFalsy();
+
+    checkbox.click();
+    checkbox.dispatchEvent(new Event("change", { bubbles: true }));
+
+    expect(getCurrentContent()).toBe("- [x] todo");
+
+    hideEditor();
   });
 });

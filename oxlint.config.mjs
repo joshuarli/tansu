@@ -184,6 +184,10 @@ export default defineConfig({
     // .map(fn) is idiomatic and safe; forcing .map(x => fn(x)) everywhere is noise
     "unicorn/no-array-callback-reference": "off",
 
+    // Prefer direct property access over destructuring for simple event handlers
+    "eslint/prefer-destructuring": "off",
+    "prefer-destructuring": "off",
+
     // Conflicts with oxfmt: oxfmt lowercases hex digits, this rule wants uppercase
     "unicorn/number-literal-case": "off",
 

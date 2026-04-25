@@ -191,6 +191,13 @@ describe("serialize", () => {
     expect(domToMarkdown(root)).toBe("- [ ] todo\n- [x] done");
   });
 
+  it("bare task line", () => {
+    const root = html(
+      '<ul class="task-list"><li class="task-item"><input type="checkbox"> todo</li><li class="task-item"><input type="checkbox" checked> done</li></ul>',
+    );
+    expect(domToMarkdown(root)).toBe("- [ ] todo\n- [x] done");
+  });
+
   it("code block with lang", () => {
     expect(domToMarkdown(html('<pre><code class="language-js">const x = 1;</code></pre>'))).toBe(
       "```js\nconst x = 1;\n```",

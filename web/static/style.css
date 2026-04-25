@@ -9,6 +9,7 @@
   --fg-muted: #57606a;
   --bg: #fff;
   --bg-subtle: #f6f8fa;
+  --bg-red: #faa0a0;
   --border: #d0d7de;
   --link: #0969da;
   --accent: #0969da;
@@ -17,6 +18,8 @@
   --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
   --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --sidebar-w: 220px;
+  --tab-min-label: 4ch;
+  --tab-min-controls: 2.75rem;
 }
 
 #app.sidebar-collapsed {
@@ -234,6 +237,9 @@ body {
   cursor: pointer;
   font-size: 13px;
   color: var(--fg-muted);
+  flex: 0 1 auto;
+  min-width: calc(var(--tab-min-label) + var(--tab-min-controls) + 24px + 6px);
+  max-width: 18rem;
   white-space: nowrap;
   user-select: none;
 }
@@ -245,6 +251,20 @@ body {
   background: var(--bg);
   color: var(--fg);
   font-weight: 500;
+}
+.tab-label {
+  flex: 1 1 auto;
+  min-width: var(--tab-min-label);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.tab-label-text {
+  display: inline;
+}
+.tab .dirty,
+.tab .close {
+  flex-shrink: 0;
 }
 .tab .dirty {
   color: var(--accent);
@@ -284,6 +304,24 @@ body {
   white-space: nowrap;
   pointer-events: none;
   z-index: 200;
+  max-width: min(32rem, calc(100vw - 24px));
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.server-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  padding: 4px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-red);
+  color: var(--fg-muted);
+  font-size: 12px;
+}
+.server-status.hidden {
+  display: none;
 }
 
 #editor-area {
@@ -491,6 +529,9 @@ body {
   margin: 0.5em 0;
   padding-left: 2em;
 }
+.editor-content ul.task-list {
+  list-style: none;
+}
 .editor-content li {
   margin: 0.25em 0;
 }
@@ -583,6 +624,9 @@ body {
 .editor-content img {
   max-width: 100%;
   border-radius: var(--radius);
+}
+.editor-content input[type="checkbox"] {
+  cursor: pointer;
 }
 .img-resize-overlay {
   position: fixed;
@@ -1236,7 +1280,11 @@ body {
   font-size: 12px;
   padding: 4px 12px;
   border-radius: 12px;
-  pointer-events: none;
+  pointer-events: auto;
+  cursor: pointer;
+  max-width: min(32rem, calc(100vw - 24px));
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .notification.hidden {
   display: none;

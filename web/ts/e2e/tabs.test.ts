@@ -29,6 +29,15 @@ describe("e2e: tabs", () => {
     await page.waitForTimeout(200);
   }
 
+  async function createNote(name: string) {
+    await page.click(".tab-new");
+    await page.waitForSelector("#input-dialog-overlay:not(.hidden)", { timeout: 2000 });
+    await page.fill("#input-dialog-input", name);
+    await page.keyboard.press("Enter");
+    await page.waitForSelector(".editor-content", { timeout: 3000 });
+    await page.waitForTimeout(200);
+  }
+
   it("tab lifecycle: open, switch, dirty, close, empty state", async () => {
     // Open first note
     await openNote("test");
@@ -97,5 +106,37 @@ describe("e2e: tabs", () => {
       await page.waitForTimeout(200);
     }
     await expect(page.isVisible("#empty-state")).resolves.toBeTruthy();
+  }, 30_000);
+
+  it("tabs shrink to a minimum width without clipping the close control", async () => {
+    await page.setViewportSize({ width: 720, height: 900 });
+
+    for (const name of [
+      "very-long-tab-name-one",
+      "very-long-tab-name-two",
+      "very-long-tab-name-three",
+      "very-long-tab-name-four",
+      "very-long-tab-name-five",
+      "very-long-tab-name-six",
+    ]) {
+      await createNote(name);
+    }
+
+    const tabBarMetrics = await page.locator("#tab-bar").evaluate((el) => ({
+      clientWidth: el.clientWidth,
+      scrollWidth: el.scrollWidth,
+    }));
+    expect(tabBarMetrics.scrollWidth).toBeGreaterThan(tabBarMetrics.clientWidth);
+
+    const tabCount = await page.$$eval(".tab:not(.tab-new)", (els) => els.length);
+    for (let i = 0; i < tabCount; i++) {
+      const tab = page.locator(".tab:not(.tab-new)").nth(i);
+      const close = tab.locator(".close");
+      const [tabBox, closeBox] = await Promise.all([tab.boundingBox(), close.boundingBox()]);
+      expect(tabBox).not.toBeNull();
+      expect(closeBox).not.toBeNull();
+      expect(closeBox!.x).toBeGreaterThanOrEqual(tabBox!.x - 1);
+      expect(closeBox!.x + closeBox!.width).toBeLessThanOrEqual(tabBox!.x + tabBox!.width + 1);
+    }
   }, 30_000);
 });

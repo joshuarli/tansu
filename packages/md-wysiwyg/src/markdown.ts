@@ -47,6 +47,7 @@ export function renderMarkdownWithCursor(src: string, offset: number): string {
 type Block =
   | { type: "heading"; level: number; text: string }
   | { type: "paragraph"; text: string }
+  | { type: "task"; text: string; checked: boolean }
   | { type: "blank" }
   | { type: "code"; lang: string; text: string }
   | { type: "hr" }
@@ -142,6 +143,14 @@ function parseBlocks(lines: string[]): Block[] {
       continue;
     }
 
+    // Bare task item: "[ ] foo" or "[x] foo"
+    const taskStart = parseTaskLine(line);
+    if (taskStart) {
+      blocks.push({ type: "task", checked: taskStart.checked, text: taskStart.text });
+      i++;
+      continue;
+    }
+
     // Blockquote
     if (line.startsWith(">")) {
       const bqLines: string[] = [];
@@ -197,6 +206,11 @@ function renderBlock(block: Block): string {
     case "paragraph": {
       return `<p>${inline(block.text)}</p>`;
     }
+    case "task": {
+      return `<ul class="task-list">\n<li class="task-item"><input type="checkbox"${
+        block.checked ? " checked" : ""
+      }>&nbsp;${block.text === "" ? "<br>" : inline(block.text)}</li>\n</ul>`;
+    }
     case "blank": {
       return '<p data-md-blank="true"><br></p>';
     }
@@ -249,18 +263,23 @@ function renderBlockquote(bqLines: string[]): string {
 
 function renderListNode(list: ListNode): string {
   const tag = list.ordered ? "ol" : "ul";
+  const cls =
+    !list.ordered && list.items.some((item) => item.checked !== null) ? ' class="task-list"' : "";
   const items = list.items
     .map((item) => {
+      const itemCls = item.checked !== null ? ' class="task-item"' : "";
       const textHtml =
         item.checked !== null
-          ? `<input type="checkbox"${item.checked ? " checked disabled" : " disabled"}> ${inline(item.text)}`
+          ? `<input type="checkbox"${item.checked ? " checked" : ""}>&nbsp;${inline(item.text)}`
           : inline(item.text);
       const nestedHtml = item.nested?.map(renderListNode).join("\n") ?? "";
       const contentHtml = textHtml || nestedHtml ? textHtml : "<br>";
-      return nestedHtml ? `<li>${contentHtml}\n${nestedHtml}</li>` : `<li>${contentHtml}</li>`;
+      return nestedHtml
+        ? `<li${itemCls}>${contentHtml}\n${nestedHtml}</li>`
+        : `<li${itemCls}>${contentHtml}</li>`;
     })
     .join("\n");
-  return `<${tag}>\n${items}\n</${tag}>`;
+  return `<${tag}${cls}>\n${items}\n</${tag}>`;
 }
 
 function parseList(
@@ -330,6 +349,17 @@ function parseListLine(
     ordered: /\d+\./.test(match[2]!),
     text,
     checked,
+  };
+}
+
+function parseTaskLine(line: string): { checked: boolean; text: string } | null {
+  const match = line.match(/^[ \t]*\[([ xX])\]\s(.*)$/);
+  if (!match) {
+    return null;
+  }
+  return {
+    checked: match[1] !== " ",
+    text: match[2]!,
   };
 }
 
