@@ -12,6 +12,7 @@ import {
 import { initEditor, invalidateNoteCache, type EditorInstance } from "./editor.ts";
 import { emit, on } from "./events.ts";
 import { initFileNav } from "./filenav.ts";
+import { initVaultSwitcher, refreshVaultSwitcher } from "./vault-switcher.ts";
 import { openStore } from "./local-store.ts";
 import { createPalette, matchesKey } from "./palette.ts";
 import { createSearch } from "./search.ts";
@@ -148,6 +149,7 @@ async function startApp() {
 function initApp() {
   editor = initEditor();
   initFileNav();
+  void initVaultSwitcher();
   const palette = createPalette();
   const settings = createSettings();
   const search = createSearch({ openTab, invalidateNoteCache });
@@ -423,6 +425,13 @@ function connectSSE() {
     es.close();
     sse = null;
     showUnlockScreen();
+  });
+
+  es.addEventListener("vault_switched", () => {
+    if (sse !== es) return;
+    void refreshVaultSwitcher();
+    emit("vault:switched");
+    emit("files:changed", {});
   });
 
   es.onerror = () => {

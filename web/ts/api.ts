@@ -544,3 +544,34 @@ export async function saveSettings(settings: Settings): Promise<void> {
     throw new Error(`save settings failed: ${res.status}`);
   }
 }
+
+export interface VaultEntry {
+  index: number;
+  name: string;
+  active: boolean;
+  encrypted: boolean;
+  locked: boolean;
+}
+
+export async function getVaults(): Promise<VaultEntry[]> {
+  const res = await fetch("/api/vaults");
+  if (!res.ok) {
+    throw new Error(`vaults failed: ${res.status}`);
+  }
+  const arr = expectArray(await readJson(res, "get vaults"), "get vaults", (v, i) => {
+    const obj = expectObject(v, `vaults[${i}]`);
+    return {
+      index: expectNumber(obj["index"], `vaults[${i}].index`),
+      name: expectString(obj["name"], `vaults[${i}].name`),
+      active: obj["active"] === true,
+      encrypted: obj["encrypted"] === true,
+      locked: obj["locked"] === true,
+    } satisfies VaultEntry;
+  });
+  return arr;
+}
+
+export async function activateVault(index: number): Promise<boolean> {
+  const res = await fetch(`/api/vaults/${index}/activate`, { method: "POST" });
+  return res.ok;
+}

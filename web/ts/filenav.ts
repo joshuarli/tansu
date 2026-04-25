@@ -111,10 +111,17 @@ export async function initFileNav(): Promise<() => void> {
     renderNavDom();
   });
 
+  // Full refresh when vault is switched
+  const offVaultSwitched = on("vault:switched", async () => {
+    await refreshPinned();
+    await render();
+  });
+
   return () => {
     offTabChange();
     offFilesChanged();
     offPinnedChanged();
+    offVaultSwitched();
   };
 }
 

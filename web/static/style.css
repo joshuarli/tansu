@@ -121,6 +121,37 @@ body {
   padding: 4px 0;
 }
 
+#vault-switcher {
+  flex-shrink: 0;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+#vault-switcher:empty {
+  display: none;
+}
+
+#vault-select {
+  width: 100%;
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font: inherit;
+  font-size: 12px;
+  background: var(--bg);
+  color: var(--fg);
+  cursor: pointer;
+}
+
+#vault-select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+#app.sidebar-collapsed #vault-switcher {
+  display: none;
+}
+
 .nav-file {
   padding: 3px 8px;
   cursor: pointer;

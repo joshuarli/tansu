@@ -10,6 +10,7 @@ interface EventMap {
   "pinned:changed": undefined;
   "revision:restore": { content: string; mtime: number };
   "file:rename": { oldPath: string; newPath: string };
+  "vault:switched": undefined;
   notification: { msg: string; type: "error" | "info" | "success" };
 }
 

@@ -167,6 +167,13 @@ export function closeActiveTab() {
   }
 }
 
+export function closeAllTabs() {
+  tabs.length = 0;
+  activeIndex = -1;
+  emit("tab:render");
+  emit("tab:change", null);
+}
+
 export function closeTabByPath(path: string) {
   const index = tabs.findIndex((t) => t.path === path);
   if (index !== -1) {
