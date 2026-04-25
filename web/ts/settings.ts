@@ -39,7 +39,7 @@ export function createSettings(): SettingsPanel {
       current = {
         weight_title: 10,
         weight_headings: 5,
-        weight_tags: 2,
+        weight_tags: 25,
         weight_content: 1,
         fuzzy_distance: 1,
         recency_boost: 2,

@@ -1,16 +1,14 @@
-/// Single-pass extraction of headings, #tags, and [[wiki-links]] from raw markdown.
+/// Single-pass extraction of headings and [[wiki-links]] from raw markdown.
 
 pub struct ScanResult {
     pub title: String,
     pub headings: Vec<String>,
-    pub tags: Vec<String>,
     pub links: Vec<String>,
 }
 
 pub fn scan(content: &str) -> ScanResult {
     let mut title = String::new();
     let mut headings = Vec::new();
-    let mut tags = Vec::new();
     let mut links = Vec::new();
 
     for line in content.lines() {
@@ -24,22 +22,17 @@ pub fn scan(content: &str) -> ScanResult {
                     title = text.to_string();
                 }
                 headings.push(text.to_string());
-                // Don't scan heading lines for tags (# is ambiguous)
-                // But still scan for wiki-links
                 extract_wiki_links(trimmed, &mut links);
                 continue;
             }
         }
 
-        // Scan line for tags and wiki-links
-        extract_tags(trimmed, &mut tags);
         extract_wiki_links(trimmed, &mut links);
     }
 
     ScanResult {
         title,
         headings,
-        tags,
         links,
     }
 }
@@ -58,34 +51,6 @@ fn count_heading(after_first_hash: &str) -> (usize, &str) {
         (level, after_first_hash[i + 1..].trim())
     } else {
         (0, "")
-    }
-}
-
-fn extract_tags(line: &str, tags: &mut Vec<String>) {
-    let bytes = line.as_bytes();
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == b'#' {
-            // Must be preceded by whitespace or start of line
-            if i > 0 && !bytes[i - 1].is_ascii_whitespace() {
-                i += 1;
-                continue;
-            }
-            // Collect tag characters: alphanumeric, -, _
-            let start = i + 1;
-            let mut j = start;
-            while j < bytes.len()
-                && (bytes[j].is_ascii_alphanumeric() || bytes[j] == b'-' || bytes[j] == b'_')
-            {
-                j += 1;
-            }
-            if j > start {
-                tags.push(line[start..j].to_string());
-            }
-            i = j;
-        } else {
-            i += 1;
-        }
     }
 }
 
@@ -145,26 +110,6 @@ mod tests {
     }
 
     #[test]
-    fn scan_extracts_tags() {
-        let r = scan("Some text #rust and #web-dev here");
-        assert_eq!(r.tags, vec!["rust", "web-dev"]);
-    }
-
-    #[test]
-    fn scan_tag_must_follow_whitespace() {
-        let r = scan("email@#notag but #real-tag");
-        // #notag should not be extracted because @ precedes it
-        assert_eq!(r.tags, vec!["real-tag"]);
-    }
-
-    #[test]
-    fn scan_tags_not_extracted_from_headings() {
-        let r = scan("# Heading with #tag\n\n#body-tag here");
-        // Heading lines skip tag extraction to avoid # ambiguity
-        assert_eq!(r.tags, vec!["body-tag"]);
-    }
-
-    #[test]
     fn scan_extracts_wiki_links() {
         let r = scan("See [[other note]] and [[sub/page]].");
         // [[sub/page]] extracts stem "page" for backlink matching
@@ -211,12 +156,6 @@ mod tests {
     fn scan_empty_brackets_ignored() {
         let r = scan("Empty [[]] brackets");
         assert!(r.links.is_empty());
-    }
-
-    #[test]
-    fn scan_tag_underscore() {
-        let r = scan("#my_tag");
-        assert_eq!(r.tags, vec!["my_tag"]);
     }
 
     #[test]

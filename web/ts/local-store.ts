@@ -2,7 +2,7 @@
 /// Caches session state and note content so the app survives server downtime.
 
 const DB_NAME = "tansu";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 let db: IDBDatabase | null = null;
 
@@ -80,14 +80,28 @@ export function kvPut(key: string, value: unknown): Promise<void> {
 interface CachedNote {
   content: string;
   mtime: number;
+  tags: string[];
 }
 
-export function noteGet(path: string): Promise<CachedNote | undefined> {
-  return idbGet<CachedNote>("notes", path);
+export async function noteGet(path: string): Promise<CachedNote | undefined> {
+  const note = await idbGet<Partial<CachedNote>>("notes", path);
+  if (!note) {
+    return undefined;
+  }
+  return {
+    content: note.content ?? "",
+    mtime: note.mtime ?? 0,
+    tags: note.tags ?? [],
+  };
 }
 
-export function notePut(path: string, content: string, mtime: number): Promise<void> {
-  return idbPut("notes", path, { content, mtime } satisfies CachedNote);
+export function notePut(
+  path: string,
+  content: string,
+  mtime: number,
+  tags: string[],
+): Promise<void> {
+  return idbPut("notes", path, { content, mtime, tags } satisfies CachedNote);
 }
 
 export function noteDel(path: string): Promise<void> {

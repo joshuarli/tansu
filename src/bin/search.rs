@@ -5,7 +5,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use tansu::{index::Index, settings::Settings};
+use tansu::{index::Index, settings::Settings, tags::TagStore};
 
 fn main() {
     if let Err(err) = run() {
@@ -39,7 +39,8 @@ fn run() -> Result<(), String> {
     let temp_index = TempIndexDir::new()?;
     let idx = Index::open_or_create(temp_index.path())
         .map_err(|err| format!("opening temp index {}: {err}", temp_index.path().display()))?;
-    idx.full_reindex(&notes_dir, &settings.excluded_folders);
+    let tags = TagStore::open(&notes_dir);
+    idx.full_reindex(&notes_dir, &settings.excluded_folders, &tags);
 
     let results = idx.search(
         &cli.query,

@@ -2,30 +2,33 @@
 
 import { Window } from "happy-dom";
 
-import type {
-  Note,
-  SaveResult,
-  NoteEntry,
-  RecentFileEntry,
-  SearchResult,
-  SessionState,
-  Settings,
-  AppStatus,
-} from "./api.ts";
+import type { SaveResult, RecentFileEntry, SessionState, Settings, AppStatus } from "./api.ts";
+
+type MockNote = { content: string; mtime: number; tags?: string[] };
+type MockNoteEntry = { path: string; title: string; tags?: string[] };
+type MockSearchResult = {
+  path: string;
+  title: string;
+  excerpt: string;
+  score: number;
+  tags?: string[];
+  field_scores: { title: number; headings: number; tags: number; content: number };
+};
 
 /// All possible JSON bodies that the mock server can return.
 /// Using a union keeps mock.on() calls honest about shape without requiring
 /// explicit generics at every call site.
 export type MockBody =
-  | Note
+  | MockNote
   | SaveResult
-  | NoteEntry[]
+  | MockNoteEntry[]
   | RecentFileEntry[]
-  | SearchResult[]
+  | MockSearchResult[]
   | SessionState
   | Settings
   | AppStatus
   | { mtime: number }
+  | { tags: string[] }
   | { updated: string[] }
   | { filename: string }
   | { content: string }

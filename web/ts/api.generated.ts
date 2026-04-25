@@ -2,19 +2,22 @@
 
 export type FieldScores = { title: number; headings: number; tags: number; content: number };
 
-export type NoteResponse = { content: string; mtime: number };
+export type NoteResponse = { content: string; mtime: number; tags: Array<string> };
 
 export type SaveResult = { mtime: number; conflict?: boolean; content?: string };
 
 export type SearchHit = {
   path: string;
   title: string;
+  tags: Array<string>;
   excerpt: string;
   score: number;
   field_scores: FieldScores;
 };
 
-export type NoteEntry = { path: string; title: string };
+export type NoteEntry = { path: string; title: string; tags: Array<string> };
+
+export type TagListResponse = { tags: Array<string> };
 
 export type FileSearchResult = { path: string; title: string };
 
@@ -31,6 +34,8 @@ export type ContentResponse = { content: string };
 export type OkResponse = { ok: boolean };
 
 export type PutNoteRequest = { content: string; expected_mtime: number };
+
+export type PutTagsRequest = { tags: Array<string> };
 
 export type CreateNoteRequest = { content: string };
 

@@ -161,9 +161,11 @@ describe("conflict", () => {
       path: "notes/e.md",
       title: "e",
       content: "a\nb", // base: what was last known
+      tags: [],
       mtime: 1000,
       dirty: true,
       lastSavedMd: "a\nb",
+      lastSavedTags: [],
     };
 
     handleReloadConflict(
@@ -191,9 +193,11 @@ describe("conflict", () => {
       path: "notes/f.md",
       title: "f",
       content: "a\nb",
+      tags: [],
       mtime: 1000,
       dirty: true,
       lastSavedMd: "a\nb",
+      lastSavedTags: [],
     };
 
     handleReloadConflict(

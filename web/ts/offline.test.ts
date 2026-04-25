@@ -68,7 +68,7 @@ describe("offline resilience", () => {
     await new Promise((r) => setTimeout(r, 10));
 
     const cached = await noteGet("notes/cached.md");
-    expect(cached).toStrictEqual({ content: "# Cached", mtime: 3000 });
+    expect(cached).toStrictEqual({ content: "# Cached", mtime: 3000, tags: [] });
 
     cleanState();
   });
@@ -145,7 +145,7 @@ describe("offline resilience", () => {
     await new Promise((r) => setTimeout(r, 10));
 
     const cached = await noteGet("notes/saved.md");
-    expect(cached).toStrictEqual({ content: "# Edited", mtime: 2000 });
+    expect(cached).toStrictEqual({ content: "# Edited", mtime: 2000, tags: [] });
 
     cleanState();
   });
@@ -159,7 +159,7 @@ describe("offline resilience", () => {
     await new Promise((r) => setTimeout(r, 10));
 
     const cached = await noteGet("notes/closing.md");
-    expect(cached).toStrictEqual({ content: "# Closing", mtime: 7000 });
+    expect(cached).toStrictEqual({ content: "# Closing", mtime: 7000, tags: [] });
   });
 
   it("persistState writes session state including closed tabs to IDB", async () => {
@@ -189,7 +189,7 @@ describe("offline resilience", () => {
       active: 0,
       closed: ["notes/old.md"],
     } satisfies SessionState);
-    await notePut("notes/offline-a.md", "# Offline A", 9000);
+    await notePut("notes/offline-a.md", "# Offline A", 9000, ["offline"]);
 
     // Server is completely down
     mock.on("GET", "/api/state", "server error", 500);

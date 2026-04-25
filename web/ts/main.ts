@@ -175,7 +175,7 @@ function initApp() {
 
   on("tab:change", (tab) => {
     if (tab) {
-      editor?.showEditor(tab.path, tab.content);
+      editor?.showEditor(tab.path, tab.content, tab.tags);
     } else {
       editor?.hideEditor();
     }
@@ -297,7 +297,7 @@ function initApp() {
         result.updated.map(async (updated) => {
           try {
             const note = await getNote(updated);
-            updateTabContent(updated, note.content, note.mtime);
+            updateTabContent(updated, note.content, note.mtime, note.tags);
           } catch {
             /* reload failed silently */
           }
@@ -306,7 +306,7 @@ function initApp() {
 
       const active = getActiveTab();
       if (active && active.path === newPath) {
-        editor?.showEditor(active.path, active.content);
+        editor?.showEditor(active.path, active.content, active.tags);
       }
     } catch {
       /* rename failed silently */

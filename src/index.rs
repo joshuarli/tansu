@@ -18,17 +18,19 @@ use tantivy::{
 };
 
 use crate::util::StrExt;
-use crate::{http, scanner, strip, util};
+use crate::{http, scanner, strip, tags::TagStore, util};
 
 #[derive(Clone)]
 pub struct NoteEntry {
     pub path: String,
     pub title: String,
+    pub tags: Vec<String>,
 }
 
 pub struct SearchResult {
     pub path: String,
     pub title: String,
+    pub tags: Vec<String>,
     pub excerpt: String,
     pub score: f32,
     pub mtime: u64,
@@ -132,7 +134,7 @@ impl Index {
     }
 
     /// Build and add a document to the writer (does not commit).
-    fn add_doc(&self, rel_path: &str, content: &str, full_path: &Path) {
+    fn add_doc(&self, rel_path: &str, content: &str, full_path: &Path, tags: &[String]) {
         let f = &self.inner.fields;
         let scan = scanner::scan(content);
         let stripped = strip::strip_markdown(content);
@@ -153,7 +155,9 @@ impl Index {
         doc.add_text(f.title, &title);
         doc.add_text(f.content, &stripped);
         doc.add_text(f.headings, scan.headings.join(" "));
-        doc.add_text(f.tags, scan.tags.join(" "));
+        for tag in tags {
+            doc.add_text(f.tags, tag);
+        }
         doc.add_u64(f.mtime, mtime);
         doc.add_text(f.links_to, scan.links.join(" "));
 
@@ -186,8 +190,8 @@ impl Index {
     }
 
     /// Index a single note. Commit is deferred until the next read operation.
-    pub fn index_note(&self, rel_path: &str, content: &str, full_path: &Path) {
-        self.add_doc(rel_path, content, full_path);
+    pub fn index_note(&self, rel_path: &str, content: &str, full_path: &Path, tags: &[String]) {
+        self.add_doc(rel_path, content, full_path, tags);
         self.inner.uncommitted.store(true, Ordering::Release);
         *self.inner.notes_cache.lock().unwrap() = None;
     }
@@ -402,6 +406,10 @@ impl Index {
                 .get_first(f.content)
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
+            let tags = doc
+                .get_all(f.tags)
+                .filter_map(|v| v.as_str().map(str::to_string))
+                .collect();
             let excerpt = make_snippet(content, &term_refs, &phrase_refs, 160);
 
             let field_scores = if score_breakdown {
@@ -428,6 +436,7 @@ impl Index {
             results.push(SearchResult {
                 path,
                 title,
+                tags,
                 excerpt,
                 score: score * recency_multiplier,
                 mtime,
@@ -506,8 +515,12 @@ impl Index {
                     .and_then(|v| v.as_str())
                     .unwrap_or("")
                     .to_string();
+                let tags = doc
+                    .get_all(f.tags)
+                    .filter_map(|v| v.as_str().map(str::to_string))
+                    .collect();
                 if !path.is_empty() {
-                    notes.push(NoteEntry { path, title });
+                    notes.push(NoteEntry { path, title, tags });
                 }
             }
         }
@@ -837,11 +850,17 @@ fn escape_html_into(out: &mut String, s: &str) {
 
 impl Index {
     /// Full reindex: walk directory, index all .md files. Single commit at end.
-    pub fn full_reindex(&self, root: &Path, excluded_folders: &[String]) {
+    pub fn full_reindex(&self, root: &Path, excluded_folders: &[String], tags: &TagStore) {
         let start = std::time::Instant::now();
-        walk_and_index(root, root, self, excluded_folders);
+        walk_and_index(root, root, self, excluded_folders, tags);
         self.commit();
-        fn walk_and_index(root: &Path, dir: &Path, idx: &Index, excluded: &[String]) {
+        fn walk_and_index(
+            root: &Path,
+            dir: &Path,
+            idx: &Index,
+            excluded: &[String],
+            tags: &TagStore,
+        ) {
             let Ok(entries) = fs::read_dir(dir) else {
                 return;
             };
@@ -860,7 +879,7 @@ impl Index {
                     if excluded.iter().any(|ex| name_str == *ex) {
                         continue;
                     }
-                    walk_and_index(root, &path, idx, excluded);
+                    walk_and_index(root, &path, idx, excluded, tags);
                     continue;
                 }
 
@@ -871,7 +890,8 @@ impl Index {
                 if let Ok(content) = fs::read_to_string(&path) {
                     let rel = path.strip_prefix(root).unwrap_or(&path);
                     let rel_str = rel.to_string_lossy();
-                    idx.add_doc(&rel_str, &content, &path);
+                    let note_tags = tags.get(&rel_str);
+                    idx.add_doc(&rel_str, &content, &path, &note_tags);
                 }
             }
         }
@@ -1094,7 +1114,7 @@ mod tests {
         fs::write(&tmp, "hello world").unwrap();
 
         // index_note stages the write but doesn't commit
-        idx.index_note("test.md", "hello world", &tmp);
+        idx.index_note("test.md", "hello world", &tmp, &[]);
         assert!(idx.inner.uncommitted.load(Ordering::Acquire));
 
         // get_all_notes triggers ensure_committed + returns the note
@@ -1108,12 +1128,12 @@ mod tests {
         assert_eq!(notes2.len(), 1);
 
         // Index another note, cache should be invalidated
-        idx.index_note("test2.md", "second note", &tmp);
+        idx.index_note("test2.md", "second note", &tmp, &[]);
         let notes3 = idx.get_all_notes();
         assert_eq!(notes3.len(), 2);
 
         // Search also triggers commit
-        idx.index_note("test3.md", "unique findme word", &tmp);
+        idx.index_note("test3.md", "unique findme word", &tmp, &[]);
         let w = SearchWeights {
             title: 10.0,
             headings: 5.0,
@@ -1135,7 +1155,12 @@ mod tests {
         let idx = Index::open_or_create(&dir).unwrap();
         let tmp = std::env::temp_dir().join("tansu_test_hyphen_note.md");
         fs::write(&tmp, "JPEG-XL support and some_function call").unwrap();
-        idx.index_note("test.md", "JPEG-XL support and some_function call", &tmp);
+        idx.index_note(
+            "test.md",
+            "JPEG-XL support and some_function call",
+            &tmp,
+            &[],
+        );
 
         let w = SearchWeights {
             title: 10.0,
@@ -1161,6 +1186,63 @@ mod tests {
     }
 
     #[test]
+    fn search_uses_metadata_tags_not_markdown_hashtags() {
+        let dir = std::env::temp_dir().join(format!("tansu_test_meta_tags_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let idx = Index::open_or_create(&dir).unwrap();
+
+        let body = std::env::temp_dir().join(format!("tansu_body_tag_{}.md", std::process::id()));
+        let meta = std::env::temp_dir().join(format!("tansu_meta_tag_{}.md", std::process::id()));
+        fs::write(&body, "#alpha appears in body").unwrap();
+        fs::write(&meta, "plain content").unwrap();
+
+        idx.index_note("body.md", "#alpha appears in body", &body, &[]);
+        idx.index_note("meta.md", "plain content", &meta, &["alpha".to_string()]);
+
+        let w = SearchWeights {
+            title: 10.0,
+            headings: 5.0,
+            tags: 25.0,
+            content: 1.0,
+        };
+        let results = idx.search("alpha", 10, None, 0, 0, w, true);
+        assert_eq!(results[0].path, "meta.md");
+        assert_eq!(results[0].tags, vec!["alpha"]);
+        assert!(results[0].field_scores.tags > 0.0);
+        let body_result = results.iter().find(|r| r.path == "body.md").unwrap();
+        assert_eq!(body_result.field_scores.tags, 0.0);
+        assert!(body_result.field_scores.content > 0.0);
+
+        let _ = fs::remove_dir_all(&dir);
+        let _ = fs::remove_file(&body);
+        let _ = fs::remove_file(&meta);
+    }
+
+    #[test]
+    fn full_reindex_reads_tags_from_store() {
+        let root =
+            std::env::temp_dir().join(format!("tansu_test_full_tags_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join(".tansu/index")).unwrap();
+        let note = root.join("note.md");
+        fs::write(&note, "hello").unwrap();
+
+        let tags = TagStore::open(&root);
+        tags.set("note.md", &["alpha".to_string(), "beta".to_string()])
+            .unwrap();
+
+        let idx = Index::open_or_create(&root.join(".tansu/index")).unwrap();
+        idx.full_reindex(&root, &[], &tags);
+
+        let notes = idx.get_all_notes();
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0].tags, vec!["alpha", "beta"]);
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn search_prefers_prefix_match_over_fuzzy() {
         let dir = std::env::temp_dir().join(format!("tansu_test_prefix_{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
@@ -1172,8 +1254,13 @@ mod tests {
         fs::write(&groats, "A note about groats and porridge").unwrap();
         fs::write(&great, "A note about great porridge").unwrap();
 
-        idx.index_note("groats.md", "A note about groats and porridge", &groats);
-        idx.index_note("great.md", "A note about great porridge", &great);
+        idx.index_note(
+            "groats.md",
+            "A note about groats and porridge",
+            &groats,
+            &[],
+        );
+        idx.index_note("great.md", "A note about great porridge", &great, &[]);
 
         let w = SearchWeights {
             title: 10.0,
@@ -1214,8 +1301,13 @@ mod tests {
         fs::write(&exact, "fresh oat groats for breakfast").unwrap();
         fs::write(&reordered, "fresh groats oat for breakfast").unwrap();
 
-        idx.index_note("exact.md", "fresh oat groats for breakfast", &exact);
-        idx.index_note("reordered.md", "fresh groats oat for breakfast", &reordered);
+        idx.index_note("exact.md", "fresh oat groats for breakfast", &exact, &[]);
+        idx.index_note(
+            "reordered.md",
+            "fresh groats oat for breakfast",
+            &reordered,
+            &[],
+        );
 
         let w = SearchWeights {
             title: 10.0,
@@ -1304,9 +1396,9 @@ mod tests {
 
         // Index alpha then beta in the same batch → segment A: alpha=doc_id=0, beta=doc_id=1.
         fs::write(&alpha, "alpha v1").unwrap();
-        idx.index_note("alpha.md", "alpha v1", &alpha);
+        idx.index_note("alpha.md", "alpha v1", &alpha, &[]);
         fs::write(&beta, "beta content").unwrap();
-        idx.index_note("beta.md", "beta content", &beta);
+        idx.index_note("beta.md", "beta content", &beta, &[]);
         let _ = idx.get_all_notes(); // ensure_committed → flushes segment A
 
         // Update alpha: delete_term marks doc_id=0 in segment A as deleted.
@@ -1314,7 +1406,7 @@ mod tests {
         // Segment A: max_doc=2, num_docs=1; deleted doc is at the LOWER id (0),
         // live beta is at the HIGHER id (1) — this is what triggers the old bug.
         fs::write(&alpha, "alpha v2").unwrap();
-        idx.index_note("alpha.md", "alpha v2", &alpha);
+        idx.index_note("alpha.md", "alpha v2", &alpha, &[]);
 
         let notes = idx.get_all_notes();
         let paths: Vec<&str> = notes.iter().map(|n| n.path.as_str()).collect();

@@ -7,5 +7,6 @@ pub mod revisions;
 pub mod scanner;
 pub mod settings;
 pub mod strip;
+pub mod tags;
 pub mod util;
 pub mod watcher;

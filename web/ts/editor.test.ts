@@ -64,7 +64,7 @@ describe("classifyReload", () => {
 describe("editor", () => {
   let cleanup: () => void;
   let mock: ReturnType<typeof mockFetch>;
-  let showEditor: (path: string, content: string) => void;
+  let showEditor: (path: string, content: string, tags?: string[]) => void;
   let hideEditor: () => void;
   let getCurrentContent: () => string;
   let saveCurrentNote: () => Promise<void>;
@@ -76,11 +76,13 @@ describe("editor", () => {
 
     mock.on("GET", "/api/note", { content: "# Test", mtime: 1000 });
     mock.on("PUT", "/api/note", { mtime: 2000 });
+    mock.on("PUT", "/api/tags", { tags: [] });
     mock.on("PUT", "/api/state", {});
     mock.on("GET", "/api/state", { tabs: [], active: -1 });
     mock.on("GET", "/api/backlinks", []);
     mock.on("GET", "/api/notes", []);
     mock.on("GET", "/api/revisions", []);
+    mock.on("GET", "/api/tags", { tags: [] });
 
     const mod = await import("./editor.ts");
     const instance = mod.initEditor();
@@ -125,6 +127,23 @@ describe("editor", () => {
     expect(toolbar!.querySelector(".editor-toolbar-btn--source") !== null).toBeTruthy();
     const menuBtn = [...toolbar!.querySelectorAll("button")].find((b) => b.title === "More");
     expect(menuBtn !== undefined).toBeTruthy();
+
+    hideEditor();
+  });
+
+  it("showEditor renders a dedicated tag input row", async () => {
+    showEditor("tags.md", "# Hi", ["alpha"]);
+    await new Promise((r) => setTimeout(r, 50));
+
+    const tagRow = document.querySelector(".editor-tags") as HTMLElement;
+    const tagInput = document.querySelector(".editor-tags-input") as HTMLInputElement;
+    expect(tagRow).not.toBeNull();
+    expect(tagInput).not.toBeNull();
+    expect(tagInput.placeholder).toBe("Add tag");
+
+    const sourceBtn = document.querySelector(".editor-toolbar-btn--source") as HTMLButtonElement;
+    sourceBtn.click();
+    expect(document.querySelector(".editor-tags-input")).not.toBeNull();
 
     hideEditor();
   });
@@ -224,6 +243,40 @@ describe("editor", () => {
     sourceBtn.click();
     expect(contentEl.style.display !== "none").toBeTruthy();
     expect(sourceEl.style.display).toBe("none");
+
+    hideEditor();
+  });
+
+  it("typing # in note content does not open tag autocomplete", async () => {
+    showEditor("no-body-tags.md", "hello");
+    await new Promise((r) => setTimeout(r, 50));
+
+    const contentEl = document.querySelector(".editor-content") as HTMLElement;
+    contentEl.focus();
+    const node = contentEl.querySelector("p")!.firstChild as Text;
+    node.textContent = "hello #ru";
+    const range = document.createRange();
+    range.setStart(node, node.length);
+    range.collapse(true);
+    const sel = window.getSelection()!;
+    sel.removeAllRanges();
+    sel.addRange(range);
+    contentEl.dispatchEvent(new Event("input", { bubbles: true }));
+
+    await new Promise((r) => setTimeout(r, 50));
+    expect(document.querySelector(".autocomplete")).toBeNull();
+
+    const sourceBtn = document.querySelector(".editor-toolbar-btn--source") as HTMLButtonElement;
+    sourceBtn.click();
+    const sourceEl = document.querySelector(".editor-source") as HTMLTextAreaElement;
+    sourceEl.value = "hello #ru";
+    sourceEl.selectionStart = sourceEl.value.length;
+    sourceEl.selectionEnd = sourceEl.value.length;
+    sourceEl.focus();
+    sourceEl.dispatchEvent(new Event("input", { bubbles: true }));
+
+    await new Promise((r) => setTimeout(r, 50));
+    expect(document.querySelector(".autocomplete")).toBeNull();
 
     hideEditor();
   });
@@ -489,6 +542,7 @@ describe("editor", () => {
     sourceEl.dispatchEvent(new Event("input", { bubbles: true }));
 
     mock.on("PUT", "/api/note", { mtime: 3000 });
+    mock.on("PUT", "/api/tags", { error: "should not be called" }, 500);
 
     await saveCurrentNote();
 
@@ -503,6 +557,36 @@ describe("editor", () => {
     }
     mock.on("GET", "/api/note", { content: "# Test", mtime: 1000 });
     mock.on("PUT", "/api/note", { mtime: 2000 });
+    mock.on("PUT", "/api/tags", { tags: [] });
+  });
+
+  it("saveCurrentNote with tag-only changes calls the tag endpoint", async () => {
+    const { openTab, getTabs, getActiveTab, closeTab } = await import("./tab-state.ts");
+    mock.on("GET", "/api/note", { content: "# Tag Save", mtime: 1000, tags: ["alpha"] });
+    await openTab("tag-save.md");
+    showEditor("tag-save.md", "# Tag Save", ["alpha"]);
+    await new Promise((r) => setTimeout(r, 50));
+
+    const removeBtn = document.querySelector(".tag-pill-remove") as HTMLButtonElement;
+    removeBtn.click();
+
+    mock.on("PUT", "/api/note", { error: "should not be called" }, 500);
+    mock.on("PUT", "/api/tags", { tags: [] });
+
+    await saveCurrentNote();
+
+    const tab = getActiveTab();
+    expect(tab!.dirty).toBeFalsy();
+    expect(tab!.mtime).toBe(1000);
+    expect(tab!.tags).toStrictEqual([]);
+
+    hideEditor();
+    while (getTabs().length > 0) {
+      closeTab(0);
+    }
+    mock.on("GET", "/api/note", { content: "# Test", mtime: 1000 });
+    mock.on("PUT", "/api/note", { mtime: 2000 });
+    mock.on("PUT", "/api/tags", { tags: [] });
   });
 
   it("saveCurrentNote real-conflict: conflict banner appears", async () => {
@@ -674,6 +758,10 @@ describe("editor", () => {
     await new Promise((r) => setTimeout(r, 50));
 
     const contentEl = document.querySelector(".editor-content") as HTMLElement;
+    const heading = contentEl.querySelector("h1");
+    if (heading) {
+      heading.textContent = "Changed";
+    }
     contentEl.dispatchEvent(new Event("input", { bubbles: true }));
 
     expect(getActiveTab()!.dirty).toBeTruthy();
@@ -714,6 +802,7 @@ describe("editor", () => {
     sourceBtn.click();
 
     const sourceEl = document.querySelector(".editor-source") as HTMLTextAreaElement;
+    sourceEl.value = "# Changed";
     sourceEl.dispatchEvent(new Event("input", { bubbles: true }));
 
     expect(getActiveTab()!.dirty).toBeTruthy();
@@ -806,11 +895,11 @@ describe("editor", () => {
     const sourceBtn = document.querySelector(".editor-toolbar-btn--source") as HTMLButtonElement;
     sourceBtn.click();
     const sourceEl = document.querySelector(".editor-source") as HTMLTextAreaElement;
-    sourceEl.value = "# FC";
+    sourceEl.value = "# Mine";
     sourceEl.dispatchEvent(new Event("input", { bubbles: true }));
 
     // Server returns conflict but disk content matches editor → false-conflict
-    mock.on("PUT", "/api/note", { mtime: 2000, content: "# FC" }, 409);
+    mock.on("PUT", "/api/note", { mtime: 2000, content: "# Mine" }, 409);
 
     await saveCurrentNote();
 

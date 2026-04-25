@@ -375,6 +375,36 @@ body {
   flex-shrink: 0;
 }
 
+.editor-tags {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 10px 0 14px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 18px;
+}
+
+.editor-tags-input {
+  flex: 1 0 120px;
+  min-width: 120px;
+  border: none;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  font-size: 13px;
+  padding: 4px 0;
+}
+
+.editor-tags-input::placeholder {
+  color: var(--fg-muted);
+}
+
+.editor-tags-input:focus {
+  outline: none;
+}
+
 .editor-toolbar-btn {
   display: flex;
   align-items: center;
@@ -818,6 +848,10 @@ body {
   background: var(--bg-subtle);
 }
 .search-result .title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
   font-weight: 500;
   font-size: 14px;
 }
@@ -840,6 +874,40 @@ body {
   background: rgba(255, 220, 0, 0.4);
   border-radius: 2px;
   font-weight: normal;
+}
+
+.tag-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid #b6e3ff;
+  background: #ddf4ff;
+  color: #0969da;
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.tag-pill--editor {
+  font-size: 12px;
+  padding: 4px 10px;
+}
+
+.tag-pill-remove {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+}
+
+.tag-pill-remove:hover {
+  color: var(--fg);
 }
 
 .search-create {

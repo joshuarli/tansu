@@ -11,8 +11,10 @@ export interface Tab {
   title: string;
   dirty: boolean;
   content: string;
+  tags: string[];
   mtime: number;
   lastSavedMd: string;
+  lastSavedTags: string[];
 }
 
 const tabs: Tab[] = [];
@@ -62,10 +64,12 @@ export async function syncToServer() {
 }
 
 /// Try server, cache to IDB on success, fall back to IDB cache on failure.
-async function fetchNote(path: string): Promise<{ content: string; mtime: number }> {
+async function fetchNote(
+  path: string,
+): Promise<{ content: string; mtime: number; tags: string[] }> {
   try {
     const note = await getNote(path);
-    notePut(path, note.content, note.mtime).catch(() => void 0);
+    notePut(path, note.content, note.mtime, note.tags).catch(() => void 0);
     return note;
   } catch {
     const cached = await noteGet(path);
@@ -74,6 +78,14 @@ async function fetchNote(path: string): Promise<{ content: string; mtime: number
     }
     throw new Error(`Note ${path} not available offline`);
   }
+}
+
+function sameTags(a: readonly string[], b: readonly string[]): boolean {
+  return a.length === b.length && a.every((tag, i) => tag === b[i]);
+}
+
+function recomputeDirty(tab: Tab): boolean {
+  return tab.content !== tab.lastSavedMd || !sameTags(tab.tags, tab.lastSavedTags);
 }
 
 function notifyChange() {
@@ -89,14 +101,16 @@ export async function openTab(path: string): Promise<Tab> {
     return tabs[existing]!;
   }
 
-  const { content, mtime } = await fetchNote(path);
+  const { content, mtime, tags } = await fetchNote(path);
   const tab: Tab = {
     path,
     title: stemFromPath(path),
     dirty: false,
     content,
+    tags,
     mtime,
     lastSavedMd: content,
+    lastSavedTags: tags,
   };
   tabs.push(tab);
   await switchTab(tabs.length - 1);
@@ -120,8 +134,10 @@ export async function switchTab(index: number) {
         return;
       }
       tab.content = note.content;
+      tab.tags = note.tags;
       tab.mtime = note.mtime;
       tab.lastSavedMd = note.content;
+      tab.lastSavedTags = note.tags;
     } catch {
       console.warn(`Could not load ${tab.path} offline`);
     }
@@ -144,7 +160,7 @@ export function closeTab(index: number) {
     closedTabs.shift();
   }
   /* c8 ignore start */
-  notePut(tab.path, tab.content, tab.mtime).catch(() => void 0);
+  notePut(tab.path, tab.content, tab.mtime, tab.tags).catch(() => void 0);
   /* c8 ignore stop */
 
   emit("tab:close", tab);
@@ -217,23 +233,59 @@ export function markDirty(path: string) {
 export function markClean(path: string, content: string, mtime: number) {
   const tab = tabs.find((t) => t.path === path);
   if (tab) {
-    tab.dirty = false;
     tab.content = content;
     tab.mtime = mtime;
     tab.lastSavedMd = content;
     tab.title = stemFromPath(path);
+    tab.dirty = recomputeDirty(tab);
     /* c8 ignore start */
-    notePut(path, content, mtime).catch(() => void 0);
+    notePut(path, content, mtime, tab.tags).catch(() => void 0);
     /* c8 ignore stop */
     emit("tab:render");
   }
 }
 
-export function updateTabContent(path: string, content: string, mtime: number) {
+export function markTagsClean(path: string, tags: string[]) {
+  const tab = tabs.find((t) => t.path === path);
+  if (tab) {
+    tab.tags = [...tags];
+    tab.lastSavedTags = [...tags];
+    tab.dirty = recomputeDirty(tab);
+    /* c8 ignore start */
+    notePut(path, tab.content, tab.mtime, tab.tags).catch(() => void 0);
+    /* c8 ignore stop */
+    emit("tab:render");
+  }
+}
+
+export function updateTabDraft(path: string, draft: { content?: string; tags?: string[] }) {
+  const tab = tabs.find((t) => t.path === path);
+  if (tab) {
+    if (draft.content !== undefined) {
+      tab.content = draft.content;
+    }
+    if (draft.tags !== undefined) {
+      tab.tags = [...draft.tags];
+    }
+    tab.dirty = recomputeDirty(tab);
+    emit("tab:render");
+  }
+}
+
+export function updateTabContent(
+  path: string,
+  content: string,
+  mtime: number,
+  tags: string[] = [],
+) {
   const tab = tabs.find((t) => t.path === path);
   if (tab) {
     tab.content = content;
     tab.mtime = mtime;
+    tab.tags = [...tags];
+    tab.lastSavedMd = content;
+    tab.lastSavedTags = [...tags];
+    tab.dirty = false;
     tab.title = stemFromPath(path);
   }
 }
@@ -291,10 +343,12 @@ export async function restoreSession() {
     if (i === activeIdx) {
       let content = "";
       let mtime = 0;
+      let tags: string[] = [];
       try {
         const note = await fetchNote(path);
         ({ content } = note);
         ({ mtime } = note);
+        ({ tags } = note);
       } catch {
         console.warn(`Could not load ${path} for session restore`);
       }
@@ -303,8 +357,10 @@ export async function restoreSession() {
         title: stemFromPath(path),
         dirty: false,
         content,
+        tags,
         mtime,
         lastSavedMd: content,
+        lastSavedTags: tags,
       });
     } else {
       tabs.push({
@@ -312,8 +368,10 @@ export async function restoreSession() {
         title: stemFromPath(path),
         dirty: false,
         content: "",
+        tags: [],
         mtime: 0,
         lastSavedMd: "",
+        lastSavedTags: [],
       });
     }
   }

@@ -31,19 +31,23 @@ describe("local-store", () => {
   });
 
   it("notePut + noteGet roundtrip", async () => {
-    await notePut("test.md", "# Hello", 1000);
+    await notePut("test.md", "# Hello", 1000, ["alpha"]);
     const note = await noteGet("test.md");
-    expect(note).toStrictEqual({ content: "# Hello", mtime: 1000 });
+    expect(note).toStrictEqual({ content: "# Hello", mtime: 1000, tags: ["alpha"] });
   });
 
   it("notePut overwrites existing note", async () => {
-    await notePut("overwrite.md", "v1", 1000);
-    await notePut("overwrite.md", "v2", 2000);
-    await expect(noteGet("overwrite.md")).resolves.toStrictEqual({ content: "v2", mtime: 2000 });
+    await notePut("overwrite.md", "v1", 1000, []);
+    await notePut("overwrite.md", "v2", 2000, ["beta"]);
+    await expect(noteGet("overwrite.md")).resolves.toStrictEqual({
+      content: "v2",
+      mtime: 2000,
+      tags: ["beta"],
+    });
   });
 
   it("noteDel removes a cached note", async () => {
-    await notePut("delete-me.md", "bye", 1000);
+    await notePut("delete-me.md", "bye", 1000, []);
     await noteDel("delete-me.md");
     await expect(noteGet("delete-me.md")).resolves.toBeUndefined();
   });
@@ -72,7 +76,7 @@ describe("local-store graceful degradation (no openStore)", () => {
   });
 
   it("notePut is a silent no-op", async () => {
-    await notePut("note.md", "content", 1000);
+    await notePut("note.md", "content", 1000, []);
   });
 
   it("noteDel is a silent no-op", async () => {

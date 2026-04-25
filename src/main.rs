@@ -11,8 +11,9 @@ use std::{
 use tansu::api_types::{
     AppStatus, ContentResponse, CreateNoteRequest, FieldScores, FileSearchResult, FilenameResponse,
     NoteEntry, NoteResponse, OkResponse, PinRequest, PinnedFileEntry, PrfRegisterRequest,
-    PrfRemoveRequest, PutNoteRequest, RecentFileEntry, RenameRequest, RenameResponse, SaveResult,
-    SearchHit, SessionState as SessionStateJson, UnlockRequest, VaultEntry,
+    PrfRemoveRequest, PutNoteRequest, PutTagsRequest, RecentFileEntry, RenameRequest,
+    RenameResponse, SaveResult, SearchHit, SessionState as SessionStateJson, TagListResponse,
+    UnlockRequest, VaultEntry,
 };
 use tansu::crypto::{self, CryptoConfig, Vault};
 use tansu::filenames::FileNameIndex;
@@ -20,6 +21,7 @@ use tansu::http::*;
 use tansu::index::Index;
 use tansu::revisions;
 use tansu::settings::Settings;
+use tansu::tags::TagStore;
 use tansu::watcher::{self, WatchEvent};
 
 #[cfg(feature = "embed")]
@@ -47,6 +49,7 @@ struct VaultState {
     session: Option<SessionState>,
     index: Index,
     file_index: FileNameIndex,
+    tags: TagStore,
     settings: Settings,
     watch_rx: mpsc::Receiver<WatchEvent>,
     self_writes: Arc<Mutex<HashMap<PathBuf, Instant>>>,
@@ -132,9 +135,7 @@ impl Server {
                             .strip_prefix(&self.vaults[self.active].dir)
                             .unwrap_or(&path);
                         let rel_str = rel.to_string_lossy().into_owned();
-                        self.vaults[self.active]
-                            .index
-                            .index_note(&rel_str, &content, &path);
+                        self.reindex_note(&rel_str, &content, &path);
                         self.vaults[self.active]
                             .file_index
                             .index_file(&rel_str, mtime_secs(&path));
@@ -209,6 +210,17 @@ impl Server {
         }
     }
 
+    fn note_tags(&self, rel_path: &str) -> Vec<String> {
+        self.vaults[self.active].tags.get(rel_path)
+    }
+
+    fn reindex_note(&self, rel_path: &str, content: &str, full_path: &Path) {
+        let tags = self.note_tags(rel_path);
+        self.vaults[self.active]
+            .index
+            .index_note(rel_path, content, full_path, &tags);
+    }
+
     /// Reindex all markdown files using the vault for decryption.
     fn reindex_with_vault(&self) {
         let vault = match &self.vaults[self.active].vault {
@@ -223,9 +235,7 @@ impl Server {
                 let rel = path
                     .strip_prefix(&self.vaults[self.active].dir)
                     .unwrap_or(path);
-                self.vaults[self.active]
-                    .index
-                    .index_note(&rel.to_string_lossy(), &content, path);
+                self.reindex_note(&rel.to_string_lossy(), &content, path);
             }
         }
         self.vaults[self.active].index.commit();
@@ -423,6 +433,10 @@ impl Server {
             ("GET", "/api/note") => self.api_get_note(stream, path_raw),
             ("PUT", "/api/note") => {
                 self.api_put_note(stream, path_raw, headers, raw_buf, header_len)
+            }
+            ("GET", "/api/tags") => self.api_get_tags(stream, path_raw),
+            ("PUT", "/api/tags") => {
+                self.api_put_tags(stream, path_raw, headers, raw_buf, header_len)
             }
             ("POST", "/api/note") => {
                 self.api_create_note(stream, path_raw, headers, raw_buf, header_len)
@@ -681,6 +695,7 @@ impl Server {
             .map(|r| SearchHit {
                 path: r.path.clone(),
                 title: r.title.clone(),
+                tags: r.tags.clone(),
                 excerpt: r.excerpt.clone(),
                 score: r.score,
                 field_scores: FieldScores {
@@ -707,7 +722,60 @@ impl Server {
         }
         let content = self.read_content(&full)?;
         let mtime = mtime_secs(&full);
-        respond_json(sock, &NoteResponse { content, mtime })
+        let tags = self.note_tags(&rel);
+        respond_json(
+            sock,
+            &NoteResponse {
+                content,
+                mtime,
+                tags,
+            },
+        )
+    }
+
+    fn api_get_tags(&self, sock: &TcpStream, path_raw: &str) -> io::Result<()> {
+        let tags = if let Some(path) = query_param(path_raw, "path") {
+            let full = self.vaults[self.active].dir.join(&path);
+            if !full.starts_with(&self.vaults[self.active].dir) {
+                return write_error(sock, 403, "Forbidden");
+            }
+            if !full.is_file() {
+                return write_error(sock, 404, "Not Found");
+            }
+            self.note_tags(&path)
+        } else {
+            self.vaults[self.active].tags.all_unique()
+        };
+        respond_json(sock, &TagListResponse { tags })
+    }
+
+    fn api_put_tags(
+        &mut self,
+        stream: &mut TcpStream,
+        path_raw: &str,
+        headers: &[httparse::Header<'_>],
+        raw_buf: &[u8],
+        header_len: usize,
+    ) -> io::Result<()> {
+        let Some(rel) = query_param(path_raw, "path") else {
+            return write_error(stream, 400, "missing path param");
+        };
+        let full = self.vaults[self.active].dir.join(&rel);
+        if !full.starts_with(&self.vaults[self.active].dir) {
+            return write_error(stream, 403, "Forbidden");
+        }
+        if !full.is_file() {
+            return write_error(stream, 404, "Not Found");
+        }
+
+        let req: PutTagsRequest = parse_body(stream, headers, raw_buf, header_len)?;
+        let tags = self.vaults[self.active].tags.set(&rel, &req.tags)?;
+        if let Ok(content) = self.read_content(&full) {
+            self.vaults[self.active]
+                .index
+                .index_note(&rel, &content, &full, &tags);
+        }
+        respond_json(stream, &TagListResponse { tags })
     }
 
     fn api_put_note(
@@ -758,9 +826,7 @@ impl Server {
 
         revisions::save_revision(&self.vaults[self.active].dir, &rel, &full);
         self.write_content(&full, req.content.as_bytes())?;
-        self.vaults[self.active]
-            .index
-            .index_note(&rel, &req.content, &full);
+        self.reindex_note(&rel, &req.content, &full);
         self.vaults[self.active]
             .file_index
             .index_file(&rel, mtime_secs(&full));
@@ -808,9 +874,8 @@ impl Server {
         };
 
         self.write_content(&full, content.as_bytes())?;
-        self.vaults[self.active]
-            .index
-            .index_note(&rel, &content, &full);
+        self.vaults[self.active].tags.set(&rel, &[])?;
+        self.reindex_note(&rel, &content, &full);
         self.vaults[self.active]
             .file_index
             .index_file(&rel, mtime_secs(&full));
@@ -839,6 +904,7 @@ impl Server {
         revisions::save_revision(&self.vaults[self.active].dir, &rel, &full);
         self.mark_self_write(&full);
         fs::remove_file(&full)?;
+        self.vaults[self.active].tags.remove(&rel)?;
         self.vaults[self.active].index.remove_note(&rel);
         self.vaults[self.active].file_index.remove_file(&rel);
 
@@ -885,15 +951,16 @@ impl Server {
         self.mark_self_write(&old_full);
         self.mark_self_write(&new_full);
         fs::rename(&old_full, &new_full)?;
+        self.vaults[self.active]
+            .tags
+            .rename(&req.old_path, &req.new_path)?;
 
         self.vaults[self.active].index.remove_note(&req.old_path);
         self.vaults[self.active]
             .file_index
             .remove_file(&req.old_path);
         if let Ok(content) = self.read_content(&new_full) {
-            self.vaults[self.active]
-                .index
-                .index_note(&req.new_path, &content, &new_full);
+            self.reindex_note(&req.new_path, &content, &new_full);
             self.vaults[self.active]
                 .file_index
                 .index_file(&req.new_path, mtime_secs(&new_full));
@@ -924,9 +991,7 @@ impl Server {
                         eprintln!("rename: failed to update {}: {e}", note_full.display());
                         continue;
                     }
-                    self.vaults[self.active]
-                        .index
-                        .index_note(note_path, &new_content, &note_full);
+                    self.reindex_note(note_path, &new_content, &note_full);
                     updated.push(note_path.clone());
                 }
             }
@@ -953,6 +1018,7 @@ impl Server {
             .map(|n| NoteEntry {
                 path: n.path.clone(),
                 title: n.title.clone(),
+                tags: n.tags.clone(),
             })
             .collect();
         respond_json(sock, &entries)
@@ -1095,10 +1161,11 @@ impl Server {
             } else {
                 let index = self.vaults[self.active].index.clone();
                 let file_index = self.vaults[self.active].file_index.clone();
+                let tags = self.vaults[self.active].tags.clone();
                 let dir = self.vaults[self.active].dir.clone();
                 let excluded = self.vaults[self.active].settings.excluded_folders.clone();
                 std::thread::spawn(move || {
-                    index.full_reindex(&dir, &excluded);
+                    index.full_reindex(&dir, &excluded, &tags);
                     file_index.full_reindex(&dir, &excluded);
                 });
             }
@@ -1131,9 +1198,7 @@ impl Server {
 
         revisions::save_revision(&self.vaults[self.active].dir, &rel, &full);
         self.write_content(&full, rev_content.as_bytes())?;
-        self.vaults[self.active]
-            .index
-            .index_note(&rel, &rev_content, &full);
+        self.reindex_note(&rel, &rev_content, &full);
         self.vaults[self.active]
             .file_index
             .index_file(&rel, mtime_secs(&full));
@@ -1294,9 +1359,10 @@ impl Server {
         } else if !self.vaults[n].encrypted {
             let index = self.vaults[n].index.clone();
             let file_index = self.vaults[n].file_index.clone();
+            let tags = self.vaults[n].tags.clone();
             let excluded = self.vaults[n].settings.excluded_folders.clone();
             std::thread::spawn(move || {
-                index.full_reindex(&dir, &excluded);
+                index.full_reindex(&dir, &excluded, &tags);
                 file_index.full_reindex(&dir, &excluded);
             });
         }
@@ -1681,6 +1747,7 @@ fn main() {
             .unwrap_or_else(|e| die(&format!("vault.{name}: create names index dir: {e}")));
         let file_index = FileNameIndex::open_or_create(&names_dir)
             .unwrap_or_else(|e| die(&format!("vault.{name}: open names index: {e}")));
+        let tags = TagStore::open(&dir);
 
         let self_writes = Arc::new(Mutex::new(HashMap::<PathBuf, Instant>::new()));
 
@@ -1701,10 +1768,11 @@ fn main() {
         if i == 0 && !encrypted {
             let index_clone = index.clone();
             let file_index_clone = file_index.clone();
+            let tags_clone = tags.clone();
             let dir_clone = dir.clone();
             let excluded = settings.excluded_folders.clone();
             std::thread::spawn(move || {
-                index_clone.full_reindex(&dir_clone, &excluded);
+                index_clone.full_reindex(&dir_clone, &excluded, &tags_clone);
                 file_index_clone.full_reindex(&dir_clone, &excluded);
             });
         }
@@ -1718,6 +1786,7 @@ fn main() {
             session: None,
             index,
             file_index,
+            tags,
             settings,
             watch_rx,
             self_writes,

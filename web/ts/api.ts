@@ -12,6 +12,7 @@ import type {
   PrfRegisterRequest,
   PrfRemoveRequest,
   PutNoteRequest,
+  PutTagsRequest,
   RecentFileEntry,
   RenameRequest,
   RenameResponse,
@@ -19,6 +20,7 @@ import type {
   SearchHit,
   SessionState,
   Settings,
+  TagListResponse,
   UnlockRequest,
   VaultEntry,
 } from "./api.generated.ts";
@@ -37,6 +39,7 @@ export type {
   PrfRegisterRequest,
   PrfRemoveRequest,
   PutNoteRequest,
+  PutTagsRequest,
   RecentFileEntry,
   RenameRequest,
   RenameResponse,
@@ -44,6 +47,7 @@ export type {
   SearchHit,
   SessionState,
   Settings,
+  TagListResponse,
   UnlockRequest,
   VaultEntry,
 };
@@ -71,7 +75,8 @@ export async function searchNotes(q: string, path?: string): Promise<SearchResul
   if (!res.ok) {
     throw new Error(`search failed: ${res.status}`);
   }
-  return readJson<SearchResult[]>(res, "search");
+  const results = await readJson<SearchResult[]>(res, "search");
+  return results.map((result) => ({ ...result, tags: result.tags ?? [] }));
 }
 
 export async function getNote(path: string): Promise<Note> {
@@ -79,7 +84,8 @@ export async function getNote(path: string): Promise<Note> {
   if (!res.ok) {
     throw new Error(`get note failed: ${res.status}`);
   }
-  return readJson<Note>(res, "get note");
+  const note = await readJson<Note>(res, "get note");
+  return { ...note, tags: note.tags ?? [] };
 }
 
 export async function saveNote(
@@ -100,6 +106,29 @@ export async function saveNote(
     throw new Error(`save failed: ${res.status}`);
   }
   return data;
+}
+
+export async function listTags(path?: string): Promise<string[]> {
+  const url = path ? `/api/tags?path=${encodeURIComponent(path)}` : "/api/tags";
+  const res = await fetch(url);
+  if (!res.ok) {
+    throw new Error(`list tags failed: ${res.status}`);
+  }
+  const data = await readJson<TagListResponse>(res, "list tags");
+  return data.tags;
+}
+
+export async function saveNoteTags(path: string, tags: string[]): Promise<string[]> {
+  const res = await fetch(`/api/tags?path=${encodeURIComponent(path)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ tags } satisfies PutTagsRequest),
+  });
+  if (!res.ok) {
+    throw new Error(`save tags failed: ${res.status}`);
+  }
+  const data = await readJson<TagListResponse>(res, "save note tags");
+  return data.tags;
 }
 
 // Unconditional overwrite — server treats expected_mtime=0 as "skip conflict check".
@@ -143,7 +172,8 @@ export async function listNotes(): Promise<NoteEntry[]> {
   if (!res.ok) {
     throw new Error(`list failed: ${res.status}`);
   }
-  return readJson<NoteEntry[]>(res, "list notes");
+  const notes = await readJson<NoteEntry[]>(res, "list notes");
+  return notes.map((note) => ({ ...note, tags: note.tags ?? [] }));
 }
 
 export async function searchFileNames(q: string): Promise<FileSearchResult[]> {

@@ -23,7 +23,7 @@ impl Default for Settings {
         Self {
             weight_title: 10.0,
             weight_headings: 5.0,
-            weight_tags: 2.0,
+            weight_tags: 25.0,
             weight_content: 1.0,
             fuzzy_distance: 1,
             recency_boost: 2,
@@ -69,7 +69,7 @@ mod tests {
         let s = Settings::default();
         assert_eq!(s.weight_title, 10.0);
         assert_eq!(s.weight_headings, 5.0);
-        assert_eq!(s.weight_tags, 2.0);
+        assert_eq!(s.weight_tags, 25.0);
         assert_eq!(s.weight_content, 1.0);
         assert_eq!(s.fuzzy_distance, 1);
         assert_eq!(s.recency_boost, 2);

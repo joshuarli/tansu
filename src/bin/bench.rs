@@ -2,6 +2,7 @@ use std::{env, fs, path::Path, time::Instant};
 
 use tansu::index::Index;
 use tansu::settings::Settings;
+use tansu::tags::TagStore;
 
 fn main() {
     let dir = env::args().nth(1).unwrap_or_else(|| {
@@ -34,6 +35,7 @@ fn main() {
     println!();
 
     let idx = Index::open_or_create(&index_dir).expect("failed to open index");
+    let tags = TagStore::open(&dir);
 
     // Warm up reader
     idx.search(
@@ -140,16 +142,17 @@ fn main() {
         let full = dir.join(&note.path);
         let content = fs::read_to_string(&full).unwrap_or_default();
         let content_len = content.len();
+        let note_tags = tags.get(&note.path);
         let label = format!("index_note ({content_len} bytes)");
         bench(&label, 20, || {
-            idx.index_note(&note.path, &content, &full);
+            idx.index_note(&note.path, &content, &full, &note_tags);
         });
     }
 
     // 8. Full reindex
     let excluded = settings.excluded_folders.clone();
     bench("full_reindex", 3, || {
-        idx.full_reindex(&dir, &excluded);
+        idx.full_reindex(&dir, &excluded, &tags);
     });
 }
 

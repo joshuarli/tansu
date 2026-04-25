@@ -8,9 +8,16 @@ import {
   handleBlockTransform,
 } from "@joshuarli98/md-wysiwyg";
 
-import { forceSaveNote, saveNote } from "./api.ts";
+import { forceSaveNote, saveNote, saveNoteTags } from "./api.ts";
 import { checkWikiLinkTrigger, hideAutocomplete } from "./autocomplete.ts";
 export { invalidateNoteCache } from "./autocomplete.ts";
+import {
+  checkTagInput,
+  hideTagAutocomplete,
+  normalizeTagInput,
+  rememberTags,
+} from "./tag-autocomplete.ts";
+export { invalidateTagCache } from "./tag-autocomplete.ts";
 import { loadBacklinks } from "./backlinks.ts";
 import { showConflictBanner, handleReloadConflict } from "./conflict.ts";
 import { showContextMenu } from "./context-menu.ts";
@@ -33,7 +40,15 @@ import {
   restoreSelectionFromRenderedMarkers,
 } from "./renderer.ts";
 import { toggleRevisions, hideRevisions, isRevisionsOpen } from "./revisions.ts";
-import { markDirty, markClean, getActiveTab, getTabs, setCursor, getCursor } from "./tab-state.ts";
+import {
+  markClean,
+  markTagsClean,
+  getActiveTab,
+  getTabs,
+  setCursor,
+  getCursor,
+  updateTabDraft,
+} from "./tab-state.ts";
 
 export type SaveAction =
   | { type: "clean"; content: string; mtime: number }
@@ -196,7 +211,7 @@ function dedentLine(line: string): string {
 }
 
 export interface EditorInstance {
-  showEditor(path: string, content: string): void;
+  showEditor(path: string, content: string, tags?: string[]): void;
   hideEditor(): void;
   getCurrentContent(): string;
   saveCurrentNote(opts?: { silent?: boolean }): Promise<void>;
@@ -212,10 +227,13 @@ export function initEditor(): EditorInstance {
   let container: HTMLElement | null = null;
   let contentEl: HTMLElement | null = null;
   let sourceEl: HTMLTextAreaElement | null = null;
+  let tagRowEl: HTMLElement | null = null;
+  let tagInputEl: HTMLInputElement | null = null;
   let backlinksEl: HTMLElement | null = null;
   let revisionsEl: HTMLElement | null = null;
   let isSourceMode = false;
   let currentPath: string | null = null;
+  let currentTags: string[] = [];
 
   interface UndoEntry {
     md: string;
@@ -242,6 +260,105 @@ export function initEditor(): EditorInstance {
       return domToMarkdown(contentEl);
     }
     return "";
+  }
+
+  function getCurrentTags(): string[] {
+    return [...currentTags];
+  }
+
+  function sameTags(a: readonly string[], b: readonly string[]): boolean {
+    return a.length === b.length && a.every((tag, i) => tag === b[i]);
+  }
+
+  function renderTagRow() {
+    if (!tagRowEl) {
+      return;
+    }
+    tagRowEl.innerHTML = "";
+
+    for (const tag of currentTags) {
+      const chip = document.createElement("span");
+      chip.className = "tag-pill tag-pill--editor";
+
+      const label = document.createElement("span");
+      label.textContent = `#${tag}`;
+      chip.append(label);
+
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "tag-pill-remove";
+      remove.textContent = "\u00D7";
+      remove.onclick = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        hideTagAutocomplete();
+        currentTags = currentTags.filter((current) => current !== tag);
+        renderTagRow();
+        onEditorTabMutation();
+        tagInputEl?.focus();
+      };
+      chip.append(remove);
+      tagRowEl.append(chip);
+    }
+
+    tagInputEl = document.createElement("input");
+    tagInputEl.type = "text";
+    tagInputEl.className = "editor-tags-input";
+    tagInputEl.placeholder = currentTags.length === 0 ? "Add tags" : "Add tag";
+    tagInputEl.autocomplete = "off";
+    tagInputEl.autocapitalize = "off";
+    tagInputEl.spellcheck = false;
+    tagInputEl.addEventListener("focus", () => {
+      if (tagInputEl) {
+        checkTagInput(tagInputEl, currentTags, handleTagSelected);
+      }
+    });
+    tagInputEl.addEventListener("input", () => {
+      if (!tagInputEl) {
+        return;
+      }
+      const normalized = normalizeTagInput(tagInputEl.value);
+      if (tagInputEl.value !== normalized) {
+        tagInputEl.value = normalized;
+      }
+      checkTagInput(tagInputEl, currentTags, handleTagSelected);
+    });
+    tagInputEl.addEventListener("blur", () => {
+      setTimeout(() => {
+        if (document.activeElement !== tagInputEl) {
+          hideTagAutocomplete();
+        }
+      }, 0);
+    });
+    tagInputEl.addEventListener("keydown", (e) => {
+      if (!tagInputEl) {
+        return;
+      }
+      if (e.key === "Backspace" && tagInputEl.value === "" && currentTags.length > 0) {
+        e.preventDefault();
+        hideTagAutocomplete();
+        currentTags = currentTags.slice(0, -1);
+        renderTagRow();
+        onEditorTabMutation();
+        tagInputEl?.focus();
+      }
+    });
+    tagRowEl.append(tagInputEl);
+  }
+
+  function setCurrentTags(tags: readonly string[]) {
+    currentTags = [...tags];
+    renderTagRow();
+  }
+
+  function handleTagSelected(tag: string) {
+    rememberTags([tag]);
+    if (!currentTags.includes(tag)) {
+      currentTags = [...currentTags, tag].sort();
+      renderTagRow();
+    }
+    onEditorTabMutation();
+    tagInputEl?.focus();
   }
 
   function scheduleAutosave() {
@@ -295,6 +412,12 @@ export function initEditor(): EditorInstance {
     }
 
     const content = getCurrentContent();
+    const tags = getCurrentTags();
+    const contentChanged = content !== tab.lastSavedMd;
+    const tagsChanged = !sameTags(tags, tab.lastSavedTags);
+    if (!contentChanged && !tagsChanged) {
+      return;
+    }
     if (contentEl) {
       const sel = getSelectionMarkdownOffsets(contentEl);
       pushUndo(content, sel?.start ?? 0, sel?.end ?? 0);
@@ -302,44 +425,50 @@ export function initEditor(): EditorInstance {
     // Capture cursor synchronously before the first await
     const cursorOffset = isSourceMode ? -1 : saveCursorOffset();
 
-    const result = await saveNote(savePath, content, tab.mtime);
-    const action = classifySaveResult(result, content, tab.content);
+    if (contentChanged) {
+      const result = await saveNote(savePath, content, tab.mtime);
+      const action = classifySaveResult(result, content, tab.lastSavedMd);
 
-    switch (action.type) {
-      case "clean": {
-        markClean(savePath, action.content, action.mtime);
-        if (cursorOffset >= 0) {
-          setCursor(savePath, cursorOffset);
+      switch (action.type) {
+        case "clean": {
+          markClean(savePath, action.content, action.mtime);
+          emit("files:changed", { savedPath: savePath });
+          break;
         }
-        emit("files:changed", { savedPath: savePath });
-        break;
-      }
-      case "false-conflict": {
-        const retry = await forceSaveNote(savePath, content);
-        markClean(savePath, content, retry.mtime);
-        if (cursorOffset >= 0) {
-          setCursor(savePath, cursorOffset);
+        case "false-conflict": {
+          const retry = await forceSaveNote(savePath, content);
+          markClean(savePath, content, retry.mtime);
+          emit("files:changed", { savedPath: savePath });
+          break;
         }
-        emit("files:changed", { savedPath: savePath });
-        break;
-      }
-      case "real-conflict": {
-        // Suppress banner for background autosaves; next manual save will surface it.
-        if (!silent && container) {
-          showConflictBanner(
-            container,
-            currentPath,
-            action.diskContent,
-            action.diskMtime,
-            loadContent,
-            getCurrentContent,
-          );
+        case "real-conflict": {
+          if (!silent && container) {
+            showConflictBanner(
+              container,
+              currentPath,
+              action.diskContent,
+              action.diskMtime,
+              loadContent,
+              getCurrentContent,
+            );
+          }
+          return;
         }
-        break;
+        default: {
+          return;
+        }
       }
-      default: {
-        break;
-      }
+    }
+
+    if (tagsChanged) {
+      const savedTags = await saveNoteTags(savePath, tags);
+      rememberTags(savedTags);
+      setCurrentTags(savedTags);
+      markTagsClean(savePath, savedTags);
+    }
+
+    if (cursorOffset >= 0) {
+      setCursor(savePath, cursorOffset);
     }
   }
 
@@ -502,6 +631,7 @@ export function initEditor(): EditorInstance {
       return;
     }
     hideRevisions();
+    hideTagAutocomplete();
 
     if (isSourceMode) {
       const md = sourceEl.value;
@@ -569,7 +699,7 @@ export function initEditor(): EditorInstance {
 
   function onEditorTabMutation() {
     if (currentPath) {
-      markDirty(currentPath);
+      updateTabDraft(currentPath, { content: getCurrentContent(), tags: getCurrentTags() });
     }
     scheduleAutosave();
     if (contentEl && !isSourceMode) {
@@ -749,17 +879,12 @@ export function initEditor(): EditorInstance {
     });
 
     contentEl.addEventListener("input", () => {
-      if (currentPath) {
-        markDirty(currentPath);
-      }
-      scheduleAutosave();
       if (contentEl && checkBlockInputTransform(contentEl)) {
+        onEditorTabMutation();
         return;
       }
       checkInlineTransform();
-      if (contentEl) {
-        checkWikiLinkTrigger(contentEl, currentPath);
-      }
+      onEditorTabMutation();
     });
 
     contentEl.addEventListener("change", (e) => {
@@ -767,10 +892,7 @@ export function initEditor(): EditorInstance {
       if (!(target instanceof HTMLInputElement) || target.type !== "checkbox") {
         return;
       }
-      if (currentPath) {
-        markDirty(currentPath);
-      }
-      scheduleAutosave();
+      onEditorTabMutation();
     });
 
     contentEl.addEventListener("click", (e) => {
@@ -778,17 +900,11 @@ export function initEditor(): EditorInstance {
       if (!(target instanceof HTMLInputElement) || target.type !== "checkbox") {
         return;
       }
-      if (currentPath) {
-        markDirty(currentPath);
-      }
-      scheduleAutosave();
+      onEditorTabMutation();
     });
 
     sourceEl.addEventListener("input", () => {
-      if (currentPath) {
-        markDirty(currentPath);
-      }
-      scheduleAutosave();
+      onEditorTabMutation();
     });
 
     contentEl.addEventListener("keydown", (e) => {
@@ -842,11 +958,7 @@ export function initEditor(): EditorInstance {
       }
 
       if (e.key === "Enter" && !e.shiftKey) {
-        handleBlockTransform(e, contentEl!, () => {
-          if (currentPath) {
-            markDirty(currentPath);
-          }
-        });
+        handleBlockTransform(e, contentEl!, onEditorTabMutation);
       }
     });
 
@@ -887,10 +999,7 @@ export function initEditor(): EditorInstance {
     });
 
     initImageResize(contentEl, () => {
-      if (currentPath) {
-        markDirty(currentPath);
-      }
-      scheduleAutosave();
+      onEditorTabMutation();
     });
 
     sourceEl.addEventListener("keydown", (e) => {
@@ -908,7 +1017,7 @@ export function initEditor(): EditorInstance {
     });
   }
 
-  function showEditor(path: string, content: string) {
+  function showEditor(path: string, content: string, tags: string[] = []) {
     if (autosaveTimer !== null) {
       clearTimeout(autosaveTimer);
       autosaveTimer = null;
@@ -918,6 +1027,8 @@ export function initEditor(): EditorInstance {
     isSourceMode = false;
     hideRevisions();
     hideAutocomplete();
+    hideTagAutocomplete();
+    currentTags = [...tags];
 
     const emptyState = document.querySelector<HTMLElement>("#empty-state");
     editorArea.innerHTML = "";
@@ -1001,6 +1112,14 @@ export function initEditor(): EditorInstance {
     toolbarEl.append(fmtGroup, toolbarSpacer, sourceBtn, menuBtn);
     editorArea.append(toolbarEl);
 
+    tagRowEl = document.createElement("div");
+    tagRowEl.className = "editor-tags";
+    tagRowEl.onclick = () => {
+      tagInputEl?.focus();
+    };
+    container.append(tagRowEl);
+    renderTagRow();
+
     contentEl = document.createElement("div");
     contentEl.className = "editor-content";
     contentEl.contentEditable = "true";
@@ -1046,6 +1165,8 @@ export function initEditor(): EditorInstance {
     currentPath = null;
     hideRevisions();
     hideAutocomplete();
+    hideTagAutocomplete();
+    currentTags = [];
 
     if (formatToolbarCleanup) {
       formatToolbarCleanup();
@@ -1065,6 +1186,8 @@ export function initEditor(): EditorInstance {
     }
     contentEl = null;
     sourceEl = null;
+    tagRowEl = null;
+    tagInputEl = null;
     revisionsEl = null;
     const emptyState = document.querySelector("#empty-state") as HTMLElement | null;
     if (emptyState) {

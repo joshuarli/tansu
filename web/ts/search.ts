@@ -158,7 +158,15 @@ export function createSearch(deps: SearchDeps): Search {
 
       const title = document.createElement("div");
       title.className = "title";
-      title.textContent = r.title;
+      const titleText = document.createElement("span");
+      titleText.textContent = r.title;
+      title.append(titleText);
+      for (const tag of r.tags) {
+        const pill = document.createElement("span");
+        pill.className = "tag-pill";
+        pill.textContent = `#${tag}`;
+        title.append(pill);
+      }
 
       const path = document.createElement("div");
       path.className = "path";

@@ -5,6 +5,7 @@ use ts_rs::TS;
 pub struct NoteResponse {
     pub content: String,
     pub mtime: u64,
+    pub tags: Vec<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, TS)]
@@ -30,6 +31,7 @@ pub struct FieldScores {
 pub struct SearchHit {
     pub path: String,
     pub title: String,
+    pub tags: Vec<String>,
     pub excerpt: String,
     pub score: f32,
     pub field_scores: FieldScores,
@@ -39,6 +41,12 @@ pub struct SearchHit {
 pub struct NoteEntry {
     pub path: String,
     pub title: String,
+    pub tags: Vec<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, TS)]
+pub struct TagListResponse {
+    pub tags: Vec<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, TS)]
@@ -91,6 +99,11 @@ pub struct PutNoteRequest {
 pub struct CreateNoteRequest {
     #[serde(default)]
     pub content: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, TS)]
+pub struct PutTagsRequest {
+    pub tags: Vec<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, TS)]

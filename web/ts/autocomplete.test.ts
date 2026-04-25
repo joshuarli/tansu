@@ -2,9 +2,9 @@ import type { CompleteWikiLink } from "./autocomplete.ts";
 import { setupDOM, mockFetch } from "./test-helper.ts";
 
 const NOTES = [
-  { path: "notes/alpha.md", title: "Alpha" },
-  { path: "notes/beta.md", title: "Beta" },
-  { path: "notes/gamma.md", title: "Gamma" },
+  { path: "notes/alpha.md", title: "Alpha", tags: [] },
+  { path: "notes/beta.md", title: "Beta", tags: [] },
+  { path: "notes/gamma.md", title: "Gamma", tags: [] },
 ];
 
 function getDropdown() {
@@ -236,7 +236,7 @@ describe("autocomplete", () => {
     hideAutocomplete();
 
     // Replace with a different set of notes
-    mock.on("GET", "/api/notes", [{ path: "notes/new.md", title: "New Note" }]);
+    mock.on("GET", "/api/notes", [{ path: "notes/new.md", title: "New Note", tags: [] }]);
     invalidateNoteCache();
 
     typeInEditor("[[new");

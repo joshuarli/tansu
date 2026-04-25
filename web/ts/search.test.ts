@@ -35,6 +35,7 @@ describe("search", () => {
       {
         path: "a.md",
         title: "Alpha",
+        tags: ["rust", "docs"],
         excerpt: "test",
         score: 1.5,
         field_scores: { title: 1, headings: 0.5, tags: 0, content: 0 },
@@ -116,6 +117,16 @@ describe("search", () => {
   it("search results and keyboard nav", async () => {
     const input = document.querySelector("#search-input")! as HTMLInputElement;
     const resultsEl = document.querySelector("#search-results")!;
+    mock.on("GET", "/api/search", [
+      {
+        path: "a.md",
+        title: "Alpha",
+        tags: ["rust", "docs"],
+        excerpt: "test",
+        score: 1.5,
+        field_scores: { title: 1, headings: 0.5, tags: 0, content: 0 },
+      },
+    ]);
 
     // Type in search box → results render
     openSearch2();
@@ -128,6 +139,7 @@ describe("search", () => {
     const firstResult = resultsEl.children[0]! as HTMLElement;
     expect(firstResult.textContent!).toContain("Alpha");
     expect(firstResult.textContent!).toContain("a.md");
+    expect(firstResult.querySelectorAll(".tag-pill")).toHaveLength(2);
 
     // Score breakdown rendered (show_score_breakdown: true in mock)
     expect(firstResult.textContent!).toContain("title:");
@@ -216,6 +228,7 @@ describe("search", () => {
       {
         path: "a.md",
         title: "Alpha",
+        tags: [],
         excerpt: "test",
         score: 1.5,
         field_scores: { title: 1, headings: 0.5, tags: 0, content: 0 },
@@ -255,6 +268,7 @@ describe("search", () => {
       {
         path: "a.md",
         title: "Alpha",
+        tags: [],
         excerpt: "test",
         score: 1.5,
         field_scores: { title: 1, headings: 0.5, tags: 0, content: 0 },
@@ -292,6 +306,7 @@ describe("search", () => {
         {
           path: "a.md",
           title: "Alpha",
+          tags: [],
           excerpt: "alpha result",
           score: 1,
           field_scores: { title: 1, headings: 0, tags: 0, content: 0 },
@@ -303,6 +318,7 @@ describe("search", () => {
       {
         path: "b.md",
         title: "Beta",
+        tags: [],
         excerpt: "beta result",
         score: 1,
         field_scores: { title: 1, headings: 0, tags: 0, content: 0 },

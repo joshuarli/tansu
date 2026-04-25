@@ -6,7 +6,9 @@ import {
   deleteNote,
   renameNote,
   listNotes,
+  listTags,
   getBacklinks,
+  saveNoteTags,
   uploadImage,
   listRevisions,
   getRevision,
@@ -96,6 +98,17 @@ describe("api", () => {
     mock.on("GET", "/api/notes", [{ path: "a.md", title: "A" }]);
     const notes = await listNotes();
     expect(notes).toHaveLength(1);
+    expect(notes[0]!.tags).toStrictEqual([]);
+  });
+
+  it("listTags", async () => {
+    mock.on("GET", "/api/tags", { tags: ["alpha", "beta"] });
+    await expect(listTags()).resolves.toStrictEqual(["alpha", "beta"]);
+  });
+
+  it("saveNoteTags", async () => {
+    mock.on("PUT", "/api/tags", { tags: ["alpha"] });
+    await expect(saveNoteTags("a.md", ["ALPHA"])).resolves.toStrictEqual(["alpha"]);
   });
 
   it("getBacklinks", async () => {
