@@ -23,8 +23,8 @@ function randomText(rand: () => number, minLen: number, maxLen: number): string 
   );
 }
 
-const FUZZ_ITERATIONS = Number.parseInt(process.env.FUZZ_ITERATIONS ?? "30", 10);
-const FUZZ_SEED = Number.parseInt(process.env.FUZZ_SEED ?? "42", 10);
+const FUZZ_ITERATIONS = Number.parseInt(process.env["FUZZ_ITERATIONS"] ?? "30", 10);
+const FUZZ_SEED = Number.parseInt(process.env["FUZZ_SEED"] ?? "42", 10);
 
 describe(`e2e: fuzz editor source toggle (seed=${FUZZ_SEED}, iterations=${FUZZ_ITERATIONS})`, () => {
   let page: Page;

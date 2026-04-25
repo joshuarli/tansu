@@ -6,7 +6,7 @@ interface EventMap {
   "tab:render": undefined;
   "tab:change": Tab | null;
   "tab:close": Tab;
-  "files:changed": { savedPath?: string };
+  "files:changed": { savedPath?: string } | undefined;
   "pinned:changed": undefined;
   "revision:restore": { content: string; mtime: number };
   "file:rename": { oldPath: string; newPath: string };
@@ -18,7 +18,7 @@ type Handler<T> = (data: T) => void;
 
 const listeners = new Map<string, Set<Handler<unknown>>>();
 
-type EmitArgs<T> = T extends undefined ? [] : [data: T];
+type EmitArgs<T> = undefined extends T ? [data?: Exclude<T, undefined>] : [data: T];
 
 /// Subscribe to an event. Returns an unsubscribe function.
 export function on<K extends keyof EventMap>(event: K, handler: Handler<EventMap[K]>): () => void {

@@ -1,6 +1,7 @@
 import { defineConfig } from "oxlint";
 
 export default defineConfig({
+  ignorePatterns: ["web/ts/api.generated.ts"],
   env: { browser: true },
   plugins: ["eslint", "unicorn", "typescript", "import", "promise", "vitest"],
   categories: {

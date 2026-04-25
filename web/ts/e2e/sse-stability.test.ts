@@ -72,7 +72,6 @@ describe("e2e: SSE connection stability", () => {
     await page.addInitScript(() => {
       (window as any).__sseConnects = 0;
       const Orig = window.EventSource;
-      // @ts-expect-error: EventSource subclass assigned to window — TS doesn't allow narrowing
       window.EventSource = class extends Orig {
         constructor(url: string | URL, opts?: EventSourceInit) {
           super(url, opts);
@@ -122,7 +121,7 @@ describe("e2e: SSE connection stability", () => {
         let successHandler: ((ev: Event) => void) | null = null;
 
         realReq.addEventListener("success", () => {
-          setTimeout(() => successHandler?.call(realReq), 400);
+          setTimeout(() => successHandler?.call(realReq, new Event("success")), 400);
         });
 
         return new Proxy(realReq, {
@@ -147,7 +146,6 @@ describe("e2e: SSE connection stability", () => {
       // causes that EventSource's onerror to fire.
       let prevInstance: EventSource | null = null;
       const Orig = window.EventSource;
-      // @ts-expect-error: EventSource subclass assigned to window — TS doesn't allow narrowing
       window.EventSource = class extends Orig {
         constructor(url: string | URL, opts?: EventSourceInit) {
           super(url, opts);
