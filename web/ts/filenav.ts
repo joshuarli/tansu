@@ -24,7 +24,7 @@ function showNavContextMenu(e: MouseEvent, path: string, title: string): void {
       isPinned: pinnedPaths.has(path),
       onPinChanged: async () => {
         await refreshPinned();
-        await render();
+        renderNavDom();
       },
       onDeleted: () => closeTabByPath(path),
     }),
@@ -34,13 +34,16 @@ function showNavContextMenu(e: MouseEvent, path: string, title: string): void {
 }
 
 let currentMode: "recent" | "search" = "recent";
+let pinnedFiles: PinnedFileEntry[] = [];
 let pinnedPaths = new Set<string>();
+let recentFiles: RecentFileEntry[] = [];
 let currentQuery = "";
 // Prevents a queued files:changed render from being dropped when one is already in-flight.
 let renderQueued = false;
 let renderInFlight = false;
 
 export async function initFileNav(): Promise<() => void> {
+  await refreshPinned();
   render();
 
   const collapseBtn = document.querySelector("#sidebar-collapse") as HTMLButtonElement;
@@ -76,9 +79,15 @@ export async function initFileNav(): Promise<() => void> {
   // Re-render on tab changes to update active file highlight and scroll
   const offTabChange = on("tab:change", () => onTabChange());
 
-  // Refresh file list whenever files are mutated. Guard prevents stale double-renders
-  // when both the local save and SSE fire files:changed within the same tick.
-  const offFilesChanged = on("files:changed", async () => {
+  // On save, update the recent list client-side — no network calls needed.
+  // For other mutations (delete), do a full re-fetch with the in-flight guard.
+  const offFilesChanged = on("files:changed", async (data) => {
+    if (data.savedPath) {
+      updateRecentOnSave(data.savedPath);
+      renderNavDom();
+      return;
+    }
+
     if (renderInFlight) {
       renderQueued = true;
       return;
@@ -99,7 +108,7 @@ export async function initFileNav(): Promise<() => void> {
   // Refresh pinned state when changed from tab context menu
   const offPinnedChanged = on("pinned:changed", async () => {
     await refreshPinned();
-    render();
+    renderNavDom();
   });
 
   return () => {
@@ -111,10 +120,23 @@ export async function initFileNav(): Promise<() => void> {
 
 async function refreshPinned(): Promise<void> {
   try {
-    const files = await getPinnedFiles();
-    pinnedPaths = new Set(files.map((f) => f.path));
+    pinnedFiles = await getPinnedFiles();
+    pinnedPaths = new Set(pinnedFiles.map((f) => f.path));
   } catch {
     // keep stale data on failure
+  }
+}
+
+function updateRecentOnSave(savedPath: string): void {
+  const nowSecs = Math.floor(Date.now() / 1000);
+  const existing = recentFiles.find((f) => f.path === savedPath);
+  if (existing) {
+    recentFiles = [
+      { ...existing, mtime: nowSecs },
+      ...recentFiles.filter((f) => f.path !== savedPath),
+    ];
+  } else {
+    recentFiles = [{ path: savedPath, title: "", mtime: nowSecs }, ...recentFiles];
   }
 }
 
@@ -144,27 +166,33 @@ async function renderRecent(): Promise<void> {
     return;
   }
 
-  let pinned: PinnedFileEntry[] = [];
-  let recent: RecentFileEntry[] = [];
   try {
-    [pinned, recent] = await Promise.all([getPinnedFiles(), getRecentFiles()]);
-    pinnedPaths = new Set(pinned.map((f) => f.path));
+    recentFiles = await getRecentFiles();
   } catch {
     container.innerHTML = '<div class="nav-empty">Failed to load</div>';
+    return;
+  }
+
+  renderNavDom();
+}
+
+function renderNavDom(): void {
+  const container = getContainer();
+  if (!container) {
     return;
   }
 
   const active = getActiveTab();
   container.innerHTML = "";
 
-  const recentNonPinned = recent.filter((f) => !pinnedPaths.has(f.path));
+  const recentNonPinned = recentFiles.filter((f) => !pinnedPaths.has(f.path));
 
-  if (pinned.length === 0 && recentNonPinned.length === 0) {
+  if (pinnedFiles.length === 0 && recentNonPinned.length === 0) {
     container.innerHTML = '<div class="nav-empty">No files</div>';
     return;
   }
 
-  for (const file of pinned) {
+  for (const file of pinnedFiles) {
     container.append(makeFileRow(file.path, file.title, active?.path, null));
   }
   for (const file of recentNonPinned) {

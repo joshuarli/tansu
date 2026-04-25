@@ -6,7 +6,7 @@ interface EventMap {
   "tab:render": undefined;
   "tab:change": Tab | null;
   "tab:close": Tab;
-  "files:changed": undefined;
+  "files:changed": { savedPath?: string };
   "pinned:changed": undefined;
   "revision:restore": { content: string; mtime: number };
   "file:rename": { oldPath: string; newPath: string };

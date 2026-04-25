@@ -290,6 +290,10 @@ export function initEditor(): EditorInstance {
       return;
     }
 
+    if (!tab.dirty) {
+      return;
+    }
+
     const content = getCurrentContent();
     if (contentEl) {
       const sel = getSelectionMarkdownOffsets(contentEl);
@@ -307,7 +311,7 @@ export function initEditor(): EditorInstance {
         if (cursorOffset >= 0) {
           setCursor(savePath, cursorOffset);
         }
-        emit("files:changed");
+        emit("files:changed", { savedPath: savePath });
         break;
       }
       case "false-conflict": {
@@ -316,7 +320,7 @@ export function initEditor(): EditorInstance {
         if (cursorOffset >= 0) {
           setCursor(savePath, cursorOffset);
         }
-        emit("files:changed");
+        emit("files:changed", { savedPath: savePath });
         break;
       }
       case "real-conflict": {

@@ -31,13 +31,12 @@ export function getActiveIndex(): number {
   return activeIndex;
 }
 
+function buildState(): SessionState {
+  return { tabs: tabs.map((t) => t.path), active: activeIndex, closed: closedTabs, cursors };
+}
+
 function persistState() {
-  const state: SessionState = {
-    tabs: tabs.map((t) => t.path),
-    active: activeIndex,
-    closed: closedTabs,
-    cursors,
-  };
+  const state = buildState();
   /* c8 ignore start */
   kvPut("session", state).catch(() => void 0);
   saveState(state).catch(() => void 0);
@@ -46,7 +45,8 @@ function persistState() {
 
 export function setCursor(path: string, offset: number) {
   cursors[path] = offset;
-  persistState();
+  /* c8 ignore next */
+  kvPut("session", buildState()).catch(() => void 0);
 }
 
 export function getCursor(path: string): number | undefined {

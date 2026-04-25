@@ -56,7 +56,7 @@ async function confirmDelete(path: string, title: string, onDeleted?: () => void
   }
   await deleteNote(path);
   await onDeleted?.();
-  emit("files:changed");
+  emit("files:changed", {});
 }
 
 export function buildFileContextMenuItems(opts: FileActionsOptions): MenuItem[] {
