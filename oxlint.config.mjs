@@ -81,6 +81,9 @@ export default defineConfig({
     "sort-keys": "off",
     "sort-vars": "off",
 
+    // Brace-less single-statement ifs are idiomatic and readable
+    "curly": "off",
+
     // Function declaration vs expression is context-dependent
     "func-style": "off",
 
@@ -119,6 +122,8 @@ export default defineConfig({
     // Callbacks and .then() chains are legitimate in DOM and async event code
     "promise/prefer-await-to-then": "off",
     "promise/prefer-await-to-callbacks": "off",
+    // Side-effect-only .then() handlers don't need an explicit return value
+    "promise/always-return": "off",
 
     // i++ is idiomatic in for loops
     "no-plusplus": "off",
@@ -191,6 +196,24 @@ export default defineConfig({
       files: ["**/*.test.ts", "**/e2e/**/*.ts", "**/test-helper.ts", "**/search-cli.ts"],
       rules: {
         "no-empty-function": "off",
+      },
+    },
+    {
+      files: ["**/e2e/**/*.ts"],
+      rules: {
+        // Browser-context scripts passed to page.addInitScript use (window as any) casts
+        "typescript/no-explicit-any": "off",
+        // Mock constructors track `this` via closure to simulate server-drop behavior
+        "typescript/no-this-alias": "off",
+        "unicorn/no-this-assignment": "off",
+        // srv.close callback only resolves once (rej/res are mutually exclusive)
+        "promise/no-multiple-resolved": "off",
+        // Inline class expressions inside addInitScript count as multiple classes
+        "max-classes-per-file": "off",
+        // mulberry32 PRNG intentionally mutates its closure parameter as state
+        "no-param-reassign": "off",
+        // | 0 is ToInt32 (signed 32-bit wrap), not truncation — Math.trunc would be wrong
+        "unicorn/prefer-math-trunc": "off",
       },
     },
     {

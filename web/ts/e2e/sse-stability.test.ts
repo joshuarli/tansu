@@ -22,7 +22,7 @@ async function waitForServer(url: string, ms: number) {
     try {
       const r = await fetch(url);
       if (r.ok) return;
-    } catch {}
+    } catch { /* ignore */ }
     await new Promise((r) => setTimeout(r, 100));
   }
   throw new Error(`server at ${url} did not start within ${ms}ms`);
@@ -60,7 +60,7 @@ describe("e2e: SSE connection stability", () => {
     });
     try {
       rmSync(notesDir, { recursive: true });
-    } catch {}
+    } catch { /* ignore */ }
   });
 
   it("no reconnect loop on normal load", async () => {
@@ -68,7 +68,7 @@ describe("e2e: SSE connection stability", () => {
     await page.addInitScript(() => {
       (window as any).__sseConnects = 0;
       const Orig = window.EventSource;
-      // @ts-ignore
+      // @ts-expect-error: EventSource subclass assigned to window — TS doesn't allow narrowing
       window.EventSource = class extends Orig {
         constructor(url: string | URL, opts?: EventSourceInit) {
           super(url, opts);
@@ -113,7 +113,7 @@ describe("e2e: SSE connection stability", () => {
       // IDBOpenDBRequest, preventing the native callback from firing immediately.
       // Our success event listener then calls the handler 400ms later.
       const origOpen = IDBFactory.prototype.open;
-      IDBFactory.prototype.open = function (name: string, version?: number) {
+      IDBFactory.prototype.open = function mockIDBOpen(name: string, version?: number) {
         const realReq = origOpen.call(this, name, version);
         let successHandler: ((ev: Event) => void) | null = null;
 
@@ -143,7 +143,7 @@ describe("e2e: SSE connection stability", () => {
       // causes that EventSource's onerror to fire.
       let prevInstance: EventSource | null = null;
       const Orig = window.EventSource;
-      // @ts-ignore
+      // @ts-expect-error: EventSource subclass assigned to window — TS doesn't allow narrowing
       window.EventSource = class extends Orig {
         constructor(url: string | URL, opts?: EventSourceInit) {
           super(url, opts);

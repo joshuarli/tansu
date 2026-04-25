@@ -50,35 +50,35 @@ function expectObject(value: unknown, ctx: string): JsonObject {
 
 function expectString(value: unknown, ctx: string): string {
   if (typeof value !== "string") {
-    throw new Error(`${ctx}: expected string`);
+    throw new TypeError(`${ctx}: expected string`);
   }
   return value;
 }
 
 function expectNumber(value: unknown, ctx: string): number {
   if (typeof value !== "number" || Number.isNaN(value)) {
-    throw new Error(`${ctx}: expected number`);
+    throw new TypeError(`${ctx}: expected number`);
   }
   return value;
 }
 
 function expectBoolean(value: unknown, ctx: string): boolean {
   if (typeof value !== "boolean") {
-    throw new Error(`${ctx}: expected boolean`);
+    throw new TypeError(`${ctx}: expected boolean`);
   }
   return value;
 }
 
 function expectStringArray(value: unknown, ctx: string): string[] {
   if (!Array.isArray(value)) {
-    throw new Error(`${ctx}: expected string[]`);
+    throw new TypeError(`${ctx}: expected string[]`);
   }
   return value.map((entry, index) => expectString(entry, `${ctx}[${index}]`));
 }
 
 function expectNumberArray(value: unknown, ctx: string): number[] {
   if (!Array.isArray(value)) {
-    throw new Error(`${ctx}: expected number[]`);
+    throw new TypeError(`${ctx}: expected number[]`);
   }
   return value.map((entry, index) => expectNumber(entry, `${ctx}[${index}]`));
 }
@@ -89,7 +89,7 @@ function expectArray<T>(
   map: (entry: unknown, index: number) => T,
 ): T[] {
   if (!Array.isArray(value)) {
-    throw new Error(`${ctx}: expected array`);
+    throw new TypeError(`${ctx}: expected array`);
   }
   return value.map((entry, index) => map(entry, index));
 }
@@ -100,6 +100,7 @@ async function readJson(res: Response, ctx: string): Promise<unknown> {
   } catch (error) {
     throw new Error(
       `${ctx}: invalid JSON${error instanceof Error && error.message ? ` (${error.message})` : ""}`,
+      { cause: error },
     );
   }
 }
@@ -170,8 +171,7 @@ function parsePinnedFileEntry(value: unknown, ctx: string): PinnedFileEntry {
 
 function parseSaveResult(value: unknown, ctx: string): SaveResult {
   const obj = expectObject(value, ctx);
-  const conflict = obj["conflict"];
-  const content = obj["content"];
+  const { conflict, content } = obj;
   return {
     mtime: expectNumber(obj["mtime"], `${ctx}.mtime`),
     ...(conflict === undefined ? {} : { conflict: expectBoolean(conflict, `${ctx}.conflict`) }),
@@ -181,10 +181,7 @@ function parseSaveResult(value: unknown, ctx: string): SaveResult {
 
 function parseSessionState(value: unknown, ctx: string): SessionState {
   const obj = expectObject(value, ctx);
-  const tabs = obj["tabs"];
-  const active = obj["active"];
-  const closed = obj["closed"];
-  const cursors = obj["cursors"];
+  const { tabs, active, closed, cursors } = obj;
 
   let parsedCursors: Record<string, number> | undefined;
   if (cursors !== undefined) {

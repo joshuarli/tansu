@@ -77,14 +77,17 @@ export function toggleBold(md: string, start: number, end: number): FormatResult
 
 export function toggleItalic(md: string, start: number, end: number): FormatResult {
   if (md.slice(start, end).includes("\n\n")) {
-    return toggleMarkerAcrossBlocks(md, start, end, "*", (block) => {
-      return (
+    return toggleMarkerAcrossBlocks(
+      md,
+      start,
+      end,
+      "*",
+      (block) =>
         block.startsWith("*") &&
         block.endsWith("*") &&
         !block.startsWith("**") &&
-        !block.endsWith("**")
-      );
-    });
+        !block.endsWith("**"),
+    );
   }
   const n = 1;
   const marker = "*";

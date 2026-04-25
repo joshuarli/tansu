@@ -137,14 +137,9 @@ async function refreshPinned(): Promise<void> {
 function updateRecentOnSave(savedPath: string): void {
   const nowSecs = Math.floor(Date.now() / 1000);
   const existing = recentFiles.find((f) => f.path === savedPath);
-  if (existing) {
-    recentFiles = [
-      { ...existing, mtime: nowSecs },
-      ...recentFiles.filter((f) => f.path !== savedPath),
-    ];
-  } else {
-    recentFiles = [{ path: savedPath, title: "", mtime: nowSecs }, ...recentFiles];
-  }
+  recentFiles = existing
+    ? [{ ...existing, mtime: nowSecs }, ...recentFiles.filter((f) => f.path !== savedPath)]
+    : [{ path: savedPath, title: "", mtime: nowSecs }, ...recentFiles];
 }
 
 // Update active highlight and scroll into view on tab change — no network calls.

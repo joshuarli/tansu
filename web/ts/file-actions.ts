@@ -41,11 +41,7 @@ async function togglePinned(
   isPinned: boolean,
   onPinChanged?: () => void | Promise<void>,
 ) {
-  if (isPinned) {
-    await unpinFile(path);
-  } else {
-    await pinFile(path);
-  }
+  await (isPinned ? unpinFile(path) : pinFile(path));
   await onPinChanged?.();
   emit("pinned:changed");
 }

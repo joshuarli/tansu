@@ -17,15 +17,15 @@ let notesDir: string;
 let baseUrl: string;
 
 function getFreePort(): Promise<number> {
-  return new Promise((resolve, reject) => {
+  return new Promise((res, rej) => {
     const srv = createServer();
     srv.listen(0, "127.0.0.1", () => {
       const { port } = srv.address() as { port: number };
       srv.close((err) => {
         if (err) {
-          reject(err);
+          rej(err);
         } else {
-          resolve(port);
+          res(port);
         }
       });
     });
@@ -78,12 +78,12 @@ export async function teardown() {
   if (server) {
     server.kill();
     // Wait for process to exit
-    await new Promise<void>((resolve) => {
+    await new Promise<void>((done) => {
       if (!server.pid) {
-        return resolve();
+        return done();
       }
-      server.on("exit", resolve);
-      setTimeout(resolve, 2000);
+      server.on("exit", done);
+      setTimeout(done, 2000);
     });
   }
   if (notesDir) {
