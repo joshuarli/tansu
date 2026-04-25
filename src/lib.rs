@@ -1,6 +1,7 @@
 pub mod api_types;
 pub mod crypto;
 pub mod filenames;
+pub mod frontmatter;
 pub mod http;
 pub mod index;
 pub mod revisions;

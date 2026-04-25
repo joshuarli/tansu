@@ -8,9 +8,10 @@ import {
   handleBlockTransform,
 } from "@joshuarli98/md-wysiwyg";
 
-import { forceSaveNote, saveNote, saveNoteTags } from "./api.ts";
+import { forceSaveNote, saveNote } from "./api.ts";
 import { checkWikiLinkTrigger, hideAutocomplete } from "./autocomplete.ts";
 export { invalidateNoteCache } from "./autocomplete.ts";
+import { splitFrontmatter, withFrontmatter } from "./frontmatter.ts";
 import {
   checkTagInput,
   hideTagAutocomplete,
@@ -48,7 +49,6 @@ import {
 import { toggleRevisions, hideRevisions, isRevisionsOpen } from "./revisions.ts";
 import {
   markClean,
-  markTagsClean,
   getActiveTab,
   getTabs,
   setCursor,
@@ -260,20 +260,26 @@ export function initEditor(): EditorInstance {
 
   function getCurrentContent(): string {
     if (isSourceMode && sourceEl) {
+      const parsed = splitFrontmatter(sourceEl.value);
+      if (parsed.hasFrontmatter) {
+        const changed =
+          currentTags.length !== parsed.tags.length ||
+          currentTags.some((tag, i) => tag !== parsed.tags[i]);
+        if (changed) {
+          currentTags = [...parsed.tags];
+          renderTagRow();
+        }
+      }
       return sourceEl.value;
     }
     if (contentEl) {
-      return domToMarkdown(contentEl);
+      return withFrontmatter(domToMarkdown(contentEl), currentTags);
     }
     return "";
   }
 
   function getCurrentTags(): string[] {
     return [...currentTags];
-  }
-
-  function sameTags(a: readonly string[], b: readonly string[]): boolean {
-    return a.length === b.length && a.every((tag, i) => tag === b[i]);
   }
 
   function renderTagRow() {
@@ -300,6 +306,7 @@ export function initEditor(): EditorInstance {
         hideTagAutocomplete();
         currentTags = currentTags.filter((current) => current !== tag);
         renderTagRow();
+        syncSourceFromTags();
         onEditorTabMutation();
         tagInputEl?.focus();
       };
@@ -345,6 +352,7 @@ export function initEditor(): EditorInstance {
         hideTagAutocomplete();
         currentTags = currentTags.slice(0, -1);
         renderTagRow();
+        syncSourceFromTags();
         onEditorTabMutation();
         tagInputEl?.focus();
       }
@@ -357,12 +365,22 @@ export function initEditor(): EditorInstance {
     renderTagRow();
   }
 
+  function syncSourceFromTags() {
+    if (!isSourceMode || !sourceEl) {
+      return;
+    }
+    const parsed = splitFrontmatter(sourceEl.value);
+    const body = parsed.hasFrontmatter ? parsed.body : sourceEl.value;
+    sourceEl.value = withFrontmatter(body, currentTags);
+  }
+
   function handleTagSelected(tag: string) {
     rememberTags([tag]);
     if (!currentTags.includes(tag)) {
       currentTags = [...currentTags, tag].toSorted();
       renderTagRow();
     }
+    syncSourceFromTags();
     onEditorTabMutation();
     tagInputEl?.focus();
   }
@@ -418,10 +436,8 @@ export function initEditor(): EditorInstance {
     }
 
     const content = getCurrentContent();
-    const tags = getCurrentTags();
     const contentChanged = content !== tab.lastSavedMd;
-    const tagsChanged = !sameTags(tags, tab.lastSavedTags);
-    if (!contentChanged && !tagsChanged) {
+    if (!contentChanged) {
       return;
     }
     if (contentEl) {
@@ -464,13 +480,6 @@ export function initEditor(): EditorInstance {
           return;
         }
       }
-    }
-
-    if (tagsChanged) {
-      const savedTags = await saveNoteTags(savePath, tags);
-      rememberTags(savedTags);
-      setCurrentTags(savedTags);
-      markTagsClean(savePath, savedTags);
     }
 
     if (cursorOffset >= 0) {
@@ -615,6 +624,7 @@ export function initEditor(): EditorInstance {
   }
 
   function loadContent(markdown: string, explicitOffset?: number) {
+    const parsed = splitFrontmatter(markdown);
     if (isSourceMode && sourceEl) {
       const pos = sourceEl.selectionStart;
       sourceEl.value = markdown;
@@ -625,10 +635,14 @@ export function initEditor(): EditorInstance {
         contentEl === document.activeElement || contentEl.contains(document.activeElement);
       const offset = explicitOffset ?? (focused ? saveCursorOffset() : -1);
       if (offset >= 0) {
-        restoreCursorOffset(offset, markdown, explicitOffset !== undefined);
+        restoreCursorOffset(offset, parsed.body, explicitOffset !== undefined);
       } else {
-        setContent(contentEl, markdown);
+        setContent(contentEl, parsed.body);
       }
+    }
+
+    if (parsed.hasFrontmatter) {
+      setCurrentTags(parsed.tags);
     }
   }
 
@@ -641,13 +655,14 @@ export function initEditor(): EditorInstance {
 
     if (isSourceMode) {
       const md = sourceEl.value;
-      setContent(contentEl, md);
+      const parsed = splitFrontmatter(md);
+      setCurrentTags(parsed.hasFrontmatter ? parsed.tags : []);
+      setContent(contentEl, parsed.body);
       contentEl.style.display = "";
       sourceEl.style.display = "none";
       isSourceMode = false;
     } else {
-      const md = domToMarkdown(contentEl);
-      sourceEl.value = md;
+      sourceEl.value = getCurrentContent();
       contentEl.style.display = "none";
       sourceEl.style.display = "";
       isSourceMode = true;

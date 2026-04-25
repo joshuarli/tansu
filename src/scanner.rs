@@ -1,4 +1,6 @@
 /// Single-pass extraction of headings and [[wiki-links]] from raw markdown.
+use crate::frontmatter;
+
 pub struct ScanResult {
     pub title: String,
     pub headings: Vec<String>,
@@ -6,11 +8,12 @@ pub struct ScanResult {
 }
 
 pub fn scan(content: &str) -> ScanResult {
+    let body = frontmatter::split_tags(content).body;
     let mut title = String::new();
     let mut headings = Vec::new();
     let mut links = Vec::new();
 
-    for line in content.lines() {
+    for line in body.lines() {
         let trimmed = line.trim();
 
         // Headings: lines starting with # followed by space

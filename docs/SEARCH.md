@@ -16,6 +16,6 @@
 
 ## Tags
 
-- Tags are separate note metadata stored in `.tansu/tags.json`, not markdown `#foo` content.
+- Tags are stored in each note's frontmatter and indexed as a separate search field.
 - Search treats tag text like any other indexed term for matching and ranking, just with a much higher default weight.
 - Rich tag query syntax such as `tag:foo` is not supported.

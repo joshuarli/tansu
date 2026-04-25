@@ -76,7 +76,6 @@ describe("editor", () => {
 
     mock.on("GET", "/api/note", { content: "# Test", mtime: 1000 });
     mock.on("PUT", "/api/note", { mtime: 2000 });
-    mock.on("PUT", "/api/tags", { tags: [] });
     mock.on("PUT", "/api/state", {});
     mock.on("GET", "/api/state", { tabs: [], active: -1 });
     mock.on("GET", "/api/backlinks", []);
@@ -103,6 +102,24 @@ describe("editor", () => {
     expect(contentEl.innerHTML).toContain("<h1>Hello</h1>");
     expect(contentEl.innerHTML).toContain("<p>World</p>");
     expect(contentEl.contentEditable).toBe("true");
+
+    hideEditor();
+  });
+
+  it("showEditor hides frontmatter in content mode and preserves it in source mode", async () => {
+    showEditor("frontmatter.md", "---\ntags: [alpha]\n---\n\n# Hello");
+    await new Promise((r) => setTimeout(r, 50));
+
+    const contentEl = document.querySelector(".editor-content") as HTMLElement;
+    expect(contentEl.innerHTML).toContain("<h1>Hello</h1>");
+    expect(contentEl.innerHTML).not.toContain("tags:");
+    expect(contentEl.innerHTML).not.toContain("---");
+
+    const sourceBtn = document.querySelector(".editor-toolbar-btn--source") as HTMLButtonElement;
+    sourceBtn.click();
+    const sourceEl = document.querySelector(".editor-source") as HTMLTextAreaElement;
+    expect(sourceEl.value).toContain("tags: [alpha]");
+    expect(sourceEl.value).toContain("# Hello");
 
     hideEditor();
   });
@@ -542,7 +559,6 @@ describe("editor", () => {
     sourceEl.dispatchEvent(new Event("input", { bubbles: true }));
 
     mock.on("PUT", "/api/note", { mtime: 3000 });
-    mock.on("PUT", "/api/tags", { error: "should not be called" }, 500);
 
     await saveCurrentNote();
 
@@ -557,28 +573,27 @@ describe("editor", () => {
     }
     mock.on("GET", "/api/note", { content: "# Test", mtime: 1000 });
     mock.on("PUT", "/api/note", { mtime: 2000 });
-    mock.on("PUT", "/api/tags", { tags: [] });
   });
 
-  it("saveCurrentNote with tag-only changes calls the tag endpoint", async () => {
+  it("saveCurrentNote with tag-only changes persists frontmatter in the note save", async () => {
     const { openTab, getTabs, getActiveTab, closeTab } = await import("./tab-state.ts");
-    mock.on("GET", "/api/note", { content: "# Tag Save", mtime: 1000, tags: ["alpha"] });
+    const raw = "---\ntags: [alpha]\n---\n\n# Tag Save";
+    mock.on("GET", "/api/note", { content: raw, mtime: 1000, tags: ["alpha"] });
     await openTab("tag-save.md");
-    showEditor("tag-save.md", "# Tag Save", ["alpha"]);
+    showEditor("tag-save.md", raw, ["alpha"]);
     await new Promise((r) => setTimeout(r, 50));
 
     const removeBtn = document.querySelector(".tag-pill-remove") as HTMLButtonElement;
     removeBtn.click();
 
-    mock.on("PUT", "/api/note", { error: "should not be called" }, 500);
-    mock.on("PUT", "/api/tags", { tags: [] });
+    mock.on("PUT", "/api/note", { mtime: 2000 });
 
     await saveCurrentNote();
 
     const tab = getActiveTab();
     expect(tab!.dirty).toBeFalsy();
-    expect(tab!.mtime).toBe(1000);
-    expect(tab!.tags).toStrictEqual([]);
+    expect(tab!.mtime).toBe(2000);
+    expect(tab!.content).toBe("# Tag Save");
 
     hideEditor();
     while (getTabs().length > 0) {
@@ -586,7 +601,6 @@ describe("editor", () => {
     }
     mock.on("GET", "/api/note", { content: "# Test", mtime: 1000 });
     mock.on("PUT", "/api/note", { mtime: 2000 });
-    mock.on("PUT", "/api/tags", { tags: [] });
   });
 
   it("saveCurrentNote real-conflict: conflict banner appears", async () => {

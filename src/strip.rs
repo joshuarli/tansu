@@ -1,9 +1,11 @@
 /// Strip markdown syntax using pulldown-cmark, returning plain text for indexing.
+use crate::frontmatter;
 use pulldown_cmark::{Event, Parser, Tag, TagEnd};
 
 pub fn strip_markdown(markdown: &str) -> String {
-    let parser = Parser::new(markdown);
-    let mut out = String::with_capacity(markdown.len());
+    let body = frontmatter::split_tags(markdown).body;
+    let parser = Parser::new(body);
+    let mut out = String::with_capacity(body.len());
     let mut in_code_block = false;
 
     for event in parser {

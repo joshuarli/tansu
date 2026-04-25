@@ -17,6 +17,7 @@ use tansu::api_types::{
 };
 use tansu::crypto::{self, CryptoConfig, Vault};
 use tansu::filenames::FileNameIndex;
+use tansu::frontmatter;
 use tansu::http::*;
 use tansu::index::Index;
 use tansu::revisions;
@@ -136,6 +137,7 @@ impl Server {
                             .unwrap_or(&path);
                         let rel_str = rel.to_string_lossy().into_owned();
                         self.reindex_note(&rel_str, &content, &path);
+                        self.refresh_note_tags_cache(&rel_str, &content);
                         self.vaults[self.active]
                             .file_index
                             .index_file(&rel_str, mtime_secs(&path));
@@ -210,12 +212,24 @@ impl Server {
         }
     }
 
-    fn note_tags(&self, rel_path: &str) -> Vec<String> {
-        self.vaults[self.active].tags.get(rel_path)
+    fn note_tags(&self, rel_path: &str, content: &str) -> Vec<String> {
+        let parsed = frontmatter::split_tags(content);
+        if parsed.has_frontmatter {
+            parsed.tags
+        } else {
+            self.vaults[self.active].tags.get(rel_path)
+        }
+    }
+
+    fn refresh_note_tags_cache(&self, rel_path: &str, content: &str) {
+        let parsed = frontmatter::split_tags(content);
+        if parsed.has_frontmatter {
+            let _ = self.vaults[self.active].tags.set(rel_path, &parsed.tags);
+        }
     }
 
     fn reindex_note(&self, rel_path: &str, content: &str, full_path: &Path) {
-        let tags = self.note_tags(rel_path);
+        let tags = self.note_tags(rel_path, content);
         self.vaults[self.active]
             .index
             .index_note(rel_path, content, full_path, &tags);
@@ -236,6 +250,7 @@ impl Server {
                     .strip_prefix(&self.vaults[self.active].dir)
                     .unwrap_or(path);
                 self.reindex_note(&rel.to_string_lossy(), &content, path);
+                self.refresh_note_tags_cache(&rel.to_string_lossy(), &content);
             }
         }
         self.vaults[self.active].index.commit();
@@ -724,7 +739,7 @@ impl Server {
         }
         let content = self.read_content(&full)?;
         let mtime = mtime_secs(&full);
-        let tags = self.note_tags(&rel);
+        let tags = self.note_tags(&rel, &content);
         respond_json(
             sock,
             &NoteResponse {
@@ -744,9 +759,14 @@ impl Server {
             if !full.is_file() {
                 return write_error(sock, 404, "Not Found");
             }
-            self.note_tags(&path)
+            let content = self.read_content(&full)?;
+            self.note_tags(&path, &content)
         } else {
-            self.vaults[self.active].tags.all_unique()
+            let mut set = std::collections::BTreeSet::new();
+            for note in self.vaults[self.active].index.get_all_notes() {
+                set.extend(note.tags);
+            }
+            set.into_iter().collect()
         };
         respond_json(sock, &TagListResponse { tags })
     }
@@ -771,12 +791,19 @@ impl Server {
         }
 
         let req: PutTagsRequest = parse_body(stream, headers, raw_buf, header_len)?;
-        let tags = self.vaults[self.active].tags.set(&rel, &req.tags)?;
-        if let Ok(content) = self.read_content(&full) {
-            self.vaults[self.active]
-                .index
-                .index_note(&rel, &content, &full, &tags);
+        let tags = tansu::tags::normalize_tags(req.tags.iter().map(String::as_str));
+        let current = self.read_content(&full).unwrap_or_default();
+        let body = frontmatter::split_tags(&current).body.to_string();
+        let content = frontmatter::with_tags(&body, &tags);
+        if content != current {
+            revisions::save_revision(&self.vaults[self.active].dir, &rel, &full);
+            self.write_content(&full, content.as_bytes())?;
         }
+        self.vaults[self.active].tags.set(&rel, &tags)?;
+        self.reindex_note(&rel, &content, &full);
+        self.vaults[self.active]
+            .file_index
+            .index_file(&rel, mtime_secs(&full));
         respond_json(stream, &TagListResponse { tags })
     }
 
@@ -816,6 +843,7 @@ impl Server {
         // Skip revision + write if content hasn't changed
         let current_content = self.read_content(&full).unwrap_or_default();
         if current_content == req.content {
+            self.refresh_note_tags_cache(&rel, &current_content);
             return respond_json(
                 stream,
                 &SaveResult {
@@ -829,6 +857,7 @@ impl Server {
         revisions::save_revision(&self.vaults[self.active].dir, &rel, &full);
         self.write_content(&full, req.content.as_bytes())?;
         self.reindex_note(&rel, &req.content, &full);
+        self.refresh_note_tags_cache(&rel, &req.content);
         self.vaults[self.active]
             .file_index
             .index_file(&rel, mtime_secs(&full));
@@ -876,7 +905,7 @@ impl Server {
         };
 
         self.write_content(&full, content.as_bytes())?;
-        self.vaults[self.active].tags.set(&rel, &[])?;
+        self.refresh_note_tags_cache(&rel, &content);
         self.reindex_note(&rel, &content, &full);
         self.vaults[self.active]
             .file_index
@@ -963,6 +992,7 @@ impl Server {
             .remove_file(&req.old_path);
         if let Ok(content) = self.read_content(&new_full) {
             self.reindex_note(&req.new_path, &content, &new_full);
+            self.refresh_note_tags_cache(&req.new_path, &content);
             self.vaults[self.active]
                 .file_index
                 .index_file(&req.new_path, mtime_secs(&new_full));
@@ -994,6 +1024,7 @@ impl Server {
                         continue;
                     }
                     self.reindex_note(note_path, &new_content, &note_full);
+                    self.refresh_note_tags_cache(note_path, &new_content);
                     updated.push(note_path.clone());
                 }
             }
@@ -1201,6 +1232,7 @@ impl Server {
         revisions::save_revision(&self.vaults[self.active].dir, &rel, &full);
         self.write_content(&full, rev_content.as_bytes())?;
         self.reindex_note(&rel, &rev_content, &full);
+        self.refresh_note_tags_cache(&rel, &rev_content);
         self.vaults[self.active]
             .file_index
             .index_file(&rel, mtime_secs(&full));

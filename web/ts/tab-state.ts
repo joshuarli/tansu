@@ -79,12 +79,8 @@ async function fetchNote(
   }
 }
 
-function sameTags(a: readonly string[], b: readonly string[]): boolean {
-  return a.length === b.length && a.every((tag, i) => tag === b[i]);
-}
-
 function recomputeDirty(tab: Tab): boolean {
-  return tab.content !== tab.lastSavedMd || !sameTags(tab.tags, tab.lastSavedTags);
+  return tab.content !== tab.lastSavedMd;
 }
 
 function notifyChange() {

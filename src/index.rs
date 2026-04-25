@@ -18,7 +18,7 @@ use tantivy::{
 };
 
 use crate::util::StrExt;
-use crate::{http, scanner, strip, tags::TagStore, util};
+use crate::{frontmatter, http, scanner, strip, tags::TagStore, util};
 
 #[derive(Clone)]
 pub struct NoteEntry {
@@ -137,8 +137,9 @@ impl Index {
     #[allow(clippy::readonly_write_lock)]
     fn add_doc(&self, rel_path: &str, content: &str, full_path: &Path, tags: &[String]) {
         let f = &self.inner.fields;
-        let scan = scanner::scan(content);
-        let stripped = strip::strip_markdown(content);
+        let body = frontmatter::split_tags(content);
+        let scan = scanner::scan(body.body);
+        let stripped = strip::strip_markdown(body.body);
         let mtime = http::mtime_secs(full_path);
 
         let title = Path::new(rel_path)
@@ -894,7 +895,12 @@ impl Index {
                 if let Ok(content) = fs::read_to_string(&path) {
                     let rel = path.strip_prefix(root).unwrap_or(&path);
                     let rel_str = rel.to_string_lossy();
-                    let note_tags = tags.get(&rel_str);
+                    let parsed = frontmatter::split_tags(&content);
+                    let note_tags = if parsed.has_frontmatter {
+                        parsed.tags
+                    } else {
+                        tags.get(&rel_str)
+                    };
                     idx.add_doc(&rel_str, &content, &path, &note_tags);
                 }
             }
