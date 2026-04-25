@@ -1,5 +1,4 @@
 /// Single-pass extraction of headings and [[wiki-links]] from raw markdown.
-
 pub struct ScanResult {
     pub title: String,
     pub headings: Vec<String>,

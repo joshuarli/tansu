@@ -3,11 +3,6 @@ import type { MenuItem } from "./context-menu.ts";
 import { emit } from "./events.ts";
 import { showInputDialog } from "./input-dialog.ts";
 
-export type RenameEventDetail = {
-  path: string;
-  newName: string;
-};
-
 type FileActionsOptions = {
   path: string;
   title: string;
@@ -22,10 +17,6 @@ function buildRenamedPath(path: string, newName: string): string {
   return `${dir}${newName}.md`;
 }
 
-function dispatchLegacyRenameEvent(detail: RenameEventDetail): void {
-  window.dispatchEvent(new CustomEvent<RenameEventDetail>("tansu:rename", { detail }));
-}
-
 async function requestRename(path: string, title: string): Promise<void> {
   const newName = await showInputDialog("Rename to...", title);
   if (!newName || newName === title) {
@@ -33,7 +24,6 @@ async function requestRename(path: string, title: string): Promise<void> {
   }
 
   emit("file:rename", { oldPath: path, newPath: buildRenamedPath(path, newName) });
-  dispatchLegacyRenameEvent({ path, newName });
 }
 
 async function togglePinned(

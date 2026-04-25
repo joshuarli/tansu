@@ -73,6 +73,7 @@ impl FileNameIndex {
         })
     }
 
+    #[allow(clippy::readonly_write_lock)]
     fn add_doc(&self, rel_path: &str, mtime: u64) {
         let f = &self.inner.fields;
         let stem = Path::new(rel_path)

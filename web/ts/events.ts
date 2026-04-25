@@ -14,25 +14,31 @@ type EventMap = {
   notification: { msg: string; type: "error" | "info" | "success" };
 };
 
-type Handler<T> = (data: T) => void;
-
-const listeners = new Map<string, Set<Handler<unknown>>>();
-
+type Handler<K extends keyof EventMap> = (data: EventMap[K]) => void;
 type EmitArgs<T> = undefined extends T ? [data?: Exclude<T, undefined>] : [data: T];
+type AnyHandler = (data: unknown) => void;
+
+const listeners = new Map<keyof EventMap, Set<AnyHandler>>();
+
+function getListeners(event: keyof EventMap): Set<AnyHandler> {
+  let set = listeners.get(event);
+  if (!set) {
+    set = new Set<AnyHandler>();
+    listeners.set(event, set);
+  }
+  return set;
+}
 
 /// Subscribe to an event. Returns an unsubscribe function.
-export function on<K extends keyof EventMap>(event: K, handler: Handler<EventMap[K]>): () => void {
-  if (!listeners.has(event)) {
-    listeners.set(event, new Set());
-  }
-  const set = listeners.get(event)!;
-  set.add(handler as Handler<unknown>);
-  return () => set.delete(handler as Handler<unknown>);
+export function on<K extends keyof EventMap>(event: K, handler: Handler<K>): () => void {
+  const set = getListeners(event);
+  set.add(handler as AnyHandler);
+  return () => set.delete(handler as AnyHandler);
 }
 
 /// Emit an event to all subscribers.
 export function emit<K extends keyof EventMap>(event: K, ...args: EmitArgs<EventMap[K]>): void {
-  for (const h of listeners.get(event) ?? []) {
-    h(args[0] as unknown);
+  for (const handler of getListeners(event)) {
+    handler(args[0]);
   }
 }

@@ -65,7 +65,7 @@ const inputTransforms: [RegExp, TransformFn][] = [
   ],
 
   [
-    new RegExp("^" + "`".repeat(CODE_FENCE_MARKER_LENGTH) + `\\S*${SP}$`),
+    new RegExp(`^${"`".repeat(CODE_FENCE_MARKER_LENGTH)}\\S*${SP}$`),
     (block, text, contentEl) => {
       const lang = text.slice(CODE_FENCE_MARKER_LENGTH).replace(/[  ]+$/, "");
       const cls = lang ? ` class="language-${lang}"` : "";
@@ -99,7 +99,7 @@ const transforms: [RegExp, TransformFn][] = [
   ],
 
   [
-    new RegExp("^" + "`".repeat(CODE_FENCE_MARKER_LENGTH)),
+    new RegExp(`^${"`".repeat(CODE_FENCE_MARKER_LENGTH)}`),
     (block, text, contentEl) => {
       const lang = text.slice(CODE_FENCE_MARKER_LENGTH).trim();
       const cls = lang ? ` class="language-${lang}"` : "";

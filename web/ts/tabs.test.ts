@@ -1,3 +1,4 @@
+import { on } from "./events.ts";
 import type { Tab } from "./tab-state.ts";
 import { setupDOM, mockFetch } from "./test-helper.ts";
 
@@ -413,7 +414,7 @@ describe("tabs", () => {
     expect(getTabs()).toHaveLength(0);
   });
 
-  it("context menu Rename dispatches tansu:rename event via input dialog", async () => {
+  it("context menu Rename emits file:rename via the typed bus", async () => {
     while (getTabs().length > 0) {
       closeTab(0);
     }
@@ -422,11 +423,10 @@ describe("tabs", () => {
     const tabBar = document.querySelector("#tab-bar")!;
     const tabEl = tabBar.querySelectorAll(".tab:not(.tab-new)")[getTabs().length - 1]!;
 
-    let renameDetail: { path: string; newName: string } | null = null;
-    const handler = (e: Event) => {
-      renameDetail = (e as CustomEvent<{ path: string; newName: string }>).detail;
-    };
-    window.addEventListener("tansu:rename", handler);
+    let renameDetail: { oldPath: string; newPath: string } | null = null;
+    const offRename = on("file:rename", (detail) => {
+      renameDetail = detail;
+    });
 
     (tabEl as HTMLElement).dispatchEvent(
       new MouseEvent("contextmenu", { bubbles: true, cancelable: true }),
@@ -449,10 +449,10 @@ describe("tabs", () => {
     await tick();
 
     expect(renameDetail !== null).toBeTruthy();
-    expect(renameDetail!.path).toBe("notes/to-rename.md");
-    expect(renameDetail!.newName).toBe("renamed-note");
+    expect(renameDetail!.oldPath).toBe("notes/to-rename.md");
+    expect(renameDetail!.newPath).toBe("notes/renamed-note.md");
 
-    window.removeEventListener("tansu:rename", handler);
+    offRename();
     while (getTabs().length > 0) {
       closeTab(0);
     }

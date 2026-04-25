@@ -418,6 +418,7 @@ impl Server {
         self.serve_index(stream)
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn dispatch_api(
         &mut self,
         stream: &mut TcpStream,
@@ -480,6 +481,7 @@ impl Server {
         }
     }
 
+    #[cfg(not(feature = "embed"))]
     fn static_dir(&self) -> PathBuf {
         let exe = env::current_exe().unwrap_or_default();
         let exe_dir = exe.parent().unwrap_or(Path::new("."));

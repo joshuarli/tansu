@@ -1,4 +1,4 @@
-import { emit } from "./events.ts";
+import { emit, on } from "./events.ts";
 import { setupDOM, mockFetch } from "./test-helper.ts";
 
 const tick = () => new Promise<void>((r) => setTimeout(r, 0));
@@ -435,7 +435,7 @@ describe("filenav", () => {
     await drain();
   });
 
-  it("rename action in context menu dispatches tansu:rename event", async () => {
+  it("rename action in context menu emits file:rename via the typed bus", async () => {
     while (getTabs().length > 0) {
       closeTab(0);
     }
@@ -452,11 +452,10 @@ describe("filenav", () => {
     );
     await tick();
 
-    let renameDetail: { path: string; newName: string } | null = null;
-    const handler = (e: Event) => {
-      renameDetail = (e as CustomEvent).detail;
-    };
-    window.addEventListener("tansu:rename", handler);
+    let renameDetail: { oldPath: string; newPath: string } | null = null;
+    const offRename = on("file:rename", (detail) => {
+      renameDetail = detail;
+    });
 
     const items = document.body.querySelectorAll(".context-menu-item");
     (items[0] as HTMLElement).click(); // Rename...
@@ -469,10 +468,10 @@ describe("filenav", () => {
     );
     await tick();
 
-    window.removeEventListener("tansu:rename", handler);
+    offRename();
     expect(renameDetail !== null).toBeTruthy();
-    expect(renameDetail!.path).toBe("notes/alpha.md");
-    expect(renameDetail!.newName).toBe("alpha-renamed");
+    expect(renameDetail!.oldPath).toBe("notes/alpha.md");
+    expect(renameDetail!.newPath).toBe("notes/alpha-renamed.md");
   });
 
   it("delete action in context menu calls deleteNote API", async () => {

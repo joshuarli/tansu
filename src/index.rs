@@ -134,6 +134,7 @@ impl Index {
     }
 
     /// Build and add a document to the writer (does not commit).
+    #[allow(clippy::readonly_write_lock)]
     fn add_doc(&self, rel_path: &str, content: &str, full_path: &Path, tags: &[String]) {
         let f = &self.inner.fields;
         let scan = scanner::scan(content);
@@ -207,6 +208,7 @@ impl Index {
 
     /// Two-phase search: exact + prefix first, fuzzy fallback if <5 results.
     /// `weights` order: [title, headings, tags, content].
+    #[allow(clippy::too_many_arguments)]
     pub fn search(
         &self,
         query: &str,
@@ -341,6 +343,7 @@ impl Index {
         BooleanQuery::new(term_queries)
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn execute_search(
         &self,
         searcher: &tantivy::Searcher,
@@ -531,6 +534,7 @@ impl Index {
 }
 
 /// Compute per-field scores using Tantivy's explain API on each individual sub-query.
+#[allow(clippy::too_many_arguments)]
 fn explain_field_scores(
     searcher: &tantivy::Searcher,
     addr: DocAddress,

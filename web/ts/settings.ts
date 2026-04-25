@@ -36,6 +36,19 @@ type SettingsPanel = {
   isOpen(): boolean;
 };
 
+function recencyLabel(value: number): string {
+  if (value === 0) {
+    return "Disabled";
+  }
+  if (value === 1) {
+    return "24 hours";
+  }
+  if (value === 2) {
+    return "7 days";
+  }
+  return "30 days";
+}
+
 export function createSettings(): SettingsPanel {
   const overlay = document.querySelector("#settings-overlay")!;
   const panel = document.querySelector("#settings-panel")!;
@@ -121,15 +134,7 @@ export function createSettings(): SettingsPanel {
           <select data-key="recency_boost">
             ${SETTINGS_RECENCY_BOOST_OPTIONS.map(
               (value) =>
-                `<option value="${value}"${s.recency_boost === value ? " selected" : ""}>${
-                  value === 0
-                    ? "Disabled"
-                    : value === 1
-                      ? "24 hours"
-                      : value === 2
-                        ? "7 days"
-                        : "30 days"
-                }</option>`,
+                `<option value="${value}"${s.recency_boost === value ? " selected" : ""}>${recencyLabel(value)}</option>`,
             ).join("")}
           </select>
         </label>
