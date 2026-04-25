@@ -2,10 +2,10 @@ use std::{
     collections::HashSet,
     env, fs,
     io::{self, Read, Write},
-    net::{Shutdown, TcpListener, TcpStream},
+    net::{TcpListener, TcpStream},
     path::{Path, PathBuf},
     sync::{Arc, Mutex, mpsc},
-    time::{Duration, Instant},
+    time::Instant,
 };
 
 use serde::{Deserialize, Serialize};
@@ -125,7 +125,7 @@ struct Server {
     settings: Settings,
     watch_rx: mpsc::Receiver<WatchEvent>,
     self_writes: Arc<Mutex<HashSet<PathBuf>>>,
-    sse_client: Arc<Mutex<Option<TcpStream>>>,
+    sse_clients: Arc<Mutex<Vec<TcpStream>>>,
     /// None = plaintext mode or locked. Check `encrypted` to distinguish.
     vault: Option<Vault>,
     session: Option<SessionState>,
@@ -185,11 +185,8 @@ impl Server {
     fn lock_server(&mut self) {
         self.vault = None;
         self.session = None;
-        // Send locked event to SSE client
         self.broadcast_sse("locked", "");
-        // Close SSE connection
-        let mut guard = self.sse_client.lock().unwrap();
-        *guard = None;
+        self.sse_clients.lock().unwrap().clear();
     }
 
     fn drain_watch_events(&mut self) {
@@ -221,13 +218,9 @@ impl Server {
     }
 
     fn broadcast_sse(&self, event_type: &str, path: &str) {
-        let mut guard = self.sse_client.lock().unwrap();
-        if let Some(ref mut stream) = *guard {
-            let msg = format!("event: {event_type}\ndata: {path}\n\n");
-            if stream.write_all(msg.as_bytes()).is_err() {
-                *guard = None;
-            }
-        }
+        let msg = format!("event: {event_type}\ndata: {path}\n\n");
+        let mut guard = self.sse_clients.lock().unwrap();
+        guard.retain_mut(|s| s.write_all(msg.as_bytes()).is_ok());
     }
 
     fn mark_self_write(&self, path: &Path) {
@@ -545,12 +538,6 @@ impl Server {
     }
 
     fn handle_sse(&self, stream: &mut TcpStream) -> io::Result<()> {
-        let mut guard = self.sse_client.lock().unwrap();
-        // Reloads/open-tab replacement should not surface a client-visible 409.
-        // Keep only the newest SSE connection and close the old one best-effort.
-        if let Some(old) = guard.take() {
-            let _ = old.shutdown(Shutdown::Both);
-        }
         let header = "HTTP/1.1 200 OK\r\n\
                       Content-Type: text/event-stream\r\n\
                       Cache-Control: no-store\r\n\
@@ -558,7 +545,7 @@ impl Server {
                       \r\n";
         stream.write_all(header.as_bytes())?;
         stream.write_all(b"event: connected\ndata: ok\n\n")?;
-        *guard = Some(stream.try_clone()?);
+        self.sse_clients.lock().unwrap().push(stream.try_clone()?);
         Ok(())
     }
 
@@ -1589,24 +1576,12 @@ fn main() {
         settings,
         watch_rx,
         self_writes,
-        sse_client: Arc::new(Mutex::new(None)),
+        sse_clients: Arc::new(Mutex::new(Vec::new())),
         vault: None,
         session: None,
         encrypted,
         crypto_config,
     };
-
-    let heartbeat_client = srv.sse_client.clone();
-    std::thread::spawn(move || {
-        loop {
-            std::thread::sleep(Duration::from_secs(15));
-            let mut guard = heartbeat_client.lock().unwrap();
-            if let Some(ref mut stream) = *guard
-                && stream.write_all(b":\n\n").is_err() {
-                    *guard = None;
-                }
-        }
-    });
 
     for stream in listener.incoming() {
         match stream {
