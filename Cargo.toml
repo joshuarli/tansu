@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 httparse = "1"
+toml = { version = "0.8", default-features = false, features = ["parse"] }
 tantivy = { version = "0.25", default-features = false, features = ["mmap", "lz4-compression"] }
 notify = "7"
 serde = { version = "1", features = ["derive"] }
