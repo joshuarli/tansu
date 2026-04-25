@@ -82,7 +82,7 @@ export async function initFileNav(): Promise<() => void> {
   // On save, update the recent list client-side — no network calls needed.
   // For other mutations (delete), do a full re-fetch with the in-flight guard.
   const offFilesChanged = on("files:changed", async (data) => {
-    if (data.savedPath) {
+    if (data?.savedPath) {
       updateRecentOnSave(data.savedPath);
       renderNavDom();
       return;

@@ -28,9 +28,9 @@ describe("e2e: firefox regressions", () => {
   }
 
   async function setSource(content: string) {
-    await page.click("button:has-text('Source')");
+    await page.click(".editor-toolbar-btn--source");
     await page.fill(".editor-source", content);
-    await page.click("button:has-text('Source')");
+    await page.click(".editor-toolbar-btn--source");
     await page.waitForTimeout(100);
   }
 
@@ -65,15 +65,15 @@ describe("e2e: firefox regressions", () => {
     await page.keyboard.press("Backspace");
     await page.waitForTimeout(2000); // autosave debounce
 
-    await page.click("button:has-text('Source')");
+    await page.click(".editor-toolbar-btn--source");
     await expect(page.$eval(".editor-source", (el: HTMLTextAreaElement) => el.value)).resolves.toBe(
       "- one\n  - ",
     );
-    await page.click("button:has-text('Source')");
+    await page.click(".editor-toolbar-btn--source");
 
     await page.reload({ waitUntil: "load" });
     await page.waitForSelector(".editor-content", { timeout: 3000 });
-    await page.click("button:has-text('Source')");
+    await page.click(".editor-toolbar-btn--source");
     await expect(page.$eval(".editor-source", (el: HTMLTextAreaElement) => el.value)).resolves.toBe(
       "- one\n  - ",
     );
@@ -107,15 +107,15 @@ describe("e2e: firefox regressions", () => {
     await page.keyboard.press("Backspace");
     await page.waitForTimeout(2000);
 
-    await page.click("button:has-text('Source')");
+    await page.click(".editor-toolbar-btn--source");
     await expect(page.$eval(".editor-source", (el: HTMLTextAreaElement) => el.value)).resolves.toBe(
       "- a",
     );
-    await page.click("button:has-text('Source')");
+    await page.click(".editor-toolbar-btn--source");
 
     await page.reload({ waitUntil: "load" });
     await page.waitForSelector(".editor-content", { timeout: 3000 });
-    await page.click("button:has-text('Source')");
+    await page.click(".editor-toolbar-btn--source");
     await expect(page.$eval(".editor-source", (el: HTMLTextAreaElement) => el.value)).resolves.toBe(
       "- a",
     );
@@ -128,15 +128,15 @@ describe("e2e: firefox regressions", () => {
     await setSource(source);
     await page.waitForTimeout(2000);
 
-    await page.click("button:has-text('Source')");
+    await page.click(".editor-toolbar-btn--source");
     await expect(page.$eval(".editor-source", (el: HTMLTextAreaElement) => el.value)).resolves.toBe(
       source,
     );
-    await page.click("button:has-text('Source')");
+    await page.click(".editor-toolbar-btn--source");
 
     await page.reload({ waitUntil: "load" });
     await page.waitForSelector(".editor-content", { timeout: 3000 });
-    await page.click("button:has-text('Source')");
+    await page.click(".editor-toolbar-btn--source");
     await expect(page.$eval(".editor-source", (el: HTMLTextAreaElement) => el.value)).resolves.toBe(
       source,
     );
@@ -149,15 +149,15 @@ describe("e2e: firefox regressions", () => {
     await setSource(source);
     await page.waitForTimeout(2000);
 
-    await page.click("button:has-text('Source')");
+    await page.click(".editor-toolbar-btn--source");
     await expect(page.$eval(".editor-source", (el: HTMLTextAreaElement) => el.value)).resolves.toBe(
       source,
     );
-    await page.click("button:has-text('Source')");
+    await page.click(".editor-toolbar-btn--source");
 
     await page.reload({ waitUntil: "load" });
     await page.waitForSelector(".editor-content", { timeout: 3000 });
-    await page.click("button:has-text('Source')");
+    await page.click(".editor-toolbar-btn--source");
     await expect(page.$eval(".editor-source", (el: HTMLTextAreaElement) => el.value)).resolves.toBe(
       source,
     );
@@ -170,15 +170,15 @@ describe("e2e: firefox regressions", () => {
     await setSource(source);
     await page.waitForTimeout(2000);
 
-    await page.click("button:has-text('Source')");
+    await page.click(".editor-toolbar-btn--source");
     await expect(page.$eval(".editor-source", (el: HTMLTextAreaElement) => el.value)).resolves.toBe(
       source,
     );
-    await page.click("button:has-text('Source')");
+    await page.click(".editor-toolbar-btn--source");
 
     await page.reload({ waitUntil: "load" });
     await page.waitForSelector(".editor-content", { timeout: 3000 });
-    await page.click("button:has-text('Source')");
+    await page.click(".editor-toolbar-btn--source");
     await expect(page.$eval(".editor-source", (el: HTMLTextAreaElement) => el.value)).resolves.toBe(
       source,
     );

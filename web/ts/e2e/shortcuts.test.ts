@@ -41,26 +41,16 @@ describe("e2e: keyboard shortcuts", () => {
     expect(tabCount).toBeGreaterThanOrEqual(1);
   });
 
-  it("Cmd+T creates new note", async () => {
-    // Mock the prompt dialog to return a note name
-    await page.evaluate(() => {
-      (window as unknown as Record<string, unknown>)["__origPrompt"] = window.prompt;
-      window.prompt = () => "shortcut-note";
-    });
-
+  it("Cmd+N creates new note", async () => {
     const tabsBefore = await page.$$eval(".tab:not(.tab-new)", (els) => els.length);
-    await page.keyboard.press("Meta+t");
+    await page.keyboard.press("Meta+n");
+    await page.waitForSelector("#input-dialog-input", { timeout: 2000 });
+    await page.fill("#input-dialog-input", "shortcut-note");
+    await page.keyboard.press("Enter");
     await page.waitForTimeout(500);
 
     const tabsAfter = await page.$$eval(".tab:not(.tab-new)", (els) => els.length);
     expect(tabsAfter).toBe(tabsBefore + 1);
-
-    // Restore prompt
-    await page.evaluate(() => {
-      window.prompt = (window as unknown as Record<string, unknown>)[
-        "__origPrompt"
-      ] as typeof window.prompt;
-    });
   });
 
   it("Cmd+W closes active tab", async () => {

@@ -1,5 +1,5 @@
 use std::{
-    collections::HashSet,
+    collections::HashMap,
     env, fs,
     io::{self, Read, Write},
     net::{TcpListener, TcpStream},
@@ -124,7 +124,7 @@ struct Server {
     file_index: FileNameIndex,
     settings: Settings,
     watch_rx: mpsc::Receiver<WatchEvent>,
-    self_writes: Arc<Mutex<HashSet<PathBuf>>>,
+    self_writes: Arc<Mutex<HashMap<PathBuf, Instant>>>,
     sse_clients: Arc<Mutex<Vec<TcpStream>>>,
     /// None = plaintext mode or locked. Check `encrypted` to distinguish.
     vault: Option<Vault>,
@@ -224,7 +224,10 @@ impl Server {
     }
 
     fn mark_self_write(&self, path: &Path) {
-        self.self_writes.lock().unwrap().insert(path.to_path_buf());
+        self.self_writes
+            .lock()
+            .unwrap()
+            .insert(path.to_path_buf(), Instant::now());
     }
 
     /// Read a user-content file as String (decrypts if vault is active).
@@ -1550,7 +1553,7 @@ fn main() {
         });
     }
 
-    let self_writes = Arc::new(Mutex::new(HashSet::<PathBuf>::new()));
+    let self_writes = Arc::new(Mutex::new(HashMap::<PathBuf, Instant>::new()));
     let (watch_tx, watch_rx) = mpsc::channel();
     let _watcher = watcher::start_watcher(&dir, watch_tx, self_writes.clone())
         .unwrap_or_else(|e| die(&format!("start watcher: {e}")));

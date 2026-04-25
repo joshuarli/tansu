@@ -46,7 +46,7 @@ test-ts:
 	vitest run
 
 test-e2e:
-	pnpm run test-e2e
+	vitest run --config vitest.e2e.config.ts
 
 NOTES_DIR ?= '/Users/josh/Library/Mobile Documents/iCloud~md~obsidian/Documents/Notes'
 

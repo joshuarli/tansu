@@ -304,17 +304,16 @@ describe("tab-state", () => {
     // Make createNote (POST /api/note) fail
     mock.on("POST", "/api/note", "server error", 500);
 
-    const errorSpy = console.error;
-    let errorCalled = false;
-    console.error = (..._args: unknown[]) => {
-      errorCalled = true;
-    };
+    let errorNotified = false;
+    const offNotif = on("notification", (data) => {
+      if (data.type === "error") errorNotified = true;
+    });
 
     await createNewNote("Failing Note");
 
-    console.error = errorSpy;
+    offNotif();
 
-    expect(errorCalled).toBeTruthy();
+    expect(errorNotified).toBeTruthy();
     // No tab should have been created since createNote threw
     expect(getTabs()).toHaveLength(0);
 

@@ -25,9 +25,9 @@ describe("e2e: block transforms", () => {
   });
 
   async function resetEditor(content: string) {
-    await page.click("button:has-text('Source')");
+    await page.click(".editor-toolbar-btn--source");
     await page.fill(".editor-source", content);
-    await page.click("button:has-text('Source')");
+    await page.click(".editor-toolbar-btn--source");
     await page.click(".editor-content");
   }
 

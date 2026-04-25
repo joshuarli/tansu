@@ -1,8 +1,8 @@
 use std::{
-    collections::HashSet,
+    collections::HashMap,
     path::{Path, PathBuf},
     sync::{Arc, Mutex, mpsc},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use crate::util;
@@ -14,10 +14,12 @@ pub enum WatchEvent {
     Removed(PathBuf),
 }
 
+const SELF_WRITE_WINDOW: Duration = Duration::from_secs(2);
+
 pub fn start_watcher(
     dir: &Path,
     tx: mpsc::Sender<WatchEvent>,
-    self_writes: Arc<Mutex<HashSet<PathBuf>>>,
+    self_writes: Arc<Mutex<HashMap<PathBuf, Instant>>>,
 ) -> notify::Result<RecommendedWatcher> {
     let dir_owned = dir.to_path_buf();
     let dir_for_watch = dir.to_path_buf();
@@ -37,11 +39,14 @@ pub fn start_watcher(
                     continue;
                 }
 
-                // Check self-write filter
+                // Check self-write filter: suppress events within the window of our own writes.
                 {
                     let mut sw = self_writes.lock().unwrap();
-                    if sw.remove(path) {
-                        continue;
+                    if let Some(&ts) = sw.get(path) {
+                        if ts.elapsed() < SELF_WRITE_WINDOW {
+                            continue;
+                        }
+                        sw.remove(path);
                     }
                 }
 

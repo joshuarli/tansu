@@ -395,7 +395,7 @@ function connectSSE() {
 
   es.addEventListener("changed", async (e) => {
     const path = e.data;
-    emit("files:changed");
+    emit("files:changed", { savedPath: path });
     const active = getActiveTab();
     if (active && active.path === path) {
       try {
@@ -410,7 +410,7 @@ function connectSSE() {
   es.addEventListener("deleted", (e) => {
     const path = e.data;
     invalidateNoteCache();
-    emit("files:changed");
+    emit("files:changed", {});
     const active = getActiveTab();
     if (active && active.path === path) {
       showNotification(`"${stemFromPath(path)}" was deleted externally.`);

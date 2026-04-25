@@ -26,31 +26,34 @@ describe("e2e: save deduplication", () => {
     await teardown();
   });
 
-  // Count PUT /api/note requests fired during a callback, waiting for them to settle.
-  async function countPuts(
+  // Collect /api/note requests by method during a callback, then wait for cascading
+  // requests to settle before returning. The settle window must be long enough for a
+  // full SSE round-trip (file write → watcher event → drain → SSE broadcast → client
+  // handler) to complete so we can assert it didn't happen.
+  async function collectNoteRequests(
     fn: () => Promise<void>,
-  ): Promise<{ count: number; statuses: number[] }> {
-    const statuses: number[] = [];
+    settleMs = 1500,
+  ): Promise<Record<string, number[]>> {
+    const byMethod: Record<string, number[]> = {};
     const handler = (response: PlaywrightResponse) => {
-      if (response.request().method() === "PUT" && response.url().includes("/api/note")) {
-        statuses.push(response.status());
-      }
+      if (!response.url().includes("/api/note")) return;
+      const method = response.request().method();
+      (byMethod[method] ??= []).push(response.status());
     };
     page.on("response", handler);
     await fn();
-    // Wait long enough for any concurrent/cascading requests to land.
-    await page.waitForTimeout(800);
+    await page.waitForTimeout(settleMs);
     page.off("response", handler);
-    return { count: statuses.length, statuses };
+    return byMethod;
   }
 
-  it("Cmd+S on unmodified note sends exactly 1 PUT", async () => {
+  it("Cmd+S on unmodified note sends no requests", async () => {
     await page.click(".editor-content");
-    const { count, statuses } = await countPuts(async () => {
+    const reqs = await collectNoteRequests(async () => {
       await page.keyboard.press("Meta+s");
     });
-    expect(count).toBe(1);
-    expect(statuses).toStrictEqual([200]);
+    expect(reqs["PUT"]).toBeUndefined();
+    expect(reqs["GET"]).toBeUndefined();
   }, 15_000);
 
   it("Cmd+S on modified note sends exactly 1 PUT with no 409", async () => {
@@ -58,10 +61,27 @@ describe("e2e: save deduplication", () => {
     await page.keyboard.type(" edited");
     await page.waitForSelector(".tab.active .dirty", { timeout: 2000 });
 
-    const { count, statuses } = await countPuts(async () => {
+    const reqs = await collectNoteRequests(async () => {
       await page.keyboard.press("Meta+s");
     });
-    expect(count).toBe(1);
-    expect(statuses).toStrictEqual([200]);
+    expect(reqs["PUT"]).toStrictEqual([200]);
+    expect(reqs["GET"]).toBeUndefined();
+  }, 15_000);
+
+  it("saving twice in sequence sends no GET after either save", async () => {
+    await page.click(".editor-content");
+    await page.keyboard.type(" first");
+    await page.waitForSelector(".tab.active .dirty", { timeout: 2000 });
+    await page.keyboard.press("Meta+s");
+    await page.waitForTimeout(200);
+
+    await page.keyboard.type(" second");
+    await page.waitForSelector(".tab.active .dirty", { timeout: 2000 });
+
+    const reqs = await collectNoteRequests(async () => {
+      await page.keyboard.press("Meta+s");
+    });
+    expect(reqs["PUT"]).toStrictEqual([200]);
+    expect(reqs["GET"]).toBeUndefined();
   }, 15_000);
 });

@@ -63,38 +63,37 @@ export function checkInlineTransform(): string | null {
     }
 
     const { start, end } = computeReplaceRange(pat, m.start, pos);
-    const html = buildReplacementHtml(pat, m.content);
 
+    // Use Range API directly instead of execCommand("insertHTML") — Chrome's
+    // execCommand rewrites <code> as a CSS-styled span, losing the semantic element.
     const range = document.createRange();
     range.setStart(node, start);
     range.setEnd(node, end);
-    sel.removeAllRanges();
-    sel.addRange(range);
+    range.deleteContents();
 
-    document.execCommand("insertHTML", false, html); // incremental edit; bypasses renderer intentionally for undo stack
+    const el = document.createElement(pat.tag);
+    el.textContent = m.content;
+    range.insertNode(el);
 
-    // For trailingSpace patterns, the space text node is already there —
-    // move cursor to after it so typing continues outside the styled element
+    // Position cursor after the inserted element.
+    const nr = document.createRange();
     if (pat.trailingSpace) {
-      const newSel = window.getSelection();
-      if (newSel && newSel.rangeCount > 0) {
-        const r = newSel.getRangeAt(0);
-        let cursor = r.startContainer;
-        // Walk up to the styled element if we're inside it
-        while (cursor.parentNode && cursor.parentNode !== node.parentNode) {
-          cursor = cursor.parentNode;
-        }
-        // Find the text node after the styled element (contains the space)
-        const after = (cursor as HTMLElement).nextSibling;
-        if (after && after.nodeType === Node.TEXT_NODE) {
-          const nr = document.createRange();
-          nr.setStart(after, clampNodeOffset(after, after.textContent?.length ?? 0));
-          nr.collapse(true);
-          newSel.removeAllRanges();
-          newSel.addRange(nr);
-        }
+      // deleteContents split the text node; the trailing space is now in el.nextSibling.
+      const after = el.nextSibling;
+      if (after?.nodeType === Node.TEXT_NODE) {
+        nr.setStart(after, Math.min(1, after.textContent?.length ?? 0));
+      } else {
+        nr.setStartAfter(el);
       }
+    } else {
+      // Insert a zero-width space so the cursor lands outside the element.
+      const zwsp = document.createTextNode("​");
+      el.after(zwsp);
+      nr.setStart(zwsp, 1);
     }
+    nr.collapse(true);
+    sel.removeAllRanges();
+    sel.addRange(nr);
 
     return pat.tag;
   }

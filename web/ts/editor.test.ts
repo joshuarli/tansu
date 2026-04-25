@@ -486,6 +486,7 @@ describe("editor", () => {
     sourceBtn.click();
     const sourceEl = document.querySelector(".editor-source") as HTMLTextAreaElement;
     sourceEl.value = "# Updated Content";
+    sourceEl.dispatchEvent(new Event("input", { bubbles: true }));
 
     mock.on("PUT", "/api/note", { mtime: 3000 });
 
@@ -515,6 +516,7 @@ describe("editor", () => {
     sourceBtn.click();
     const sourceEl = document.querySelector(".editor-source") as HTMLTextAreaElement;
     sourceEl.value = "# My edits";
+    sourceEl.dispatchEvent(new Event("input", { bubbles: true }));
 
     // Server says file changed to something different
     mock.on("PUT", "/api/note", { mtime: 2000, conflict: true, content: "# Disk version" }, 409);
@@ -805,6 +807,7 @@ describe("editor", () => {
     sourceBtn.click();
     const sourceEl = document.querySelector(".editor-source") as HTMLTextAreaElement;
     sourceEl.value = "# FC";
+    sourceEl.dispatchEvent(new Event("input", { bubbles: true }));
 
     // Server returns conflict but disk content matches editor → false-conflict
     mock.on("PUT", "/api/note", { mtime: 2000, content: "# FC" }, 409);

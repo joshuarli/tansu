@@ -17,9 +17,9 @@ describe("e2e: editor", () => {
   });
 
   async function resetEditor(content: string) {
-    await page.click("button:has-text('Source')");
+    await page.click(".editor-toolbar-btn--source");
     await page.fill(".editor-source", content);
-    await page.click("button:has-text('Source')");
+    await page.click(".editor-toolbar-btn--source");
     await page.click(".editor-content");
   }
 
@@ -48,13 +48,13 @@ describe("e2e: editor", () => {
     expect(editable).toBe("true");
 
     // Source mode toggle
-    await page.click("button:has-text('Source')");
+    await page.click(".editor-toolbar-btn--source");
     await expect(page.isVisible(".editor-source")).resolves.toBeTruthy();
     const srcValue = await page.$eval(".editor-source", (el: HTMLTextAreaElement) => el.value);
     expect(srcValue).toContain("# Hello");
 
     // Toggle back
-    await page.click("button:has-text('Source')");
+    await page.click(".editor-toolbar-btn--source");
     await expect(page.isVisible(".editor-content")).resolves.toBeTruthy();
     await expect(page.isHidden(".editor-source")).resolves.toBeTruthy();
 
@@ -90,14 +90,14 @@ describe("e2e: editor", () => {
     await page.keyboard.press("Meta+a");
     await page.keyboard.press("Meta+b");
     const bHtml = await page.$eval(".editor-content", (el) => el.innerHTML);
-    expect(bHtml).toContain("<b>");
+    expect(bHtml).toContain("<strong>");
 
     // Cmd+I toggles italic
     await resetEditor("plain text");
     await page.keyboard.press("Meta+a");
     await page.keyboard.press("Meta+i");
     const iHtml = await page.$eval(".editor-content", (el) => el.innerHTML);
-    expect(iHtml).toContain("<i>");
+    expect(iHtml).toContain("<em>");
 
     // Paste plain text
     await resetEditor("");
@@ -119,10 +119,10 @@ describe("e2e: editor", () => {
   async function saveAndGetSource(): Promise<string> {
     await page.keyboard.press("Meta+s");
     await page.waitForTimeout(300);
-    await page.click("button:has-text('Source')");
+    await page.click(".editor-toolbar-btn--source");
     const src = await page.$eval(".editor-source", (el: HTMLTextAreaElement) => el.value);
     // Toggle back to content mode for subsequent tests
-    await page.click("button:has-text('Source')");
+    await page.click(".editor-toolbar-btn--source");
     return src;
   }
 

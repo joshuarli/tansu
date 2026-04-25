@@ -5,7 +5,7 @@ import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
 import { chromium, firefox, type Browser, type Page } from "playwright";
 
@@ -48,10 +48,13 @@ export async function setup(opts?: {
   writeFileSync(join(notesDir, "second.md"), "# Second\n\nAnother note.");
   writeFileSync(join(notesDir, "linked.md"), "# Linked\n\nHas a [[test]] link.");
 
-  // Start server
-  server = spawn("cargo", ["run", "--bin", "tansu", "--", notesDir, "--port", String(activePort)], {
+  // Start server using the pre-built binary (run `cargo build` before `make test-e2e`).
+  const binary = resolve("target/debug/tansu");
+  server = spawn(binary, [notesDir, "--port", String(activePort)], {
     stdio: ["ignore", "pipe", "pipe"],
   });
+  server.stdout?.on("data", () => {});
+  server.stderr?.on("data", () => {});
 
   // Wait for server to be ready
   await waitForServer(`http://localhost:${activePort}`, 10_000);
