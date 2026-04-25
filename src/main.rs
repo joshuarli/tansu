@@ -1415,9 +1415,13 @@ fn die(msg: &str) -> ! {
 }
 
 fn expand_tilde(s: &str) -> PathBuf {
-    if s == "~" || s.starts_with("~/") {
+    if let Some(rest) = s.strip_prefix("~/") {
         if let Some(home) = env::var_os("HOME") {
-            return PathBuf::from(home).join(s.trim_start_matches("~/"));
+            return PathBuf::from(home).join(rest);
+        }
+    } else if s == "~" {
+        if let Some(home) = env::var_os("HOME") {
+            return PathBuf::from(home);
         }
     }
     PathBuf::from(s)
@@ -1472,8 +1476,27 @@ fn load_vault_configs(config_path: &Path) -> Vec<(String, PathBuf)> {
         .collect()
 }
 
-/// Walk up from each vault dir and assert no ancestor has a .tansu/ directory.
+/// Check that no two configured vaults are nested inside each other, and that no vault
+/// is nested inside a vault not in the config (detected via .tansu/ ancestor dir).
 fn check_vault_nesting(vaults: &[(String, PathBuf)]) {
+    // Pairwise: catches nesting between freshly-configured vaults with no .tansu/ yet.
+    for i in 0..vaults.len() {
+        for j in 0..vaults.len() {
+            if i == j {
+                continue;
+            }
+            let (name_i, dir_i) = &vaults[i];
+            let (name_j, dir_j) = &vaults[j];
+            if dir_i.starts_with(dir_j) {
+                die(&format!(
+                    "vault.{name_i} ({}) is nested inside vault.{name_j} ({})",
+                    dir_i.display(),
+                    dir_j.display()
+                ));
+            }
+        }
+    }
+    // Walk-up: catches nesting inside a vault that exists on disk but isn't in the config.
     for (name, dir) in vaults {
         let mut ancestor = dir.parent();
         while let Some(p) = ancestor {

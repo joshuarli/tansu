@@ -3,7 +3,7 @@ TARGET     := $(shell rustc -vV | awk '/^host:/ {print $$2}')
 
 dev: clean
 	pnpm run bundle-dev
-	cargo run --bin tansu -- $(NOTES_DIR) --port 3000
+	cargo run --bin tansu -- --port 3000
 
 build: ts build-rs
 
@@ -48,8 +48,6 @@ test-ts:
 test-e2e:
 	vitest run --config vitest.e2e.config.ts
 
-NOTES_DIR ?= '/Users/josh/Library/Mobile Documents/iCloud~md~obsidian/Documents/Notes'
-
 test-rs:
 	cargo test -q
 
@@ -57,7 +55,7 @@ bench:
 	cargo bench --bench index
 
 bench-quick:
-	cargo run --bin bench -- $(NOTES_DIR)
+	cargo run --bin bench
 
 release-linux-amd64:
 	pnpm run bundle
