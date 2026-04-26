@@ -1,6 +1,8 @@
 /// IndexedDB-backed local store for offline resilience.
 /// Caches session state and note content so the app survives server downtime.
 
+import { splitFrontmatter } from "./frontmatter.ts";
+
 const DB_NAME = "tansu";
 const DB_VERSION = 2;
 
@@ -88,10 +90,11 @@ export async function noteGet(path: string): Promise<CachedNote | undefined> {
   if (!note) {
     return undefined;
   }
+  const parsed = splitFrontmatter(note.content ?? "");
   return {
     content: note.content ?? "",
     mtime: note.mtime ?? 0,
-    tags: note.tags ?? [],
+    tags: parsed.hasFrontmatter ? parsed.tags : (note.tags ?? []),
   };
 }
 
@@ -101,7 +104,12 @@ export function notePut(
   mtime: number,
   tags: string[],
 ): Promise<void> {
-  return idbPut("notes", path, { content, mtime, tags } satisfies CachedNote);
+  const parsed = splitFrontmatter(content);
+  return idbPut("notes", path, {
+    content,
+    mtime,
+    tags: parsed.hasFrontmatter ? parsed.tags : tags,
+  } satisfies CachedNote);
 }
 
 export function noteDel(path: string): Promise<void> {

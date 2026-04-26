@@ -36,6 +36,16 @@ describe("local-store", () => {
     expect(note).toStrictEqual({ content: "# Hello", mtime: 1000, tags: ["alpha"] });
   });
 
+  it("noteGet derives tags from frontmatter", async () => {
+    await notePut("frontmatter.md", "---\ntags: [alpha, beta]\n---\n\n# Hello", 1000, ["stale"]);
+    const note = await noteGet("frontmatter.md");
+    expect(note).toStrictEqual({
+      content: "---\ntags: [alpha, beta]\n---\n\n# Hello",
+      mtime: 1000,
+      tags: ["alpha", "beta"],
+    });
+  });
+
   it("notePut overwrites existing note", async () => {
     await notePut("overwrite.md", "v1", 1000, []);
     await notePut("overwrite.md", "v2", 2000, ["beta"]);

@@ -224,7 +224,7 @@ impl Server {
     fn refresh_note_tags_cache(&self, rel_path: &str, content: &str) {
         let parsed = frontmatter::split_tags(content);
         if parsed.has_frontmatter {
-            let _ = self.vaults[self.active].tags.set(rel_path, &parsed.tags);
+            let _ = self.vaults[self.active].tags.remove(rel_path);
         }
     }
 
@@ -799,7 +799,7 @@ impl Server {
             revisions::save_revision(&self.vaults[self.active].dir, &rel, &full);
             self.write_content(&full, content.as_bytes())?;
         }
-        self.vaults[self.active].tags.set(&rel, &tags)?;
+        self.vaults[self.active].tags.remove(&rel)?;
         self.reindex_note(&rel, &content, &full);
         self.vaults[self.active]
             .file_index
