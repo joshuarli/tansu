@@ -10,6 +10,7 @@ describe("tabs", () => {
   let openTab: (path: string) => Promise<Tab>;
   let closeTab: (i: number) => void;
   let getTabs: () => Tab[];
+  let getActiveTab: () => Tab | null;
   let markDirty: (path: string) => void;
   let createNewNoteViaDialog: () => Promise<void>;
 
@@ -31,6 +32,7 @@ describe("tabs", () => {
     ({ openTab } = stateMod);
     ({ closeTab } = stateMod);
     ({ getTabs } = stateMod);
+    ({ getActiveTab } = stateMod);
     ({ markDirty } = stateMod);
     createNewNoteViaDialog = mod.promptNewNote;
 
@@ -88,6 +90,25 @@ describe("tabs", () => {
     }
   });
 
+  it("clicking an inactive tab switches the active tab", async () => {
+    await openTwo();
+    const tabBar = document.querySelector("#tab-bar")!;
+    const tabEls = tabBar.querySelectorAll(".tab:not(.tab-new)");
+
+    expect(getActiveTab()?.path).toBe("notes/beta.md");
+    (tabEls[0] as HTMLElement).click();
+    await tick();
+
+    const renderedTabEls = tabBar.querySelectorAll(".tab:not(.tab-new)");
+    expect(getActiveTab()?.path).toBe("notes/alpha.md");
+    expect(renderedTabEls[0]!.classList.contains("active")).toBeTruthy();
+    expect(renderedTabEls[1]!.classList.contains("active")).toBeFalsy();
+
+    while (getTabs().length > 0) {
+      closeTab(0);
+    }
+  });
+
   it("tab labels match note titles", async () => {
     await openTwo();
     const tabBar = document.querySelector("#tab-bar")!;
@@ -137,6 +158,24 @@ describe("tabs", () => {
     const remaining = tabBar.querySelectorAll(".tab:not(.tab-new)");
     expect(remaining).toHaveLength(1);
     expect(remaining[0]!.querySelector("span:not(.close):not(.dirty)")!.textContent).toBe("beta");
+    while (getTabs().length > 0) {
+      closeTab(0);
+    }
+  });
+
+  it("close button on an inactive tab does not switch before closing", async () => {
+    await openTwo();
+    const tabBar = document.querySelector("#tab-bar")!;
+    const tabEls = tabBar.querySelectorAll(".tab:not(.tab-new)");
+    const closeBtn = tabEls[0]!.querySelector(".close") as HTMLElement;
+
+    expect(getActiveTab()?.path).toBe("notes/beta.md");
+    closeBtn.click();
+    await tick();
+
+    expect(getActiveTab()?.path).toBe("notes/beta.md");
+    expect(tabBar.querySelectorAll(".tab:not(.tab-new)")).toHaveLength(1);
+
     while (getTabs().length > 0) {
       closeTab(0);
     }
@@ -266,6 +305,25 @@ describe("tabs", () => {
     document.dispatchEvent(
       new KeyboardEvent("keydown", { key: " ", ctrlKey: true, bubbles: true }),
     );
+    await tick();
+
+    expect(tabBar.querySelectorAll(".tab:not(.tab-new)")).toHaveLength(countBefore);
+
+    while (getTabs().length > 0) {
+      closeTab(0);
+    }
+  });
+
+  it("space key does not close hovered tab when focus is in an input", async () => {
+    await openTwo();
+    const tabBar = document.querySelector("#tab-bar")!;
+    const countBefore = tabBar.querySelectorAll(".tab:not(.tab-new)").length;
+    const tabEl = tabBar.querySelectorAll(".tab:not(.tab-new)")[0]! as HTMLElement;
+    const input = document.querySelector("#sidebar-search") as HTMLInputElement;
+
+    tabEl.dispatchEvent(new MouseEvent("mouseenter", { bubbles: true }));
+    input.focus();
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: " ", bubbles: true }));
     await tick();
 
     expect(tabBar.querySelectorAll(".tab:not(.tab-new)")).toHaveLength(countBefore);

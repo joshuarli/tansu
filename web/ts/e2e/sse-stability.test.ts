@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -35,15 +35,23 @@ describe("e2e: SSE connection stability", () => {
   let server: ChildProcess;
   let baseUrl: string;
   let notesDir: string;
+  let configDir: string;
 
   beforeAll(async () => {
     const port = await getFreePort();
     baseUrl = `http://localhost:${port}`;
     notesDir = mkdtempSync(join(tmpdir(), "tansu-sse-"));
     writeFileSync(join(notesDir, "test.md"), "# Hello");
+    configDir = mkdtempSync(join(tmpdir(), "tansu-sse-config-"));
+    mkdirSync(join(configDir, "tansu"), { recursive: true });
+    writeFileSync(
+      join(configDir, "tansu", "config.toml"),
+      `[vault.test]\ndir = ${JSON.stringify(notesDir)}\n`,
+    );
 
     const binary = resolve("target/debug/tansu");
-    server = spawn(binary, [notesDir, "--port", String(port)], {
+    server = spawn(binary, ["--port", String(port)], {
+      env: { ...process.env, XDG_CONFIG_HOME: configDir },
       stdio: ["ignore", "pipe", "pipe"],
     });
     server.stderr?.on("data", () => {});
@@ -62,6 +70,11 @@ describe("e2e: SSE connection stability", () => {
     });
     try {
       rmSync(notesDir, { recursive: true });
+    } catch {
+      /* ignore */
+    }
+    try {
+      rmSync(configDir, { recursive: true });
     } catch {
       /* ignore */
     }

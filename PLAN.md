@@ -1,0 +1,338 @@
+# Frontend Preact Migration Plan
+
+This plan tracks the migration from imperative DOM modules in `web/` to JSX and
+Preact. The migration is intentionally test-first: build characterization tests
+around existing behavior, then convert one UI island at a time behind those
+tests.
+
+## Goals
+
+- [ ] Move app UI from scattered `document.querySelector`, `document.createElement`, and module-level DOM mutation to typed Preact components.
+- [ ] Keep the app lightweight: Preact only, no router, no global state library, no CSS framework, no Vite migration unless separately justified.
+- [ ] Preserve current app behavior during migration.
+- [ ] Keep the editor's `contenteditable` surface stable by treating it as an imperative island until the surrounding shell is declarative.
+- [ ] Keep `packages/md-wysiwyg` framework-neutral at its core, with optional Preact adapters only if useful.
+- [ ] Improve production readiness through stronger tests, explicit async states, cleanup discipline, and accessibility fixes.
+
+## Non-Goals For The Initial Migration
+
+- [ ] Do not redesign the app visually during the conversion.
+- [ ] Do not replace the Rust server or API shape.
+- [ ] Do not introduce a client router.
+- [ ] Do not introduce Redux, Zustand, Jotai, signals, or another state library.
+- [ ] Do not make the editor fully controlled on every keystroke.
+- [ ] Do not move app-specific behavior into `packages/md-wysiwyg`.
+- [ ] Do not add a CSS framework.
+
+## Baseline Gates
+
+- [x] Record current `tsgo --noEmit` result. Passed.
+- [x] Record current `tsgo -p packages/md-wysiwyg/tsconfig.json --noEmit` result. Passed.
+- [x] Record current `vitest run` result. Passed: 26 files, 384 tests.
+- [x] Record current `cd packages/md-wysiwyg && vitest run` result. Passed via `pnpm exec vitest run`: 11 files, 394 tests.
+- [x] Record current `cargo test` result. Passed: 126 Rust tests across lib/bin targets.
+- [x] Record current `pnpm run test-e2e` result, or document blocker if the local binary/browser setup is not ready. Harness now starts the server with a temp vault config; blocked by missing Playwright browser binaries. Run `pnpm exec playwright install` before retrying.
+- [x] Confirm `pnpm run bundle` succeeds before any Preact changes. Passed.
+- [x] Confirm `pnpm run bundle-dev` succeeds before any Preact changes. Passed.
+
+## Pre-Migration Test Inventory
+
+- [ ] Inventory existing DOM unit tests in `web/ts/*.test.ts`.
+- [ ] Inventory existing browser e2e tests in `web/ts/e2e/*.test.ts`.
+- [ ] Identify modules with module-level DOM side effects.
+- [ ] Identify modules that own global listeners.
+- [ ] Identify modules that own timers.
+- [ ] Identify modules that own async request cancellation or stale-response guards.
+- [ ] Identify modules that write `innerHTML`.
+- [ ] Identify modules that call `document.body.append`.
+
+## Characterization Tests To Add Before Conversion
+
+### App Bootstrap And Global Lifecycle
+
+- [ ] Add test coverage for unlocked startup initializing the main app shell.
+- [ ] Add test coverage for locked startup hiding `#app` and showing unlock screen.
+- [ ] Add test coverage for recovery-key unlock success removing unlock screen and starting the app.
+- [ ] Add test coverage for recovery-key unlock failure showing an error and re-enabling the submit button.
+- [ ] Add test coverage for biometric unlock auto-trigger when PRF is available.
+- [ ] Add test coverage for biometric unlock failure message.
+- [ ] Add test coverage for unsupported browser feature page.
+- [ ] Add test coverage for notification show, auto-dismiss, and click-dismiss behavior.
+- [ ] Add test coverage for server status show/hide during SSE reconnect.
+- [ ] Add test coverage for pagehide/beforeunload closing SSE.
+- [ ] Add test coverage for focus/visibility reconnect behavior.
+
+### Tabs
+
+- [x] Existing tests cover rendering, active state, dirty dot, close button, context menu, tooltip, space-to-close, middle click, new-note dialog, and rename event.
+- [x] Add explicit test that clicking a non-active tab switches active tab.
+- [x] Add explicit test that the close button does not also switch the tab.
+- [ ] Add explicit test that tooltip position updates from tab bounds.
+- [ ] Add explicit test that active tab scrolls into view.
+- [x] Add explicit test that space does not close when focus is in an input or textarea.
+- [ ] Add explicit test that unpin context menu label appears for pinned tabs.
+
+### File Navigation
+
+- [x] Existing tests cover active state under rapid events, collapse button, search mode, empty/error states, context menu, pin/delete/rename actions, and pinned refresh.
+- [x] Add explicit test for pinned file de-duplication against recent files.
+- [x] Add explicit test for opening a note by clicking a nav item.
+- [ ] Add explicit test for unpin action when file is already pinned.
+- [ ] Add explicit test for stale search responses not replacing newer results.
+- [ ] Add explicit test that active state updates when `tab:change` fires without `files:changed`.
+
+### Search Modal
+
+- [x] Existing tests cover open/close/toggle, scoped placeholder, escape/backdrop close, rendering results, tags, score breakdown, create note, API error, settings failure, and stale response ordering.
+- [x] Add explicit test that scoped search sends `path` and suppresses create-note option.
+- [ ] Add explicit test that stale response from an old scope is ignored.
+- [x] Add explicit test that `show_score_breakdown: false` hides score details.
+- [ ] Add explicit test that click selection updates selected index before opening.
+- [x] Add explicit test that ArrowDown wraps from last item to first.
+- [x] Add explicit test that ArrowUp wraps from first item to last.
+- [ ] Add explicit test that Enter on the create option creates the note.
+
+### Command Palette
+
+- [x] Existing tests cover lifecycle, filtering, click, keyboard navigation, Enter, Escape, and `matchesKey`.
+- [ ] Add explicit test that selected index resets on open.
+- [ ] Add explicit test that selected index clamps when filtering reduces result count.
+- [ ] Add explicit test that backdrop click closes.
+- [ ] Add explicit test that empty filter result renders no command items.
+- [ ] Add explicit test that command action errors do not leave inconsistent UI, if this behavior is desired.
+
+### Settings Modal
+
+- [x] Existing tests cover load, save, defaults on error, slider display, excluded-folder Enter save, encrypted security rendering, lock button, save failure, lifecycle, toggle, and backdrop close.
+- [x] Add explicit test that cancel closes without saving.
+- [x] Add explicit test that save sends the exact settings payload.
+- [x] Add explicit test for excluded folder trimming and empty entry removal.
+- [ ] Add explicit test for PRF remove action.
+- [ ] Add explicit test for PRF register success.
+- [ ] Add explicit test for PRF register failure.
+- [ ] Add explicit test for status failure hiding/degrading the security section.
+
+### Input Dialog
+
+- [ ] Add test for opening with placeholder text.
+- [ ] Add test for Enter resolving trimmed value.
+- [ ] Add test for Enter with empty value resolving `null` or no-op, matching current behavior.
+- [ ] Add test for Escape resolving `null`.
+- [ ] Add test for backdrop click resolving `null`.
+- [ ] Add test for cleanup of event listeners after close.
+
+### Context Menu
+
+- [ ] Add test for positioning at click coordinates.
+- [ ] Add test for disabled item behavior if supported.
+- [ ] Add test for danger class rendering.
+- [ ] Add test for outside click cleanup.
+- [ ] Add test for deferred action behavior.
+
+### Editor Shell
+
+- [x] Existing tests cover rendering markdown, frontmatter hiding/source preservation, toolbar/source/menu creation, tag row, markdown serialization, cursor restoration, hide behavior, save classification, and reload classification.
+- [ ] Add explicit test for source-mode edit syncing back to rendered mode.
+- [ ] Add explicit test for tag add via autocomplete callback path.
+- [ ] Add explicit test for tag remove syncing source frontmatter.
+- [ ] Add explicit test for Backspace removing last tag from empty tag input.
+- [ ] Add explicit test for toolbar format button wiring.
+- [ ] Add explicit test for more-menu actions: revisions, backlinks, source mode, or available current items.
+- [ ] Add explicit test for conflict banner action integration.
+- [ ] Add explicit test for autosave timer scheduling and cancellation.
+- [ ] Add explicit test that autosave defers while a non-collapsed selection is active.
+- [ ] Add explicit test for undo/redo keyboard behavior.
+- [ ] Add explicit test for source-mode save path.
+- [ ] Add explicit test for paste image handler integration.
+
+### Renderer And Markdown Ownership
+
+- [x] Existing enforcement test prevents direct render function imports outside `renderer.ts`.
+- [ ] Add enforcement test for markdown `innerHTML` writes remaining centralized.
+- [ ] Add enforcement test for converted modules not using app-root ID queries.
+- [ ] Add enforcement test for no broad `document.body.innerHTML` outside known bootstrap/test exceptions.
+- [ ] Add enforcement test for no direct `renderMarkdown*` calls from Preact components except approved adapter boundaries.
+
+### `packages/md-wysiwyg`
+
+- [x] Existing package tests cover markdown render, serialization, cursor offset, selection rendering, transforms, inline transforms, diff, merge, highlight, roundtrip, and utilities.
+- [ ] Add tests for any optional Preact entrypoint before adding it.
+- [ ] Add `MarkdownPreview` tests if introduced.
+- [ ] Add `MarkdownEditorSurface` tests if introduced.
+- [ ] Add `DiffView` component tests if introduced.
+- [ ] Add tests proving the core package remains usable without Preact adapters.
+
+## Preact Setup
+
+- [ ] Add `preact` as the only production frontend dependency.
+- [ ] Update `package.json` bundle script to compile `web/ts/main.tsx`.
+- [ ] Add esbuild JSX settings: `--jsx=automatic --jsx-import-source=preact`.
+- [ ] Update `tsconfig.json` with `jsx: "react-jsx"` and `jsxImportSource: "preact"`.
+- [ ] Ensure `vitest.config.ts` coverage includes `web/ts/**/*.tsx`.
+- [ ] Ensure oxlint/oxfmt cover `.tsx` files.
+- [ ] Add `web/ts/component-test-helper.tsx`.
+- [ ] Add a minimal smoke component test.
+- [ ] Confirm production bundle succeeds.
+- [ ] Confirm dev bundle succeeds.
+
+## App Shell Conversion
+
+- [ ] Create `web/ts/main.tsx` as a thin Preact mount.
+- [ ] Create `web/ts/app.tsx`.
+- [ ] Render the existing static shell in JSX using the same IDs/classes.
+- [ ] Keep legacy init functions running from a single `useEffect`.
+- [ ] Keep `web/index.html` as only the root mount and script/style links.
+- [ ] Verify old modules still work against the JSX-rendered shell.
+- [ ] Remove duplicated static app shell from `web/index.html`.
+- [ ] Add tests for shell render.
+- [ ] Run full frontend tests and e2e smoke.
+
+## Leaf Component Conversions
+
+### Context Menu
+
+- [ ] Create `ContextMenu.tsx`.
+- [ ] Preserve temporary imperative `showContextMenu(items, x, y)` API.
+- [ ] Render menu items declaratively.
+- [ ] Add cleanup on outside click.
+- [ ] Keep keyboard/accessibility improvements scoped and tested.
+- [ ] Delete old imperative DOM construction after callers pass tests.
+
+### Input Dialog
+
+- [ ] Create `InputDialog.tsx`.
+- [ ] Preserve temporary `showInputDialog()` Promise API.
+- [ ] Render dialog declaratively.
+- [ ] Add focus management.
+- [ ] Add Escape/backdrop cleanup.
+- [ ] Delete old imperative DOM construction after callers pass tests.
+
+### Conflict Banner
+
+- [ ] Create `ConflictBanner.tsx`.
+- [ ] Convert keep-mine/take-theirs callbacks to props.
+- [ ] Preserve current conflict behavior.
+- [ ] Add integration test from editor reload/save conflict paths.
+
+### Backlinks
+
+- [ ] Create `Backlinks.tsx`.
+- [ ] Render loading, empty, error, and list states.
+- [ ] Keep `openTab` callback explicit.
+- [ ] Remove direct DOM writes from `backlinks.ts`.
+
+### Revisions
+
+- [ ] Create `RevisionsPanel.tsx`.
+- [ ] Render loading, empty, error, list, diff preview, and restore states.
+- [ ] Keep restore event compatibility until editor is converted.
+- [ ] Remove direct DOM writes from `revisions.ts`.
+
+### Vault Switcher
+
+- [ ] Create `VaultSwitcher.tsx`.
+- [ ] Render select and empty states declaratively.
+- [ ] Preserve current API behavior.
+- [ ] Ensure vault switch refresh and SSE behavior remain covered.
+
+## State Ownership Migration
+
+- [ ] Add a subscription API to `tab-state.ts` if needed by Preact hooks.
+- [ ] Add `useTabs()` hook.
+- [ ] Convert `tabs.ts` to `TabBar.tsx`.
+- [ ] Move tooltip state into `TabBar`.
+- [ ] Move global space-to-close listener into a cleanup-safe effect.
+- [ ] Convert `filenav.ts` to `FileNav.tsx`.
+- [ ] Move file-nav loading/error/search state into component state.
+- [ ] Convert notification pill to component state.
+- [ ] Convert server status to component state.
+- [ ] Give SSE lifecycle one owner.
+- [ ] Replace broad event-bus usage with props/state where practical.
+- [ ] Keep typed event bus only where it remains the simplest integration boundary.
+
+## Modal Conversion
+
+- [ ] Convert `search.ts` to `SearchModal.tsx`.
+- [ ] Preserve temporary open/close/toggle imperative control surface.
+- [ ] Keep stale request guard behavior.
+- [ ] Keep scoped search behavior.
+- [ ] Convert `palette.ts` to `CommandPalette.tsx`.
+- [ ] Move command registration to app-level state.
+- [ ] Move global shortcut handling to one cleanup-safe effect.
+- [ ] Convert `settings.ts` to `SettingsModal.tsx`.
+- [ ] Split security controls into a small component if helpful.
+- [ ] Keep exact API payload shapes.
+
+## Editor Conversion
+
+- [ ] Create `EditorShell.tsx`.
+- [ ] Keep `contenteditable` as an imperative island via refs.
+- [ ] Move toolbar rendering into JSX.
+- [ ] Move tag row rendering into JSX.
+- [ ] Move source toggle rendering into JSX.
+- [ ] Move more-menu trigger rendering into JSX.
+- [ ] Keep markdown rendering through `renderer.ts`.
+- [ ] Keep `domToMarkdown` serialization path unchanged.
+- [ ] Preserve custom undo/redo behavior.
+- [ ] Preserve source-text format operations.
+- [ ] Preserve autosave debounce and conflict handling.
+- [ ] Preserve cursor and selection sentinels.
+- [ ] Convert editor event listeners into cleanup-safe effects.
+- [ ] Extract editor controller logic only where it lowers risk.
+- [ ] Run editor unit tests after every editor slice.
+- [ ] Run e2e editor/save/transform/fuzz/firefox tests before considering this phase complete.
+
+## `packages/md-wysiwyg` Preact Adapter
+
+- [ ] Keep core package framework-neutral.
+- [ ] Add optional `./preact` export only if app conversion benefits from it.
+- [ ] Add `src/preact.tsx` only after tests specify expected adapter behavior.
+- [ ] Add `MarkdownPreview` if useful.
+- [ ] Add `MarkdownEditorSurface` only if it does not hide app-specific editor logic.
+- [ ] Add `DiffView` if revision UI benefits from it.
+- [ ] Ensure package core tests do not require Preact.
+- [ ] Ensure app can still import core package APIs from `@joshuarli98/md-wysiwyg`.
+
+## CSS And Accessibility Hardening
+
+- [ ] Keep `web/static/style.css` initially.
+- [ ] Organize CSS by component sections.
+- [ ] Prefer class selectors over ID selectors for styling.
+- [ ] Keep stable IDs only while legacy modules or e2e selectors require them.
+- [ ] Add accessible modal roles.
+- [ ] Add `aria-modal` to modal dialogs.
+- [ ] Add labels or accessible names to inputs/buttons.
+- [ ] Replace clickable `div`/`span` controls with real buttons where possible.
+- [ ] Add focus restore for modals.
+- [ ] Add `aria-live` for notification/status behavior.
+- [ ] Add keyboard coverage for converted components.
+
+## Production Readiness
+
+- [ ] Add app-level error boundary.
+- [ ] Centralize JSON parsing and typed API boundaries.
+- [ ] Make loading/empty/error states explicit in converted components.
+- [ ] Ensure every document/window listener has cleanup.
+- [ ] Ensure every timer has cleanup.
+- [ ] Ensure SSE reconnect timers are owned and cleaned.
+- [ ] Ensure overlays/popovers clean up on unmount.
+- [ ] Measure bundle size before Preact.
+- [ ] Measure bundle size after Preact.
+- [ ] Avoid `preact/compat` unless explicitly justified.
+- [ ] Add final enforcement tests for post-migration DOM restrictions.
+
+## Final Migration Completion Criteria
+
+- [ ] `web/ts/main.tsx` is the only app bootstrap entrypoint.
+- [ ] App shell is rendered by Preact.
+- [ ] Tabs, file nav, search, palette, settings, input dialog, context menu, notification, server status, and vault switcher are Preact components.
+- [ ] Editor shell is Preact, with the editable surface isolated behind refs.
+- [ ] `renderer.ts` remains the only app markdown render sink.
+- [ ] No converted component relies on fixed app-root `document.querySelector` lookups.
+- [ ] No unowned global listeners are registered at module import time.
+- [ ] Existing unit tests pass.
+- [ ] Existing package tests pass.
+- [ ] Existing Rust tests pass.
+- [ ] Existing e2e tests pass.
+- [ ] New migration characterization tests pass.
+- [ ] Bundle succeeds in dev and production modes.

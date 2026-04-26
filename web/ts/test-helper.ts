@@ -38,6 +38,12 @@ export type MockBody =
   | Record<string, never>
   | string;
 
+export type MockRequest = {
+  method: string;
+  url: string;
+  body: string | null;
+};
+
 const TANSU_HTML = `<!doctype html>
 <html><head></head><body>
   <div id="app">
@@ -140,9 +146,15 @@ export function mockFetch(): MockFetch {
     match: (url: string, init?: RequestInit) => boolean;
     respond: () => Response | Promise<Response>;
   }[] = [];
+  const requests: MockRequest[] = [];
   const origFetch = globalThis.fetch;
 
   const mock: MockFetch = {
+    requests,
+    clearRequests() {
+      requests.length = 0;
+      return mock;
+    },
     on(method: string, urlPattern: string | RegExp, body: MockBody, status = 200) {
       handlers.push({
         match: (url, init) => {
@@ -206,6 +218,12 @@ export function mockFetch(): MockFetch {
     } else {
       ({ url } = input);
     }
+    const initBody = init?.body;
+    requests.push({
+      method: (init?.method ?? "GET").toUpperCase(),
+      url,
+      body: typeof initBody === "string" ? initBody : initBody ? String(initBody) : null,
+    });
     // Later handlers take precedence (search in reverse)
     for (let i = handlers.length - 1; i >= 0; i--) {
       if (handlers[i]!.match(url, init)) {
@@ -219,6 +237,8 @@ export function mockFetch(): MockFetch {
 }
 
 export type MockFetch = {
+  requests: MockRequest[];
+  clearRequests(): MockFetch;
   on(method: string, urlPattern: string | RegExp, body: MockBody, status?: number): MockFetch;
   onDelayed(
     method: string,

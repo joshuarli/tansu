@@ -61,6 +61,8 @@ describe("filenav", () => {
       { path: "notes/beta.md", title: "beta", mtime: 1000 },
     ]);
     mock.on("GET", "/api/pinned", []);
+    emit("pinned:changed");
+    await drain();
     while (getTabs().length > 0) {
       closeTab(0);
     }
@@ -433,6 +435,48 @@ describe("filenav", () => {
     mock.on("GET", "/api/pinned", []);
     emit("pinned:changed");
     await drain();
+  });
+
+  it("pinned files are not duplicated in the recent list", async () => {
+    mock.on("GET", "/api/pinned", [{ path: "notes/alpha.md", title: "alpha" }]);
+    mock.on("GET", "/api/recentfiles", [
+      { path: "notes/alpha.md", title: "alpha", mtime: 2000 },
+      { path: "notes/beta.md", title: "beta", mtime: 1000 },
+    ]);
+
+    emit("pinned:changed");
+    emit("files:changed");
+    await drain();
+
+    const container = document.querySelector("#sidebar-tree")!;
+    const alphaRows = [...container.querySelectorAll<HTMLElement>(".nav-file")].filter(
+      (el) => el.title === "notes/alpha.md",
+    );
+    expect(alphaRows).toHaveLength(1);
+  });
+
+  it("clicking a nav item opens the corresponding tab", async () => {
+    while (getTabs().length > 0) {
+      closeTab(0);
+    }
+    mock.on("GET", "/api/recentfiles", [{ path: "notes/click-me.md", title: "click-me", mtime: 1 }]);
+    mock.on("GET", "/api/pinned", []);
+
+    emit("files:changed");
+    await drain();
+
+    const container = document.querySelector("#sidebar-tree")!;
+    const navFile = [...container.querySelectorAll<HTMLElement>(".nav-file")].find(
+      (el) => el.title === "notes/click-me.md",
+    );
+    if (!navFile) {
+      throw new Error("expected notes/click-me.md to render in file nav");
+    }
+    navFile.click();
+    await drain();
+
+    expect(getTabs()).toHaveLength(1);
+    expect((getTabs()[0] as { path: string }).path).toBe("notes/click-me.md");
   });
 
   it("rename action in context menu emits file:rename via the typed bus", async () => {

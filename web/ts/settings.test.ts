@@ -1,4 +1,5 @@
 import { setupDOM, mockFetch } from "./test-helper.ts";
+import type { Settings } from "./api.ts";
 
 describe("settings", () => {
   let cleanup: () => void;
@@ -61,6 +62,73 @@ describe("settings", () => {
 
     // Settings should be closed after successful save
     expect(isSettingsOpen()).toBeFalsy();
+  });
+
+  it("save sends the exact settings payload", async () => {
+    mock.on("GET", "/api/settings", {
+      weight_title: 10,
+      weight_headings: 5,
+      weight_tags: 2,
+      weight_content: 1,
+      fuzzy_distance: 1,
+      recency_boost: 2,
+      result_limit: 20,
+      show_score_breakdown: true,
+      excluded_folders: ["archive"],
+    });
+    mock.on("PUT", "/api/settings", {});
+
+    await openSettings();
+    mock.clearRequests();
+    const panel = document.querySelector("#settings-panel")!;
+
+    (panel.querySelector('input[data-key="weight_title"]') as HTMLInputElement).value = "8";
+    (panel.querySelector('input[data-key="weight_headings"]') as HTMLInputElement).value = "4";
+    (panel.querySelector('input[data-key="weight_tags"]') as HTMLInputElement).value = "3";
+    (panel.querySelector('input[data-key="weight_content"]') as HTMLInputElement).value = "2";
+    (panel.querySelector('select[data-key="fuzzy_distance"]') as HTMLSelectElement).value = "2";
+    (panel.querySelector('select[data-key="recency_boost"]') as HTMLSelectElement).value = "3";
+    (panel.querySelector('input[data-key="result_limit"]') as HTMLInputElement).value = "37";
+    (panel.querySelector('input[data-key="show_score_breakdown"]') as HTMLInputElement).checked =
+      false;
+    (panel.querySelector('input[data-key="excluded_folders"]') as HTMLInputElement).value =
+      "archive, drafts, , private ";
+
+    (panel.querySelector("#settings-save") as HTMLButtonElement).click();
+    await new Promise((r) => setTimeout(r, 20));
+
+    const put = mock.requests.find(
+      (req) => req.method === "PUT" && req.url === "/api/settings",
+    );
+    expect(put?.body).toBeTruthy();
+    const payload = JSON.parse(put!.body!) as Settings;
+    expect(payload).toStrictEqual({
+      weight_title: 8,
+      weight_headings: 4,
+      weight_tags: 3,
+      weight_content: 2,
+      fuzzy_distance: 2,
+      recency_boost: 3,
+      result_limit: 37,
+      show_score_breakdown: false,
+      excluded_folders: ["archive", "drafts", "private"],
+    });
+    expect(isSettingsOpen()).toBeFalsy();
+  });
+
+  it("cancel closes without saving", async () => {
+    await openSettings();
+    mock.clearRequests();
+    const panel = document.querySelector("#settings-panel")!;
+    (panel.querySelector('input[data-key="weight_title"]') as HTMLInputElement).value = "1";
+
+    (panel.querySelector("#settings-cancel") as HTMLButtonElement).click();
+    await new Promise((r) => setTimeout(r, 10));
+
+    expect(isSettingsOpen()).toBeFalsy();
+    expect(
+      mock.requests.some((req) => req.method === "PUT" && req.url === "/api/settings"),
+    ).toBeFalsy();
   });
 
   it("security section renders when encrypted", async () => {

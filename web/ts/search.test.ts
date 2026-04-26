@@ -200,6 +200,128 @@ describe("search", () => {
     closeSearch2();
   });
 
+  it("scoped search sends the path and suppresses the create-note option", async () => {
+    const input = document.querySelector("#search-input")! as HTMLInputElement;
+    const resultsEl = document.querySelector("#search-results")!;
+
+    mock.clearRequests();
+    mock.on("GET", /\/api\/search\?q=alpha&path=notes%2Falpha\.md/, [
+      {
+        path: "notes/alpha.md",
+        title: "Alpha",
+        tags: [],
+        excerpt: "scoped alpha",
+        score: 1,
+        field_scores: { title: 1, headings: 0, tags: 0, content: 0 },
+      },
+    ]);
+
+    openSearch2("notes/alpha.md");
+    input.value = "alpha";
+    input.dispatchEvent(new Event("input"));
+    await new Promise((r) => setTimeout(r, 200));
+
+    expect(
+      mock.requests.some((req) => req.url === "/api/search?q=alpha&path=notes%2Falpha.md"),
+    ).toBeTruthy();
+    expect(resultsEl.querySelector(".search-result")?.textContent).toContain("Alpha");
+    expect(resultsEl.querySelector(".search-create")).toBeNull();
+
+    closeSearch2();
+  });
+
+  it("score breakdown is hidden when the setting is disabled", async () => {
+    const input = document.querySelector("#search-input")! as HTMLInputElement;
+    const resultsEl = document.querySelector("#search-results")!;
+
+    mock.on("GET", "/api/settings", {
+      weight_title: 10,
+      weight_headings: 5,
+      weight_tags: 2,
+      weight_content: 1,
+      fuzzy_distance: 1,
+      recency_boost: 2,
+      result_limit: 20,
+      show_score_breakdown: false,
+      excluded_folders: [],
+    });
+    mock.on("GET", "/api/search", [
+      {
+        path: "a.md",
+        title: "Alpha",
+        tags: [],
+        excerpt: "test",
+        score: 1.5,
+        field_scores: { title: 1, headings: 0.5, tags: 0, content: 0 },
+      },
+    ]);
+
+    openSearch2();
+    await new Promise((r) => setTimeout(r, 50));
+    input.value = "alpha";
+    input.dispatchEvent(new Event("input"));
+    await new Promise((r) => setTimeout(r, 200));
+
+    const firstResult = resultsEl.querySelector(".search-result") as HTMLElement | null;
+    expect(firstResult).not.toBeNull();
+    expect(firstResult!.querySelector(".score")).toBeNull();
+    expect(firstResult!.textContent!).not.toContain("title:");
+
+    closeSearch2();
+    mock.on("GET", "/api/settings", {
+      weight_title: 10,
+      weight_headings: 5,
+      weight_tags: 2,
+      weight_content: 1,
+      fuzzy_distance: 1,
+      recency_boost: 2,
+      result_limit: 20,
+      show_score_breakdown: true,
+      excluded_folders: [],
+    });
+  });
+
+  it("arrow navigation wraps between first and last items", async () => {
+    const input = document.querySelector("#search-input")! as HTMLInputElement;
+    const resultsEl = document.querySelector("#search-results")!;
+
+    mock.on("GET", "/api/search", [
+      {
+        path: "a.md",
+        title: "Alpha",
+        tags: [],
+        excerpt: "alpha",
+        score: 1,
+        field_scores: { title: 1, headings: 0, tags: 0, content: 0 },
+      },
+      {
+        path: "b.md",
+        title: "Beta",
+        tags: [],
+        excerpt: "beta",
+        score: 1,
+        field_scores: { title: 1, headings: 0, tags: 0, content: 0 },
+      },
+    ]);
+
+    openSearch2();
+    input.value = "alpha";
+    input.dispatchEvent(new Event("input"));
+    await new Promise((r) => setTimeout(r, 200));
+
+    const children = [...resultsEl.children];
+    expect(children).toHaveLength(3);
+    expect(children[0]!.classList.contains("selected")).toBeTruthy();
+
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }));
+    expect(children[2]!.classList.contains("selected")).toBeTruthy();
+
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+    expect(children[0]!.classList.contains("selected")).toBeTruthy();
+
+    closeSearch2();
+  });
+
   it("search API error clears results", async () => {
     const input = document.querySelector("#search-input")! as HTMLInputElement;
     const resultsEl = document.querySelector("#search-results")!;

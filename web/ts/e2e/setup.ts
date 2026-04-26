@@ -2,7 +2,7 @@
 /// Shares a single browser instance across all e2e tests in a file.
 
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -14,6 +14,7 @@ type BrowserName = "chromium" | "firefox";
 let browser: Browser;
 let server: ChildProcess;
 let notesDir: string;
+let configDir: string;
 let baseUrl: string;
 
 function getFreePort(): Promise<number> {
@@ -47,10 +48,17 @@ export async function setup(opts?: {
   writeFileSync(join(notesDir, "test.md"), "# Hello\n\nThis is a test note.");
   writeFileSync(join(notesDir, "second.md"), "# Second\n\nAnother note.");
   writeFileSync(join(notesDir, "linked.md"), "# Linked\n\nHas a [[test]] link.");
+  configDir = mkdtempSync(join(tmpdir(), "tansu-e2e-config-"));
+  mkdirSync(join(configDir, "tansu"), { recursive: true });
+  writeFileSync(
+    join(configDir, "tansu", "config.toml"),
+    `[vault.test]\ndir = ${JSON.stringify(notesDir)}\n`,
+  );
 
   // Start server using the pre-built binary (run `cargo build` before `make test-e2e`).
   const binary = resolve("target/debug/tansu");
-  server = spawn(binary, [notesDir, "--port", String(activePort)], {
+  server = spawn(binary, ["--port", String(activePort)], {
+    env: { ...process.env, XDG_CONFIG_HOME: configDir },
     stdio: ["ignore", "pipe", "pipe"],
   });
   server.stdout?.on("data", () => {});
@@ -89,6 +97,13 @@ export async function teardown() {
   if (notesDir) {
     try {
       rmSync(notesDir, { recursive: true });
+    } catch {
+      /* ignore cleanup errors */
+    }
+  }
+  if (configDir) {
+    try {
+      rmSync(configDir, { recursive: true });
     } catch {
       /* ignore cleanup errors */
     }
