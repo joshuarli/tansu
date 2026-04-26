@@ -94,7 +94,7 @@ export async function noteGet(path: string): Promise<CachedNote | undefined> {
   return {
     content: note.content ?? "",
     mtime: note.mtime ?? 0,
-    tags: parsed.hasFrontmatter ? parsed.tags : (note.tags ?? []),
+    tags: parsed.tags,
   };
 }
 
@@ -102,13 +102,13 @@ export function notePut(
   path: string,
   content: string,
   mtime: number,
-  tags: string[],
+  _tags: string[],
 ): Promise<void> {
   const parsed = splitFrontmatter(content);
   return idbPut("notes", path, {
     content,
     mtime,
-    tags: parsed.hasFrontmatter ? parsed.tags : tags,
+    tags: parsed.tags,
   } satisfies CachedNote);
 }
 

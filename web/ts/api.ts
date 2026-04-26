@@ -12,7 +12,6 @@ import type {
   PrfRegisterRequest,
   PrfRemoveRequest,
   PutNoteRequest,
-  PutTagsRequest,
   RecentFileEntry,
   RenameRequest,
   RenameResponse,
@@ -39,7 +38,6 @@ export type {
   PrfRegisterRequest,
   PrfRemoveRequest,
   PutNoteRequest,
-  PutTagsRequest,
   RecentFileEntry,
   RenameRequest,
   RenameResponse,
@@ -115,19 +113,6 @@ export async function listTags(path?: string): Promise<string[]> {
     throw new Error(`list tags failed: ${res.status}`);
   }
   const data = await readJson<TagListResponse>(res, "list tags");
-  return data.tags;
-}
-
-export async function saveNoteTags(path: string, tags: string[]): Promise<string[]> {
-  const res = await fetch(`/api/tags?path=${encodeURIComponent(path)}`, {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ tags } satisfies PutTagsRequest),
-  });
-  if (!res.ok) {
-    throw new Error(`save tags failed: ${res.status}`);
-  }
-  const data = await readJson<TagListResponse>(res, "save note tags");
   return data.tags;
 }
 

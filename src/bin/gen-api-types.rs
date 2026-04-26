@@ -31,7 +31,6 @@ fn main() {
         decl::<ContentResponse>(),
         decl::<OkResponse>(),
         decl::<PutNoteRequest>(),
-        decl::<PutTagsRequest>(),
         decl::<CreateNoteRequest>(),
         decl::<RenameRequest>(),
         decl::<PinRequest>(),

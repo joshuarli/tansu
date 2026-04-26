@@ -125,7 +125,7 @@ fn bench_index_note(c: &mut Criterion) {
 
     // Alloc report
     let snap = alloc_snapshot();
-    idx.index_note(&note.path, &content, &full, &note.tags);
+    idx.index_note(&note.path, &content, &full);
     let (allocs, bytes, net) = alloc_delta(&snap);
     eprintln!(
         "index_note ({} bytes): {} allocs, {} bytes total, {} bytes net",
@@ -138,12 +138,7 @@ fn bench_index_note(c: &mut Criterion) {
     let path = &note.path;
     c.bench_function(&format!("index_note ({} bytes)", content.len()), |b| {
         b.iter(|| {
-            idx.index_note(
-                black_box(path),
-                black_box(&content),
-                black_box(&full),
-                &note.tags,
-            );
+            idx.index_note(black_box(path), black_box(&content), black_box(&full));
         });
     });
 
@@ -156,12 +151,7 @@ fn bench_index_note(c: &mut Criterion) {
     };
     c.bench_function("index_note + search (write-read cycle)", |b| {
         b.iter(|| {
-            idx.index_note(
-                black_box(path),
-                black_box(&content),
-                black_box(&full),
-                &note.tags,
-            );
+            idx.index_note(black_box(path), black_box(&content), black_box(&full));
             let r = idx.search(black_box("the"), 20, None, 1, 2, weights, false);
             black_box(r.len());
         });

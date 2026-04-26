@@ -33,7 +33,7 @@ describe("local-store", () => {
   it("notePut + noteGet roundtrip", async () => {
     await notePut("test.md", "# Hello", 1000, ["alpha"]);
     const note = await noteGet("test.md");
-    expect(note).toStrictEqual({ content: "# Hello", mtime: 1000, tags: ["alpha"] });
+    expect(note).toStrictEqual({ content: "# Hello", mtime: 1000, tags: [] });
   });
 
   it("noteGet derives tags from frontmatter", async () => {
@@ -52,7 +52,7 @@ describe("local-store", () => {
     await expect(noteGet("overwrite.md")).resolves.toStrictEqual({
       content: "v2",
       mtime: 2000,
-      tags: ["beta"],
+      tags: [],
     });
   });
 

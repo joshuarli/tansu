@@ -102,11 +102,6 @@ pub struct CreateNoteRequest {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, TS)]
-pub struct PutTagsRequest {
-    pub tags: Vec<String>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, TS)]
 pub struct RenameRequest {
     pub old_path: String,
     pub new_path: String,

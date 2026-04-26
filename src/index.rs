@@ -18,7 +18,7 @@ use tantivy::{
 };
 
 use crate::util::StrExt;
-use crate::{frontmatter, http, scanner, strip, tags::TagStore, util};
+use crate::{frontmatter, http, scanner, strip, util};
 
 #[derive(Clone)]
 pub struct NoteEntry {
@@ -135,7 +135,7 @@ impl Index {
 
     /// Build and add a document to the writer (does not commit).
     #[allow(clippy::readonly_write_lock)]
-    fn add_doc(&self, rel_path: &str, content: &str, full_path: &Path, tags: &[String]) {
+    fn add_doc(&self, rel_path: &str, content: &str, full_path: &Path) {
         let f = &self.inner.fields;
         let body = frontmatter::split_tags(content);
         let scan = scanner::scan(body.body);
@@ -157,7 +157,7 @@ impl Index {
         doc.add_text(f.title, &title);
         doc.add_text(f.content, &stripped);
         doc.add_text(f.headings, scan.headings.join(" "));
-        for tag in tags {
+        for tag in body.tags {
             doc.add_text(f.tags, tag);
         }
         doc.add_u64(f.mtime, mtime);
@@ -192,8 +192,8 @@ impl Index {
     }
 
     /// Index a single note. Commit is deferred until the next read operation.
-    pub fn index_note(&self, rel_path: &str, content: &str, full_path: &Path, tags: &[String]) {
-        self.add_doc(rel_path, content, full_path, tags);
+    pub fn index_note(&self, rel_path: &str, content: &str, full_path: &Path) {
+        self.add_doc(rel_path, content, full_path);
         self.inner.uncommitted.store(true, Ordering::Release);
         *self.inner.notes_cache.lock().unwrap() = None;
     }
@@ -855,17 +855,11 @@ fn escape_html_into(out: &mut String, s: &str) {
 
 impl Index {
     /// Full reindex: walk directory, index all .md files. Single commit at end.
-    pub fn full_reindex(&self, root: &Path, excluded_folders: &[String], tags: &TagStore) {
+    pub fn full_reindex(&self, root: &Path, excluded_folders: &[String]) {
         let start = std::time::Instant::now();
-        walk_and_index(root, root, self, excluded_folders, tags);
+        walk_and_index(root, root, self, excluded_folders);
         self.commit();
-        fn walk_and_index(
-            root: &Path,
-            dir: &Path,
-            idx: &Index,
-            excluded: &[String],
-            tags: &TagStore,
-        ) {
+        fn walk_and_index(root: &Path, dir: &Path, idx: &Index, excluded: &[String]) {
             let Ok(entries) = fs::read_dir(dir) else {
                 return;
             };
@@ -884,7 +878,7 @@ impl Index {
                     if excluded.iter().any(|ex| name_str == *ex) {
                         continue;
                     }
-                    walk_and_index(root, &path, idx, excluded, tags);
+                    walk_and_index(root, &path, idx, excluded);
                     continue;
                 }
 
@@ -895,13 +889,7 @@ impl Index {
                 if let Ok(content) = fs::read_to_string(&path) {
                     let rel = path.strip_prefix(root).unwrap_or(&path);
                     let rel_str = rel.to_string_lossy();
-                    let parsed = frontmatter::split_tags(&content);
-                    let note_tags = if parsed.has_frontmatter {
-                        parsed.tags
-                    } else {
-                        tags.get(&rel_str)
-                    };
-                    idx.add_doc(&rel_str, &content, &path, &note_tags);
+                    idx.add_doc(&rel_str, &content, &path);
                 }
             }
         }
@@ -1124,7 +1112,7 @@ mod tests {
         fs::write(&tmp, "hello world").unwrap();
 
         // index_note stages the write but doesn't commit
-        idx.index_note("test.md", "hello world", &tmp, &[]);
+        idx.index_note("test.md", "hello world", &tmp);
         assert!(idx.inner.uncommitted.load(Ordering::Acquire));
 
         // get_all_notes triggers ensure_committed + returns the note
@@ -1138,12 +1126,12 @@ mod tests {
         assert_eq!(notes2.len(), 1);
 
         // Index another note, cache should be invalidated
-        idx.index_note("test2.md", "second note", &tmp, &[]);
+        idx.index_note("test2.md", "second note", &tmp);
         let notes3 = idx.get_all_notes();
         assert_eq!(notes3.len(), 2);
 
         // Search also triggers commit
-        idx.index_note("test3.md", "unique findme word", &tmp, &[]);
+        idx.index_note("test3.md", "unique findme word", &tmp);
         let w = SearchWeights {
             title: 10.0,
             headings: 5.0,
@@ -1165,12 +1153,7 @@ mod tests {
         let idx = Index::open_or_create(&dir).unwrap();
         let tmp = std::env::temp_dir().join("tansu_test_hyphen_note.md");
         fs::write(&tmp, "JPEG-XL support and some_function call").unwrap();
-        idx.index_note(
-            "test.md",
-            "JPEG-XL support and some_function call",
-            &tmp,
-            &[],
-        );
+        idx.index_note("test.md", "JPEG-XL support and some_function call", &tmp);
 
         let w = SearchWeights {
             title: 10.0,
@@ -1205,10 +1188,10 @@ mod tests {
         let body = std::env::temp_dir().join(format!("tansu_body_tag_{}.md", std::process::id()));
         let meta = std::env::temp_dir().join(format!("tansu_meta_tag_{}.md", std::process::id()));
         fs::write(&body, "#alpha appears in body").unwrap();
-        fs::write(&meta, "plain content").unwrap();
+        fs::write(&meta, "---\ntags: [alpha]\n---\n\nplain content").unwrap();
 
-        idx.index_note("body.md", "#alpha appears in body", &body, &[]);
-        idx.index_note("meta.md", "plain content", &meta, &["alpha".to_string()]);
+        idx.index_note("body.md", "#alpha appears in body", &body);
+        idx.index_note("meta.md", "---\ntags: [alpha]\n---\n\nplain content", &meta);
 
         let w = SearchWeights {
             title: 10.0,
@@ -1230,7 +1213,7 @@ mod tests {
     }
 
     #[test]
-    fn full_reindex_reads_tags_from_store() {
+    fn full_reindex_reads_tags_from_frontmatter() {
         let root =
             std::env::temp_dir().join(format!("tansu_test_full_tags_{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
@@ -1238,12 +1221,14 @@ mod tests {
         let note = root.join("note.md");
         fs::write(&note, "hello").unwrap();
 
-        let tags = TagStore::open(&root);
-        tags.set("note.md", &["alpha".to_string(), "beta".to_string()])
-            .unwrap();
+        fs::write(
+            root.join("note.md"),
+            "---\ntags: [alpha, beta]\n---\n\nhello",
+        )
+        .unwrap();
 
         let idx = Index::open_or_create(&root.join(".tansu/index")).unwrap();
-        idx.full_reindex(&root, &[], &tags);
+        idx.full_reindex(&root, &[]);
 
         let notes = idx.get_all_notes();
         assert_eq!(notes.len(), 1);
@@ -1264,13 +1249,8 @@ mod tests {
         fs::write(&groats, "A note about groats and porridge").unwrap();
         fs::write(&great, "A note about great porridge").unwrap();
 
-        idx.index_note(
-            "groats.md",
-            "A note about groats and porridge",
-            &groats,
-            &[],
-        );
-        idx.index_note("great.md", "A note about great porridge", &great, &[]);
+        idx.index_note("groats.md", "A note about groats and porridge", &groats);
+        idx.index_note("great.md", "A note about great porridge", &great);
 
         let w = SearchWeights {
             title: 10.0,
@@ -1311,13 +1291,8 @@ mod tests {
         fs::write(&exact, "fresh oat groats for breakfast").unwrap();
         fs::write(&reordered, "fresh groats oat for breakfast").unwrap();
 
-        idx.index_note("exact.md", "fresh oat groats for breakfast", &exact, &[]);
-        idx.index_note(
-            "reordered.md",
-            "fresh groats oat for breakfast",
-            &reordered,
-            &[],
-        );
+        idx.index_note("exact.md", "fresh oat groats for breakfast", &exact);
+        idx.index_note("reordered.md", "fresh groats oat for breakfast", &reordered);
 
         let w = SearchWeights {
             title: 10.0,
@@ -1406,9 +1381,9 @@ mod tests {
 
         // Index alpha then beta in the same batch → segment A: alpha=doc_id=0, beta=doc_id=1.
         fs::write(&alpha, "alpha v1").unwrap();
-        idx.index_note("alpha.md", "alpha v1", &alpha, &[]);
+        idx.index_note("alpha.md", "alpha v1", &alpha);
         fs::write(&beta, "beta content").unwrap();
-        idx.index_note("beta.md", "beta content", &beta, &[]);
+        idx.index_note("beta.md", "beta content", &beta);
         let _ = idx.get_all_notes(); // ensure_committed → flushes segment A
 
         // Update alpha: delete_term marks doc_id=0 in segment A as deleted.
@@ -1416,7 +1391,7 @@ mod tests {
         // Segment A: max_doc=2, num_docs=1; deleted doc is at the LOWER id (0),
         // live beta is at the HIGHER id (1) — this is what triggers the old bug.
         fs::write(&alpha, "alpha v2").unwrap();
-        idx.index_note("alpha.md", "alpha v2", &alpha, &[]);
+        idx.index_note("alpha.md", "alpha v2", &alpha);
 
         let notes = idx.get_all_notes();
         let paths: Vec<&str> = notes.iter().map(|n| n.path.as_str()).collect();

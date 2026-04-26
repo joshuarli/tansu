@@ -35,8 +35,6 @@ export type OkResponse = { ok: boolean };
 
 export type PutNoteRequest = { content: string; expected_mtime: number };
 
-export type PutTagsRequest = { tags: Array<string> };
-
 export type CreateNoteRequest = { content: string };
 
 export type RenameRequest = { old_path: string; new_path: string };

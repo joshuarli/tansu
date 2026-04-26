@@ -8,7 +8,6 @@ import {
   listNotes,
   listTags,
   getBacklinks,
-  saveNoteTags,
   uploadImage,
   listRevisions,
   getRevision,
@@ -104,11 +103,6 @@ describe("api", () => {
   it("listTags", async () => {
     mock.on("GET", "/api/tags", { tags: ["alpha", "beta"] });
     await expect(listTags()).resolves.toStrictEqual(["alpha", "beta"]);
-  });
-
-  it("saveNoteTags", async () => {
-    mock.on("PUT", "/api/tags", { tags: ["alpha"] });
-    await expect(saveNoteTags("a.md", ["ALPHA"])).resolves.toStrictEqual(["alpha"]);
   });
 
   it("getBacklinks", async () => {
