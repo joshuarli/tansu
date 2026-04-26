@@ -459,7 +459,9 @@ describe("filenav", () => {
     while (getTabs().length > 0) {
       closeTab(0);
     }
-    mock.on("GET", "/api/recentfiles", [{ path: "notes/click-me.md", title: "click-me", mtime: 1 }]);
+    mock.on("GET", "/api/recentfiles", [
+      { path: "notes/click-me.md", title: "click-me", mtime: 1 },
+    ]);
     mock.on("GET", "/api/pinned", []);
 
     emit("files:changed");

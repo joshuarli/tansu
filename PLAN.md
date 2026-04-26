@@ -28,10 +28,10 @@ tests.
 
 - [x] Record current `tsgo --noEmit` result. Passed.
 - [x] Record current `tsgo -p packages/md-wysiwyg/tsconfig.json --noEmit` result. Passed.
-- [x] Record current `vitest run` result. Passed: 26 files, 384 tests.
+- [x] Record current `vitest run` result. Passed: 27 files, 391 tests.
 - [x] Record current `cd packages/md-wysiwyg && vitest run` result. Passed via `pnpm exec vitest run`: 11 files, 394 tests.
 - [x] Record current `cargo test` result. Passed: 126 Rust tests across lib/bin targets.
-- [x] Record current `pnpm run test-e2e` result, or document blocker if the local binary/browser setup is not ready. Harness now starts the server with a temp vault config; blocked by missing Playwright browser binaries. Run `pnpm exec playwright install` before retrying.
+- [x] Record current `pnpm run test-e2e` result, or document blocker if the local binary/browser setup is not ready. Passed: 10 files, 37 tests. Harness now starts the server with a temp vault config and Playwright browsers are installed.
 - [x] Confirm `pnpm run bundle` succeeds before any Preact changes. Passed.
 - [x] Confirm `pnpm run bundle-dev` succeeds before any Preact changes. Passed.
 
@@ -114,20 +114,20 @@ tests.
 
 ### Input Dialog
 
-- [ ] Add test for opening with placeholder text.
-- [ ] Add test for Enter resolving trimmed value.
-- [ ] Add test for Enter with empty value resolving `null` or no-op, matching current behavior.
-- [ ] Add test for Escape resolving `null`.
-- [ ] Add test for backdrop click resolving `null`.
+- [x] Add test for opening with placeholder text.
+- [x] Add test for Enter resolving trimmed value.
+- [x] Add test for Enter with empty value resolving `null` or no-op, matching current behavior.
+- [x] Add test for Escape resolving `null`.
+- [x] Add test for backdrop click resolving `null`.
 - [ ] Add test for cleanup of event listeners after close.
 
 ### Context Menu
 
-- [ ] Add test for positioning at click coordinates.
+- [x] Add test for positioning at click coordinates.
 - [ ] Add test for disabled item behavior if supported.
-- [ ] Add test for danger class rendering.
-- [ ] Add test for outside click cleanup.
-- [ ] Add test for deferred action behavior.
+- [x] Add test for danger class rendering.
+- [x] Add test for outside click cleanup.
+- [x] Add test for deferred action behavior.
 
 ### Editor Shell
 

@@ -1,5 +1,5 @@
-import { setupDOM, mockFetch } from "./test-helper.ts";
 import type { Settings } from "./api.ts";
+import { setupDOM, mockFetch } from "./test-helper.ts";
 
 describe("settings", () => {
   let cleanup: () => void;
@@ -97,9 +97,7 @@ describe("settings", () => {
     (panel.querySelector("#settings-save") as HTMLButtonElement).click();
     await new Promise((r) => setTimeout(r, 20));
 
-    const put = mock.requests.find(
-      (req) => req.method === "PUT" && req.url === "/api/settings",
-    );
+    const put = mock.requests.find((req) => req.method === "PUT" && req.url === "/api/settings");
     expect(put?.body).toBeTruthy();
     const payload = JSON.parse(put!.body!) as Settings;
     expect(payload).toStrictEqual({

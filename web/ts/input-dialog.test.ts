@@ -24,6 +24,23 @@ describe("input-dialog", () => {
     return document.querySelector("#input-dialog-input") as HTMLInputElement;
   }
 
+  it("shows placeholder and focuses/selects the default value", async () => {
+    const p = showInputDialog("Note name...", "starter");
+    await tick();
+
+    expect(getOverlay().classList.contains("hidden")).toBeFalsy();
+    expect(getInput().placeholder).toBe("Note name...");
+    expect(getInput().value).toBe("starter");
+    expect(document.activeElement).toBe(getInput());
+    expect(getInput().selectionStart).toBe(0);
+    expect(getInput().selectionEnd).toBe("starter".length);
+
+    getInput().dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }),
+    );
+    await p;
+  });
+
   it("Enter key submits the dialog and resolves with trimmed value", async () => {
     const p = showInputDialog("Type something...");
     await tick();
@@ -98,5 +115,22 @@ describe("input-dialog", () => {
     );
     const r2 = await p2;
     expect(r2).toBeNull();
+  });
+
+  it("dialog can be reopened after a backdrop cancel", async () => {
+    const p1 = showInputDialog("First");
+    await tick();
+    getOverlay().dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+    await p1;
+
+    const p2 = showInputDialog("Second");
+    await tick();
+    expect(getInput().placeholder).toBe("Second");
+    getInput().value = "next";
+    getInput().dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }),
+    );
+
+    await expect(p2).resolves.toBe("next");
   });
 });

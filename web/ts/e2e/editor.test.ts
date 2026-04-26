@@ -1,3 +1,6 @@
+import { writeFileSync } from "node:fs";
+import { join } from "node:path";
+
 import type { Page } from "playwright";
 
 import { setup, teardown } from "./setup.ts";
@@ -5,36 +8,45 @@ import { setup, teardown } from "./setup.ts";
 describe("e2e: editor", () => {
   let page: Page;
   let baseUrl: string;
+  let notesDir: string;
+  const defaultNote = "# Hello\n\nThis is a test note.";
 
   beforeAll(async () => {
     const ctx = await setup();
     ({ page } = ctx);
     ({ baseUrl } = ctx);
+    ({ notesDir } = ctx);
   }, 30_000);
 
   afterAll(async () => {
     await teardown();
   });
 
+  async function openTestNote() {
+    await page.goto(baseUrl);
+    await page.waitForSelector("#tab-bar", { timeout: 5000 });
+    await page.waitForSelector('.nav-file[title="test.md"]', { timeout: 3000 });
+    await page.click('.nav-file[title="test.md"]');
+    await page.waitForSelector(".editor-content", { timeout: 3000 });
+  }
+
+  beforeEach(async () => {
+    writeFileSync(join(notesDir, "test.md"), defaultNote);
+    await openTestNote();
+  });
+
   async function resetEditor(content: string) {
     await page.click(".editor-toolbar-btn--source");
+    await page.waitForSelector(".editor-source", { state: "visible", timeout: 3000 });
+    await page.waitForSelector(".editor-content", { state: "hidden", timeout: 3000 });
     await page.fill(".editor-source", content);
     await page.click(".editor-toolbar-btn--source");
+    await page.waitForSelector(".editor-content", { state: "visible", timeout: 3000 });
+    await page.waitForSelector(".editor-source", { state: "hidden", timeout: 3000 });
     await page.click(".editor-content");
   }
 
   it("opens note, renders, source toggle, edit, save, transforms", async () => {
-    await page.goto(baseUrl);
-    await page.waitForSelector("#tab-bar", { timeout: 5000 });
-
-    // Open test.md via search
-    await page.keyboard.press("Meta+k");
-    await page.waitForSelector("#search-input", { timeout: 2000 });
-    await page.fill("#search-input", "test");
-    await page.waitForTimeout(300);
-    await page.keyboard.press("Enter");
-    await page.waitForSelector(".editor-content", { timeout: 3000 });
-
     // Renders markdown
     const html = await page.$eval(".editor-content", (el) => el.innerHTML);
     expect(html).toContain("<h1>Hello</h1>");
@@ -49,14 +61,14 @@ describe("e2e: editor", () => {
 
     // Source mode toggle
     await page.click(".editor-toolbar-btn--source");
-    await expect(page.isVisible(".editor-source")).resolves.toBeTruthy();
+    await page.waitForSelector(".editor-source", { state: "visible", timeout: 3000 });
     const srcValue = await page.$eval(".editor-source", (el: HTMLTextAreaElement) => el.value);
     expect(srcValue).toContain("# Hello");
 
     // Toggle back
     await page.click(".editor-toolbar-btn--source");
-    await expect(page.isVisible(".editor-content")).resolves.toBeTruthy();
-    await expect(page.isHidden(".editor-source")).resolves.toBeTruthy();
+    await page.waitForSelector(".editor-content", { state: "visible", timeout: 3000 });
+    await page.waitForSelector(".editor-source", { state: "hidden", timeout: 3000 });
 
     // Typing marks dirty
     await page.click(".editor-content");
@@ -120,9 +132,12 @@ describe("e2e: editor", () => {
     await page.keyboard.press("Meta+s");
     await page.waitForTimeout(300);
     await page.click(".editor-toolbar-btn--source");
+    await page.waitForSelector(".editor-source", { state: "visible", timeout: 3000 });
     const src = await page.$eval(".editor-source", (el: HTMLTextAreaElement) => el.value);
     // Toggle back to content mode for subsequent tests
     await page.click(".editor-toolbar-btn--source");
+    await page.waitForSelector(".editor-source", { state: "hidden", timeout: 3000 });
+    await page.waitForSelector(".editor-content", { state: "visible", timeout: 3000 });
     return src;
   }
 
