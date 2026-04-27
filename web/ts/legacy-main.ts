@@ -75,7 +75,7 @@ async function startApp() {
     appInitialized = true;
   }
   await openStore();
-  if (!sseLifecycle.getSse()) connectSSE();
+  if (!sseLifecycle?.getSse()) connectSSE();
   restoreSession();
 }
 
@@ -212,41 +212,40 @@ function initApp() {
   });
 }
 
-// Notification pill
-const notif = document.querySelector("#notification") as HTMLElement;
-const serverStatus = document.querySelector("#server-status") as HTMLElement;
-const notificationController = createNotificationController(notif, NOTIFICATION_AUTO_DISMISS_MS);
-const serverStatusController = createServerStatusController(serverStatus);
-
-on("notification", ({ msg, type }) => notificationController.show(msg, type));
-
-const sseBackoff = createBackoff([...SSE_BACKOFF_DELAYS_MS]);
-const sseLifecycle = createSseLifecycle({ connectSse: connectSSE });
+let notificationController: ReturnType<typeof createNotificationController> | null = null;
+let serverStatusController: ReturnType<typeof createServerStatusController> | null = null;
+let sseBackoff: ReturnType<typeof createBackoff> | null = null;
+let sseLifecycle: ReturnType<typeof createSseLifecycle> | null = null;
 
 function connectSSE() {
-  const existing = sseLifecycle.getSse();
+  const sl = sseLifecycle!;
+  const sb = sseBackoff!;
+  const nc = notificationController!;
+  const sc = serverStatusController!;
+
+  const existing = sl.getSse();
   if (existing) {
     existing.close();
-    sseLifecycle.setSse(null);
+    sl.setSse(null);
   }
-  const timer = sseLifecycle.getReconnectTimer();
+  const timer = sl.getReconnectTimer();
   if (timer) {
     clearTimeout(timer);
-    sseLifecycle.setReconnectTimer(null);
+    sl.setReconnectTimer(null);
   }
-  if (sseLifecycle.isPageUnloading()) {
+  if (sl.isPageUnloading()) {
     return;
   }
   const es = new EventSource("/events");
-  sseLifecycle.setSse(es);
+  sl.setSse(es);
 
   es.addEventListener("connected", () => {
-    if (sseLifecycle.getSse() !== es) return;
-    sseBackoff.reset();
-    if (sseBackoff.wasUnavailable) {
-      sseBackoff.wasUnavailable = false;
+    if (sl.getSse() !== es) return;
+    sb.reset();
+    if (sb.wasUnavailable) {
+      sb.wasUnavailable = false;
     }
-    serverStatusController.hide();
+    sc.hide();
     syncToServer();
   });
 
@@ -270,38 +269,38 @@ function connectSSE() {
     emit("files:changed", {});
     const active = getActiveTab();
     if (active && active.path === path) {
-      notificationController.show(`"${stemFromPath(path)}" was deleted externally.`);
+      nc.show(`"${stemFromPath(path)}" was deleted externally.`);
       closeActiveTab();
     }
   });
 
   es.addEventListener("locked", () => {
-    if (sseLifecycle.getSse() !== es) return;
+    if (sl.getSse() !== es) return;
     es.close();
-    sseLifecycle.setSse(null);
+    sl.setSse(null);
     showUnlockScreen();
   });
 
   es.addEventListener("vault_switched", () => {
-    if (sseLifecycle.getSse() !== es) return;
+    if (sl.getSse() !== es) return;
     void refreshVaultSwitcher();
     emit("vault:switched");
     emit("files:changed", {});
   });
 
   es.onerror = () => {
-    if (sseLifecycle.getSse() !== es) return;
+    if (sl.getSse() !== es) return;
     es.close();
-    sseLifecycle.setSse(null);
-    if (sseLifecycle.isPageUnloading()) {
+    sl.setSse(null);
+    if (sl.isPageUnloading()) {
       return;
     }
-    sseBackoff.wasUnavailable = true;
-    const delay = sseBackoff.next();
-    serverStatusController.show(`Server unavailable. Retrying in ${sseBackoff.format(delay)}...`);
-    sseLifecycle.setReconnectTimer(
+    sb.wasUnavailable = true;
+    const delay = sb.next();
+    sc.show(`Server unavailable. Retrying in ${sb.format(delay)}...`);
+    sl.setReconnectTimer(
       setTimeout(() => {
-        sseLifecycle.setReconnectTimer(null);
+        sl.setReconnectTimer(null);
         connectSSE();
       }, delay),
     );
@@ -350,6 +349,14 @@ function teardownApp() {
 }
 
 export function bootLegacyApp() {
+  const notif = document.querySelector("#notification") as HTMLElement;
+  const serverStatus = document.querySelector("#server-status") as HTMLElement;
+  notificationController = createNotificationController(notif, NOTIFICATION_AUTO_DISMISS_MS);
+  serverStatusController = createServerStatusController(serverStatus);
+  on("notification", ({ msg, type }) => notificationController!.show(msg, type));
+  sseBackoff = createBackoff([...SSE_BACKOFF_DELAYS_MS]);
+  sseLifecycle = createSseLifecycle({ connectSse: connectSSE });
+
   document.addEventListener("keydown", globalKeydown);
   window.addEventListener("pagehide", teardownApp);
   window.addEventListener("pagehide", sseLifecycle.closeForUnload);

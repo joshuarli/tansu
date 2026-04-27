@@ -84,7 +84,14 @@ type SettingsViewProps = {
 function SettingsView(props: Readonly<SettingsViewProps>) {
   return (
     <>
-      <Show when={props.current()}>
+      <Show
+        when={props.current()}
+        fallback={
+          <p style={{ padding: "1rem", color: "var(--fg-muted)", "font-size": "13px" }}>
+            Loading...
+          </p>
+        }
+      >
         {(current) => (
           <>
             <h2>Settings</h2>
@@ -290,6 +297,7 @@ export function createSettings(): SettingsPanel {
   const panelEl = panel;
   panelEl.textContent = "";
 
+  let savedFocus: Element | null = null;
   const [isOpen, setIsOpen] = createSignal(false);
   const [current, setCurrent] = createSignal<Settings | null>(null);
   const [status, setStatus] = createSignal<AppStatus | null>(null);
@@ -298,9 +306,14 @@ export function createSettings(): SettingsPanel {
   function close() {
     setIsOpen(false);
     overlayEl.classList.add("hidden");
+    if (savedFocus instanceof HTMLElement) {
+      savedFocus.focus();
+    }
+    savedFocus = null;
   }
 
   async function open() {
+    savedFocus = document.activeElement;
     setIsOpen(true);
     overlayEl.classList.remove("hidden");
     setSecurityStatus("");

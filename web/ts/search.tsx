@@ -45,6 +45,7 @@ type SearchViewProps = {
 let overlayEl: HTMLElement | null = null;
 let inputEl: HTMLInputElement | null = null;
 let resultsEl: HTMLElement | null = null;
+let savedFocus: Element | null = null;
 const [viewState, setViewState] = createSignal<SearchViewState>({
   isOpen: false,
   scopePath: null,
@@ -106,42 +107,45 @@ function Score(props: Readonly<{ result: SearchResult }>) {
 
 function SearchView(props: Readonly<SearchViewProps>) {
   return (
-    <div id="search-modal">
+    <div id="search-modal" role="dialog" aria-modal="true" aria-label="Search notes">
       <input
         id="search-input"
         type="text"
         placeholder={viewState().scopePath ? "Find in note..." : "Search notes..."}
+        aria-label={viewState().scopePath ? "Find in note" : "Search notes"}
         autocomplete="off"
         spellcheck={false}
       />
       <div id="search-results">
         <For each={props.state().results}>
           {(result, i) => (
-            <div
+            <button
+              type="button"
               class={`search-result${i() === props.state().selectedIndex ? " selected" : ""}`}
               onClick={() => props.onSelectResult(i())}
             >
-              <div class="title">
+              <span class="title">
                 <span>{result.title}</span>
                 <For each={result.tags}>{(tag) => <span class="tag-pill">#{tag}</span>}</For>
-              </div>
-              <div class="path">{result.path}</div>
+              </span>
+              <span class="path">{result.path}</span>
               <Show when={props.state().showScoreBreakdown}>
                 <Score result={result} />
               </Show>
               <Show when={result.excerpt}>
                 <Excerpt excerpt={result.excerpt} />
               </Show>
-            </div>
+            </button>
           )}
         </For>
         <Show when={props.state().query.length > 0 && !props.state().scopePath}>
-          <div
+          <button
+            type="button"
             class={`search-create${props.state().selectedIndex === props.state().results.length ? " selected" : ""}`}
             onClick={props.onSelectCreate}
           >
             Create "{props.state().query}"
-          </div>
+          </button>
         </Show>
       </div>
     </div>
@@ -251,6 +255,10 @@ function closeController(controller: SearchController) {
     overlayEl?.classList.add("hidden");
     inputEl?.blur();
     syncView(controller, "");
+    if (savedFocus instanceof HTMLElement) {
+      savedFocus.focus();
+    }
+    savedFocus = null;
   }
 }
 
@@ -357,6 +365,7 @@ export function createSearch(deps: SearchDeps): Search {
   void refreshShowScoreBreakdown(controller);
 
   function open(filterPath?: string) {
+    savedFocus = document.activeElement;
     activeController = controller;
     controller.searchRequestId++;
     controller.isOpen = true;

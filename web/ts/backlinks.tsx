@@ -18,9 +18,9 @@ function Backlinks(props: Readonly<BacklinksProps>) {
       </div>
       <div class="backlinks-list">
         {props.links.map((linkPath) => (
-          <div class="backlink-item" onClick={() => openTab(linkPath)}>
+          <button type="button" class="backlink-item" onClick={() => openTab(linkPath)}>
             {stemFromPath(linkPath)}
-          </div>
+          </button>
         ))}
       </div>
     </>

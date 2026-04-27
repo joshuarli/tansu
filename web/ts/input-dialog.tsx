@@ -9,11 +9,16 @@ type DialogState = {
 let pendingResolve: ((val: string | null) => void) | null = null;
 let setState: ((value: DialogState | null) => void) | null = null;
 let overlayEl: HTMLElement | null = null;
+let savedFocus: Element | null = null;
 
 function closeActive(value: string | null) {
   const resolve = pendingResolve;
   pendingResolve = null;
   setState?.(null);
+  if (savedFocus instanceof HTMLElement) {
+    savedFocus.focus();
+  }
+  savedFocus = null;
   resolve?.(value);
 }
 
@@ -36,7 +41,12 @@ function InputDialog() {
   });
 
   return (
-    <div id="input-dialog">
+    <div
+      id="input-dialog"
+      role="dialog"
+      aria-modal="true"
+      aria-label={state()?.placeholder ?? "Enter text"}
+    >
       <Show when={state()}>
         {(current) => (
           <input
@@ -81,6 +91,8 @@ function ensureMounted() {
 
 export function showInputDialog(placeholder: string, defaultValue = ""): Promise<string | null> {
   ensureMounted();
+
+  savedFocus = document.activeElement;
 
   if (pendingResolve) {
     pendingResolve(null);

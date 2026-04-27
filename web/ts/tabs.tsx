@@ -114,15 +114,17 @@ function TabBar() {
           <span class="tab-label">
             <span class="tab-label-text">{tab.title}</span>
           </span>
-          <span
+          <button
+            type="button"
             class="close"
+            aria-label={`Close ${tab.title}`}
             onClick={(e) => {
               e.stopPropagation();
               closeTab(i());
             }}
           >
             ×
-          </span>
+          </button>
         </div>
       )}
     </For>
@@ -135,9 +137,15 @@ export function TabBarShell() {
   return (
     <>
       <TabBar />
-      <div class="tab tab-new" title="New note (Ctrl+N)" onClick={() => void promptNewNote()}>
+      <button
+        type="button"
+        class="tab tab-new"
+        title="New note (Ctrl+N)"
+        aria-label="New note"
+        onClick={() => void promptNewNote()}
+      >
         +
-      </div>
+      </button>
     </>
   );
 }

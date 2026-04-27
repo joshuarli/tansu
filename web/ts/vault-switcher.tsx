@@ -16,6 +16,7 @@ function VaultSwitcher(props: Readonly<{ vaults: readonly VaultEntry[] }>) {
     <select
       id="vault-select"
       title="Switch vault"
+      aria-label="Switch vault"
       onChange={(e) => {
         const idx = Number(e.currentTarget.value);
         void handleVaultSwitch(idx);

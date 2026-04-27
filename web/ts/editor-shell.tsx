@@ -55,6 +55,7 @@ function EditorShellView(
           type="button"
           class={`editor-toolbar-btn editor-toolbar-btn--source${props.isSourceMode() ? " active" : ""}`}
           title="Toggle source mode"
+          aria-label="Toggle source mode"
           innerHTML={SOURCE_ICON}
         />
         <button
@@ -62,6 +63,7 @@ function EditorShellView(
           type="button"
           class="editor-toolbar-btn"
           title="More"
+          aria-label="More options"
           innerHTML={MENU_ICON}
         />
       </div>
@@ -71,7 +73,12 @@ function EditorShellView(
             {(tag) => (
               <span class="tag-pill tag-pill--editor">
                 <span>{`#${tag}`}</span>
-                <button type="button" class="tag-pill-remove" data-tag-remove={tag}>
+                <button
+                  type="button"
+                  class="tag-pill-remove"
+                  data-tag-remove={tag}
+                  aria-label={`Remove tag #${tag}`}
+                >
                   ×
                 </button>
               </span>
@@ -84,6 +91,7 @@ function EditorShellView(
             type="text"
             class="editor-tags-input"
             placeholder={props.tags().length === 0 ? "Add tags" : "Add tag"}
+            aria-label="Add tag"
             autocomplete="off"
             autocapitalize="off"
             spellcheck={false}

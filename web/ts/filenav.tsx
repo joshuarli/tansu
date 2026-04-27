@@ -231,7 +231,9 @@ export async function initFileNav(): Promise<() => void> {
   const onCollapse = () => {
     const collapsed = app.classList.toggle("sidebar-collapsed");
     collapseBtn.innerHTML = collapsed ? "&#x203A;" : "&#x2039;";
-    collapseBtn.title = collapsed ? "Expand sidebar" : "Collapse sidebar";
+    const label = collapsed ? "Expand sidebar" : "Collapse sidebar";
+    collapseBtn.title = label;
+    collapseBtn.setAttribute("aria-label", label);
   };
 
   const onInput = () => {

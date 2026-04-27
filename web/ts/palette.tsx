@@ -55,24 +55,26 @@ type PaletteViewProps = {
 
 function PaletteView(props: Readonly<PaletteViewProps>) {
   return (
-    <div id="palette-modal">
+    <div id="palette-modal" role="dialog" aria-modal="true" aria-label="Command palette">
       <input
         id="palette-input"
         type="text"
         placeholder="Type a command..."
+        aria-label="Command search"
         autocomplete="off"
         spellcheck={false}
       />
       <div id="palette-list">
         <For each={props.filtered()}>
           {(cmd, i) => (
-            <div
+            <button
+              type="button"
               class={`palette-item${i() === props.state().selectedIndex ? " selected" : ""}`}
               onClick={() => props.onSelect(cmd)}
             >
               <span class="palette-label">{cmd.label}</span>
               <span class="palette-shortcut">{cmd.shortcut}</span>
-            </div>
+            </button>
           )}
         </For>
       </div>
@@ -90,6 +92,7 @@ export function createPalette(): Palette {
 
   let commands: Command[] = [];
   let inputEl: HTMLInputElement | null = null;
+  let savedFocus: Element | null = null;
   const [state, setState] = createSignal<PaletteState>({
     isOpen: false,
     query: "",
@@ -115,6 +118,7 @@ export function createPalette(): Palette {
   }
 
   function open() {
+    savedFocus = document.activeElement;
     setState({
       isOpen: true,
       query: "",
@@ -128,6 +132,10 @@ export function createPalette(): Palette {
     setState((prev) => ({ ...prev, isOpen: false }));
     overlayEl.classList.add("hidden");
     inputEl?.blur();
+    if (savedFocus instanceof HTMLElement) {
+      savedFocus.focus();
+    }
+    savedFocus = null;
   }
 
   function toggle() {

@@ -17,10 +17,11 @@ export function App() {
             id="sidebar-search"
             type="text"
             placeholder="Filter files..."
+            aria-label="Filter files"
             autocomplete="off"
             spellcheck={false}
           />
-          <button id="sidebar-collapse" title="Collapse sidebar">
+          <button id="sidebar-collapse" title="Collapse sidebar" aria-label="Collapse sidebar">
             &#x2039;
           </button>
         </div>
@@ -28,7 +29,12 @@ export function App() {
         <div id="sidebar-tree"></div>
       </div>
       <div id="app-main">
-        <div id="notification" class="notification hidden"></div>
+        <div
+          id="notification"
+          class="notification hidden"
+          aria-live="assertive"
+          aria-atomic="true"
+        ></div>
         <div id="tab-bar">
           <TabBarShell />
         </div>
@@ -52,13 +58,9 @@ export function App() {
         </div>
       </div>
       <div id="settings-overlay" class="hidden">
-        <div id="settings-panel"></div>
+        <div id="settings-panel" role="dialog" aria-modal="true" aria-label="Settings"></div>
       </div>
-      <div id="input-dialog-overlay" class="hidden">
-        <div id="input-dialog">
-          <input id="input-dialog-input" type="text" autocomplete="off" spellcheck={false} />
-        </div>
-      </div>
+      <div id="input-dialog-overlay" class="hidden"></div>
       <div id="palette-overlay" class="hidden">
         <div id="palette-modal">
           <input

@@ -71,4 +71,78 @@ describe("context-menu", () => {
     await tick();
     expect(sawMenuDuringAction).toBeFalsy();
   });
+
+  describe("keyboard navigation", () => {
+    it("focuses the first item on open", () => {
+      showContextMenu(
+        [
+          { label: "One", onclick: () => {} },
+          { label: "Two", onclick: () => {} },
+        ],
+        0,
+        0,
+      );
+      const items = document.querySelectorAll(".context-menu-item");
+      expect(document.activeElement).toBe(items[0]);
+    });
+
+    it("ArrowDown moves focus to the next item", () => {
+      showContextMenu(
+        [
+          { label: "One", onclick: () => {} },
+          { label: "Two", onclick: () => {} },
+        ],
+        0,
+        0,
+      );
+      const items = document.querySelectorAll(".context-menu-item");
+      (items[0] as HTMLElement).dispatchEvent(
+        new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }),
+      );
+      expect(document.activeElement).toBe(items[1]);
+    });
+
+    it("ArrowDown wraps from last item to first", () => {
+      showContextMenu(
+        [
+          { label: "One", onclick: () => {} },
+          { label: "Two", onclick: () => {} },
+        ],
+        0,
+        0,
+      );
+      const items = document.querySelectorAll(".context-menu-item");
+      (items[0] as HTMLElement).dispatchEvent(
+        new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }),
+      );
+      (items[1] as HTMLElement).dispatchEvent(
+        new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }),
+      );
+      expect(document.activeElement).toBe(items[0]);
+    });
+
+    it("ArrowUp wraps from first item to last", () => {
+      showContextMenu(
+        [
+          { label: "One", onclick: () => {} },
+          { label: "Two", onclick: () => {} },
+          { label: "Three", onclick: () => {} },
+        ],
+        0,
+        0,
+      );
+      const items = document.querySelectorAll(".context-menu-item");
+      (items[0] as HTMLElement).dispatchEvent(
+        new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }),
+      );
+      expect(document.activeElement).toBe(items[2]);
+    });
+
+    it("Escape closes the menu", () => {
+      showContextMenu([{ label: "One", onclick: () => {} }], 0, 0);
+      const item = document.querySelector(".context-menu-item") as HTMLElement;
+      item.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      expect(document.querySelector(".context-menu")).toBeNull();
+    });
+  });
 });

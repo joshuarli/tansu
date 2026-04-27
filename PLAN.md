@@ -214,7 +214,7 @@ tests.
 - [x] Preserve temporary imperative `showContextMenu(items, x, y)` API.
 - [x] Render menu items declaratively.
 - [x] Add cleanup on outside click.
-- [ ] Keep keyboard/accessibility improvements scoped and tested.
+- [x] Keep keyboard/accessibility improvements scoped and tested.
 - [x] Delete old imperative DOM construction after callers pass tests.
 
 ### Input Dialog
@@ -314,28 +314,28 @@ tests.
 
 ## CSS And Accessibility Hardening
 
-- [ ] Keep `web/static/style.css` initially.
-- [ ] Organize CSS by component sections.
+- [x] Keep `web/static/style.css` initially.
+- [x] Organize CSS by component sections.
 - [ ] Prefer class selectors over ID selectors for styling.
 - [ ] Keep stable IDs only while legacy modules or e2e selectors require them.
-- [ ] Add accessible modal roles.
-- [ ] Add `aria-modal` to modal dialogs.
-- [ ] Add labels or accessible names to inputs/buttons.
-- [ ] Replace clickable `div`/`span` controls with real buttons where possible.
-- [ ] Add focus restore for modals.
-- [ ] Add `aria-live` for notification/status behavior.
-- [ ] Add keyboard coverage for converted components.
+- [x] Add accessible modal roles.
+- [x] Add `aria-modal` to modal dialogs.
+- [x] Add labels or accessible names to inputs/buttons.
+- [x] Replace clickable `div`/`span` controls with real buttons where possible.
+- [x] Add focus restore for modals.
+- [x] Add `aria-live` for notification/status behavior.
+- [x] Add keyboard coverage for converted components.
 
 ## Production Readiness
 
 - [x] Add app-level error boundary.
-- [ ] Centralize JSON parsing and typed API boundaries.
-- [ ] Make loading/empty/error states explicit in converted components.
+- [x] Centralize JSON parsing and typed API boundaries.
+- [x] Make loading/empty/error states explicit in converted components.
 - [x] Ensure every document/window listener has cleanup.
 - [x] Ensure every timer has cleanup.
 - [x] Ensure SSE reconnect timers are owned and cleaned.
 - [x] Ensure overlays/popovers clean up on unmount.
-- [ ] Avoid compatibility layers unless explicitly justified.
+- [x] Avoid compatibility layers unless explicitly justified.
 - [x] Add final enforcement tests for post-migration DOM restrictions.
 
 ## Final Migration Completion Criteria
