@@ -46,6 +46,10 @@ export function getActiveIndex(): number {
   return _activeIndexSignal();
 }
 
+export function useTabs() {
+  return { tabs: getTabs, activeIndex: getActiveIndex, activeTab: getActiveTab };
+}
+
 function buildState(): SessionState {
   return { tabs: _tabs.map((t) => t.path), active: _activeIndex, closed: closedTabs, cursors };
 }
@@ -95,7 +99,6 @@ async function fetchNote(
 
 function notifyChange() {
   syncSignals();
-  emit("tab:render");
   emit("tab:change", _tabs[_activeIndex] ?? null);
   persistState();
 }
@@ -172,7 +175,6 @@ export function closeTab(index: number) {
   notePut(tab.path, tab.content, tab.mtime, tab.tags).catch(() => void 0);
   /* c8 ignore stop */
 
-  emit("tab:close", tab);
   _tabs.splice(index, 1);
 
   if (_tabs.length === 0) {
@@ -196,7 +198,6 @@ export function closeAllTabs() {
   _tabs.length = 0;
   _activeIndex = -1;
   syncSignals();
-  emit("tab:render");
   emit("tab:change", null);
 }
 
@@ -237,7 +238,6 @@ export function markDirty(path: string) {
   if (idx !== -1 && !_tabs[idx]!.dirty) {
     _tabs[idx] = { ..._tabs[idx]!, dirty: true };
     syncSignals();
-    emit("tab:render");
   }
 }
 
@@ -257,7 +257,6 @@ export function markClean(path: string, content: string, mtime: number) {
     notePut(path, content, mtime, tab.tags).catch(() => void 0);
     /* c8 ignore stop */
     syncSignals();
-    emit("tab:render");
   }
 }
 
@@ -276,7 +275,6 @@ export function markTagsClean(path: string, tags: string[]) {
     notePut(path, tab.content, tab.mtime, newTags).catch(() => void 0);
     /* c8 ignore stop */
     syncSignals();
-    emit("tab:render");
   }
 }
 
@@ -293,7 +291,6 @@ export function updateTabDraft(path: string, draft: { content?: string; tags?: s
       dirty: newContent !== tab.lastSavedMd,
     };
     syncSignals();
-    emit("tab:render");
   }
 }
 

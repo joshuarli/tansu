@@ -1,5 +1,7 @@
 import { ErrorBoundary } from "solid-js";
 
+import { TabBarShell } from "./tabs.tsx";
+
 export function App() {
   return (
     <ErrorBoundary
@@ -27,7 +29,9 @@ export function App() {
       </div>
       <div id="app-main">
         <div id="notification" class="notification hidden"></div>
-        <div id="tab-bar"></div>
+        <div id="tab-bar">
+          <TabBarShell />
+        </div>
         <div id="server-status" class="server-status hidden" aria-live="polite"></div>
         <div id="editor-area">
           <div id="empty-state">

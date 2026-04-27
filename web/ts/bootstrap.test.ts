@@ -267,36 +267,25 @@ describe("bootstrap", () => {
     backoff.reset();
 
     const closed: string[] = [];
-    let sse: { close(): void } | null = { close: () => closed.push("closed") };
-    let timer: ReturnType<typeof setTimeout> | null = setTimeout(() => {}, 10_000);
-    let pageUnloading = false;
     let connects = 0;
     const controller = createSseLifecycle({
-      getSse: () => sse,
-      setSse: (value) => {
-        sse = value;
-      },
-      getReconnectTimer: () => timer,
-      setReconnectTimer: (value) => {
-        timer = value;
-      },
-      getPageUnloading: () => pageUnloading,
-      setPageUnloading: (value) => {
-        pageUnloading = value;
-      },
       connectSse: () => {
         connects++;
       },
       document,
     });
 
+    // sse non-null → no connect
+    controller.setSse({ close: () => closed.push("closed") });
+    controller.setReconnectTimer(setTimeout(() => {}, 10_000));
     controller.requestImmediateReconnect();
     expect(connects).toBe(0);
 
-    sse = null;
+    // sse null, timer pending → clear timer and connect
+    controller.setSse(null);
     controller.requestImmediateReconnect();
     expect(connects).toBe(1);
-    expect(timer).toBeNull();
+    expect(controller.getReconnectTimer()).toBeNull();
 
     Object.defineProperty(document, "visibilityState", {
       configurable: true,
@@ -305,10 +294,10 @@ describe("bootstrap", () => {
     controller.onVisibilityChange();
     expect(connects).toBe(2);
 
-    sse = { close: () => closed.push("closed-again") };
+    controller.setSse({ close: () => closed.push("closed-again") });
     controller.closeForUnload();
-    expect(pageUnloading).toBeTruthy();
-    expect(sse).toBeNull();
+    expect(controller.isPageUnloading()).toBeTruthy();
+    expect(controller.getSse()).toBeNull();
     expect(closed).toStrictEqual(["closed-again"]);
   });
 });

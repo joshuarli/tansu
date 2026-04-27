@@ -3,9 +3,7 @@
 import type { Tab } from "./tab-state.ts";
 
 type EventMap = {
-  "tab:render": undefined;
   "tab:change": Tab | null;
-  "tab:close": Tab;
   "files:changed": { savedPath?: string } | undefined;
   "pinned:changed": undefined;
   "revision:restore": { content: string; mtime: number };

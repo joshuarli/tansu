@@ -49,11 +49,8 @@ import { isPrfLikelySupported, getPrfKey } from "./webauthn.ts";
 import { registerWikiLinkClickHandler } from "./wikilinks.ts";
 
 const appEl = document.querySelector("#app") as HTMLElement;
-let sse: EventSource | null = null;
 let appInitialized = false;
 let editor: EditorInstance | null = null;
-let sseReconnectTimer: ReturnType<typeof setTimeout> | null = null;
-let pageUnloading = false;
 let palette: ReturnType<typeof createPalette> | null = null;
 let search: ReturnType<typeof createSearch> | null = null;
 let settings: ReturnType<typeof createSettings> | null = null;
@@ -76,11 +73,9 @@ async function startApp() {
   if (!appInitialized) {
     initApp();
     appInitialized = true;
-    // tabs.tsx mounts on the first tab:render; emit early so .tab-new appears with no saved session.
-    emit("tab:render");
   }
   await openStore();
-  if (!sse) connectSSE();
+  if (!sseLifecycle.getSse()) connectSSE();
   restoreSession();
 }
 
@@ -226,41 +221,27 @@ const serverStatusController = createServerStatusController(serverStatus);
 on("notification", ({ msg, type }) => notificationController.show(msg, type));
 
 const sseBackoff = createBackoff([...SSE_BACKOFF_DELAYS_MS]);
-const sseLifecycle = createSseLifecycle({
-  getSse: () => sse,
-  setSse: (value) => {
-    sse = value;
-  },
-  getReconnectTimer: () => sseReconnectTimer,
-  setReconnectTimer: (value) => {
-    sseReconnectTimer = value;
-  },
-  getPageUnloading: () => pageUnloading,
-  setPageUnloading: (value) => {
-    pageUnloading = value;
-  },
-  connectSse: () => {
-    connectSSE();
-  },
-});
+const sseLifecycle = createSseLifecycle({ connectSse: connectSSE });
 
 function connectSSE() {
-  if (sse) {
-    sse.close();
-    sse = null;
+  const existing = sseLifecycle.getSse();
+  if (existing) {
+    existing.close();
+    sseLifecycle.setSse(null);
   }
-  if (sseReconnectTimer) {
-    clearTimeout(sseReconnectTimer);
-    sseReconnectTimer = null;
+  const timer = sseLifecycle.getReconnectTimer();
+  if (timer) {
+    clearTimeout(timer);
+    sseLifecycle.setReconnectTimer(null);
   }
-  if (pageUnloading) {
+  if (sseLifecycle.isPageUnloading()) {
     return;
   }
   const es = new EventSource("/events");
-  sse = es;
+  sseLifecycle.setSse(es);
 
   es.addEventListener("connected", () => {
-    if (sse !== es) return;
+    if (sseLifecycle.getSse() !== es) return;
     sseBackoff.reset();
     if (sseBackoff.wasUnavailable) {
       sseBackoff.wasUnavailable = false;
@@ -295,33 +276,35 @@ function connectSSE() {
   });
 
   es.addEventListener("locked", () => {
-    if (sse !== es) return;
+    if (sseLifecycle.getSse() !== es) return;
     es.close();
-    sse = null;
+    sseLifecycle.setSse(null);
     showUnlockScreen();
   });
 
   es.addEventListener("vault_switched", () => {
-    if (sse !== es) return;
+    if (sseLifecycle.getSse() !== es) return;
     void refreshVaultSwitcher();
     emit("vault:switched");
     emit("files:changed", {});
   });
 
   es.onerror = () => {
-    if (sse !== es) return;
+    if (sseLifecycle.getSse() !== es) return;
     es.close();
-    sse = null;
-    if (pageUnloading) {
+    sseLifecycle.setSse(null);
+    if (sseLifecycle.isPageUnloading()) {
       return;
     }
     sseBackoff.wasUnavailable = true;
     const delay = sseBackoff.next();
     serverStatusController.show(`Server unavailable. Retrying in ${sseBackoff.format(delay)}...`);
-    sseReconnectTimer = setTimeout(() => {
-      sseReconnectTimer = null;
-      connectSSE();
-    }, delay);
+    sseLifecycle.setReconnectTimer(
+      setTimeout(() => {
+        sseLifecycle.setReconnectTimer(null);
+        connectSSE();
+      }, delay),
+    );
   };
 }
 

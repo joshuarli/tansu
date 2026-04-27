@@ -36,6 +36,10 @@ describe("tabs", () => {
     ({ markDirty } = stateMod);
     createNewNoteViaDialog = mod.promptNewNote;
 
+    // Mount TabBar into the test DOM (previously done via on("tab:render")).
+    const tabBarEl = document.querySelector("#tab-bar") as HTMLElement;
+    mod.mountTabBar(tabBarEl);
+
     // Clean up any leaked state from other test files sharing the module.
     while (getTabs().length > 0) {
       closeTab(0);
@@ -425,7 +429,6 @@ describe("tabs", () => {
   });
 
   it("+ button promptNewNote opens dialog and creates note on Enter", async () => {
-    // Ensure render() has been called so .tab-new exists (render only fires on tab events)
     await openTab("notes/ensure-render.md");
     await tick();
     while (getTabs().length > 0) {

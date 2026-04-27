@@ -3,7 +3,6 @@ import { render } from "solid-js/web";
 
 import { getPinnedFiles } from "./api.ts";
 import { showContextMenu } from "./context-menu.tsx";
-import { on } from "./events.ts";
 import { buildFileContextMenuItems } from "./file-actions.ts";
 import { showInputDialog } from "./input-dialog.tsx";
 import {
@@ -132,7 +131,7 @@ function TabBar() {
 
 // Tab-new button rendered alongside TabBar but outside it to avoid being
 // inside the <For> reactive scope.
-function TabBarShell() {
+export function TabBarShell() {
   return (
     <>
       <TabBar />
@@ -142,18 +141,6 @@ function TabBarShell() {
     </>
   );
 }
-
-let tabBarMounted = false;
-
-function renderTabs() {
-  if (tabBarMounted) return;
-  const tabBar = document.querySelector("#tab-bar");
-  if (!(tabBar instanceof HTMLElement)) return;
-  tabBarMounted = true;
-  render(() => <TabBarShell />, tabBar);
-}
-
-on("tab:render", renderTabs);
 
 async function showTabContextMenu(e: MouseEvent, index: number) {
   e.preventDefault();
@@ -177,4 +164,8 @@ async function showTabContextMenu(e: MouseEvent, index: number) {
     e.clientX,
     e.clientY,
   );
+}
+
+export function mountTabBar(container: HTMLElement) {
+  render(() => <TabBarShell />, container);
 }

@@ -257,7 +257,7 @@ tests.
 ## State Ownership Migration
 
 - [x] Add a subscription API to `tab-state.ts` if needed by SolidJS hooks/signals.
-- [ ] Add `useTabs()` hook.
+- [x] Add `useTabs()` hook.
 - [x] Convert `tabs.ts` to `TabBar.tsx`.
 - [x] Move tooltip state into `TabBar`.
 - [x] Move global space-to-close listener into a cleanup-safe effect.
@@ -265,9 +265,9 @@ tests.
 - [x] Move file-nav loading/error/search state into component state.
 - [x] Convert notification pill to component state.
 - [x] Convert server status to component state.
-- [ ] Give SSE lifecycle one owner.
-- [ ] Replace broad event-bus usage with props/state where practical.
-- [ ] Keep typed event bus only where it remains the simplest integration boundary.
+- [x] Give SSE lifecycle one owner.
+- [x] Replace broad event-bus usage with props/state where practical.
+- [x] Keep typed event bus only where it remains the simplest integration boundary.
 
 ## Modal Conversion
 

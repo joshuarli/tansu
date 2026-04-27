@@ -30,7 +30,6 @@ describe("tab-state", () => {
   let setCursor: (path: string, offset: number) => void;
   let getCursor: (path: string) => number | undefined;
   let reopenClosedTab: () => Promise<void>;
-  let offRender: () => void;
   let offChange: () => void;
 
   beforeAll(async () => {
@@ -64,13 +63,11 @@ describe("tab-state", () => {
     ({ getCursor } = mod);
     ({ reopenClosedTab } = mod);
 
-    offRender = on("tab:render", () => {});
     offChange = on("tab:change", () => {});
   });
 
   afterAll(() => {
     mock.restore();
-    offRender();
     offChange();
     cleanup();
   });
@@ -87,11 +84,7 @@ describe("tab-state", () => {
       closeTab(0);
     }
     mock.on("GET", "/api/note", { content: "# Test", mtime: 1000 });
-    let renderCount = 0;
     let changeCount = 0;
-    const offR = on("tab:render", () => {
-      renderCount++;
-    });
     const offC = on("tab:change", () => {
       changeCount++;
     });
@@ -109,7 +102,6 @@ describe("tab-state", () => {
     expect(tab1.dirty).toBeFalsy();
     expect(getTabs()).toHaveLength(1);
     expect(getActiveIndex()).toBe(0);
-    expect(renderCount).toBeGreaterThan(0);
     expect(changeCount).toBeGreaterThan(0);
 
     // Reopen same tab — no duplicate
@@ -151,7 +143,6 @@ describe("tab-state", () => {
     closeActiveTab();
     expect(getTabs()).toHaveLength(0);
 
-    offR();
     offC();
   });
 

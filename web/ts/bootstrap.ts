@@ -293,51 +293,48 @@ export async function bootApp(opts: BootAppOptions): Promise<void> {
 
 type Closeable = { close(): void };
 
-type SseLifecycleOptions<T extends Closeable> = {
-  getSse: () => T | null;
-  setSse: (value: T | null) => void;
-  getReconnectTimer: () => ReturnType<typeof setTimeout> | null;
-  setReconnectTimer: (value: ReturnType<typeof setTimeout> | null) => void;
-  getPageUnloading: () => boolean;
-  setPageUnloading: (value: boolean) => void;
+type SseLifecycleOptions = {
   connectSse: () => void;
   clearTimer?: (timer: ReturnType<typeof setTimeout>) => void;
   document?: Document;
 };
 
-export function createSseLifecycle<T extends Closeable>(
-  opts: SseLifecycleOptions<T>,
-): {
+export function createSseLifecycle(opts: SseLifecycleOptions): {
+  getSse(): Closeable | null;
+  setSse(value: Closeable | null): void;
+  getReconnectTimer(): ReturnType<typeof setTimeout> | null;
+  setReconnectTimer(value: ReturnType<typeof setTimeout> | null): void;
+  isPageUnloading(): boolean;
   requestImmediateReconnect(): void;
   closeForUnload(): void;
   onVisibilityChange(): void;
 } {
+  let sse: Closeable | null = null;
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  let pageUnloading = false;
   const clearTimer = opts.clearTimer ?? clearTimeout;
   const doc = opts.document ?? document;
 
   function requestImmediateReconnect() {
-    if (opts.getPageUnloading() || opts.getSse()) {
+    if (pageUnloading || sse) {
       return;
     }
-    const timer = opts.getReconnectTimer();
-    if (timer) {
-      clearTimer(timer);
-      opts.setReconnectTimer(null);
+    if (reconnectTimer) {
+      clearTimer(reconnectTimer);
+      reconnectTimer = null;
     }
     opts.connectSse();
   }
 
   function closeForUnload() {
-    opts.setPageUnloading(true);
-    const timer = opts.getReconnectTimer();
-    if (timer) {
-      clearTimer(timer);
-      opts.setReconnectTimer(null);
+    pageUnloading = true;
+    if (reconnectTimer) {
+      clearTimer(reconnectTimer);
+      reconnectTimer = null;
     }
-    const sse = opts.getSse();
     if (sse) {
       sse.close();
-      opts.setSse(null);
+      sse = null;
     }
   }
 
@@ -347,5 +344,18 @@ export function createSseLifecycle<T extends Closeable>(
     }
   }
 
-  return { requestImmediateReconnect, closeForUnload, onVisibilityChange };
+  return {
+    getSse: () => sse,
+    setSse: (value) => {
+      sse = value;
+    },
+    getReconnectTimer: () => reconnectTimer,
+    setReconnectTimer: (value) => {
+      reconnectTimer = value;
+    },
+    isPageUnloading: () => pageUnloading,
+    requestImmediateReconnect,
+    closeForUnload,
+    onVisibilityChange,
+  };
 }

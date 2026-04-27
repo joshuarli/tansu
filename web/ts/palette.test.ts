@@ -253,7 +253,15 @@ describe("palette", () => {
   it("command action error does not leave palette open", () => {
     openPalette();
 
-    registerCommands([{ label: "ThrowCmd", shortcut: "", action: () => { throw new Error("oops"); } }]);
+    registerCommands([
+      {
+        label: "ThrowCmd",
+        shortcut: "",
+        action: () => {
+          throw new Error("oops");
+        },
+      },
+    ]);
     const input = document.querySelector("#palette-input")! as HTMLInputElement;
     input.value = "";
     input.dispatchEvent(new Event("input"));
@@ -268,7 +276,13 @@ describe("palette", () => {
     expect(isPaletteOpen()).toBeFalsy();
 
     registerCommands([
-      { label: "Save", shortcut: "⌘S", action: () => { actionCalled = true; } },
+      {
+        label: "Save",
+        shortcut: "⌘S",
+        action: () => {
+          actionCalled = true;
+        },
+      },
       { label: "Search", shortcut: "⌘K", action: () => {} },
       { label: "New note", shortcut: "⌘T", action: () => {} },
     ]);

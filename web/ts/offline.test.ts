@@ -19,7 +19,6 @@ describe("offline resilience", () => {
   let reopenClosedTab: () => Promise<void>;
   let syncToServer: () => Promise<void>;
   let restoreSession: () => Promise<void>;
-  let offRender: () => void;
   let offChange: () => void;
 
   function cleanState() {
@@ -48,12 +47,10 @@ describe("offline resilience", () => {
     ({ syncToServer } = mod);
     ({ restoreSession } = mod);
 
-    offRender = on("tab:render", () => {});
     offChange = on("tab:change", () => {});
   });
 
   afterAll(() => {
-    offRender();
     offChange();
     mock.restore();
     closeStore();
@@ -267,7 +264,6 @@ describe("closed-tab stack", () => {
   let reopenClosedTab: () => Promise<void>;
   let restoreSession: () => Promise<void>;
   let closedTabs: string[];
-  let offRender: () => void;
   let offChange: () => void;
 
   function cleanState() {
@@ -294,12 +290,10 @@ describe("closed-tab stack", () => {
     ({ restoreSession } = mod);
     ({ closedTabs } = mod);
 
-    offRender = on("tab:render", () => {});
     offChange = on("tab:change", () => {});
   });
 
   afterAll(() => {
-    offRender();
     offChange();
     mock.restore();
     closeStore();

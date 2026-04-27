@@ -1459,7 +1459,10 @@ describe("editor", () => {
     } as unknown as DataTransfer;
 
     const pasteEvent = new ClipboardEvent("paste", { bubbles: true, cancelable: true });
-    Object.defineProperty(pasteEvent, "clipboardData", { value: clipboardData, configurable: true });
+    Object.defineProperty(pasteEvent, "clipboardData", {
+      value: clipboardData,
+      configurable: true,
+    });
 
     contentEl.dispatchEvent(pasteEvent);
 
