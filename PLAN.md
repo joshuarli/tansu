@@ -217,10 +217,10 @@ tests.
 
 ### Conflict Banner
 
-- [ ] Create `ConflictBanner.tsx`.
-- [ ] Convert keep-mine/take-theirs callbacks to props.
-- [ ] Preserve current conflict behavior.
-- [ ] Add integration test from editor reload/save conflict paths.
+- [x] Create `ConflictBanner.tsx`.
+- [x] Convert keep-mine/take-theirs callbacks to props.
+- [x] Preserve current conflict behavior.
+- [x] Add integration test from editor reload/save conflict paths.
 
 ### Backlinks
 
