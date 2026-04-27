@@ -1,5 +1,5 @@
-import { For, Show } from "solid-js";
 import type { DiffHunk } from "@joshuarli98/md-wysiwyg";
+import { For, Show } from "solid-js";
 
 type Props = {
   hunks: DiffHunk[];

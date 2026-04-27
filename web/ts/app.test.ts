@@ -57,10 +57,10 @@ describe("app shell", () => {
     expect(root.querySelector("#tab-bar")).toBeTruthy();
     expect(root.querySelector(".server-status")).toBeTruthy();
     expect(root.querySelector("#editor-area")).toBeTruthy();
-    expect(root.querySelector("#search-overlay")).toBeTruthy();
-    expect(root.querySelector("#settings-overlay")).toBeTruthy();
+    expect(root.querySelector("#search-root")).toBeTruthy();
+    expect(root.querySelector("#settings-root")).toBeTruthy();
     expect(root.querySelector("#input-dialog-overlay")).toBeTruthy();
-    expect(root.querySelector("#palette-overlay")).toBeTruthy();
+    expect(root.querySelector("#palette-root")).toBeTruthy();
     expect(root.querySelector("#empty-state")?.textContent).toContain("Cmd+K");
     expect(root.querySelectorAll(":scope > div")).toHaveLength(6);
 

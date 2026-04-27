@@ -22,30 +22,24 @@ type NavRow = {
   active: boolean;
   timeLabel: string | null;
   dir: string | null;
+  isPinned: boolean;
+  onContextMenu: (e: MouseEvent) => void;
 };
 
-const [currentMode, setCurrentMode] = createSignal<"recent" | "search">("recent");
-const [pinnedFiles, setPinnedFiles] = createSignal<PinnedFileEntry[]>([]);
-const [pinnedPaths, setPinnedPaths] = createSignal(new Set<string>());
-const [recentFiles, setRecentFiles] = createSignal<RecentFileEntry[]>([]);
-const [searchResults, setSearchResults] = createSignal<FileSearchResult[]>([]);
-const [currentQuery, setCurrentQuery] = createSignal("");
-const [recentError, setRecentError] = createSignal(false);
-const [searchError, setSearchError] = createSignal(false);
-let renderQueued = false;
-let renderInFlight = false;
-let searchGen = 0;
-
-function showNavContextMenu(e: MouseEvent, path: string, title: string): void {
+function showNavContextMenu(
+  e: MouseEvent,
+  path: string,
+  title: string,
+  isPinned: boolean,
+  onPinChanged: () => Promise<void>,
+): void {
   e.preventDefault();
   showContextMenu(
     buildFileContextMenuItems({
       path,
       title,
-      isPinned: pinnedPaths().has(path),
-      onPinChanged: async () => {
-        await refreshPinned();
-      },
+      isPinned,
+      onPinChanged,
       onDeleted: () => closeTabByPath(path),
     }),
     e.clientX,
@@ -73,9 +67,7 @@ function FileRow(props: Readonly<NavRow>) {
       class={`nav-file${props.active ? " active" : ""}`}
       title={props.path}
       onClick={() => void openTab(props.path)}
-      onContextMenu={(e) =>
-        showNavContextMenu(e, props.path, props.title || stemFromPath(props.path))
-      }
+      onContextMenu={props.onContextMenu}
     >
       <Show
         when={props.dir}
@@ -93,120 +85,164 @@ function FileRow(props: Readonly<NavRow>) {
   );
 }
 
-function NavView() {
-  const recentNonPinned = createMemo(() => recentFiles().filter((f) => !pinnedPaths().has(f.path)));
-
-  return (
-    <Switch>
-      <Match when={currentMode() === "search" && searchError()}>
-        <div class="nav-empty">Search failed</div>
-      </Match>
-      <Match when={currentMode() === "search" && searchResults().length === 0}>
-        <div class="nav-empty">No matches</div>
-      </Match>
-      <Match when={currentMode() === "search"}>
-        <For each={searchResults()}>
-          {(result) => (
-            <FileRow
-              path={result.path}
-              title={result.title}
-              active={result.path === getActiveTab()?.path}
-              timeLabel={null}
-              dir={
-                result.path.includes("/")
-                  ? result.path.slice(0, result.path.lastIndexOf("/"))
-                  : null
-              }
-            />
-          )}
-        </For>
-      </Match>
-      <Match when={recentError()}>
-        <div class="nav-empty">Failed to load</div>
-      </Match>
-      <Match when={pinnedFiles().length === 0 && recentNonPinned().length === 0}>
-        <div class="nav-empty">No files</div>
-      </Match>
-      <Match when={true}>
-        <>
-          <For each={pinnedFiles()}>
-            {(file) => (
-              <FileRow
-                path={file.path}
-                title={file.title}
-                active={file.path === getActiveTab()?.path}
-                timeLabel={null}
-                dir={null}
-              />
-            )}
-          </For>
-          <For each={recentNonPinned()}>
-            {(file) => (
-              <FileRow
-                path={file.path}
-                title={file.title}
-                active={file.path === getActiveTab()?.path}
-                timeLabel={relativeTime(file.mtime * 1000)}
-                dir={null}
-              />
-            )}
-          </For>
-        </>
-      </Match>
-    </Switch>
-  );
-}
-
-async function refreshPinned(): Promise<void> {
-  try {
-    const files = await getPinnedFiles();
-    setPinnedFiles(files);
-    setPinnedPaths(new Set(files.map((f) => f.path)));
-  } catch {
-    /* keep stale data */
-  }
-}
-
-function updateRecentOnSave(savedPath: string): void {
-  const nowSecs = Math.floor(Date.now() / 1000);
-  const existing = recentFiles().find((f) => f.path === savedPath);
-  setRecentFiles(
-    existing
-      ? [{ ...existing, mtime: nowSecs }, ...recentFiles().filter((f) => f.path !== savedPath)]
-      : [{ path: savedPath, title: "", mtime: nowSecs }, ...recentFiles()],
-  );
-}
-
-async function renderRecent(): Promise<void> {
-  try {
-    setRecentFiles(await getRecentFiles());
-    setRecentError(false);
-  } catch {
-    setRecentError(true);
-  }
-}
-
-async function renderSearch(q: string): Promise<void> {
-  const gen = ++searchGen;
-  try {
-    const results = await searchFileNames(q);
-    if (gen !== searchGen) return;
-    setSearchResults(results);
-    setSearchError(false);
-  } catch {
-    if (gen !== searchGen) return;
-    setSearchResults([]);
-    setSearchError(true);
-  }
-}
-
-async function renderNav(): Promise<void> {
-  await (currentMode() === "search" && currentQuery().trim()
-    ? renderSearch(currentQuery())
-    : renderRecent());
-}
-
 export async function initFileNav(): Promise<() => void> {
+  const [currentMode, setCurrentMode] = createSignal<"recent" | "search">("recent");
+  const [pinnedFiles, setPinnedFiles] = createSignal<PinnedFileEntry[]>([]);
+  const [pinnedPaths, setPinnedPaths] = createSignal(new Set<string>());
+  const [recentFiles, setRecentFiles] = createSignal<RecentFileEntry[]>([]);
+  const [searchResults, setSearchResults] = createSignal<FileSearchResult[]>([]);
+  const [currentQuery, setCurrentQuery] = createSignal("");
+  const [recentError, setRecentError] = createSignal(false);
+  const [searchError, setSearchError] = createSignal(false);
+  let renderQueued = false;
+  let renderInFlight = false;
+  let searchGen = 0;
+
+  async function refreshPinned(): Promise<void> {
+    try {
+      const files = await getPinnedFiles();
+      setPinnedFiles(files);
+      setPinnedPaths(new Set(files.map((f) => f.path)));
+    } catch {
+      /* keep stale data */
+    }
+  }
+
+  function updateRecentOnSave(savedPath: string): void {
+    const nowSecs = Math.floor(Date.now() / 1000);
+    const existing = recentFiles().find((f) => f.path === savedPath);
+    setRecentFiles(
+      existing
+        ? [{ ...existing, mtime: nowSecs }, ...recentFiles().filter((f) => f.path !== savedPath)]
+        : [{ path: savedPath, title: "", mtime: nowSecs }, ...recentFiles()],
+    );
+  }
+
+  async function renderRecent(): Promise<void> {
+    try {
+      setRecentFiles(await getRecentFiles());
+      setRecentError(false);
+    } catch {
+      setRecentError(true);
+    }
+  }
+
+  async function renderSearch(q: string): Promise<void> {
+    const gen = ++searchGen;
+    try {
+      const results = await searchFileNames(q);
+      if (gen !== searchGen) return;
+      setSearchResults(results);
+      setSearchError(false);
+    } catch {
+      if (gen !== searchGen) return;
+      setSearchResults([]);
+      setSearchError(true);
+    }
+  }
+
+  async function renderNav(): Promise<void> {
+    await (currentMode() === "search" && currentQuery().trim()
+      ? renderSearch(currentQuery())
+      : renderRecent());
+  }
+
+  function NavView() {
+    const recentNonPinned = createMemo(() =>
+      recentFiles().filter((f) => !pinnedPaths().has(f.path)),
+    );
+
+    return (
+      <Switch>
+        <Match when={currentMode() === "search" && searchError()}>
+          <div class="nav-empty">Search failed</div>
+        </Match>
+        <Match when={currentMode() === "search" && searchResults().length === 0}>
+          <div class="nav-empty">No matches</div>
+        </Match>
+        <Match when={currentMode() === "search"}>
+          <For each={searchResults()}>
+            {(result) => (
+              <FileRow
+                path={result.path}
+                title={result.title}
+                active={result.path === getActiveTab()?.path}
+                timeLabel={null}
+                dir={
+                  result.path.includes("/")
+                    ? result.path.slice(0, result.path.lastIndexOf("/"))
+                    : null
+                }
+                isPinned={false}
+                onContextMenu={(e) =>
+                  showNavContextMenu(
+                    e,
+                    result.path,
+                    result.title || stemFromPath(result.path),
+                    false,
+                    refreshPinned,
+                  )
+                }
+              />
+            )}
+          </For>
+        </Match>
+        <Match when={recentError()}>
+          <div class="nav-empty">Failed to load</div>
+        </Match>
+        <Match when={pinnedFiles().length === 0 && recentNonPinned().length === 0}>
+          <div class="nav-empty">No files</div>
+        </Match>
+        <Match when={true}>
+          <>
+            <For each={pinnedFiles()}>
+              {(file) => (
+                <FileRow
+                  path={file.path}
+                  title={file.title}
+                  active={file.path === getActiveTab()?.path}
+                  timeLabel={null}
+                  dir={null}
+                  isPinned={true}
+                  onContextMenu={(e) =>
+                    showNavContextMenu(
+                      e,
+                      file.path,
+                      file.title || stemFromPath(file.path),
+                      true,
+                      refreshPinned,
+                    )
+                  }
+                />
+              )}
+            </For>
+            <For each={recentNonPinned()}>
+              {(file) => (
+                <FileRow
+                  path={file.path}
+                  title={file.title}
+                  active={file.path === getActiveTab()?.path}
+                  timeLabel={relativeTime(file.mtime * 1000)}
+                  dir={null}
+                  isPinned={false}
+                  onContextMenu={(e) =>
+                    showNavContextMenu(
+                      e,
+                      file.path,
+                      file.title || stemFromPath(file.path),
+                      false,
+                      refreshPinned,
+                    )
+                  }
+                />
+              )}
+            </For>
+          </>
+        </Match>
+      </Switch>
+    );
+  }
+
   await refreshPinned();
   await renderNav();
 

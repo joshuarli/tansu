@@ -1,4 +1,4 @@
-import { createSignal, For } from "solid-js";
+import { For, createSignal } from "solid-js";
 import { render } from "solid-js/web";
 
 type KeyBinding = {
@@ -17,18 +17,10 @@ type Command = {
 /// Check if a keyboard event matches a key binding.
 export function matchesKey(e: KeyboardEvent, k: KeyBinding): boolean {
   const meta = e.metaKey || e.ctrlKey;
-  if (k.meta && !meta) {
-    return false;
-  }
-  if (!k.meta && meta) {
-    return false;
-  }
-  if (k.shift && !e.shiftKey) {
-    return false;
-  }
-  if (!k.shift && e.shiftKey) {
-    return false;
-  }
+  if (k.meta && !meta) return false;
+  if (!k.meta && meta) return false;
+  if (k.shift && !e.shiftKey) return false;
+  if (!k.shift && e.shiftKey) return false;
   return e.key === k.key;
 }
 
@@ -51,6 +43,9 @@ type PaletteViewProps = {
   state: () => PaletteState;
   filtered: () => readonly Command[];
   onSelect: (cmd: Command) => void;
+  inputRef: (el: HTMLInputElement) => void;
+  onInput: () => void;
+  onKeyDown: (e: KeyboardEvent) => void;
 };
 
 function PaletteView(props: Readonly<PaletteViewProps>) {
@@ -58,11 +53,14 @@ function PaletteView(props: Readonly<PaletteViewProps>) {
     <div class="palette-modal" role="dialog" aria-modal="true" aria-label="Command palette">
       <input
         id="palette-input"
+        ref={props.inputRef}
         type="text"
         placeholder="Type a command..."
         aria-label="Command search"
         autocomplete="off"
         spellcheck={false}
+        on:input={props.onInput}
+        on:keydown={props.onKeyDown}
       />
       <div id="palette-list">
         <For each={props.filtered()}>
@@ -83,12 +81,8 @@ function PaletteView(props: Readonly<PaletteViewProps>) {
 }
 
 export function createPalette(): Palette {
-  const overlay = document.querySelector("#palette-overlay");
-  if (!(overlay instanceof HTMLElement)) {
-    throw new Error("missing #palette-overlay");
-  }
-  const overlayEl = overlay;
-  overlayEl.textContent = "";
+  const container = document.querySelector("#palette-root");
+  if (!(container instanceof HTMLElement)) throw new Error("missing #palette-root");
 
   let commands: Command[] = [];
   let inputEl: HTMLInputElement | null = null;
@@ -101,49 +95,29 @@ export function createPalette(): Palette {
 
   function getFiltered(): Command[] {
     const q = state().query.trim().toLowerCase();
-    if (!q) {
-      return commands;
-    }
+    if (!q) return commands;
     return commands.filter((c) => c.label.toLowerCase().includes(q));
-  }
-
-  function focusInput() {
-    queueMicrotask(() => {
-      inputEl = document.querySelector("#palette-input");
-      if (inputEl) {
-        inputEl.value = state().query;
-      }
-      inputEl?.focus();
-    });
   }
 
   function open() {
     savedFocus = document.activeElement;
-    setState({
-      isOpen: true,
-      query: "",
-      selectedIndex: 0,
+    setState({ isOpen: true, query: "", selectedIndex: 0 });
+    queueMicrotask(() => {
+      if (inputEl) inputEl.value = "";
+      inputEl?.focus();
     });
-    overlayEl.classList.remove("hidden");
-    focusInput();
   }
 
   function close() {
     setState((prev) => ({ ...prev, isOpen: false }));
-    overlayEl.classList.add("hidden");
     inputEl?.blur();
-    if (savedFocus instanceof HTMLElement) {
-      savedFocus.focus();
-    }
+    if (savedFocus instanceof HTMLElement) savedFocus.focus();
     savedFocus = null;
   }
 
   function toggle() {
-    if (state().isOpen) {
-      close();
-    } else {
-      open();
-    }
+    if (state().isOpen) close();
+    else open();
   }
 
   function updateSelection(delta: number) {
@@ -164,20 +138,7 @@ export function createPalette(): Palette {
     cmd.action();
   }
 
-  render(
-    () => <PaletteView state={state} filtered={getFiltered} onSelect={selectCommand} />,
-    overlayEl,
-  );
-
-  inputEl = document.querySelector("#palette-input");
-  inputEl?.addEventListener("input", () => {
-    setState((prev) => ({
-      ...prev,
-      query: inputEl?.value ?? "",
-      selectedIndex: 0,
-    }));
-  });
-  inputEl?.addEventListener("keydown", (e) => {
+  function handleKeyDown(e: KeyboardEvent) {
     const filtered = getFiltered();
     if (e.key === "ArrowDown") {
       e.preventDefault();
@@ -188,19 +149,42 @@ export function createPalette(): Palette {
     } else if (e.key === "Enter") {
       e.preventDefault();
       const cmd = filtered[state().selectedIndex];
-      if (cmd) {
-        selectCommand(cmd);
-      }
+      if (cmd) selectCommand(cmd);
     } else if (e.key === "Escape") {
       e.preventDefault();
       close();
     }
-  });
-  overlayEl.addEventListener("click", (e) => {
-    if (e.target === overlayEl) {
-      close();
-    }
-  });
+  }
+
+  render(
+    () => (
+      <div
+        id="palette-overlay"
+        class={state().isOpen ? "" : "hidden"}
+        onClick={(e) => {
+          if (e.target === e.currentTarget) close();
+        }}
+      >
+        <PaletteView
+          state={state}
+          filtered={getFiltered}
+          onSelect={selectCommand}
+          inputRef={(el) => {
+            inputEl = el;
+          }}
+          onInput={() => {
+            setState((prev) => ({
+              ...prev,
+              query: inputEl?.value ?? "",
+              selectedIndex: 0,
+            }));
+          }}
+          onKeyDown={handleKeyDown}
+        />
+      </div>
+    ),
+    container,
+  );
 
   return {
     toggle,

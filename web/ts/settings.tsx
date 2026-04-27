@@ -287,16 +287,10 @@ function SettingsView(props: Readonly<SettingsViewProps>) {
 }
 
 export function createSettings(): SettingsPanel {
-  const overlay = document.querySelector("#settings-overlay");
-  const panel = document.querySelector("#settings-panel");
-  if (!(overlay instanceof HTMLElement) || !(panel instanceof HTMLElement)) {
-    throw new Error("missing settings host");
-  }
+  const container = document.querySelector("#settings-root");
+  if (!(container instanceof HTMLElement)) throw new Error("missing #settings-root");
 
-  const overlayEl = overlay;
-  const panelEl = panel;
-  panelEl.textContent = "";
-
+  let panelEl: HTMLElement | null = null;
   let savedFocus: Element | null = null;
   const [isOpen, setIsOpen] = createSignal(false);
   const [current, setCurrent] = createSignal<Settings | null>(null);
@@ -305,7 +299,6 @@ export function createSettings(): SettingsPanel {
 
   function close() {
     setIsOpen(false);
-    overlayEl.classList.add("hidden");
     if (savedFocus instanceof HTMLElement) {
       savedFocus.focus();
     }
@@ -315,7 +308,6 @@ export function createSettings(): SettingsPanel {
   async function open() {
     savedFocus = document.activeElement;
     setIsOpen(true);
-    overlayEl.classList.remove("hidden");
     setSecurityStatus("");
     try {
       setCurrent(await getSettings());
@@ -339,7 +331,7 @@ export function createSettings(): SettingsPanel {
 
   async function save() {
     const snapshot = current();
-    if (!snapshot) {
+    if (!snapshot || !panelEl) {
       return;
     }
     const updated = { ...snapshot };
@@ -417,65 +409,77 @@ export function createSettings(): SettingsPanel {
     close();
   }
 
-  overlayEl.addEventListener("click", (e) => {
-    if (e.target === overlayEl) {
-      close();
-    }
-  });
-
   render(
     () => (
-      <SettingsView
-        current={current}
-        status={status}
-        securityStatus={securityStatus}
-        onRange={(key, value) => {
-          setCurrent((prev) => (prev ? { ...prev, [key]: Number.parseFloat(value) } : prev));
+      <div
+        id="settings-overlay"
+        class={isOpen() ? "" : "hidden"}
+        onClick={(e) => {
+          if (e.target === e.currentTarget) close();
         }}
-        onSelect={(key, value) => {
-          setCurrent((prev) => (prev ? { ...prev, [key]: Number.parseInt(value, 10) } : prev));
-        }}
-        onNumber={(key, value) => {
-          setCurrent((prev) => (prev ? { ...prev, [key]: Number.parseInt(value, 10) } : prev));
-        }}
-        onCheckbox={(key, checked) => {
-          setCurrent((prev) => (prev ? { ...prev, [key]: checked } : prev));
-        }}
-        onFolders={(value) => {
-          setCurrent((prev) =>
-            prev
-              ? {
-                  ...prev,
-                  excluded_folders: value
-                    .split(",")
-                    .map((s) => s.trim())
-                    .filter((s) => s.length > 0),
-                }
-              : prev,
-          );
-        }}
-        onFoldersKeyDown={(e) => {
-          if (e.key === "Enter") {
-            e.preventDefault();
-            void save();
-          }
-        }}
-        onSave={() => {
-          void save();
-        }}
-        onClose={close}
-        onRemovePrf={(id) => {
-          void removeCredential(id);
-        }}
-        onAddPrf={() => {
-          void addCredential();
-        }}
-        onLock={() => {
-          void lockNow();
-        }}
-      />
+      >
+        <div
+          id="settings-panel"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Settings"
+          ref={(el) => {
+            panelEl = el;
+          }}
+        >
+          <SettingsView
+            current={current}
+            status={status}
+            securityStatus={securityStatus}
+            onRange={(key, value) => {
+              setCurrent((prev) => (prev ? { ...prev, [key]: Number.parseFloat(value) } : prev));
+            }}
+            onSelect={(key, value) => {
+              setCurrent((prev) => (prev ? { ...prev, [key]: Number.parseInt(value, 10) } : prev));
+            }}
+            onNumber={(key, value) => {
+              setCurrent((prev) => (prev ? { ...prev, [key]: Number.parseInt(value, 10) } : prev));
+            }}
+            onCheckbox={(key, checked) => {
+              setCurrent((prev) => (prev ? { ...prev, [key]: checked } : prev));
+            }}
+            onFolders={(value) => {
+              setCurrent((prev) =>
+                prev
+                  ? {
+                      ...prev,
+                      excluded_folders: value
+                        .split(",")
+                        .map((s) => s.trim())
+                        .filter((s) => s.length > 0),
+                    }
+                  : prev,
+              );
+            }}
+            onFoldersKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                void save();
+              }
+            }}
+            onSave={() => {
+              void save();
+            }}
+            onClose={close}
+            onRemovePrf={(id) => {
+              void removeCredential(id);
+            }}
+            onAddPrf={() => {
+              void addCredential();
+            }}
+            onLock={() => {
+              void lockNow();
+            }}
+          />
+        </div>
+      </div>
     ),
-    panelEl,
+    container,
   );
 
   return { toggle, open, close, isOpen };

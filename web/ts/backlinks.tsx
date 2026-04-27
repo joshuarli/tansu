@@ -1,4 +1,5 @@
 import { stemFromPath } from "@joshuarli98/md-wysiwyg";
+import { For } from "solid-js";
 import { render } from "solid-js/web";
 
 import { getBacklinks } from "./api.ts";
@@ -17,11 +18,13 @@ function Backlinks(props: Readonly<BacklinksProps>) {
         {props.links.length} backlink{props.links.length > 1 ? "s" : ""}
       </div>
       <div class="backlinks-list">
-        {props.links.map((linkPath) => (
-          <button type="button" class="backlink-item" onClick={() => openTab(linkPath)}>
-            {stemFromPath(linkPath)}
-          </button>
-        ))}
+        <For each={props.links}>
+          {(linkPath) => (
+            <button type="button" class="backlink-item" onClick={() => openTab(linkPath)}>
+              {stemFromPath(linkPath)}
+            </button>
+          )}
+        </For>
       </div>
     </>
   );

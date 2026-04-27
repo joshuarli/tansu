@@ -4,7 +4,7 @@ import { render } from "solid-js/web";
 import { createNote, getSettings, searchNotes, type SearchResult } from "./api.ts";
 import { SEARCH_MIN_QUERY_LENGTH, SEARCH_SCORE_PRECISION } from "./constants.ts";
 
-type Search = {
+export type Search = {
   toggle(): void;
   open(filterPath?: string): void;
   close(): void;
@@ -16,67 +16,29 @@ type SearchDeps = {
   invalidateNoteCache: () => void;
 };
 
-type SearchController = {
-  deps: SearchDeps;
-  isOpen: boolean;
-  scopePath: string | null;
-  results: SearchResult[];
-  selectedIndex: number;
-  showScoreBreakdown: boolean;
-  settingsRequestId: number;
-  searchRequestId: number;
-};
+type ExcerptPart = { text: string; bold: boolean };
 
-type SearchViewState = {
-  isOpen: boolean;
-  scopePath: string | null;
-  query: string;
-  results: SearchResult[];
-  selectedIndex: number;
-  showScoreBreakdown: boolean;
-};
-
-type SearchViewProps = {
-  state: () => SearchViewState;
-  onSelectResult: (index: number) => void;
-  onSelectCreate: () => void;
-};
-
-let overlayEl: HTMLElement | null = null;
-let inputEl: HTMLInputElement | null = null;
-let resultsEl: HTMLElement | null = null;
-let savedFocus: Element | null = null;
-const [viewState, setViewState] = createSignal<SearchViewState>({
-  isOpen: false,
-  scopePath: null,
-  query: "",
-  results: [],
-  selectedIndex: 0,
-  showScoreBreakdown: true,
-});
-let mounted = false;
-let activeController: SearchController | null = null;
+function parseExcerpt(raw: string): ExcerptPart[] {
+  const parts = raw.split(/(<b>|<\/b>)/);
+  const result: ExcerptPart[] = [];
+  let inBold = false;
+  for (const part of parts) {
+    if (part === "<b>") {
+      inBold = true;
+    } else if (part === "</b>") {
+      inBold = false;
+    } else if (part) {
+      result.push({ text: part, bold: inBold });
+    }
+  }
+  return result;
+}
 
 function Excerpt(props: Readonly<{ excerpt: string }>) {
-  const parts = props.excerpt.split(/(<b>|<\/b>)/);
-  let inBold = false;
   return (
     <div class="excerpt">
-      <For each={parts}>
-        {(part) => {
-          if (part === "<b>") {
-            inBold = true;
-            return null;
-          }
-          if (part === "</b>") {
-            inBold = false;
-            return null;
-          }
-          if (!part) {
-            return null;
-          }
-          return inBold ? <b>{part}</b> : part;
-        }}
+      <For each={parseExcerpt(props.excerpt)}>
+        {(part) => (part.bold ? <b>{part.text}</b> : part.text)}
       </For>
     </div>
   );
@@ -85,18 +47,10 @@ function Excerpt(props: Readonly<{ excerpt: string }>) {
 function Score(props: Readonly<{ result: SearchResult }>) {
   const fs = props.result.field_scores;
   const parts: string[] = [];
-  if (fs.title > 0) {
-    parts.push(`title:${fs.title.toPrecision(SEARCH_SCORE_PRECISION)}`);
-  }
-  if (fs.headings > 0) {
-    parts.push(`headings:${fs.headings.toPrecision(SEARCH_SCORE_PRECISION)}`);
-  }
-  if (fs.tags > 0) {
-    parts.push(`tags:${fs.tags.toPrecision(SEARCH_SCORE_PRECISION)}`);
-  }
-  if (fs.content > 0) {
-    parts.push(`content:${fs.content.toPrecision(SEARCH_SCORE_PRECISION)}`);
-  }
+  if (fs.title > 0) parts.push(`title:${fs.title.toPrecision(SEARCH_SCORE_PRECISION)}`);
+  if (fs.headings > 0) parts.push(`headings:${fs.headings.toPrecision(SEARCH_SCORE_PRECISION)}`);
+  if (fs.tags > 0) parts.push(`tags:${fs.tags.toPrecision(SEARCH_SCORE_PRECISION)}`);
+  if (fs.content > 0) parts.push(`content:${fs.content.toPrecision(SEARCH_SCORE_PRECISION)}`);
   return (
     <div class="score">
       {props.result.score.toPrecision(SEARCH_SCORE_PRECISION)}
@@ -105,23 +59,39 @@ function Score(props: Readonly<{ result: SearchResult }>) {
   );
 }
 
+type SearchViewProps = {
+  inputRef: (el: HTMLInputElement) => void;
+  scopePath: () => string | null;
+  results: () => SearchResult[];
+  selectedIndex: () => number;
+  showScoreBreakdown: () => boolean;
+  query: () => string;
+  onInput: () => void;
+  onKeyDown: (e: KeyboardEvent) => void;
+  onSelectResult: (index: number) => void;
+  onSelectCreate: () => void;
+};
+
 function SearchView(props: Readonly<SearchViewProps>) {
   return (
     <div class="search-modal" role="dialog" aria-modal="true" aria-label="Search notes">
       <input
         id="search-input"
+        ref={props.inputRef}
         type="text"
-        placeholder={viewState().scopePath ? "Find in note..." : "Search notes..."}
-        aria-label={viewState().scopePath ? "Find in note" : "Search notes"}
+        placeholder={props.scopePath() ? "Find in note..." : "Search notes..."}
+        aria-label={props.scopePath() ? "Find in note" : "Search notes"}
         autocomplete="off"
         spellcheck={false}
+        on:input={props.onInput}
+        on:keydown={props.onKeyDown}
       />
       <div id="search-results">
-        <For each={props.state().results}>
+        <For each={props.results()}>
           {(result, i) => (
             <button
               type="button"
-              class={`search-result${i() === props.state().selectedIndex ? " selected" : ""}`}
+              class={`search-result${i() === props.selectedIndex() ? " selected" : ""}`}
               onClick={() => props.onSelectResult(i())}
             >
               <span class="title">
@@ -129,7 +99,7 @@ function SearchView(props: Readonly<SearchViewProps>) {
                 <For each={result.tags}>{(tag) => <span class="tag-pill">#{tag}</span>}</For>
               </span>
               <span class="path">{result.path}</span>
-              <Show when={props.state().showScoreBreakdown}>
+              <Show when={props.showScoreBreakdown()}>
                 <Score result={result} />
               </Show>
               <Show when={result.excerpt}>
@@ -138,13 +108,13 @@ function SearchView(props: Readonly<SearchViewProps>) {
             </button>
           )}
         </For>
-        <Show when={props.state().query.length > 0 && !props.state().scopePath}>
+        <Show when={props.query().length > 0 && !props.scopePath()}>
           <button
             type="button"
-            class={`search-create${props.state().selectedIndex === props.state().results.length ? " selected" : ""}`}
+            class={`search-create${props.selectedIndex() === props.results().length ? " selected" : ""}`}
             onClick={props.onSelectCreate}
           >
-            Create "{props.state().query}"
+            Create "{props.query()}"
           </button>
         </Show>
       </div>
@@ -152,252 +122,173 @@ function SearchView(props: Readonly<SearchViewProps>) {
   );
 }
 
-function syncView(controller: SearchController, query?: string) {
-  setViewState({
-    isOpen: controller.isOpen,
-    scopePath: controller.scopePath,
-    query: query ?? inputEl?.value.trim() ?? viewState().query,
-    results: controller.results,
-    selectedIndex: controller.selectedIndex,
-    showScoreBreakdown: controller.showScoreBreakdown,
-  });
-}
+export function initSearch(deps: SearchDeps): Search {
+  const container = document.querySelector("#search-root");
+  if (!(container instanceof HTMLElement)) throw new Error("missing #search-root");
 
-function updateSelection() {
-  queueMicrotask(() => {
-    const items = resultsEl?.children;
-    items?.[viewState().selectedIndex]?.scrollIntoView({ block: "nearest" });
-  });
-}
+  let inputEl: HTMLInputElement | null = null;
+  let savedFocus: Element | null = null;
+  let searchRequestId = 0;
+  let settingsRequestId = 0;
 
-async function refreshShowScoreBreakdown(controller: SearchController) {
-  const requestId = ++controller.settingsRequestId;
-  try {
-    const settings = await getSettings();
-    if (requestId !== controller.settingsRequestId) {
+  const [isOpen, setIsOpen] = createSignal(false);
+  const [scopePath, setScopePath] = createSignal<string | null>(null);
+  const [query, setQuery] = createSignal("");
+  const [results, setResults] = createSignal<SearchResult[]>([]);
+  const [selectedIndex, setSelectedIndex] = createSignal(0);
+  const [showScoreBreakdown, setShowScoreBreakdown] = createSignal(true);
+
+  function updateScroll() {
+    queueMicrotask(() => {
+      const resultsEl = document.querySelector("#search-results");
+      resultsEl?.children[selectedIndex()]?.scrollIntoView({ block: "nearest" });
+    });
+  }
+
+  async function refreshSettings() {
+    const reqId = ++settingsRequestId;
+    try {
+      const settings = await getSettings();
+      if (reqId !== settingsRequestId) return;
+      setShowScoreBreakdown(settings.show_score_breakdown);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  async function doSearch() {
+    const q = inputEl?.value.trim() ?? "";
+    const reqId = ++searchRequestId;
+    const scope = scopePath();
+
+    setQuery(q);
+
+    if (q.length < SEARCH_MIN_QUERY_LENGTH) {
+      setResults([]);
+      setSelectedIndex(0);
       return;
     }
-    controller.showScoreBreakdown = settings.show_score_breakdown;
-    if (activeController === controller) {
-      syncView(controller);
+
+    let nextResults: SearchResult[] = [];
+    try {
+      nextResults = await searchNotes(q, scope ?? undefined);
+    } catch {
+      nextResults = [];
     }
-  } catch {
-    /* ignore */
-  }
-}
 
-async function doSearch(controller: SearchController) {
-  const query = inputEl?.value.trim() ?? "";
-  const requestId = ++controller.searchRequestId;
-  const requestScopePath = controller.scopePath;
-
-  if (query.length < SEARCH_MIN_QUERY_LENGTH) {
-    controller.results = [];
-    controller.selectedIndex = 0;
-    if (activeController === controller) {
-      syncView(controller, query);
-    }
-    return;
+    const latestQ = inputEl?.value.trim() ?? "";
+    if (reqId !== searchRequestId || !isOpen() || latestQ !== q || scopePath() !== scope) return;
+    setResults(nextResults);
+    setSelectedIndex(0);
   }
 
-  let nextResults: SearchResult[] = [];
-  try {
-    nextResults = await searchNotes(query, requestScopePath ?? undefined);
-  } catch {
-    nextResults = [];
-  }
-
-  const latestQuery = inputEl?.value.trim() ?? "";
-  if (
-    requestId !== controller.searchRequestId ||
-    !controller.isOpen ||
-    latestQuery !== query ||
-    controller.scopePath !== requestScopePath ||
-    activeController !== controller
-  ) {
-    return;
-  }
-
-  controller.results = nextResults;
-  controller.selectedIndex = 0;
-  syncView(controller, query);
-}
-
-async function selectItem(controller: SearchController, index = controller.selectedIndex) {
-  const query = inputEl?.value.trim() ?? "";
-  if (index < controller.results.length) {
-    const result = controller.results[index];
-    if (result) {
-      closeController(controller);
-      await controller.deps.openTab(result.path);
-    }
-    return;
-  }
-
-  if (!query) {
-    return;
-  }
-  const path = query.endsWith(".md") ? query : `${query}.md`;
-  closeController(controller);
-  try {
-    await createNote(path);
-    controller.deps.invalidateNoteCache();
-    await controller.deps.openTab(path);
-  } catch {
-    /* ignore */
-  }
-}
-
-function closeController(controller: SearchController) {
-  controller.searchRequestId++;
-  controller.isOpen = false;
-  if (activeController === controller) {
-    overlayEl?.classList.add("hidden");
-    inputEl?.blur();
-    syncView(controller, "");
-    if (savedFocus instanceof HTMLElement) {
-      savedFocus.focus();
-    }
-    savedFocus = null;
-  }
-}
-
-function ensureMounted() {
-  if (mounted) {
-    return;
-  }
-  const overlay = document.querySelector("#search-overlay");
-  if (!(overlay instanceof HTMLElement)) {
-    throw new Error("missing #search-overlay");
-  }
-  overlayEl = overlay;
-  overlayEl.textContent = "";
-
-  render(
-    () => (
-      <SearchView
-        state={viewState}
-        onSelectResult={(index) => {
-          const controller = activeController;
-          if (!controller) {
-            return;
-          }
-          controller.selectedIndex = index;
-          syncView(controller);
-          void selectItem(controller, index);
-        }}
-        onSelectCreate={() => {
-          const controller = activeController;
-          if (!controller) {
-            return;
-          }
-          controller.selectedIndex = controller.results.length;
-          syncView(controller);
-          void selectItem(controller, controller.results.length);
-        }}
-      />
-    ),
-    overlayEl,
-  );
-
-  inputEl = document.querySelector("#search-input");
-  resultsEl = document.querySelector("#search-results");
-  if (!(inputEl instanceof HTMLInputElement) || !(resultsEl instanceof HTMLElement)) {
-    throw new Error("missing search nodes");
-  }
-
-  inputEl.addEventListener("input", () => {
-    const controller = activeController;
-    if (!controller) {
+  async function selectItem(index = selectedIndex()) {
+    const q = inputEl?.value.trim() ?? "";
+    const res = results();
+    if (index < res.length) {
+      const result = res[index];
+      if (result) {
+        close();
+        await deps.openTab(result.path);
+      }
       return;
     }
-    void doSearch(controller);
-  });
-  inputEl.addEventListener("keydown", (e: KeyboardEvent) => {
-    const controller = activeController;
-    if (!controller) {
-      return;
+    if (!q) return;
+    const path = q.endsWith(".md") ? q : `${q}.md`;
+    close();
+    try {
+      await createNote(path);
+      deps.invalidateNoteCache();
+      await deps.openTab(path);
+    } catch {
+      /* ignore */
     }
-    const totalItems =
-      controller.results.length + ((inputEl?.value.trim().length ?? 0) > 0 ? 1 : 0);
+  }
+
+  function handleKeyDown(e: KeyboardEvent) {
+    const totalItems = results().length + ((inputEl?.value.trim().length ?? 0) > 0 ? 1 : 0);
     if (e.key === "ArrowDown") {
       e.preventDefault();
-      controller.selectedIndex = (controller.selectedIndex + 1) % Math.max(totalItems, 1);
-      syncView(controller);
-      updateSelection();
+      setSelectedIndex((i) => (i + 1) % Math.max(totalItems, 1));
+      updateScroll();
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
-      controller.selectedIndex =
-        (controller.selectedIndex - 1 + Math.max(totalItems, 1)) % Math.max(totalItems, 1);
-      syncView(controller);
-      updateSelection();
+      setSelectedIndex((i) => (i - 1 + Math.max(totalItems, 1)) % Math.max(totalItems, 1));
+      updateScroll();
     } else if (e.key === "Enter") {
       e.preventDefault();
-      void selectItem(controller);
+      void selectItem();
     } else if (e.key === "Escape") {
       e.preventDefault();
-      closeController(controller);
+      close();
     }
-  });
-  overlayEl.addEventListener("click", (e) => {
-    if (e.target === overlayEl && activeController) {
-      closeController(activeController);
-    }
-  });
-
-  mounted = true;
-}
-
-export function createSearch(deps: SearchDeps): Search {
-  ensureMounted();
-
-  const controller: SearchController = {
-    deps,
-    isOpen: false,
-    scopePath: null,
-    results: [],
-    selectedIndex: 0,
-    showScoreBreakdown: true,
-    settingsRequestId: 0,
-    searchRequestId: 0,
-  };
-
-  void refreshShowScoreBreakdown(controller);
+  }
 
   function open(filterPath?: string) {
     savedFocus = document.activeElement;
-    activeController = controller;
-    controller.searchRequestId++;
-    controller.isOpen = true;
-    controller.scopePath = filterPath ?? null;
-    controller.results = [];
-    controller.selectedIndex = 0;
-    overlayEl?.classList.remove("hidden");
+    searchRequestId++;
+    setIsOpen(true);
+    setScopePath(filterPath ?? null);
+    setResults([]);
+    setSelectedIndex(0);
+    setQuery("");
     if (inputEl) {
       inputEl.value = "";
-      inputEl.placeholder = filterPath ? "Find in note..." : "Search notes...";
       inputEl.focus();
     }
-    syncView(controller, "");
-    void refreshShowScoreBreakdown(controller);
+    void refreshSettings();
   }
 
   function close() {
-    closeController(controller);
+    searchRequestId++;
+    setIsOpen(false);
+    setQuery("");
+    if (inputEl) inputEl.blur();
+    if (savedFocus instanceof HTMLElement) savedFocus.focus();
+    savedFocus = null;
   }
 
-  function toggle() {
-    if (controller.isOpen) {
-      close();
-    } else {
-      open();
-    }
-  }
+  render(
+    () => (
+      <div
+        id="search-overlay"
+        class={isOpen() ? "" : "hidden"}
+        onClick={(e) => {
+          if (e.target === e.currentTarget) close();
+        }}
+      >
+        <SearchView
+          inputRef={(el) => {
+            inputEl = el;
+          }}
+          scopePath={scopePath}
+          results={results}
+          selectedIndex={selectedIndex}
+          showScoreBreakdown={showScoreBreakdown}
+          query={query}
+          onInput={() => void doSearch()}
+          onKeyDown={handleKeyDown}
+          onSelectResult={(i) => {
+            setSelectedIndex(i);
+            void selectItem(i);
+          }}
+          onSelectCreate={() => {
+            setSelectedIndex(results().length);
+            void selectItem(results().length);
+          }}
+        />
+      </div>
+    ),
+    container,
+  );
 
   return {
-    toggle,
+    toggle() {
+      if (isOpen()) close();
+      else open();
+    },
     open,
     close,
-    isOpen: () => controller.isOpen,
+    isOpen,
   };
 }

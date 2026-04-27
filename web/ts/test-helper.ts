@@ -69,26 +69,14 @@ const TANSU_HTML = `<!doctype html>
     <div id="editor-area">
       <div id="empty-state">empty</div>
     </div>
-  <div id="search-overlay" class="hidden">
-    <div class="search-modal">
-      <input id="search-input" type="text">
-      <div id="search-results"></div>
-    </div>
-  </div>
-  <div id="settings-overlay" class="hidden">
-    <div id="settings-panel"></div>
-  </div>
+  <div id="search-root"></div>
+  <div id="settings-root"></div>
   <div id="input-dialog-overlay" class="hidden">
     <div class="input-dialog">
       <input id="input-dialog-input" type="text">
     </div>
   </div>
-  <div id="palette-overlay" class="hidden">
-    <div class="palette-modal">
-      <input id="palette-input" type="text">
-      <div id="palette-list"></div>
-    </div>
-  </div>
+  <div id="palette-root"></div>
 </div>
 </body></html>`;
 

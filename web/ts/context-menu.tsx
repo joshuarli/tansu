@@ -1,3 +1,4 @@
+import { For } from "solid-js";
 import { render } from "solid-js/web";
 
 export type MenuItem = {
@@ -42,20 +43,22 @@ function ContextMenu(props: Readonly<ContextMenuProps>) {
       style={{ left: `${props.x}px`, top: `${props.y}px` }}
       onKeyDown={handleKeyDown}
     >
-      {props.items.map((item, i) => (
-        <button
-          role="menuitem"
-          type="button"
-          tabIndex={-1}
-          ref={(el) => {
-            buttonRefs[i] = el;
-          }}
-          class={`context-menu-item${item.danger ? " danger" : ""}`}
-          onClick={() => props.onSelect(item.onclick)}
-        >
-          {item.label}
-        </button>
-      ))}
+      <For each={props.items}>
+        {(item, i) => (
+          <button
+            role="menuitem"
+            type="button"
+            tabIndex={-1}
+            ref={(el) => {
+              buttonRefs[i()] = el;
+            }}
+            class={`context-menu-item${item.danger ? " danger" : ""}`}
+            onClick={() => props.onSelect(item.onclick)}
+          >
+            {item.label}
+          </button>
+        )}
+      </For>
     </div>
   );
 }

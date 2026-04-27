@@ -30,7 +30,7 @@ import { emit, on } from "./events.ts";
 import { initFileNav } from "./filenav.tsx";
 import { openStore } from "./local-store.ts";
 import { createPalette, matchesKey } from "./palette.tsx";
-import { createSearch } from "./search.tsx";
+import { initSearch } from "./search.tsx";
 import { createSettings } from "./settings.tsx";
 import {
   closeActiveTab,
@@ -59,7 +59,7 @@ export function App() {
     let appInitialized = false;
     let editor: EditorInstance | null = null;
     let palette: ReturnType<typeof createPalette> | null = null;
-    let search: ReturnType<typeof createSearch> | null = null;
+    let search: ReturnType<typeof initSearch> | null = null;
     let settings: ReturnType<typeof createSettings> | null = null;
 
     function showUnlockScreen(status?: AppStatus) {
@@ -92,7 +92,7 @@ export function App() {
       void initVaultSwitcher();
       palette = createPalette();
       settings = createSettings();
-      search = createSearch({ openTab, invalidateNoteCache });
+      search = initSearch({ openTab, invalidateNoteCache });
 
       registerWikiLinkClickHandler(async (target: string) => {
         const notes = await listNotes();
@@ -431,34 +431,10 @@ export function App() {
           </div>
         </div>
       </div>
-      <div id="search-overlay" class="hidden">
-        <div class="search-modal">
-          <input
-            id="search-input"
-            type="text"
-            placeholder="Search notes..."
-            autocomplete="off"
-            spellcheck={false}
-          />
-          <div id="search-results"></div>
-        </div>
-      </div>
-      <div id="settings-overlay" class="hidden">
-        <div id="settings-panel" role="dialog" aria-modal="true" aria-label="Settings"></div>
-      </div>
+      <div id="search-root"></div>
+      <div id="settings-root"></div>
       <div id="input-dialog-overlay" class="hidden"></div>
-      <div id="palette-overlay" class="hidden">
-        <div class="palette-modal">
-          <input
-            id="palette-input"
-            type="text"
-            placeholder="Type a command..."
-            autocomplete="off"
-            spellcheck={false}
-          />
-          <div id="palette-list"></div>
-        </div>
-      </div>
+      <div id="palette-root"></div>
     </ErrorBoundary>
   );
 }

@@ -1,9 +1,10 @@
 import { computeDiff } from "@joshuarli98/md-wysiwyg";
 import type { DiffHunk } from "@joshuarli98/md-wysiwyg";
+import { For, Match, Show, Switch, createSignal } from "solid-js";
 import { render } from "solid-js/web";
 
-import { DiffView } from "./DiffView.tsx";
 import { getRevision, listRevisions, restoreRevision } from "./api.ts";
+import { DiffView } from "./DiffView.tsx";
 import { emit } from "./events.ts";
 import { relativeTime } from "./util.ts";
 
@@ -12,7 +13,6 @@ let currentPath: string | null = null;
 let getContent: (() => string) | null = null;
 let onHide: (() => void) | null = null;
 let disposeRoot: (() => void) | null = null;
-const noopAsync = () => Promise.resolve();
 
 export type RevisionsOpts = {
   path: string;
@@ -21,44 +21,56 @@ export type RevisionsOpts = {
   onHide: () => void;
 };
 
-type RevisionsPanelProps = {
-  timestamps?: readonly number[];
-  loading?: boolean;
+type RevisionState = {
+  loading: boolean;
   error?: string;
+  timestamps?: readonly number[];
   previewHunks?: DiffHunk[] | null;
+};
+
+type RevisionsPanelProps = {
+  state: () => RevisionState;
   onClose: () => void;
   onRestore: (ts: number) => Promise<void>;
   onPreview: (ts: number) => Promise<void>;
 };
 
 function RevisionsBody(props: Readonly<RevisionsPanelProps>) {
-  if (props.loading) {
-    return <div style={{ "font-size": "13px", color: "#57606a" }}>Loading...</div>;
-  }
-  if (props.error) {
-    return <div style={{ "font-size": "13px", color: "#57606a" }}>{props.error}</div>;
-  }
-  if (props.timestamps && props.timestamps.length === 0) {
-    return <div style={{ "font-size": "13px", color: "#57606a" }}>No revisions yet.</div>;
-  }
   return (
-    <>
-      {props.timestamps?.map((ts) => (
-        <div class="revision-item" onClick={() => void props.onPreview(ts)}>
-          <span>{relativeTime(ts)}</span>
-          <span
-            class="restore-btn"
-            onClick={(e) => {
-              e.stopPropagation();
-              void props.onRestore(ts);
-            }}
-          >
-            Restore
-          </span>
-        </div>
-      ))}
-      {props.previewHunks ? <DiffView hunks={props.previewHunks} class="revision-preview" /> : null}
-    </>
+    <Switch>
+      <Match when={props.state().loading}>
+        <div style={{ "font-size": "13px", color: "#57606a" }}>Loading...</div>
+      </Match>
+      <Match when={props.state().error}>
+        <div style={{ "font-size": "13px", color: "#57606a" }}>{props.state().error}</div>
+      </Match>
+      <Match when={props.state().timestamps?.length === 0}>
+        <div style={{ "font-size": "13px", color: "#57606a" }}>No revisions yet.</div>
+      </Match>
+      <Match when={true}>
+        <>
+          <For each={props.state().timestamps ?? []}>
+            {(ts) => (
+              <div class="revision-item" onClick={() => void props.onPreview(ts)}>
+                <span>{relativeTime(ts)}</span>
+                <span
+                  class="restore-btn"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void props.onRestore(ts);
+                  }}
+                >
+                  Restore
+                </span>
+              </div>
+            )}
+          </For>
+          <Show when={props.state().previewHunks}>
+            {(hunks) => <DiffView hunks={hunks()} class="revision-preview" />}
+          </Show>
+        </>
+      </Match>
+    </Switch>
   );
 }
 
@@ -74,14 +86,6 @@ function RevisionsPanel(props: Readonly<RevisionsPanelProps>) {
       <RevisionsBody {...props} />
     </>
   );
-}
-
-function renderPanel(props: Readonly<RevisionsPanelProps>) {
-  if (!hostEl) {
-    return;
-  }
-  disposeRoot?.();
-  disposeRoot = render(() => <RevisionsPanel {...props} />, hostEl);
 }
 
 export function toggleRevisions(opts: RevisionsOpts) {
@@ -114,54 +118,43 @@ async function showRevisions(path: string, host: HTMLElement) {
   currentPath = path;
   hostEl = host;
 
-  renderPanel({
-    loading: true,
-    onClose: hideRevisions,
-    onRestore: noopAsync,
-    onPreview: noopAsync,
-  });
+  const [state, setState] = createSignal<RevisionState>({ loading: true });
+
+  const onRestore = async (ts: number) => {
+    if (!confirm("Restore this revision? Current content will be saved as a new revision.")) {
+      return;
+    }
+    const result = await restoreRevision(path, ts);
+    const content = await getRevision(path, ts);
+    emit("revision:restore", { content, mtime: result.mtime });
+    hideRevisions();
+  };
+
+  const onPreview = async (ts: number) => {
+    const revContent = await getRevision(path, ts);
+    if (hostEl !== host || currentPath !== path) return;
+    const current = getContent ? getContent() : "";
+    setState((s) => ({ ...s, previewHunks: computeDiff(current, revContent) }));
+  };
+
+  disposeRoot = render(
+    () => (
+      <RevisionsPanel
+        state={state}
+        onClose={hideRevisions}
+        onRestore={onRestore}
+        onPreview={onPreview}
+      />
+    ),
+    hostEl,
+  );
 
   try {
     const timestamps = await listRevisions(path);
-    if (hostEl !== host || currentPath !== path) {
-      return;
-    }
-
-    const renderList = (previewHunks: DiffHunk[] | null = null) => {
-      renderPanel({
-        timestamps,
-        previewHunks,
-        onClose: hideRevisions,
-        onRestore: async (ts) => {
-          if (!confirm("Restore this revision? Current content will be saved as a new revision.")) {
-            return;
-          }
-          const result = await restoreRevision(path, ts);
-          const content = await getRevision(path, ts);
-          emit("revision:restore", { content, mtime: result.mtime });
-          hideRevisions();
-        },
-        onPreview: async (ts) => {
-          const revContent = await getRevision(path, ts);
-          if (hostEl !== host || currentPath !== path) {
-            return;
-          }
-          const current = getContent ? getContent() : "";
-          renderList(computeDiff(current, revContent));
-        },
-      });
-    };
-
-    renderList();
+    if (hostEl !== host || currentPath !== path) return;
+    setState({ loading: false, timestamps });
   } catch {
-    if (hostEl !== host || currentPath !== path) {
-      return;
-    }
-    renderPanel({
-      error: "Failed to load revisions.",
-      onClose: hideRevisions,
-      onRestore: noopAsync,
-      onPreview: noopAsync,
-    });
+    if (hostEl !== host || currentPath !== path) return;
+    setState({ loading: false, error: "Failed to load revisions." });
   }
 }
