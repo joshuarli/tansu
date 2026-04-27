@@ -1,6 +1,7 @@
 /// Pure tab state management — no DOM dependencies.
 
 import { stemFromPath } from "@joshuarli98/md-wysiwyg";
+import { batch, createSignal } from "solid-js";
 
 import { getNote, createNote, saveState, getState, type SessionState } from "./api.ts";
 import { MAX_CLOSED_TABS } from "./constants.ts";
@@ -18,22 +19,35 @@ export type Tab = {
   lastSavedTags: string[];
 };
 
-const tabs: Tab[] = [];
-let activeIndex = -1;
+const _tabs: Tab[] = [];
+let _activeIndex = -1;
 export const closedTabs: string[] = [];
 let cursors: Record<string, number> = {};
+
+// Reactive signals — updated by syncSignals() after every mutation that needs a UI refresh.
+// getTabs() / getActiveIndex() return signal values so SolidJS components track them.
+const [_tabsSignal, _setTabsSignal] = createSignal<Tab[]>([]);
+const [_activeIndexSignal, _setActiveIndexSignal] = createSignal(-1);
+
+function syncSignals() {
+  batch(() => {
+    _setTabsSignal([..._tabs]);
+    _setActiveIndexSignal(_activeIndex);
+  });
+}
+
 export function getTabs(): Tab[] {
-  return tabs;
+  return _tabsSignal();
 }
 export function getActiveTab(): Tab | null {
-  return tabs[activeIndex] ?? null;
+  return _tabsSignal()[_activeIndexSignal()] ?? null;
 }
 export function getActiveIndex(): number {
-  return activeIndex;
+  return _activeIndexSignal();
 }
 
 function buildState(): SessionState {
-  return { tabs: tabs.map((t) => t.path), active: activeIndex, closed: closedTabs, cursors };
+  return { tabs: _tabs.map((t) => t.path), active: _activeIndex, closed: closedTabs, cursors };
 }
 
 function persistState() {
@@ -79,21 +93,18 @@ async function fetchNote(
   }
 }
 
-function recomputeDirty(tab: Tab): boolean {
-  return tab.content !== tab.lastSavedMd;
-}
-
 function notifyChange() {
+  syncSignals();
   emit("tab:render");
-  emit("tab:change", tabs[activeIndex] ?? null);
+  emit("tab:change", _tabs[_activeIndex] ?? null);
   persistState();
 }
 
 export async function openTab(path: string): Promise<Tab> {
-  const existing = tabs.findIndex((t) => t.path === path);
+  const existing = _tabs.findIndex((t) => t.path === path);
   if (existing !== -1) {
     await switchTab(existing);
-    return tabs[existing]!;
+    return _tabs[existing]!;
   }
 
   const { content, mtime, tags } = await fetchNote(path);
@@ -107,32 +118,35 @@ export async function openTab(path: string): Promise<Tab> {
     lastSavedMd: content,
     lastSavedTags: tags,
   };
-  tabs.push(tab);
-  await switchTab(tabs.length - 1);
+  _tabs.push(tab);
+  await switchTab(_tabs.length - 1);
   persistState();
   return tab;
 }
 
 export async function switchTab(index: number) {
-  if (index < 0 || index >= tabs.length) {
+  if (index < 0 || index >= _tabs.length) {
     return;
   }
-  activeIndex = index;
-  const tab = tabs[index];
+  _activeIndex = index;
+  const tab = _tabs[index];
+  const tabPath = tab?.path;
   if (tab && tab.mtime === 0 && !tab.dirty) {
     try {
       const note = await fetchNote(tab.path);
       // Another switchTab or closeTab may have run while we awaited.
-      // If the tab is no longer current, discard the load and let the
-      // winner's notifyChange() stand.
-      if (tabs[activeIndex] !== tab) {
+      // If the active index or the tab at this position changed, discard the load.
+      if (_activeIndex !== index || _tabs[index]?.path !== tabPath) {
         return;
       }
-      tab.content = note.content;
-      tab.tags = note.tags;
-      tab.mtime = note.mtime;
-      tab.lastSavedMd = note.content;
-      tab.lastSavedTags = note.tags;
+      _tabs[index] = {
+        ..._tabs[index]!,
+        content: note.content,
+        tags: [...note.tags],
+        mtime: note.mtime,
+        lastSavedMd: note.content,
+        lastSavedTags: [...note.tags],
+      };
     } catch {
       console.warn(`Could not load ${tab.path} offline`);
     }
@@ -141,7 +155,7 @@ export async function switchTab(index: number) {
 }
 
 export function closeTab(index: number) {
-  const tab = tabs[index];
+  const tab = _tabs[index];
   if (!tab) {
     return;
   }
@@ -159,34 +173,35 @@ export function closeTab(index: number) {
   /* c8 ignore stop */
 
   emit("tab:close", tab);
-  tabs.splice(index, 1);
+  _tabs.splice(index, 1);
 
-  if (tabs.length === 0) {
-    activeIndex = -1;
-  } else if (activeIndex >= tabs.length) {
-    activeIndex = tabs.length - 1;
-  } else if (index < activeIndex) {
-    activeIndex--;
+  if (_tabs.length === 0) {
+    _activeIndex = -1;
+  } else if (_activeIndex >= _tabs.length) {
+    _activeIndex = _tabs.length - 1;
+  } else if (index < _activeIndex) {
+    _activeIndex--;
   }
 
   notifyChange();
 }
 
 export function closeActiveTab() {
-  if (activeIndex >= 0) {
-    closeTab(activeIndex);
+  if (_activeIndex >= 0) {
+    closeTab(_activeIndex);
   }
 }
 
 export function closeAllTabs() {
-  tabs.length = 0;
-  activeIndex = -1;
+  _tabs.length = 0;
+  _activeIndex = -1;
+  syncSignals();
   emit("tab:render");
   emit("tab:change", null);
 }
 
 export function closeTabByPath(path: string) {
-  const index = tabs.findIndex((t) => t.path === path);
+  const index = _tabs.findIndex((t) => t.path === path);
   if (index !== -1) {
     closeTab(index);
   }
@@ -206,74 +221,92 @@ export async function reopenClosedTab() {
 }
 
 export function nextTab() {
-  if (tabs.length > 1) {
-    switchTab((activeIndex + 1) % tabs.length);
+  if (_tabs.length > 1) {
+    void switchTab((_activeIndex + 1) % _tabs.length);
   }
 }
 
 export function prevTab() {
-  if (tabs.length > 1) {
-    switchTab((activeIndex - 1 + tabs.length) % tabs.length);
+  if (_tabs.length > 1) {
+    void switchTab((_activeIndex - 1 + _tabs.length) % _tabs.length);
   }
 }
 
 export function markDirty(path: string) {
-  const tab = tabs.find((t) => t.path === path);
-  if (tab && !tab.dirty) {
-    tab.dirty = true;
+  const idx = _tabs.findIndex((t) => t.path === path);
+  if (idx !== -1 && !_tabs[idx]!.dirty) {
+    _tabs[idx] = { ..._tabs[idx]!, dirty: true };
+    syncSignals();
     emit("tab:render");
   }
 }
 
 export function markClean(path: string, content: string, mtime: number) {
-  const tab = tabs.find((t) => t.path === path);
-  if (tab) {
-    tab.content = content;
-    tab.mtime = mtime;
-    tab.lastSavedMd = content;
-    tab.title = stemFromPath(path);
-    tab.dirty = recomputeDirty(tab);
+  const idx = _tabs.findIndex((t) => t.path === path);
+  if (idx !== -1) {
+    const tab = _tabs[idx]!;
+    _tabs[idx] = {
+      ...tab,
+      content,
+      mtime,
+      lastSavedMd: content,
+      title: stemFromPath(path),
+      dirty: false,
+    };
     /* c8 ignore start */
     notePut(path, content, mtime, tab.tags).catch(() => void 0);
     /* c8 ignore stop */
+    syncSignals();
     emit("tab:render");
   }
 }
 
 export function markTagsClean(path: string, tags: string[]) {
-  const tab = tabs.find((t) => t.path === path);
-  if (tab) {
-    tab.tags = [...tags];
-    tab.lastSavedTags = [...tags];
-    tab.dirty = recomputeDirty(tab);
+  const idx = _tabs.findIndex((t) => t.path === path);
+  if (idx !== -1) {
+    const tab = _tabs[idx]!;
+    const newTags = [...tags];
+    _tabs[idx] = {
+      ...tab,
+      tags: newTags,
+      lastSavedTags: newTags,
+      dirty: tab.content !== tab.lastSavedMd,
+    };
     /* c8 ignore start */
-    notePut(path, tab.content, tab.mtime, tab.tags).catch(() => void 0);
+    notePut(path, tab.content, tab.mtime, newTags).catch(() => void 0);
     /* c8 ignore stop */
+    syncSignals();
     emit("tab:render");
   }
 }
 
 export function updateTabDraft(path: string, draft: { content?: string; tags?: string[] }) {
-  const tab = tabs.find((t) => t.path === path);
-  if (tab) {
-    if (draft.content !== undefined) {
-      tab.content = draft.content;
-    }
-    if (draft.tags !== undefined) {
-      tab.tags = [...draft.tags];
-    }
-    tab.dirty = recomputeDirty(tab);
+  const idx = _tabs.findIndex((t) => t.path === path);
+  if (idx !== -1) {
+    const tab = _tabs[idx]!;
+    const newContent = draft.content ?? tab.content;
+    const newTags = draft.tags ? [...draft.tags] : tab.tags;
+    _tabs[idx] = {
+      ...tab,
+      content: newContent,
+      tags: newTags,
+      dirty: newContent !== tab.lastSavedMd,
+    };
+    syncSignals();
     emit("tab:render");
   }
 }
 
+// Silent update — does not notify the event bus or update reactive signals.
+// The tab object is mutated in place so getTabs()[i].content reflects the
+// new value immediately (signal array elements share the same references).
 export function updateTabContent(
   path: string,
   content: string,
   mtime: number,
   tags: string[] = [],
 ) {
-  const tab = tabs.find((t) => t.path === path);
+  const tab = _tabs.find((t) => t.path === path);
   if (tab) {
     tab.content = content;
     tab.mtime = mtime;
@@ -286,10 +319,9 @@ export function updateTabContent(
 }
 
 export function updateTabPath(oldPath: string, newPath: string) {
-  const tab = tabs.find((t) => t.path === oldPath);
-  if (tab) {
-    tab.path = newPath;
-    tab.title = stemFromPath(newPath);
+  const idx = _tabs.findIndex((t) => t.path === oldPath);
+  if (idx !== -1) {
+    _tabs[idx] = { ..._tabs[idx]!, path: newPath, title: stemFromPath(newPath) };
     notifyChange();
   }
 }
@@ -347,7 +379,7 @@ export async function restoreSession() {
       } catch {
         console.warn(`Could not load ${path} for session restore`);
       }
-      tabs.push({
+      _tabs.push({
         path,
         title: stemFromPath(path),
         dirty: false,
@@ -358,7 +390,7 @@ export async function restoreSession() {
         lastSavedTags: tags,
       });
     } else {
-      tabs.push({
+      _tabs.push({
         path,
         title: stemFromPath(path),
         dirty: false,
@@ -371,8 +403,8 @@ export async function restoreSession() {
     }
   }
 
-  if (tabs.length > 0) {
-    activeIndex = activeIdx;
+  if (_tabs.length > 0) {
+    _activeIndex = activeIdx;
     notifyChange();
   }
 }

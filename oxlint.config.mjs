@@ -238,5 +238,12 @@ export default defineConfig({
         "import/no-default-export": "off",
       },
     },
+    {
+      // SolidJS ref pattern: `let el!: T` is assigned at mount via ref={el}; oxlint can't see it
+      files: ["**/*.tsx"],
+      rules: {
+        "no-unassigned-vars": "off",
+      },
+    },
   ],
 });

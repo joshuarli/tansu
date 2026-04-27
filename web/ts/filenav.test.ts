@@ -562,4 +562,84 @@ describe("filenav", () => {
     const activeEl = document.querySelector(".nav-file.active") as HTMLElement;
     expect(activeEl?.title).toBe("notes/beta.md");
   });
+
+  it("stale search response does not overwrite a newer result", async () => {
+    const staleResults = [{ path: "notes/stale.md", title: "stale" }];
+    const freshResults = [{ path: "notes/fresh.md", title: "fresh" }];
+
+    const searchInput = document.querySelector("#sidebar-search") as HTMLInputElement;
+
+    // Register delayed handler for query "a" (stale — takes 80ms)
+    mock.onDelayed("GET", /q=a$/, staleResults, 80);
+    // Register fast handler for query "ab" (fresh — responds immediately)
+    mock.on("GET", /q=ab$/, freshResults);
+
+    // Type "a" then immediately "ab"; "ab" response will arrive first
+    searchInput.value = "a";
+    searchInput.dispatchEvent(new Event("input", { bubbles: true }));
+    await tick();
+
+    searchInput.value = "ab";
+    searchInput.dispatchEvent(new Event("input", { bubbles: true }));
+
+    // Wait long enough for the slow "a" response to also arrive
+    await new Promise((r) => setTimeout(r, 120));
+
+    const container = document.querySelector("#sidebar-tree")!;
+    const rows = [...container.querySelectorAll<HTMLElement>(".nav-file")];
+    const titles = rows.map((el) => el.title);
+    // Fresh result for "ab" should be shown; stale result for "a" should not have overwritten it
+    expect(titles).toContain("notes/fresh.md");
+    expect(titles).not.toContain("notes/stale.md");
+  });
+
+  it("context menu shows Unpin when file is already pinned", async () => {
+    mock.on("GET", "/api/pinned", [{ path: "notes/alpha.md", title: "alpha" }]);
+    mock.on("GET", "/api/recentfiles", [{ path: "notes/alpha.md", title: "alpha", mtime: 2000 }]);
+    mock.on("DELETE", "/api/pin", {});
+
+    emit("pinned:changed");
+    await drain();
+
+    const container = document.querySelector("#sidebar-tree")!;
+    const navFile = container.querySelector(".nav-file") as HTMLElement;
+    navFile.dispatchEvent(
+      new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 50, clientY: 50 }),
+    );
+    await tick();
+
+    const items = document.body.querySelectorAll(".context-menu-item");
+    expect(items[1]!.textContent).toBe("Unpin");
+
+    (items[1] as HTMLElement).click();
+    await tick();
+    await new Promise((r) => setTimeout(r, 50));
+
+    const deleteReqs = mock.requests.filter(
+      (r) => r.method === "DELETE" && r.url.includes("/api/pin"),
+    );
+    expect(deleteReqs.length).toBeGreaterThan(0);
+  });
+
+  it("active state updates when tab switches without files:changed", async () => {
+    while (getTabs().length > 0) {
+      closeTab(0);
+    }
+    // Both alpha and beta are in the initial recent files mock.
+    await openTab("notes/alpha.md");
+    await tick();
+
+    expect(activeCount()).toBe(1);
+    expect((document.querySelector(".nav-file.active") as HTMLElement)?.title).toBe(
+      "notes/alpha.md",
+    );
+
+    // Switch to beta without emitting files:changed — reactive getActiveTab() should update nav.
+    await openTab("notes/beta.md");
+    await tick();
+
+    expect(activeCount()).toBe(1);
+    const activeEl = document.querySelector(".nav-file.active") as HTMLElement;
+    expect(activeEl?.title).toBe("notes/beta.md");
+  });
 });

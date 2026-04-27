@@ -54,6 +54,9 @@ let appInitialized = false;
 let editor: EditorInstance | null = null;
 let sseReconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let pageUnloading = false;
+let palette: ReturnType<typeof createPalette> | null = null;
+let search: ReturnType<typeof createSearch> | null = null;
+let settings: ReturnType<typeof createSettings> | null = null;
 
 function showUnlockScreen(status?: AppStatus) {
   renderUnlockScreen({
@@ -83,9 +86,9 @@ function initApp() {
   editor = initEditor();
   initFileNav();
   void initVaultSwitcher();
-  const palette = createPalette();
-  const settings = createSettings();
-  const search = createSearch({ openTab, invalidateNoteCache });
+  palette = createPalette();
+  settings = createSettings();
+  search = createSearch({ openTab, invalidateNoteCache });
 
   registerWikiLinkClickHandler(async (target: string) => {
     const notes = await listNotes();
@@ -119,7 +122,7 @@ function initApp() {
       label: "Search notes",
       shortcut: "\u2318K",
       keys: { key: "k", meta: true },
-      action: () => search.toggle(),
+      action: () => search?.toggle(),
     },
     {
       label: "Search in current note",
@@ -128,9 +131,9 @@ function initApp() {
       action: () => {
         const tab = getActiveTab();
         if (tab) {
-          search.open(tab.path);
+          search?.open(tab.path);
         } else {
-          search.open();
+          search?.open();
         }
       },
     },
@@ -138,7 +141,7 @@ function initApp() {
       label: "Global search",
       shortcut: "\u21E7\u2318F",
       keys: { key: "f", meta: true, shift: true },
-      action: () => search.open(),
+      action: () => search?.open(),
     },
     {
       label: "New note",
@@ -180,44 +183,9 @@ function initApp() {
       label: "Settings",
       shortcut: "\u21E7\u2318S",
       keys: { key: "s", meta: true, shift: true },
-      action: () => settings.toggle(),
+      action: () => settings?.toggle(),
     },
   ]);
-
-  document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") {
-      if (palette.isOpen()) {
-        e.preventDefault();
-        palette.close();
-        return;
-      }
-      if (settings.isOpen()) {
-        e.preventDefault();
-        settings.close();
-        return;
-      }
-      if (search.isOpen()) {
-        e.preventDefault();
-        search.close();
-        return;
-      }
-      return;
-    }
-
-    if ((e.metaKey || e.ctrlKey) && e.key === "p") {
-      e.preventDefault();
-      palette.toggle();
-      return;
-    }
-
-    for (const cmd of palette.getCommands()) {
-      if (cmd.keys && matchesKey(e, cmd.keys)) {
-        e.preventDefault();
-        cmd.action();
-        return;
-      }
-    }
-  });
 
   on("file:rename", async ({ oldPath, newPath }) => {
     try {
@@ -355,7 +323,50 @@ function connectSSE() {
   };
 }
 
+function globalKeydown(e: KeyboardEvent) {
+  if (e.key === "Escape") {
+    if (palette?.isOpen()) {
+      e.preventDefault();
+      palette.close();
+      return;
+    }
+    if (settings?.isOpen()) {
+      e.preventDefault();
+      settings.close();
+      return;
+    }
+    if (search?.isOpen()) {
+      e.preventDefault();
+      search.close();
+      return;
+    }
+    return;
+  }
+
+  if ((e.metaKey || e.ctrlKey) && e.key === "p") {
+    e.preventDefault();
+    palette?.toggle();
+    return;
+  }
+
+  if (palette) {
+    for (const cmd of palette.getCommands()) {
+      if (cmd.keys && matchesKey(e, cmd.keys)) {
+        e.preventDefault();
+        cmd.action();
+        return;
+      }
+    }
+  }
+}
+
+function teardownApp() {
+  document.removeEventListener("keydown", globalKeydown);
+}
+
 export function bootLegacyApp() {
+  document.addEventListener("keydown", globalKeydown);
+  window.addEventListener("pagehide", teardownApp);
   window.addEventListener("pagehide", sseLifecycle.closeForUnload);
   window.addEventListener("beforeunload", sseLifecycle.closeForUnload);
   window.addEventListener("focus", sseLifecycle.requestImmediateReconnect);

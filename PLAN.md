@@ -75,19 +75,19 @@ tests.
 - [x] Existing tests cover rendering, active state, dirty dot, close button, context menu, tooltip, space-to-close, middle click, new-note dialog, and rename event.
 - [x] Add explicit test that clicking a non-active tab switches active tab.
 - [x] Add explicit test that the close button does not also switch the tab.
-- [ ] Add explicit test that tooltip position updates from tab bounds.
+- [x] Add explicit test that tooltip position updates from tab bounds.
 - [ ] Add explicit test that active tab scrolls into view.
 - [x] Add explicit test that space does not close when focus is in an input or textarea.
-- [ ] Add explicit test that unpin context menu label appears for pinned tabs.
+- [x] Add explicit test that unpin context menu label appears for pinned tabs.
 
 ### File Navigation
 
 - [x] Existing tests cover active state under rapid events, collapse button, search mode, empty/error states, context menu, pin/delete/rename actions, and pinned refresh.
 - [x] Add explicit test for pinned file de-duplication against recent files.
 - [x] Add explicit test for opening a note by clicking a nav item.
-- [ ] Add explicit test for unpin action when file is already pinned.
-- [ ] Add explicit test for stale search responses not replacing newer results.
-- [ ] Add explicit test that active state updates when `tab:change` fires without `files:changed`.
+- [x] Add explicit test for unpin action when file is already pinned.
+- [x] Add explicit test for stale search responses not replacing newer results.
+- [x] Add explicit test that active state updates when `tab:change` fires without `files:changed`.
 
 ### Search Modal
 
@@ -187,8 +187,8 @@ tests.
 - [x] Update `package.json` bundle script to compile `web/ts/main.tsx`.
 - [x] Add SolidJS-compatible JSX build settings and any minimal required build plugin/runtime glue.
 - [x] Update `tsconfig.json` for SolidJS TSX compilation.
-- [ ] Ensure `vitest.config.ts` coverage includes `web/ts/**/*.tsx`.
-- [ ] Ensure oxlint/oxfmt cover `.tsx` files.
+- [x] Ensure `vitest.config.ts` coverage includes `web/ts/**/*.tsx`.
+- [x] Ensure oxlint/oxfmt cover `.tsx` files.
 - [ ] Add `web/ts/component-test-helper.tsx`.
 - [ ] Add a minimal smoke component test.
 - [x] Confirm production bundle succeeds.
@@ -256,13 +256,13 @@ tests.
 
 ## State Ownership Migration
 
-- [ ] Add a subscription API to `tab-state.ts` if needed by SolidJS hooks/signals.
+- [x] Add a subscription API to `tab-state.ts` if needed by SolidJS hooks/signals.
 - [ ] Add `useTabs()` hook.
 - [x] Convert `tabs.ts` to `TabBar.tsx`.
-- [ ] Move tooltip state into `TabBar`.
-- [ ] Move global space-to-close listener into a cleanup-safe effect.
+- [x] Move tooltip state into `TabBar`.
+- [x] Move global space-to-close listener into a cleanup-safe effect.
 - [x] Convert `filenav.ts` to `FileNav.tsx`.
-- [ ] Move file-nav loading/error/search state into component state.
+- [x] Move file-nav loading/error/search state into component state.
 - [x] Convert notification pill to component state.
 - [x] Convert server status to component state.
 - [ ] Give SSE lifecycle one owner.
@@ -277,7 +277,7 @@ tests.
 - [x] Keep scoped search behavior.
 - [x] Convert `palette.ts` to `CommandPalette.tsx`.
 - [x] Move command registration to app-level state.
-- [ ] Move global shortcut handling to one cleanup-safe effect.
+- [x] Move global shortcut handling to one cleanup-safe effect.
 - [x] Convert `settings.ts` to `SettingsModal.tsx`.
 - [ ] Split security controls into a small component if helpful.
 - [x] Keep exact API payload shapes.

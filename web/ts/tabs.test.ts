@@ -515,4 +515,52 @@ describe("tabs", () => {
       closeTab(0);
     }
   });
+
+  it("tooltip top/left position derives from tab element bounds", async () => {
+    while (getTabs().length > 0) {
+      closeTab(0);
+    }
+    await openTab("notes/pos-test.md");
+    await tick();
+    const tabBar = document.querySelector("#tab-bar")!;
+    const tabEl = tabBar.querySelectorAll(".tab:not(.tab-new)")[0]! as HTMLElement;
+    const rect = tabEl.getBoundingClientRect();
+    (tabEl as HTMLElement).dispatchEvent(new MouseEvent("mouseenter", { bubbles: true }));
+    const tooltip = document.body.querySelector(".tab-tooltip") as HTMLElement;
+    expect(tooltip.style.display).toBe("block");
+    // top = rect.bottom + 6px
+    expect(tooltip.style.top).toBe(`${rect.bottom + 6}px`);
+    // left = rect.left + rect.width / 2
+    expect(tooltip.style.left).toBe(`${rect.left + rect.width / 2}px`);
+    while (getTabs().length > 0) {
+      closeTab(0);
+    }
+  });
+
+  it("context menu shows Unpin label when tab file is already pinned", async () => {
+    while (getTabs().length > 0) {
+      closeTab(0);
+    }
+    await openTab("notes/pinned-tab.md");
+    await tick();
+    const tabBar = document.querySelector("#tab-bar")!;
+    const tabEl = tabBar.querySelectorAll(".tab:not(.tab-new)")[0]!;
+
+    mock.on("GET", "/api/pinned", [{ path: "notes/pinned-tab.md", title: "pinned-tab" }]);
+    mock.on("DELETE", "/api/pin", {});
+
+    (tabEl as HTMLElement).dispatchEvent(
+      new MouseEvent("contextmenu", { bubbles: true, cancelable: true }),
+    );
+    await tick();
+    const items = document.body.querySelectorAll(".context-menu-item");
+    expect(items[1]!.textContent).toBe("Unpin");
+    (items[1] as HTMLElement).click();
+    await tick();
+    await new Promise((r) => setTimeout(r, 50));
+
+    while (getTabs().length > 0) {
+      closeTab(0);
+    }
+  });
 });

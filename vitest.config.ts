@@ -13,7 +13,7 @@ export default defineConfig({
   test: {
     globals: true,
     environment: "happy-dom",
-    include: ["web/ts/*.test.ts"],
+    include: ["web/ts/*.test.ts", "web/ts/*.test.tsx"],
     reporters: ["agent"],
     silent: "passed-only",
     sequence: { shuffle: true },
