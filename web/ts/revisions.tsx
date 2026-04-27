@@ -1,6 +1,8 @@
-import { computeDiff, renderDiff } from "@joshuarli98/md-wysiwyg";
+import { computeDiff } from "@joshuarli98/md-wysiwyg";
+import type { DiffHunk } from "@joshuarli98/md-wysiwyg";
 import { render } from "solid-js/web";
 
+import { DiffView } from "./DiffView.tsx";
 import { getRevision, listRevisions, restoreRevision } from "./api.ts";
 import { emit } from "./events.ts";
 import { relativeTime } from "./util.ts";
@@ -23,26 +25,11 @@ type RevisionsPanelProps = {
   timestamps?: readonly number[];
   loading?: boolean;
   error?: string;
-  previewEl?: HTMLElement | null;
+  previewHunks?: DiffHunk[] | null;
   onClose: () => void;
   onRestore: (ts: number) => Promise<void>;
   onPreview: (ts: number) => Promise<void>;
 };
-
-function Preview(props: Readonly<{ element: HTMLElement }>) {
-  return (
-    <div
-      ref={(host) => {
-        queueMicrotask(() => {
-          if (props.element.parentElement !== host) {
-            host.textContent = "";
-            host.append(props.element);
-          }
-        });
-      }}
-    />
-  );
-}
 
 function RevisionsBody(props: Readonly<RevisionsPanelProps>) {
   if (props.loading) {
@@ -70,7 +57,7 @@ function RevisionsBody(props: Readonly<RevisionsPanelProps>) {
           </span>
         </div>
       ))}
-      {props.previewEl ? <Preview element={props.previewEl} /> : null}
+      {props.previewHunks ? <DiffView hunks={props.previewHunks} class="revision-preview" /> : null}
     </>
   );
 }
@@ -140,10 +127,10 @@ async function showRevisions(path: string, host: HTMLElement) {
       return;
     }
 
-    const renderList = (previewEl: HTMLElement | null = null) => {
+    const renderList = (previewHunks: DiffHunk[] | null = null) => {
       renderPanel({
         timestamps,
-        previewEl,
+        previewHunks,
         onClose: hideRevisions,
         onRestore: async (ts) => {
           if (!confirm("Restore this revision? Current content will be saved as a new revision.")) {
@@ -160,10 +147,7 @@ async function showRevisions(path: string, host: HTMLElement) {
             return;
           }
           const current = getContent ? getContent() : "";
-          const hunks = computeDiff(current, revContent);
-          const diffEl = renderDiff(hunks);
-          diffEl.classList.add("revision-preview");
-          renderList(diffEl);
+          renderList(computeDiff(current, revContent));
         },
       });
     };
