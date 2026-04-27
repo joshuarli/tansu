@@ -208,12 +208,12 @@ tests.
 
 ### Input Dialog
 
-- [ ] Create `InputDialog.tsx`.
-- [ ] Preserve temporary `showInputDialog()` Promise API.
-- [ ] Render dialog declaratively.
-- [ ] Add focus management.
-- [ ] Add Escape/backdrop cleanup.
-- [ ] Delete old imperative DOM construction after callers pass tests.
+- [x] Create `InputDialog.tsx`.
+- [x] Preserve temporary `showInputDialog()` Promise API.
+- [x] Render dialog declaratively.
+- [x] Add focus management.
+- [x] Add Escape/backdrop cleanup.
+- [x] Delete old imperative DOM construction after callers pass tests.
 
 ### Conflict Banner
 

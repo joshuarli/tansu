@@ -151,10 +151,7 @@ export function showUnlockScreen(opts: UnlockScreenOptions): HTMLElement {
     doc.body.append(screen);
   }
 
-  const hasPrf =
-    Boolean(opts.status) &&
-    opts.status.prf_credential_ids.length > 0 &&
-    opts.isPrfLikelySupported();
+  const hasPrf = (opts.status?.prf_credential_ids.length ?? 0) > 0 && opts.isPrfLikelySupported();
 
   screen.innerHTML = `
     <h1>tansu</h1>
