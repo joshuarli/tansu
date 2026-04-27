@@ -23,7 +23,7 @@ export default defineConfig({
       exclude: [
         "web/ts/webauthn.ts",
         "web/ts/main.tsx",
-        "web/ts/legacy-main.ts",
+        "web/ts/app.tsx",
         "web/ts/search-cli.ts",
         "web/ts/e2e/**",
         "web/ts/**/*.test.ts",

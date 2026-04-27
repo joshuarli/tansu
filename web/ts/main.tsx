@@ -8,8 +8,3 @@ if (!(root instanceof HTMLElement)) {
 }
 
 render(App, root);
-queueMicrotask(() => {
-  void import("./legacy-main.ts").then(({ bootLegacyApp }) => {
-    bootLegacyApp();
-  });
-});

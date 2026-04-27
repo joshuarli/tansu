@@ -55,7 +55,7 @@ type PaletteViewProps = {
 
 function PaletteView(props: Readonly<PaletteViewProps>) {
   return (
-    <div id="palette-modal" role="dialog" aria-modal="true" aria-label="Command palette">
+    <div class="palette-modal" role="dialog" aria-modal="true" aria-label="Command palette">
       <input
         id="palette-input"
         type="text"

@@ -14,7 +14,7 @@ function getContainer(): HTMLElement | null {
 function VaultSwitcher(props: Readonly<{ vaults: readonly VaultEntry[] }>) {
   return (
     <select
-      id="vault-select"
+      class="vault-select"
       title="Switch vault"
       aria-label="Switch vault"
       onChange={(e) => {

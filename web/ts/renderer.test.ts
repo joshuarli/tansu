@@ -76,8 +76,9 @@ describe("renderer invariants", () => {
     // SolidJS components should receive their DOM context via props or refs,
     // not by traversing fixed app-root IDs like #app or #editor-area.
     // main.tsx mounts the app and legitimately queries #app.
+    // app.tsx owns the app lifecycle and queries #app for the unlock screen.
     // filenav.tsx accesses #app for the sidebar-collapse toggle.
-    const allowList = new Set(["main.tsx", "filenav.tsx"]);
+    const allowList = new Set(["main.tsx", "app.tsx", "filenav.tsx"]);
     const tsxFiles = sourceFiles().filter((f) => f.endsWith(".tsx") && !allowList.has(f));
     const pattern = /document\.querySelector\s*\(\s*["'`]#(?:app|app-main|editor-area)["'`]/;
 

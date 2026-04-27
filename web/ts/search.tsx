@@ -107,7 +107,7 @@ function Score(props: Readonly<{ result: SearchResult }>) {
 
 function SearchView(props: Readonly<SearchViewProps>) {
   return (
-    <div id="search-modal" role="dialog" aria-modal="true" aria-label="Search notes">
+    <div class="search-modal" role="dialog" aria-modal="true" aria-label="Search notes">
       <input
         id="search-input"
         type="text"

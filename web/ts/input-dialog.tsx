@@ -42,7 +42,7 @@ function InputDialog() {
 
   return (
     <div
-      id="input-dialog"
+      class="input-dialog"
       role="dialog"
       aria-modal="true"
       aria-label={state()?.placeholder ?? "Enter text"}

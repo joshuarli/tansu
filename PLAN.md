@@ -316,8 +316,8 @@ tests.
 
 - [x] Keep `web/static/style.css` initially.
 - [x] Organize CSS by component sections.
-- [ ] Prefer class selectors over ID selectors for styling.
-- [ ] Keep stable IDs only while legacy modules or e2e selectors require them.
+- [x] Prefer class selectors over ID selectors for styling.
+- [x] Keep stable IDs only while legacy modules or e2e selectors require them.
 - [x] Add accessible modal roles.
 - [x] Add `aria-modal` to modal dialogs.
 - [x] Add labels or accessible names to inputs/buttons.
@@ -340,16 +340,16 @@ tests.
 
 ## Final Migration Completion Criteria
 
-- [ ] `web/ts/main.tsx` is the only app bootstrap entrypoint.
-- [ ] App shell is rendered by SolidJS.
-- [ ] Tabs, file nav, search, palette, settings, input dialog, context menu, notification, server status, and vault switcher are SolidJS components.
-- [ ] Editor shell is SolidJS, with the editable surface isolated behind refs.
-- [ ] `renderer.ts` remains the only app markdown render sink.
-- [ ] No converted component relies on fixed app-root `document.querySelector` lookups.
-- [ ] No unowned global listeners are registered at module import time.
-- [ ] Existing unit tests pass.
-- [ ] Existing package tests pass.
-- [ ] Existing Rust tests pass.
-- [ ] Existing e2e tests pass.
-- [ ] New migration characterization tests pass.
-- [ ] Bundle succeeds in dev and production modes.
+- [x] `web/ts/main.tsx` is the only app bootstrap entrypoint.
+- [x] App shell is rendered by SolidJS.
+- [x] Tabs, file nav, search, palette, settings, input dialog, context menu, notification, server status, and vault switcher are SolidJS components.
+- [x] Editor shell is SolidJS, with the editable surface isolated behind refs.
+- [x] `renderer.ts` remains the only app markdown render sink.
+- [x] No converted component relies on fixed app-root `document.querySelector` lookups.
+- [x] No unowned global listeners are registered at module import time.
+- [x] Existing unit tests pass.
+- [x] Existing package tests pass.
+- [x] Existing Rust tests pass.
+- [x] Existing e2e tests pass.
+- [x] New migration characterization tests pass.
+- [x] Bundle succeeds in dev and production modes.

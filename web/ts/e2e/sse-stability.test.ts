@@ -188,9 +188,9 @@ describe("e2e: SSE connection stability", () => {
     // A loop produces dozens of connections; healthy startup produces at most 2.
     expect(count).toBeLessThanOrEqual(2);
 
-    const notifClass = await page.getAttribute("#notification", "class");
+    const notifClass = await page.getAttribute(".notification", "class");
     expect(notifClass).not.toContain("error");
-    const serverStatusClass = await page.getAttribute("#server-status", "class");
+    const serverStatusClass = await page.getAttribute(".server-status", "class");
     expect(serverStatusClass).toContain("hidden");
     await page.close();
   }, 40_000);

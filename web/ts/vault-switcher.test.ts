@@ -37,7 +37,7 @@ describe("vault-switcher", () => {
     await initVaultSwitcher();
 
     expect(getContainer().textContent).toBe("");
-    expect(document.querySelector("#vault-select")).toBeNull();
+    expect(document.querySelector(".vault-select")).toBeNull();
   });
 
   it("renders a select when multiple vaults exist", async () => {
@@ -48,7 +48,7 @@ describe("vault-switcher", () => {
 
     await refreshVaultSwitcher();
 
-    const select = document.querySelector("#vault-select") as HTMLSelectElement | null;
+    const select = document.querySelector(".vault-select") as HTMLSelectElement | null;
     expect(select).not.toBeNull();
     expect(select!.options).toHaveLength(2);
     expect(select!.options[0]!.selected).toBeTruthy();
@@ -70,12 +70,12 @@ describe("vault-switcher", () => {
     markDirty("one.md");
     await refreshVaultSwitcher();
 
-    const select = document.querySelector("#vault-select") as HTMLSelectElement;
+    const select = document.querySelector(".vault-select") as HTMLSelectElement;
     select.value = "1";
     select.dispatchEvent(new Event("change", { bubbles: true }));
     await new Promise((r) => setTimeout(r, 50));
 
-    const refreshedSelect = document.querySelector("#vault-select") as HTMLSelectElement;
+    const refreshedSelect = document.querySelector(".vault-select") as HTMLSelectElement;
     expect(refreshedSelect.value).toBe("0");
     globalThis.confirm = originalConfirm;
     closeAllTabs();
@@ -103,12 +103,12 @@ describe("vault-switcher", () => {
       filesChanged += 1;
     });
 
-    const select = document.querySelector("#vault-select") as HTMLSelectElement;
+    const select = document.querySelector(".vault-select") as HTMLSelectElement;
     select.value = "1";
     select.dispatchEvent(new Event("change", { bubbles: true }));
     await new Promise((r) => setTimeout(r, 50));
 
-    const refreshedSelect = document.querySelector("#vault-select") as HTMLSelectElement;
+    const refreshedSelect = document.querySelector(".vault-select") as HTMLSelectElement;
     expect(refreshedSelect.value).toBe("1");
     expect(switched).toBe(1);
     expect(filesChanged).toBe(1);

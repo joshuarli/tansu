@@ -41,7 +41,7 @@ body {
   height: 100vh;
 }
 
-#app-main {
+.app-main {
   display: flex;
   flex-direction: column;
   flex: 1;
@@ -62,7 +62,7 @@ body {
   transition: width 0.15s ease;
 }
 
-#sidebar-header {
+.sidebar-header {
   display: flex;
   align-items: center;
   gap: 4px;
@@ -112,7 +112,7 @@ body {
   display: none;
 }
 
-#app.sidebar-collapsed #sidebar-header {
+#app.sidebar-collapsed .sidebar-header {
   justify-content: center;
   padding: 6px 0;
   border-bottom: none;
@@ -140,7 +140,7 @@ body {
   display: none;
 }
 
-#vault-select {
+.vault-select {
   width: 100%;
   padding: 4px 6px;
   border: 1px solid var(--border);
@@ -152,7 +152,7 @@ body {
   cursor: pointer;
 }
 
-#vault-select:focus {
+.vault-select:focus {
   outline: none;
   border-color: var(--accent);
 }
@@ -833,7 +833,7 @@ body {
   display: none;
 }
 
-#search-modal {
+.search-modal {
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: 12px;
@@ -1188,7 +1188,7 @@ body {
   display: none;
 }
 
-#input-dialog {
+.input-dialog {
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: 12px;
@@ -1345,7 +1345,7 @@ body {
   display: none;
 }
 
-#palette-modal {
+.palette-modal {
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: 12px;
