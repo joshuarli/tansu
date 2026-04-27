@@ -11,6 +11,7 @@ import {
 import { forceSaveNote, saveNote } from "./api.ts";
 import { checkWikiLinkTrigger, hideAutocomplete } from "./autocomplete.ts";
 export { invalidateNoteCache } from "./autocomplete.ts";
+import { mountEditorShell, type EditorShellController } from "./editor-shell.tsx";
 import { splitFrontmatter, withFrontmatter } from "./frontmatter.ts";
 import {
   checkTagInput,
@@ -233,10 +234,11 @@ export function initEditor(): EditorInstance {
   let container: HTMLElement | null = null;
   let contentEl: HTMLElement | null = null;
   let sourceEl: HTMLTextAreaElement | null = null;
-  let tagRowEl: HTMLElement | null = null;
   let tagInputEl: HTMLInputElement | null = null;
   let backlinksEl: HTMLElement | null = null;
   let revisionsEl: HTMLElement | null = null;
+  let shell: EditorShellController | null = null;
+  let shellHost: HTMLElement | null = null;
   let isSourceMode = false;
   let currentPath: string | null = null;
   let currentTags: string[] = [];
@@ -283,50 +285,20 @@ export function initEditor(): EditorInstance {
   }
 
   function renderTagRow() {
-    if (!tagRowEl) {
+    if (!shell) {
       return;
     }
-    tagRowEl.innerHTML = "";
-
-    for (const tag of currentTags) {
-      const chip = document.createElement("span");
-      chip.className = "tag-pill tag-pill--editor";
-
-      const label = document.createElement("span");
-      label.textContent = `#${tag}`;
-      chip.append(label);
-
-      const remove = document.createElement("button");
-      remove.type = "button";
-      remove.className = "tag-pill-remove";
-      remove.textContent = "\u00D7";
-      remove.onclick = (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        hideTagAutocomplete();
-        currentTags = currentTags.filter((current) => current !== tag);
-        renderTagRow();
-        syncSourceFromTags();
-        onEditorTabMutation();
-        tagInputEl?.focus();
-      };
-      chip.append(remove);
-      tagRowEl.append(chip);
+    shell.setTags(currentTags);
+    tagInputEl = shell.refs.getTagInputEl();
+    if (!tagInputEl) {
+      return;
     }
-
-    tagInputEl = document.createElement("input");
-    tagInputEl.type = "text";
-    tagInputEl.className = "editor-tags-input";
-    tagInputEl.placeholder = currentTags.length === 0 ? "Add tags" : "Add tag";
-    tagInputEl.autocomplete = "off";
-    tagInputEl.autocapitalize = "off";
-    tagInputEl.spellcheck = false;
-    tagInputEl.addEventListener("focus", () => {
+    tagInputEl.onfocus = () => {
       if (tagInputEl) {
         checkTagInput(tagInputEl, currentTags, handleTagSelected);
       }
-    });
-    tagInputEl.addEventListener("input", () => {
+    };
+    tagInputEl.oninput = () => {
       if (!tagInputEl) {
         return;
       }
@@ -335,15 +307,15 @@ export function initEditor(): EditorInstance {
         tagInputEl.value = normalized;
       }
       checkTagInput(tagInputEl, currentTags, handleTagSelected);
-    });
-    tagInputEl.addEventListener("blur", () => {
+    };
+    tagInputEl.onblur = () => {
       setTimeout(() => {
         if (document.activeElement !== tagInputEl) {
           hideTagAutocomplete();
         }
       }, 0);
-    });
-    tagInputEl.addEventListener("keydown", (e) => {
+    };
+    tagInputEl.onkeydown = (e) => {
       if (!tagInputEl) {
         return;
       }
@@ -356,8 +328,7 @@ export function initEditor(): EditorInstance {
         onEditorTabMutation();
         tagInputEl?.focus();
       }
-    });
-    tagRowEl.append(tagInputEl);
+    };
   }
 
   function setCurrentTags(tags: readonly string[]) {
@@ -658,23 +629,12 @@ export function initEditor(): EditorInstance {
       const parsed = splitFrontmatter(md);
       setCurrentTags(parsed.hasFrontmatter ? parsed.tags : []);
       setContent(contentEl, parsed.body);
-      contentEl.style.display = "";
-      sourceEl.style.display = "none";
       isSourceMode = false;
     } else {
       sourceEl.value = getCurrentContent();
-      contentEl.style.display = "none";
-      sourceEl.style.display = "";
       isSourceMode = true;
     }
-
-    toolbarEl
-      ?.querySelector(".editor-toolbar-btn--source")
-      ?.classList.toggle("active", isSourceMode);
-    const fmtGroup = toolbarEl?.querySelector(".editor-toolbar-fmt-group") as HTMLElement | null;
-    if (fmtGroup) {
-      fmtGroup.style.display = isSourceMode ? "none" : "flex";
-    }
+    shell?.setSourceMode(isSourceMode);
   }
 
   function isIndentableBlock(el: HTMLElement): boolean {
@@ -1052,30 +1012,37 @@ export function initEditor(): EditorInstance {
     currentTags = [...tags];
 
     const emptyState = document.querySelector<HTMLElement>("#empty-state");
-    editorArea.innerHTML = "";
     if (emptyState) {
-      editorArea.append(emptyState);
       emptyState.style.display = "none";
     }
 
-    container = document.createElement("div");
-    container.className = "editor-container";
+    shellHost?.remove();
+    shellHost = document.createElement("div");
+    editorArea.append(shellHost);
 
-    toolbarEl = document.createElement("div");
-    toolbarEl.className = "editor-toolbar";
+    shell = mountEditorShell({
+      root: shellHost,
+      tags: currentTags,
+      isSourceMode,
+    });
 
-    const sourceBtn = document.createElement("button");
-    sourceBtn.className = "editor-toolbar-btn editor-toolbar-btn--source";
-    sourceBtn.title = "Toggle source mode";
-    sourceBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="5,4 1,8 5,12"/><polyline points="11,4 15,8 11,12"/><line x1="9.5" y1="2" x2="6.5" y2="14"/></svg>`;
-    sourceBtn.onclick = () => toggleSourceMode();
-
-    const menuBtn = document.createElement("button");
-    menuBtn.className = "editor-toolbar-btn";
-    menuBtn.title = "More";
-    menuBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><rect x="1" y="3" width="14" height="2" rx="1"/><rect x="1" y="7" width="14" height="2" rx="1"/><rect x="1" y="11" width="14" height="2" rx="1"/></svg>`;
-    menuBtn.onclick = () => {
-      const rect = menuBtn.getBoundingClientRect();
+    ({
+      containerEl: container,
+      toolbarEl,
+      contentEl,
+      sourceEl,
+      revisionsEl,
+      backlinksEl,
+    } = shell.refs);
+    tagInputEl = shell.refs.getTagInputEl();
+    shell.refs.sourceBtnEl.onclick = () => {
+      toggleSourceMode();
+    };
+    shell.refs.menuBtnEl.onclick = () => {
+      const rect = shell?.refs.menuBtnEl.getBoundingClientRect();
+      if (!rect) {
+        return;
+      }
       showContextMenu(
         [
           {
@@ -1116,53 +1083,31 @@ export function initEditor(): EditorInstance {
         rect.bottom + 4,
       );
     };
+    shell.refs.tagRowEl.onclick = (e) => {
+      const target = e.target as HTMLElement | null;
+      const removeBtn = target?.closest<HTMLButtonElement>(".tag-pill-remove");
+      if (removeBtn?.dataset["tagRemove"]) {
+        e.preventDefault();
+        e.stopPropagation();
+        hideTagAutocomplete();
+        currentTags = currentTags.filter((current) => current !== removeBtn.dataset["tagRemove"]);
+        renderTagRow();
+        syncSourceFromTags();
+        onEditorTabMutation();
+        tagInputEl?.focus();
+        return;
+      }
+      tagInputEl?.focus();
+    };
 
-    const fmtGroup = document.createElement("div");
-    fmtGroup.className = "editor-toolbar-fmt-group";
-
+    const fmtGroup = shell.refs.fmtGroupEl;
     populateFormatButtons(fmtGroup, {
       applyIndent: applyIndentInEditor,
       applySourceFormat: applySourceFormatInEditor,
       afterInline: onEditorTabMutation,
       afterBlock: onEditorTabMutation,
     });
-
-    const toolbarSpacer = document.createElement("div");
-    toolbarSpacer.style.flex = "1";
-
-    toolbarEl.append(fmtGroup, toolbarSpacer, sourceBtn, menuBtn);
-    editorArea.append(toolbarEl);
-
-    tagRowEl = document.createElement("div");
-    tagRowEl.className = "editor-tags";
-    tagRowEl.onclick = () => {
-      tagInputEl?.focus();
-    };
-    container.append(tagRowEl);
     renderTagRow();
-
-    contentEl = document.createElement("div");
-    contentEl.className = "editor-content";
-    contentEl.contentEditable = "true";
-    contentEl.spellcheck = true;
-    container.append(contentEl);
-
-    sourceEl = document.createElement("textarea");
-    sourceEl.className = "editor-source";
-    sourceEl.style.display = "none";
-    container.append(sourceEl);
-
-    revisionsEl = document.createElement("div");
-    revisionsEl.className = "revisions-container";
-    revisionsEl.style.display = "none";
-    container.append(revisionsEl);
-
-    backlinksEl = document.createElement("div");
-    backlinksEl.className = "backlinks";
-    backlinksEl.style.display = "none";
-
-    editorArea.append(container);
-    editorArea.append(backlinksEl);
 
     const cursor = getCursor(path);
     loadContent(content, cursor);
@@ -1194,20 +1139,20 @@ export function initEditor(): EditorInstance {
       formatToolbarCleanup = null;
     }
     if (toolbarEl) {
-      toolbarEl.remove();
       toolbarEl = null;
     }
     if (container) {
-      container.remove();
       container = null;
     }
     if (backlinksEl) {
-      backlinksEl.remove();
       backlinksEl = null;
     }
+    shell?.dispose();
+    shell = null;
+    shellHost?.remove();
+    shellHost = null;
     contentEl = null;
     sourceEl = null;
-    tagRowEl = null;
     tagInputEl = null;
     revisionsEl = null;
     const emptyState = document.querySelector("#empty-state") as HTMLElement | null;

@@ -151,12 +151,12 @@ tests.
 ### Editor Shell
 
 - [x] Existing tests cover rendering markdown, frontmatter hiding/source preservation, toolbar/source/menu creation, tag row, markdown serialization, cursor restoration, hide behavior, save classification, and reload classification.
-- [ ] Add explicit test for source-mode edit syncing back to rendered mode.
+- [x] Add explicit test for source-mode edit syncing back to rendered mode.
 - [ ] Add explicit test for tag add via autocomplete callback path.
-- [ ] Add explicit test for tag remove syncing source frontmatter.
-- [ ] Add explicit test for Backspace removing last tag from empty tag input.
-- [ ] Add explicit test for toolbar format button wiring.
-- [ ] Add explicit test for more-menu actions: revisions, backlinks, source mode, or available current items.
+- [x] Add explicit test for tag remove syncing source frontmatter.
+- [x] Add explicit test for Backspace removing last tag from empty tag input.
+- [x] Add explicit test for toolbar format button wiring.
+- [x] Add explicit test for more-menu actions: revisions, backlinks, source mode, or available current items.
 - [ ] Add explicit test for conflict banner action integration.
 - [ ] Add explicit test for autosave timer scheduling and cancellation.
 - [ ] Add explicit test that autosave defers while a non-collapsed selection is active.
@@ -271,32 +271,32 @@ tests.
 
 ## Modal Conversion
 
-- [ ] Convert `search.ts` to `SearchModal.tsx`.
-- [ ] Preserve temporary open/close/toggle imperative control surface.
-- [ ] Keep stale request guard behavior.
-- [ ] Keep scoped search behavior.
-- [ ] Convert `palette.ts` to `CommandPalette.tsx`.
-- [ ] Move command registration to app-level state.
+- [x] Convert `search.ts` to `SearchModal.tsx`.
+- [x] Preserve temporary open/close/toggle imperative control surface.
+- [x] Keep stale request guard behavior.
+- [x] Keep scoped search behavior.
+- [x] Convert `palette.ts` to `CommandPalette.tsx`.
+- [x] Move command registration to app-level state.
 - [ ] Move global shortcut handling to one cleanup-safe effect.
-- [ ] Convert `settings.ts` to `SettingsModal.tsx`.
+- [x] Convert `settings.ts` to `SettingsModal.tsx`.
 - [ ] Split security controls into a small component if helpful.
-- [ ] Keep exact API payload shapes.
+- [x] Keep exact API payload shapes.
 
 ## Editor Conversion
 
-- [ ] Create `EditorShell.tsx`.
-- [ ] Keep `contenteditable` as an imperative island via refs.
-- [ ] Move toolbar rendering into JSX.
-- [ ] Move tag row rendering into JSX.
-- [ ] Move source toggle rendering into JSX.
-- [ ] Move more-menu trigger rendering into JSX.
-- [ ] Keep markdown rendering through `renderer.ts`.
-- [ ] Keep `domToMarkdown` serialization path unchanged.
-- [ ] Preserve custom undo/redo behavior.
-- [ ] Preserve source-text format operations.
-- [ ] Preserve autosave debounce and conflict handling.
-- [ ] Preserve cursor and selection sentinels.
-- [ ] Convert editor event listeners into cleanup-safe effects.
+- [x] Create `EditorShell.tsx`.
+- [x] Keep `contenteditable` as an imperative island via refs.
+- [x] Move toolbar rendering into JSX.
+- [x] Move tag row rendering into JSX.
+- [x] Move source toggle rendering into JSX.
+- [x] Move more-menu trigger rendering into JSX.
+- [x] Keep markdown rendering through `renderer.ts`.
+- [x] Keep `domToMarkdown` serialization path unchanged.
+- [x] Preserve custom undo/redo behavior.
+- [x] Preserve source-text format operations.
+- [x] Preserve autosave debounce and conflict handling.
+- [x] Preserve cursor and selection sentinels.
+- [x] Convert editor event listeners into cleanup-safe effects.
 - [ ] Extract editor controller logic only where it lowers risk.
 - [ ] Run editor unit tests after every editor slice.
 - [ ] Run e2e editor/save/transform/fuzz/firefox tests before considering this phase complete.
