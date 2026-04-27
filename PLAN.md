@@ -108,6 +108,8 @@ tests.
 - [ ] Add explicit test that backdrop click closes.
 - [ ] Add explicit test that empty filter result renders no command items.
 - [ ] Add explicit test that command action errors do not leave inconsistent UI, if this behavior is desired.
+- [x] Convert `palette.ts` to `CommandPalette.tsx`.
+- [x] Move command registration to app-level state.
 
 ### Settings Modal
 
