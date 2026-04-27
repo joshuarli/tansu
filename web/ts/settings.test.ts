@@ -31,7 +31,7 @@ describe("settings", () => {
     });
     mock.on("PUT", "/api/settings", {});
 
-    const { createSettings } = await import("./settings.ts");
+    const { createSettings } = await import("./settings.tsx");
     const s = createSettings();
     toggleSettings = s.toggle;
     openSettings = s.open;

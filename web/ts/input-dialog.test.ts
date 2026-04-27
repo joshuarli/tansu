@@ -8,7 +8,7 @@ describe("input-dialog", () => {
 
   beforeAll(async () => {
     cleanup = setupDOM();
-    const mod = await import("./input-dialog.ts");
+    const mod = await import("./input-dialog.tsx");
     ({ showInputDialog } = mod);
   });
 

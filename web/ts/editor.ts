@@ -20,15 +20,15 @@ import {
   rememberTags,
 } from "./tag-autocomplete.ts";
 export { invalidateTagCache } from "./tag-autocomplete.ts";
-import { loadBacklinks } from "./backlinks.ts";
-import { showConflictBanner, handleReloadConflict } from "./conflict.ts";
+import { loadBacklinks } from "./backlinks.tsx";
+import { showConflictBanner, handleReloadConflict } from "./conflict.tsx";
 import {
   AUTOSAVE_DELAY_MS,
   AUTOSAVE_RETRY_DELAY_MS,
   MAX_INDENT_SPACES,
   UNDO_STACK_MAX_ENTRIES,
 } from "./constants.ts";
-import { showContextMenu } from "./context-menu.ts";
+import { showContextMenu } from "./context-menu.tsx";
 import { on, emit } from "./events.ts";
 import {
   toggleBold,
@@ -47,7 +47,7 @@ import {
   setContentWithSelection,
   restoreSelectionFromRenderedMarkers,
 } from "./renderer.ts";
-import { toggleRevisions, hideRevisions, isRevisionsOpen } from "./revisions.ts";
+import { toggleRevisions, hideRevisions, isRevisionsOpen } from "./revisions.tsx";
 import {
   markClean,
   getActiveTab,

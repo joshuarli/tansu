@@ -2,7 +2,7 @@ import { setupDOM, mockFetch } from "./test-helper.ts";
 import type {
   initVaultSwitcher as InitVaultSwitcher,
   refreshVaultSwitcher as RefreshVaultSwitcher,
-} from "./vault-switcher.ts";
+} from "./vault-switcher.tsx";
 
 describe("vault-switcher", () => {
   let cleanup: () => void;
@@ -16,7 +16,7 @@ describe("vault-switcher", () => {
     mock.on("GET", "/api/state", { tabs: [], active: -1 });
     mock.on("PUT", "/api/state", {});
     mock.on("POST", /\/api\/vaults\/\d+\/activate/, {});
-    const mod = await import("./vault-switcher.ts");
+    const mod = await import("./vault-switcher.tsx");
     ({ initVaultSwitcher, refreshVaultSwitcher } = mod);
   });
 

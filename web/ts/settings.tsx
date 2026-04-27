@@ -29,7 +29,7 @@ import {
   SETTINGS_WEIGHT_TAGS_DEFAULT,
   SETTINGS_WEIGHT_TITLE_DEFAULT,
 } from "./constants.ts";
-import { showInputDialog } from "./input-dialog.ts";
+import { showInputDialog } from "./input-dialog.tsx";
 import { createPrfCredential, isPrfLikelySupported } from "./webauthn.ts";
 
 type SettingsPanel = {

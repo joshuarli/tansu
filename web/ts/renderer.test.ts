@@ -91,4 +91,22 @@ describe("renderer invariants", () => {
 
     expect(violations).toStrictEqual([]);
   });
+
+  it("converted .tsx components have no module-level document/window.addEventListener", () => {
+    // All DOM listeners in Solid components must live inside onMount/createEffect with onCleanup.
+    // Module-level listeners are unowned and never cleaned up.
+    const tsxFiles = sourceFiles().filter((f) => f.endsWith(".tsx") && f !== "main.tsx");
+    // Matches top-level (unindented) addEventListener calls; indented ones are inside functions.
+    const pattern = /^(?:document|window)\.addEventListener\b/m;
+
+    const violations: string[] = [];
+    for (const file of tsxFiles) {
+      const content = readFileSync(join(webTsDir, file), "utf8");
+      if (pattern.test(content)) {
+        violations.push(file);
+      }
+    }
+
+    expect(violations).toStrictEqual([]);
+  });
 });

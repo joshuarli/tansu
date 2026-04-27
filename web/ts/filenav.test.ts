@@ -35,7 +35,7 @@ describe("filenav", () => {
       closeTab(0);
     }
 
-    const navMod = await import("./filenav.ts");
+    const navMod = await import("./filenav.tsx");
     navCleanup = await navMod.initFileNav();
   });
 

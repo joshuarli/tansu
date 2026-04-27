@@ -1,7 +1,7 @@
 import { deleteNote, pinFile, unpinFile } from "./api.ts";
-import type { MenuItem } from "./context-menu.ts";
+import type { MenuItem } from "./context-menu.tsx";
 import { emit } from "./events.ts";
-import { showInputDialog } from "./input-dialog.ts";
+import { showInputDialog } from "./input-dialog.tsx";
 
 type FileActionsOptions = {
   path: string;

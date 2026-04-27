@@ -2,10 +2,10 @@ import { For, createEffect, createSignal, onCleanup, onMount } from "solid-js";
 import { render } from "solid-js/web";
 
 import { getPinnedFiles } from "./api.ts";
-import { showContextMenu } from "./context-menu.ts";
+import { showContextMenu } from "./context-menu.tsx";
 import { on } from "./events.ts";
 import { buildFileContextMenuItems } from "./file-actions.ts";
-import { showInputDialog } from "./input-dialog.ts";
+import { showInputDialog } from "./input-dialog.tsx";
 import {
   closeTab,
   createNewNote as _createNewNote,

@@ -42,7 +42,7 @@ describe("search", () => {
       },
     ]);
 
-    const { createSearch } = await import("./search.ts");
+    const { createSearch } = await import("./search.tsx");
     const s1 = createSearch({
       openTab: async () => {},
       invalidateNoteCache: () => {},

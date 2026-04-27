@@ -18,7 +18,7 @@ describe("backlinks", () => {
     mock.on("PUT", "/api/state", {});
     mock.on("GET", "/api/state", { tabs: [], active: -1 });
 
-    const mod = await import("./backlinks.ts");
+    const mod = await import("./backlinks.tsx");
     ({ loadBacklinks } = mod);
   });
 

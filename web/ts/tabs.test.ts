@@ -27,7 +27,7 @@ describe("tabs", () => {
     mock.on("POST", "/api/pin", {});
     mock.on("DELETE", "/api/pin", {});
 
-    const mod = await import("./tabs.ts");
+    const mod = await import("./tabs.tsx");
     const stateMod = await import("./tab-state.ts");
     ({ openTab } = stateMod);
     ({ closeTab } = stateMod);

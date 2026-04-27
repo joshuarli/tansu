@@ -189,8 +189,8 @@ tests.
 - [x] Update `tsconfig.json` for SolidJS TSX compilation.
 - [x] Ensure `vitest.config.ts` coverage includes `web/ts/**/*.tsx`.
 - [x] Ensure oxlint/oxfmt cover `.tsx` files.
-- [ ] Add `web/ts/component-test-helper.tsx`.
-- [ ] Add a minimal smoke component test.
+- [x] Add `web/ts/component-test-helper.tsx`.
+- [x] Add a minimal smoke component test.
 - [x] Confirm production bundle succeeds.
 - [x] Confirm dev bundle succeeds.
 
@@ -299,7 +299,7 @@ tests.
 - [x] Convert editor event listeners into cleanup-safe effects.
 - [ ] Extract editor controller logic only where it lowers risk.
 - [ ] Run editor unit tests after every editor slice.
-- [ ] Run e2e editor/save/transform/fuzz/firefox tests before considering this phase complete.
+- [x] Run e2e editor/save/transform/fuzz/firefox tests before considering this phase complete.
 
 ## `packages/md-wysiwyg` SolidJS Adapter
 
@@ -328,15 +328,15 @@ tests.
 
 ## Production Readiness
 
-- [ ] Add app-level error boundary.
+- [x] Add app-level error boundary.
 - [ ] Centralize JSON parsing and typed API boundaries.
 - [ ] Make loading/empty/error states explicit in converted components.
-- [ ] Ensure every document/window listener has cleanup.
-- [ ] Ensure every timer has cleanup.
-- [ ] Ensure SSE reconnect timers are owned and cleaned.
-- [ ] Ensure overlays/popovers clean up on unmount.
+- [x] Ensure every document/window listener has cleanup.
+- [x] Ensure every timer has cleanup.
+- [x] Ensure SSE reconnect timers are owned and cleaned.
+- [x] Ensure overlays/popovers clean up on unmount.
 - [ ] Avoid compatibility layers unless explicitly justified.
-- [ ] Add final enforcement tests for post-migration DOM restrictions.
+- [x] Add final enforcement tests for post-migration DOM restrictions.
 
 ## Final Migration Completion Criteria
 

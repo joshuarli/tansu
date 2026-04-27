@@ -37,7 +37,7 @@ describe("conflict", () => {
     mock.on("GET", "/api/state", { tabs: [], active: -1 });
 
     // Import AFTER mocks so module-level fetches see them
-    const mod = await import("./conflict.ts");
+    const mod = await import("./conflict.tsx");
     ({ showConflictBanner } = mod);
     ({ handleReloadConflict } = mod);
   });

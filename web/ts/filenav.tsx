@@ -10,7 +10,7 @@ import {
   type PinnedFileEntry,
   type RecentFileEntry,
 } from "./api.ts";
-import { showContextMenu } from "./context-menu.ts";
+import { showContextMenu } from "./context-menu.tsx";
 import { on } from "./events.ts";
 import { buildFileContextMenuItems } from "./file-actions.ts";
 import { closeTabByPath, getActiveTab, openTab } from "./tab-state.ts";

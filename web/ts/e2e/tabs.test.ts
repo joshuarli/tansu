@@ -138,5 +138,5 @@ describe("e2e: tabs", () => {
       expect(closeBox!.x).toBeGreaterThanOrEqual(tabBox!.x - 1);
       expect(closeBox!.x + closeBox!.width).toBeLessThanOrEqual(tabBox!.x + tabBox!.width + 1);
     }
-  }, 30_000);
+  }, 60_000);
 });

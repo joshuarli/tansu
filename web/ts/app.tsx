@@ -1,6 +1,14 @@
+import { ErrorBoundary } from "solid-js";
+
 export function App() {
   return (
-    <>
+    <ErrorBoundary
+      fallback={
+        <div style={{ "font-family": "sans-serif", padding: "2rem" }}>
+          Something went wrong. Please reload the page.
+        </div>
+      }
+    >
       <div id="sidebar">
         <div id="sidebar-header">
           <input
@@ -59,6 +67,6 @@ export function App() {
           <div id="palette-list"></div>
         </div>
       </div>
-    </>
+    </ErrorBoundary>
   );
 }

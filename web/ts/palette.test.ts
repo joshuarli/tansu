@@ -13,7 +13,7 @@ describe("palette", () => {
   beforeAll(async () => {
     cleanup = setupDOM();
 
-    const { createPalette } = await import("./palette.ts");
+    const { createPalette } = await import("./palette.tsx");
     const p = createPalette();
     togglePalette = p.toggle;
     openPalette = p.open;
@@ -118,7 +118,7 @@ describe("palette", () => {
   });
 
   it("matchesKey correctly matches keyboard events", async () => {
-    const { matchesKey } = await import("./palette.ts");
+    const { matchesKey } = await import("./palette.tsx");
 
     // Exact match: meta+key
     expect(

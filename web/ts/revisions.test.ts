@@ -1,4 +1,4 @@
-import type { RevisionsOpts } from "./revisions.ts";
+import type { RevisionsOpts } from "./revisions.tsx";
 import { setupDOM, mockFetch } from "./test-helper.ts";
 
 describe("revisions", () => {
@@ -36,7 +36,7 @@ describe("revisions", () => {
     mock.on("GET", /\/api\/revision\?/, { content: "# Old version" });
     mock.on("POST", "/api/restore", { mtime: 5000 });
 
-    const revMod = await import("./revisions.ts");
+    const revMod = await import("./revisions.tsx");
     ({ toggleRevisions } = revMod);
     ({ hideRevisions } = revMod);
     ({ isRevisionsOpen } = revMod);

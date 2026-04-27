@@ -26,11 +26,11 @@ import {
 } from "./constants.ts";
 import { initEditor, invalidateNoteCache, type EditorInstance } from "./editor.ts";
 import { emit, on } from "./events.ts";
-import { initFileNav } from "./filenav.ts";
+import { initFileNav } from "./filenav.tsx";
 import { openStore } from "./local-store.ts";
-import { createPalette, matchesKey } from "./palette.ts";
-import { createSearch } from "./search.ts";
-import { createSettings } from "./settings.ts";
+import { createPalette, matchesKey } from "./palette.tsx";
+import { createSearch } from "./search.tsx";
+import { createSettings } from "./settings.tsx";
 import {
   closeActiveTab,
   nextTab,
@@ -43,8 +43,8 @@ import {
   reopenClosedTab,
   syncToServer,
 } from "./tab-state.ts";
-import { promptNewNote } from "./tabs.ts";
-import { initVaultSwitcher, refreshVaultSwitcher } from "./vault-switcher.ts";
+import { promptNewNote } from "./tabs.tsx";
+import { initVaultSwitcher, refreshVaultSwitcher } from "./vault-switcher.tsx";
 import { isPrfLikelySupported, getPrfKey } from "./webauthn.ts";
 import { registerWikiLinkClickHandler } from "./wikilinks.ts";
 
@@ -76,6 +76,8 @@ async function startApp() {
   if (!appInitialized) {
     initApp();
     appInitialized = true;
+    // tabs.tsx mounts on the first tab:render; emit early so .tab-new appears with no saved session.
+    emit("tab:render");
   }
   await openStore();
   if (!sse) connectSSE();
