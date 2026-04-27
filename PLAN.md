@@ -76,7 +76,7 @@ tests.
 - [x] Add explicit test that clicking a non-active tab switches active tab.
 - [x] Add explicit test that the close button does not also switch the tab.
 - [x] Add explicit test that tooltip position updates from tab bounds.
-- [ ] Add explicit test that active tab scrolls into view.
+- [x] Add explicit test that active tab scrolls into view.
 - [x] Add explicit test that space does not close when focus is in an input or textarea.
 - [x] Add explicit test that unpin context menu label appears for pinned tabs.
 
@@ -111,7 +111,7 @@ tests.
 - [x] Add explicit test that selected index clamps when filtering reduces result count.
 - [x] Add explicit test that backdrop click closes.
 - [x] Add explicit test that empty filter result renders no command items.
-- [ ] Add explicit test that command action errors do not leave inconsistent UI, if this behavior is desired.
+- [x] Add explicit test that command action errors do not leave inconsistent UI, if this behavior is desired.
 - [x] Convert `palette.ts` to `CommandPalette.tsx`.
 - [x] Move command registration to app-level state.
 
@@ -121,10 +121,10 @@ tests.
 - [x] Add explicit test that cancel closes without saving.
 - [x] Add explicit test that save sends the exact settings payload.
 - [x] Add explicit test for excluded folder trimming and empty entry removal.
-- [ ] Add explicit test for PRF remove action.
-- [ ] Add explicit test for PRF register success.
-- [ ] Add explicit test for PRF register failure.
-- [ ] Add explicit test for status failure hiding/degrading the security section.
+- [x] Add explicit test for PRF remove action.
+- [x] Add explicit test for PRF register success.
+- [x] Add explicit test for PRF register failure.
+- [x] Add explicit test for status failure hiding/degrading the security section.
 - [x] Convert `settings.ts` to `SettingsModal.tsx`.
 - [x] Load settings on open.
 - [x] Use typed form state.
@@ -138,7 +138,7 @@ tests.
 - [x] Add test for Enter with empty value resolving `null` or no-op, matching current behavior.
 - [x] Add test for Escape resolving `null`.
 - [x] Add test for backdrop click resolving `null`.
-- [ ] Add test for cleanup of event listeners after close.
+- [x] Add test for cleanup of event listeners after close.
 
 ### Context Menu
 
@@ -152,23 +152,23 @@ tests.
 
 - [x] Existing tests cover rendering markdown, frontmatter hiding/source preservation, toolbar/source/menu creation, tag row, markdown serialization, cursor restoration, hide behavior, save classification, and reload classification.
 - [x] Add explicit test for source-mode edit syncing back to rendered mode.
-- [ ] Add explicit test for tag add via autocomplete callback path.
+- [x] Add explicit test for tag add via autocomplete callback path.
 - [x] Add explicit test for tag remove syncing source frontmatter.
 - [x] Add explicit test for Backspace removing last tag from empty tag input.
 - [x] Add explicit test for toolbar format button wiring.
 - [x] Add explicit test for more-menu actions: revisions, backlinks, source mode, or available current items.
-- [ ] Add explicit test for conflict banner action integration.
-- [ ] Add explicit test for autosave timer scheduling and cancellation.
+- [x] Add explicit test for conflict banner action integration.
+- [x] Add explicit test for autosave timer scheduling and cancellation.
 - [x] Add explicit test that autosave defers while a non-collapsed selection is active.
-- [ ] Add explicit test for undo/redo keyboard behavior.
-- [ ] Add explicit test for source-mode save path.
-- [ ] Add explicit test for paste image handler integration.
+- [x] Add explicit test for undo/redo keyboard behavior.
+- [x] Add explicit test for source-mode save path.
+- [x] Add explicit test for paste image handler integration.
 
 ### Renderer And Markdown Ownership
 
 - [x] Existing enforcement test prevents direct render function imports outside `renderer.ts`.
-- [ ] Add enforcement test for markdown `innerHTML` writes remaining centralized.
-- [ ] Add enforcement test for converted modules not using app-root ID queries.
+- [x] Add enforcement test for markdown `innerHTML` writes remaining centralized.
+- [x] Add enforcement test for converted modules not using app-root ID queries.
 - [x] Add enforcement test for no broad `document.body.innerHTML` outside known bootstrap/test exceptions.
 - [x] Add enforcement test for no direct `renderMarkdown*` calls from SolidJS components except approved adapter boundaries.
 

@@ -133,4 +133,31 @@ describe("input-dialog", () => {
 
     await expect(p2).resolves.toBe("next");
   });
+
+  it("overlay click after dialog closes does not reopen or throw", async () => {
+    const p = showInputDialog("CleanupTest");
+    await tick();
+
+    getInput().dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }),
+    );
+    await p;
+
+    expect(getOverlay().classList.contains("hidden")).toBeTruthy();
+
+    // Clicking the overlay after resolve should be a safe no-op
+    getOverlay().dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+    await tick();
+
+    expect(getOverlay().classList.contains("hidden")).toBeTruthy();
+
+    // A subsequent showInputDialog must still work correctly
+    const p2 = showInputDialog("AfterCleanup");
+    await tick();
+    expect(getInput().placeholder).toBe("AfterCleanup");
+    getInput().dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }),
+    );
+    await p2;
+  });
 });

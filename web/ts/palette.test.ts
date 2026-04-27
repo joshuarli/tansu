@@ -249,4 +249,28 @@ describe("palette", () => {
     expect(listEl.children).toHaveLength(0);
     closePalette();
   });
+
+  it("command action error does not leave palette open", () => {
+    openPalette();
+
+    registerCommands([{ label: "ThrowCmd", shortcut: "", action: () => { throw new Error("oops"); } }]);
+    const input = document.querySelector("#palette-input")! as HTMLInputElement;
+    input.value = "";
+    input.dispatchEvent(new Event("input"));
+
+    const listEl = document.querySelector("#palette-list")!;
+    try {
+      (listEl.children[0] as HTMLElement).click();
+    } catch {
+      // action threw; palette should already be closed before the action ran
+    }
+
+    expect(isPaletteOpen()).toBeFalsy();
+
+    registerCommands([
+      { label: "Save", shortcut: "⌘S", action: () => { actionCalled = true; } },
+      { label: "Search", shortcut: "⌘K", action: () => {} },
+      { label: "New note", shortcut: "⌘T", action: () => {} },
+    ]);
+  });
 });

@@ -1,6 +1,11 @@
 import type { Settings } from "./api.ts";
 import { setupDOM, mockFetch } from "./test-helper.ts";
 
+vi.mock("./webauthn.ts", () => ({
+  createPrfCredential: vi.fn(),
+  isPrfLikelySupported: vi.fn(() => true),
+}));
+
 describe("settings", () => {
   let cleanup: () => void;
   let mock: ReturnType<typeof mockFetch>;
@@ -253,6 +258,163 @@ describe("settings", () => {
 
     // Restore working mock
     mock.on("PUT", "/api/settings", {});
+  });
+
+  it("status failure hides the security section", async () => {
+    mock.on("GET", "/api/settings", {
+      weight_title: 10,
+      weight_headings: 5,
+      weight_tags: 2,
+      weight_content: 1,
+      fuzzy_distance: 1,
+      recency_boost: 2,
+      result_limit: 20,
+      show_score_breakdown: true,
+      excluded_folders: [],
+    });
+    mock.on("GET", "/api/status", { error: "fail" }, 500);
+
+    await openSettings();
+    const panel = document.querySelector("#settings-panel")!;
+
+    // Settings form should still render
+    expect(panel.querySelector("h2")).not.toBeNull();
+    // Security section should be absent because status failed (status() = null)
+    expect(panel.innerHTML).not.toContain("Security");
+
+    closeSettings();
+
+    // Restore working mocks
+    mock.on("GET", "/api/settings", {
+      weight_title: 10,
+      weight_headings: 5,
+      weight_tags: 2,
+      weight_content: 1,
+      fuzzy_distance: 1,
+      recency_boost: 2,
+      result_limit: 20,
+      show_score_breakdown: true,
+      excluded_folders: ["archive"],
+    });
+  });
+
+  it("PRF remove action removes the credential and refreshes status", async () => {
+    mock.on("GET", "/api/status", {
+      encrypted: true,
+      locked: false,
+      needs_setup: false,
+      prf_credential_names: ["Touch ID"],
+      prf_credential_ids: ["cred-abc"],
+    });
+    mock.on("POST", "/api/prf/remove", {});
+
+    await openSettings();
+    const panel = document.querySelector("#settings-panel")!;
+
+    expect(panel.innerHTML).toContain("Touch ID");
+
+    // Add the post-removal status AFTER the panel has already opened with credentials
+    mock.on("GET", "/api/status", {
+      encrypted: true,
+      locked: false,
+      needs_setup: false,
+      prf_credential_names: [],
+      prf_credential_ids: [],
+    });
+
+    const removeBtn = panel.querySelector(".prf-remove") as HTMLButtonElement;
+    expect(removeBtn).not.toBeNull();
+    removeBtn.click();
+    await new Promise((r) => setTimeout(r, 80));
+
+    // Credential should no longer appear after status refresh
+    expect(panel.innerHTML).not.toContain("Touch ID");
+
+    closeSettings();
+    mock.on("GET", "/api/status", { error: "fail" }, 500);
+  });
+
+  it("PRF register success adds the credential to the panel", async () => {
+    const webauthn = await import("./webauthn.ts");
+    vi.mocked(webauthn.createPrfCredential).mockResolvedValueOnce({
+      credentialId: "new-cred-id",
+      prfKeyB64: "base64key==",
+    });
+
+    mock.on("GET", "/api/status", {
+      encrypted: true,
+      locked: false,
+      needs_setup: false,
+      prf_credential_names: [],
+      prf_credential_ids: [],
+    });
+    mock.on("POST", "/api/prf/register", {});
+
+    await openSettings();
+    const panel = document.querySelector("#settings-panel")!;
+
+    // Add updated status AFTER panel opens so it wins on the post-registration refresh
+    mock.on("GET", "/api/status", {
+      encrypted: true,
+      locked: false,
+      needs_setup: false,
+      prf_credential_names: ["New Key"],
+      prf_credential_ids: ["new-cred-id"],
+    });
+
+    const addBtn = panel.querySelector("#prf-add") as HTMLButtonElement | null;
+    expect(addBtn).not.toBeNull();
+
+    addBtn!.click();
+    // Wait for createPrfCredential to resolve and showInputDialog to open
+    await new Promise((r) => setTimeout(r, 20));
+
+    // Name the credential via input dialog
+    const dialogInput = document.querySelector("#input-dialog-input") as HTMLInputElement | null;
+    expect(dialogInput).not.toBeNull();
+    dialogInput!.value = "New Key";
+    dialogInput!.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }),
+    );
+
+    // Wait for registration and status refresh
+    await new Promise((r) => setTimeout(r, 80));
+
+    expect(panel.innerHTML).toContain("New Key");
+
+    closeSettings();
+    mock.on("GET", "/api/status", { error: "fail" }, 500);
+  });
+
+  it("PRF register failure shows an error message", async () => {
+    const webauthn = await import("./webauthn.ts");
+    vi.mocked(webauthn.createPrfCredential).mockRejectedValueOnce(
+      new Error("User cancelled biometric"),
+    );
+
+    mock.on("GET", "/api/status", {
+      encrypted: true,
+      locked: false,
+      needs_setup: false,
+      prf_credential_names: [],
+      prf_credential_ids: [],
+    });
+
+    await openSettings();
+    const panel = document.querySelector("#settings-panel")!;
+
+    const addBtn = panel.querySelector("#prf-add") as HTMLButtonElement | null;
+    expect(addBtn).not.toBeNull();
+
+    addBtn!.click();
+    await new Promise((r) => setTimeout(r, 50));
+
+    const statusEl = panel.querySelector("#security-status");
+    expect(statusEl).not.toBeNull();
+    expect(statusEl!.textContent).toContain("User cancelled biometric");
+
+    closeSettings();
+    mock.on("GET", "/api/status", { error: "fail" }, 500);
   });
 
   it("settings lifecycle", async () => {

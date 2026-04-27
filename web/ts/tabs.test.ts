@@ -563,4 +563,26 @@ describe("tabs", () => {
       closeTab(0);
     }
   });
+
+  it("active tab scrolls into view when active index changes", async () => {
+    while (getTabs().length > 0) closeTab(0);
+
+    const scrollSpy = vi
+      .spyOn(HTMLElement.prototype, "scrollIntoView")
+      .mockImplementation(() => {});
+    try {
+      await openTab("notes/scroll-a.md");
+      await tick();
+      scrollSpy.mockClear();
+
+      await openTab("notes/scroll-b.md");
+      await tick();
+      await new Promise((r) => setTimeout(r, 10));
+
+      expect(scrollSpy).toHaveBeenCalled();
+    } finally {
+      scrollSpy.mockRestore();
+      while (getTabs().length > 0) closeTab(0);
+    }
+  });
 });

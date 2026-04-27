@@ -48,4 +48,47 @@ describe("renderer invariants", () => {
 
     expect(violations).toStrictEqual([]);
   });
+
+  it("element.innerHTML assignments are only in renderer.ts, bootstrap.ts, and filenav.tsx", () => {
+    // Markdown HTML must only be injected via renderer.ts.
+    // bootstrap.ts sets body.innerHTML for the unlock/unsupported-browser screens.
+    // filenav.tsx sets innerHTML for the collapse-button glyph (not markdown).
+    // format-toolbar.ts sets innerHTML for SVG toolbar icons (not markdown).
+    // All other files must use renderer helpers or JSX innerHTML prop (which does not
+    // match the "el.innerHTML =" DOM pattern).
+    const allowList = new Set(["renderer.ts", "bootstrap.ts", "filenav.tsx", "format-toolbar.ts"]);
+    const files = sourceFiles().filter((f) => !allowList.has(f));
+    // Match DOM assignment "el.innerHTML =" but not JSX attribute "innerHTML={"
+    const pattern = /[^{]\.innerHTML\s*=/;
+
+    const violations: string[] = [];
+    for (const file of files) {
+      const content = readFileSync(join(webTsDir, file), "utf8");
+      if (pattern.test(content)) {
+        violations.push(file);
+      }
+    }
+
+    expect(violations).toStrictEqual([]);
+  });
+
+  it("converted SolidJS components do not query broad app-layout roots", () => {
+    // SolidJS components should receive their DOM context via props or refs,
+    // not by traversing fixed app-root IDs like #app or #editor-area.
+    // main.tsx mounts the app and legitimately queries #app.
+    // filenav.tsx accesses #app for the sidebar-collapse toggle.
+    const allowList = new Set(["main.tsx", "filenav.tsx"]);
+    const tsxFiles = sourceFiles().filter((f) => f.endsWith(".tsx") && !allowList.has(f));
+    const pattern = /document\.querySelector\s*\(\s*["'`]#(?:app|app-main|editor-area)["'`]/;
+
+    const violations: string[] = [];
+    for (const file of tsxFiles) {
+      const content = readFileSync(join(webTsDir, file), "utf8");
+      if (pattern.test(content)) {
+        violations.push(file);
+      }
+    }
+
+    expect(violations).toStrictEqual([]);
+  });
 });

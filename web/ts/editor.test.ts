@@ -74,6 +74,12 @@ describe("editor", () => {
     cleanup = setupDOM();
     mock = mockFetch();
 
+    // conflict.tsx's compiled output calls delegateEvents(["click"]) at module level,
+    // which runs before setupDOM() replaces globalThis.document. Re-register on the
+    // new document so SolidJS click delegation works for conflict banner buttons.
+    const { delegateEvents } = await import("solid-js/web");
+    delegateEvents(["click"]);
+
     mock.on("GET", "/api/note", { content: "# Test", mtime: 1000 });
     mock.on("PUT", "/api/note", { mtime: 2000 });
     mock.on("PUT", "/api/state", {});
@@ -1191,5 +1197,277 @@ describe("editor", () => {
     }
     mock.on("GET", "/api/note", { content: "# Test", mtime: 1000 });
     mock.on("PUT", "/api/note", { mtime: 2000 });
+  });
+
+  it("tag add via autocomplete callback path appends tag to editor", async () => {
+    const { openTab, getTabs, closeTab } = await import("./tab-state.ts");
+    const { invalidateTagCache } = await import("./editor.ts");
+    mock.on("GET", "/api/note", { content: "# Tag AC Test", mtime: 1000 });
+    mock.on("GET", "/api/tags", { tags: ["typescript", "rust"] });
+    invalidateTagCache();
+    await openTab("tag-ac.md");
+    showEditor("tag-ac.md", "# Tag AC Test");
+    await new Promise((r) => setTimeout(r, 50));
+
+    const tagInput = document.querySelector(".editor-tags-input") as HTMLInputElement | null;
+    expect(tagInput).not.toBeNull();
+
+    // Focus triggers checkTagInput which fetches and shows the dropdown
+    tagInput!.focus();
+    tagInput!.value = "typ";
+    tagInput!.dispatchEvent(new Event("input", { bubbles: true }));
+    await new Promise((r) => setTimeout(r, 50));
+
+    const autocomplete = document.querySelector(".autocomplete");
+    expect(autocomplete).not.toBeNull();
+
+    const firstItem = autocomplete!.querySelector(".autocomplete-item") as HTMLElement | null;
+    expect(firstItem).not.toBeNull();
+    firstItem!.click();
+
+    const tagPills = document.querySelectorAll(".tag-pill");
+    expect(tagPills.length).toBeGreaterThan(0);
+
+    hideEditor();
+    while (getTabs().length > 0) closeTab(0);
+    invalidateTagCache();
+    mock.on("GET", "/api/note", { content: "# Test", mtime: 1000 });
+    mock.on("GET", "/api/tags", { tags: [] });
+  });
+
+  it("conflict banner Keep Mine force-saves and removes the banner", async () => {
+    const { openTab, getTabs, getActiveTab, closeTab } = await import("./tab-state.ts");
+    mock.on("GET", "/api/note", { content: "# Keep Mine Base", mtime: 1000 });
+    await openTab("keep-mine.md");
+    showEditor("keep-mine.md", "# Keep Mine Base");
+    await new Promise((r) => setTimeout(r, 50));
+
+    const sourceBtn = document.querySelector(".editor-toolbar-btn--source") as HTMLButtonElement;
+    sourceBtn.click();
+    const sourceEl = document.querySelector(".editor-source") as HTMLTextAreaElement;
+    sourceEl.value = "# My Edits";
+    sourceEl.dispatchEvent(new Event("input", { bubbles: true }));
+
+    mock.on("PUT", "/api/note", { mtime: 2000, conflict: true, content: "# Disk Edits" }, 409);
+    await saveCurrentNote();
+
+    const banner = document.querySelector(".conflict-banner");
+    expect(banner).not.toBeNull();
+
+    // Register a success response for the force save
+    mock.on("PUT", "/api/note", { mtime: 3000 });
+
+    const keepBtn = Array.from(banner!.querySelectorAll("button")).find(
+      (b) => b.textContent?.trim() === "Keep mine",
+    ) as HTMLButtonElement | undefined;
+    expect(keepBtn).toBeDefined();
+    keepBtn!.click();
+    await new Promise((r) => setTimeout(r, 80));
+
+    expect(document.querySelector(".conflict-banner")).toBeNull();
+    expect(getActiveTab()!.dirty).toBeFalsy();
+
+    hideEditor();
+    while (getTabs().length > 0) closeTab(0);
+    mock.on("GET", "/api/note", { content: "# Test", mtime: 1000 });
+    mock.on("PUT", "/api/note", { mtime: 2000 });
+  });
+
+  it("conflict banner Take Theirs loads disk content and clears the banner", async () => {
+    const { openTab, getTabs, getActiveTab, closeTab } = await import("./tab-state.ts");
+    mock.on("GET", "/api/note", { content: "# Take Theirs Base", mtime: 1000 });
+    await openTab("take-theirs.md");
+    showEditor("take-theirs.md", "# Take Theirs Base");
+    await new Promise((r) => setTimeout(r, 50));
+
+    const sourceBtn = document.querySelector(".editor-toolbar-btn--source") as HTMLButtonElement;
+    sourceBtn.click();
+    const sourceEl = document.querySelector(".editor-source") as HTMLTextAreaElement;
+    sourceEl.value = "# Local Edits";
+    sourceEl.dispatchEvent(new Event("input", { bubbles: true }));
+
+    mock.on("PUT", "/api/note", { mtime: 2000, conflict: true, content: "# Disk Content" }, 409);
+    await saveCurrentNote();
+
+    const banner = document.querySelector(".conflict-banner");
+    expect(banner).not.toBeNull();
+
+    const theirsBtn = Array.from(banner!.querySelectorAll("button")).find(
+      (b) => b.textContent?.trim() === "Take theirs",
+    ) as HTMLButtonElement | undefined;
+    expect(theirsBtn).toBeDefined();
+    theirsBtn!.click();
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(document.querySelector(".conflict-banner")).toBeNull();
+
+    // Source mode textarea should contain disk content after reload
+    const updatedSource = document.querySelector(".editor-source") as HTMLTextAreaElement | null;
+    expect(updatedSource?.value).toBe("# Disk Content");
+
+    const tab = getActiveTab();
+    expect(tab!.dirty).toBeFalsy();
+    expect(tab!.mtime).toBe(2000);
+
+    hideEditor();
+    while (getTabs().length > 0) closeTab(0);
+    mock.on("GET", "/api/note", { content: "# Test", mtime: 1000 });
+    mock.on("PUT", "/api/note", { mtime: 2000 });
+  });
+
+  it("autosave timer debounces rapid inputs and fires exactly once", async () => {
+    const { AUTOSAVE_DELAY_MS } = await import("./constants.ts");
+    const { openTab, getTabs, closeTab } = await import("./tab-state.ts");
+    mock.on("GET", "/api/note", { content: "# Debounce", mtime: 1000 });
+    mock.on("PUT", "/api/note", { mtime: 9001 });
+    await openTab("debounce.md");
+    showEditor("debounce.md", "# Debounce");
+    await new Promise((r) => setTimeout(r, 50));
+
+    const contentEl = document.querySelector(".editor-content") as HTMLElement;
+    const h1 = contentEl.querySelector("h1");
+    if (h1) h1.textContent = "Debounced";
+
+    const saveBefore = mock.requests.filter(
+      (r) => r.method === "PUT" && r.url.includes("/api/note"),
+    ).length;
+
+    vi.useFakeTimers();
+    try {
+      contentEl.dispatchEvent(new Event("input", { bubbles: true }));
+
+      // Advance partway — no save yet
+      vi.advanceTimersByTime(AUTOSAVE_DELAY_MS / 2);
+
+      // Second input resets the debounce timer
+      contentEl.dispatchEvent(new Event("input", { bubbles: true }));
+
+      // Advance to just before the second timer would fire — still no save
+      vi.advanceTimersByTime(AUTOSAVE_DELAY_MS / 2);
+      const savesMid =
+        mock.requests.filter((r) => r.method === "PUT" && r.url.includes("/api/note")).length -
+        saveBefore;
+      expect(savesMid).toBe(0);
+
+      // Advance past the full second timer — autosave fires
+      vi.advanceTimersByTime(AUTOSAVE_DELAY_MS);
+    } finally {
+      vi.useRealTimers();
+    }
+
+    await new Promise((r) => setTimeout(r, 100));
+
+    const savesAfter =
+      mock.requests.filter((r) => r.method === "PUT" && r.url.includes("/api/note")).length -
+      saveBefore;
+    expect(savesAfter).toBeGreaterThan(0);
+
+    hideEditor();
+    while (getTabs().length > 0) closeTab(0);
+    mock.on("GET", "/api/note", { content: "# Test", mtime: 1000 });
+    mock.on("PUT", "/api/note", { mtime: 2000 });
+  });
+
+  it("Cmd+Z undoes and Cmd+Shift+Z redoes editor content changes", async () => {
+    const { openTab, getTabs, closeTab } = await import("./tab-state.ts");
+    mock.on("GET", "/api/note", { content: "# UndoRedo Base", mtime: 1000 });
+    mock.on("PUT", "/api/note", { mtime: 7001 });
+    await openTab("undo-redo.md");
+    showEditor("undo-redo.md", "# UndoRedo Base");
+    await new Promise((r) => setTimeout(r, 50));
+
+    const contentEl = document.querySelector(".editor-content") as HTMLElement;
+
+    // Mutate content and save to push a second undo entry
+    const h1 = contentEl.querySelector("h1");
+    if (h1) h1.textContent = "UndoRedo Changed";
+    contentEl.dispatchEvent(new Event("input", { bubbles: true }));
+    await saveCurrentNote();
+
+    expect(getCurrentContent()).toContain("UndoRedo Changed");
+
+    // Cmd+Z → undo
+    contentEl.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "z", ctrlKey: true, bubbles: true, cancelable: true }),
+    );
+    expect(getCurrentContent()).toContain("UndoRedo Base");
+
+    // Cmd+Shift+Z → redo
+    contentEl.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "z",
+        ctrlKey: true,
+        shiftKey: true,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+    expect(getCurrentContent()).toContain("UndoRedo Changed");
+
+    hideEditor();
+    while (getTabs().length > 0) closeTab(0);
+    mock.on("GET", "/api/note", { content: "# Test", mtime: 1000 });
+    mock.on("PUT", "/api/note", { mtime: 2000 });
+  });
+
+  it("source-mode save path sends source textarea content to the API", async () => {
+    const { openTab, getTabs, closeTab } = await import("./tab-state.ts");
+    mock.on("GET", "/api/note", { content: "# Source Save Path", mtime: 1000 });
+    mock.on("PUT", "/api/note", { mtime: 6001 });
+    await openTab("src-save-path.md");
+    showEditor("src-save-path.md", "# Source Save Path");
+    await new Promise((r) => setTimeout(r, 50));
+
+    const sourceBtn = document.querySelector(".editor-toolbar-btn--source") as HTMLButtonElement;
+    sourceBtn.click();
+    const sourceEl = document.querySelector(".editor-source") as HTMLTextAreaElement;
+    sourceEl.value = "# From Source Textarea\n\nEdited in source mode.";
+    sourceEl.dispatchEvent(new Event("input", { bubbles: true }));
+
+    mock.clearRequests();
+    await saveCurrentNote();
+
+    const put = mock.requests.find((r) => r.method === "PUT" && r.url.includes("/api/note"));
+    expect(put?.body).toBeTruthy();
+    const payload = JSON.parse(put!.body!) as { content: string };
+    expect(payload.content).toBe("# From Source Textarea\n\nEdited in source mode.");
+
+    hideEditor();
+    while (getTabs().length > 0) closeTab(0);
+    mock.on("GET", "/api/note", { content: "# Test", mtime: 1000 });
+    mock.on("PUT", "/api/note", { mtime: 2000 });
+  });
+
+  it("paste event with image item routes to image handler and skips text paste", async () => {
+    showEditor("img-paste.md", "# Image Paste");
+    await new Promise((r) => setTimeout(r, 50));
+
+    const contentEl = document.querySelector(".editor-content") as HTMLElement;
+    const contentBefore = getCurrentContent();
+
+    const imageItem = {
+      type: "image/png",
+      kind: "file",
+      getAsFile: () => null,
+      getAsString: () => {},
+      webkitGetAsEntry: () => null,
+    } as unknown as DataTransferItem;
+
+    const clipboardData = {
+      items: [imageItem],
+      getData: (type: string) => (type === "text/plain" ? "should-not-be-pasted" : ""),
+    } as unknown as DataTransfer;
+
+    const pasteEvent = new ClipboardEvent("paste", { bubbles: true, cancelable: true });
+    Object.defineProperty(pasteEvent, "clipboardData", { value: clipboardData, configurable: true });
+
+    contentEl.dispatchEvent(pasteEvent);
+
+    // Text paste path must NOT have run — the magic string must be absent
+    expect(getCurrentContent()).not.toContain("should-not-be-pasted");
+    // Content unchanged since handleImagePaste returned early (getAsFile() = null)
+    expect(getCurrentContent()).toBe(contentBefore);
+
+    hideEditor();
   });
 });
