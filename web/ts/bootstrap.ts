@@ -1,3 +1,6 @@
+import { createEffect, createSignal } from "solid-js";
+import { render } from "solid-js/web";
+
 import type { AppStatus } from "./api.ts";
 
 export type BrowserSupportProbe = {
@@ -54,18 +57,35 @@ export function createNotificationController(
   dispose(): void;
 } {
   let notifTimer: ReturnType<typeof setTimeout> | null = null;
+  const [state, setState] = createSignal<{
+    hidden: boolean;
+    msg: string;
+    type: "error" | "info" | "success";
+  }>({
+    hidden: true,
+    msg: "",
+    type: "error",
+  });
+
+  const disposeView = render(() => {
+    createEffect(() => {
+      const current = state();
+      notifEl.className = current.hidden ? "notification hidden" : `notification ${current.type}`;
+      notifEl.textContent = current.msg;
+    });
+    return null;
+  }, notifEl);
 
   function hide() {
     if (notifTimer) {
       clearTimeout(notifTimer);
       notifTimer = null;
     }
-    notifEl.className = "notification hidden";
+    setState((current) => ({ ...current, hidden: true }));
   }
 
   function show(msg: string, type: "error" | "info" | "success" = "error") {
-    notifEl.textContent = msg;
-    notifEl.className = `notification ${type}`;
+    setState({ hidden: false, msg, type });
     if (notifTimer) {
       clearTimeout(notifTimer);
     }
@@ -82,6 +102,7 @@ export function createNotificationController(
     dispose() {
       hide();
       notifEl.removeEventListener("click", hide);
+      disposeView();
     },
   };
 }
@@ -90,14 +111,22 @@ export function createServerStatusController(serverStatusEl: HTMLElement): {
   show(msg: string): void;
   hide(): void;
 } {
+  const [state, setState] = createSignal({ hidden: true, msg: "" });
+  render(() => {
+    createEffect(() => {
+      const current = state();
+      serverStatusEl.className = current.hidden ? "server-status hidden" : "server-status";
+      serverStatusEl.textContent = current.msg;
+    });
+    return null;
+  }, serverStatusEl);
+
   return {
     show(msg: string) {
-      serverStatusEl.textContent = msg;
-      serverStatusEl.className = "server-status";
+      setState({ hidden: false, msg });
     },
     hide() {
-      serverStatusEl.textContent = "";
-      serverStatusEl.className = "server-status hidden";
+      setState({ hidden: true, msg: "" });
     },
   };
 }

@@ -263,8 +263,8 @@ tests.
 - [ ] Move global space-to-close listener into a cleanup-safe effect.
 - [x] Convert `filenav.ts` to `FileNav.tsx`.
 - [ ] Move file-nav loading/error/search state into component state.
-- [ ] Convert notification pill to component state.
-- [ ] Convert server status to component state.
+- [x] Convert notification pill to component state.
+- [x] Convert server status to component state.
 - [ ] Give SSE lifecycle one owner.
 - [ ] Replace broad event-bus usage with props/state where practical.
 - [ ] Keep typed event bus only where it remains the simplest integration boundary.
