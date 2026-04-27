@@ -199,12 +199,12 @@ tests.
 
 ### Context Menu
 
-- [ ] Create `ContextMenu.tsx`.
-- [ ] Preserve temporary imperative `showContextMenu(items, x, y)` API.
-- [ ] Render menu items declaratively.
-- [ ] Add cleanup on outside click.
+- [x] Create `ContextMenu.tsx`.
+- [x] Preserve temporary imperative `showContextMenu(items, x, y)` API.
+- [x] Render menu items declaratively.
+- [x] Add cleanup on outside click.
 - [ ] Keep keyboard/accessibility improvements scoped and tested.
-- [ ] Delete old imperative DOM construction after callers pass tests.
+- [x] Delete old imperative DOM construction after callers pass tests.
 
 ### Input Dialog
 

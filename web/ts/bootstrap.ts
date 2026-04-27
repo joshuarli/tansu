@@ -6,12 +6,16 @@ export type BrowserSupportProbe = {
   hasSetHtml: boolean;
 };
 
-export function checkBrowserSupport(
-  probe: BrowserSupportProbe = {
+function getDefaultBrowserSupportProbe(): BrowserSupportProbe {
+  return {
     hasIndexedDb: "indexedDB" in window,
     hasEventSource: "EventSource" in window,
     hasSetHtml: "setHTML" in Element.prototype,
-  },
+  };
+}
+
+export function checkBrowserSupport(
+  probe: BrowserSupportProbe = getDefaultBrowserSupportProbe(),
 ): string[] {
   const missing: string[] = [];
   if (!probe.hasIndexedDb) {
@@ -148,7 +152,9 @@ export function showUnlockScreen(opts: UnlockScreenOptions): HTMLElement {
   }
 
   const hasPrf =
-    !!opts.status && opts.status.prf_credential_ids.length > 0 && opts.isPrfLikelySupported();
+    Boolean(opts.status) &&
+    opts.status.prf_credential_ids.length > 0 &&
+    opts.isPrfLikelySupported();
 
   screen.innerHTML = `
     <h1>tansu</h1>

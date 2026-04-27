@@ -1,10 +1,11 @@
+import type { showContextMenu as ShowContextMenu } from "./context-menu.ts";
 import { setupDOM } from "./test-helper.ts";
 
 const tick = () => new Promise<void>((r) => setTimeout(r, 0));
 
 describe("context-menu", () => {
   let cleanup: () => void;
-  let showContextMenu: typeof import("./context-menu.ts").showContextMenu;
+  let showContextMenu: typeof ShowContextMenu;
 
   beforeAll(async () => {
     cleanup = setupDOM();

@@ -219,10 +219,16 @@ export function mockFetch(): MockFetch {
       ({ url } = input);
     }
     const initBody = init?.body;
+    let body: string | null = null;
+    if (typeof initBody === "string") {
+      body = initBody;
+    } else if (initBody) {
+      body = String(initBody);
+    }
     requests.push({
       method: (init?.method ?? "GET").toUpperCase(),
       url,
-      body: typeof initBody === "string" ? initBody : initBody ? String(initBody) : null,
+      body,
     });
     // Later handlers take precedence (search in reverse)
     for (let i = handlers.length - 1; i >= 0; i--) {

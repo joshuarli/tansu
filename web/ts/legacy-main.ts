@@ -19,8 +19,11 @@ import {
   showUnlockScreen as renderUnlockScreen,
   showUnsupportedPage,
 } from "./bootstrap.ts";
-import { NOTIFICATION_AUTO_DISMISS_MS, SSE_BACKOFF_DELAYS_MS } from "./constants.ts";
-import { MIN_SUPPORTED_FIREFOX_VERSION } from "./constants.ts";
+import {
+  MIN_SUPPORTED_FIREFOX_VERSION,
+  NOTIFICATION_AUTO_DISMISS_MS,
+  SSE_BACKOFF_DELAYS_MS,
+} from "./constants.ts";
 import { initEditor, invalidateNoteCache, type EditorInstance } from "./editor.ts";
 import { emit, on } from "./events.ts";
 import { initFileNav } from "./filenav.ts";
