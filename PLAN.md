@@ -224,10 +224,10 @@ tests.
 
 ### Backlinks
 
-- [ ] Create `Backlinks.tsx`.
-- [ ] Render loading, empty, error, and list states.
-- [ ] Keep `openTab` callback explicit.
-- [ ] Remove direct DOM writes from `backlinks.ts`.
+- [x] Create `Backlinks.tsx`.
+- [x] Render loading, empty, error, and list states.
+- [x] Keep `openTab` callback explicit.
+- [x] Remove direct DOM writes from `backlinks.ts`.
 
 ### Revisions
 
