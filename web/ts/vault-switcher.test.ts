@@ -1,10 +1,14 @@
 import { setupDOM, mockFetch } from "./test-helper.ts";
+import type {
+  initVaultSwitcher as InitVaultSwitcher,
+  refreshVaultSwitcher as RefreshVaultSwitcher,
+} from "./vault-switcher.ts";
 
 describe("vault-switcher", () => {
   let cleanup: () => void;
   let mock: ReturnType<typeof mockFetch>;
-  let initVaultSwitcher: typeof import("./vault-switcher.ts").initVaultSwitcher;
-  let refreshVaultSwitcher: typeof import("./vault-switcher.ts").refreshVaultSwitcher;
+  let initVaultSwitcher: typeof InitVaultSwitcher;
+  let refreshVaultSwitcher: typeof RefreshVaultSwitcher;
 
   beforeAll(async () => {
     cleanup = setupDOM();

@@ -258,10 +258,10 @@ tests.
 
 - [ ] Add a subscription API to `tab-state.ts` if needed by SolidJS hooks/signals.
 - [ ] Add `useTabs()` hook.
-- [ ] Convert `tabs.ts` to `TabBar.tsx`.
+- [x] Convert `tabs.ts` to `TabBar.tsx`.
 - [ ] Move tooltip state into `TabBar`.
 - [ ] Move global space-to-close listener into a cleanup-safe effect.
-- [ ] Convert `filenav.ts` to `FileNav.tsx`.
+- [x] Convert `filenav.ts` to `FileNav.tsx`.
 - [ ] Move file-nav loading/error/search state into component state.
 - [ ] Convert notification pill to component state.
 - [ ] Convert server status to component state.
@@ -335,8 +335,6 @@ tests.
 - [ ] Ensure every timer has cleanup.
 - [ ] Ensure SSE reconnect timers are owned and cleaned.
 - [ ] Ensure overlays/popovers clean up on unmount.
-- [ ] Measure bundle size before SolidJS.
-- [ ] Measure bundle size after SolidJS.
 - [ ] Avoid compatibility layers unless explicitly justified.
 - [ ] Add final enforcement tests for post-migration DOM restrictions.
 
