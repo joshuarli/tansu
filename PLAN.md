@@ -99,6 +99,10 @@ tests.
 - [x] Add explicit test that ArrowDown wraps from last item to first.
 - [x] Add explicit test that ArrowUp wraps from first item to last.
 - [ ] Add explicit test that Enter on the create option creates the note.
+- [x] Convert `search.ts` to `SearchModal.tsx`.
+- [x] Preserve temporary open/close/toggle imperative control surface.
+- [x] Keep stale request guard behavior.
+- [x] Keep scoped search behavior.
 
 ### Command Palette
 
