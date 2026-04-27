@@ -125,6 +125,11 @@ tests.
 - [ ] Add explicit test for PRF register success.
 - [ ] Add explicit test for PRF register failure.
 - [ ] Add explicit test for status failure hiding/degrading the security section.
+- [x] Convert `settings.ts` to `SettingsModal.tsx`.
+- [x] Load settings on open.
+- [x] Use typed form state.
+- [x] Save exact API shape.
+- [x] Keep PRF controls separate in the modal render path.
 
 ### Input Dialog
 
