@@ -1,8 +1,10 @@
 import { resolve } from "path";
 
+import solid from "vite-plugin-solid";
 import { defineConfig } from "vitest/config";
 
 export default defineConfig({
+  plugins: [solid()],
   resolve: {
     alias: {
       "@joshuarli98/md-wysiwyg": resolve(__dirname, "packages/md-wysiwyg/src/index.ts"),

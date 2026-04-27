@@ -28,7 +28,7 @@ tests.
 
 - [x] Record current `tsgo --noEmit` result. Passed.
 - [x] Record current `tsgo -p packages/md-wysiwyg/tsconfig.json --noEmit` result. Passed.
-- [x] Record current `vitest run` result. Passed: 28 files, 402 tests after adding bootstrap/global lifecycle coverage.
+- [x] Record current `vitest run` result. Passed: 29 files, 403 tests after adding bootstrap/global lifecycle coverage and the Solid shell render test.
 - [x] Record current `cd packages/md-wysiwyg && vitest run` result. Passed via `pnpm exec vitest run`: 11 files, 394 tests.
 - [x] Record current `cargo test` result. Passed: 126 Rust tests across lib/bin targets.
 - [x] Record current `pnpm run test-e2e` result, or document blocker if the local binary/browser setup is not ready. Passed: 10 files, 37 tests. Harness now starts the server with a temp vault config and Playwright browsers are installed.
@@ -37,14 +37,22 @@ tests.
 
 ## Pre-Migration Test Inventory
 
-- [ ] Inventory existing DOM unit tests in `web/ts/*.test.ts`.
-- [ ] Inventory existing browser e2e tests in `web/ts/e2e/*.test.ts`.
-- [ ] Identify modules with module-level DOM side effects.
-- [ ] Identify modules that own global listeners.
-- [ ] Identify modules that own timers.
-- [ ] Identify modules that own async request cancellation or stale-response guards.
-- [ ] Identify modules that write `innerHTML`.
-- [ ] Identify modules that call `document.body.append`.
+- [x] Inventory existing DOM unit tests in `web/ts/*.test.ts`.
+      Current DOM/unit coverage includes `api`, `autocomplete`, `backlinks`, `bootstrap`, `conflict`, `context-menu`, `editor`, `filenav`, `format-toolbar`, `image-paste`, `image-resize`, `input-dialog`, `link-hover`, `offline`, `palette`, `renderer`, `revisions`, `search`, `settings`, `tabs`, `tag-autocomplete`, `webauthn`, `wikilinks`, and supporting pure modules.
+- [x] Inventory existing browser e2e tests in `web/ts/e2e/*.test.ts`.
+      Current browser coverage includes `autocomplete`, `editor`, `firefox-regressions`, `fuzz-editor`, `new-file-save`, `save`, `shortcuts`, `sse-stability`, `tabs`, and `transforms`.
+- [x] Identify modules with module-level DOM side effects.
+      Current module-import DOM work exists in `bootstrap.ts`, `context-menu.ts`, `format-toolbar.ts`, `link-hover.ts`, `tabs.ts`, `tag-autocomplete.ts`, and `legacy-main.ts`.
+- [x] Identify modules that own global listeners.
+      Current document/window/global listener owners include `autocomplete.ts`, `bootstrap.ts`, `editor.ts`, `format-toolbar.ts`, `image-resize.ts`, `input-dialog.ts`, `legacy-main.ts`, `link-hover.ts`, `palette.ts`, `search.ts`, `settings.ts`, `tabs.ts`, `tag-autocomplete.ts`, and `wikilinks.ts`.
+- [x] Identify modules that own timers.
+      Current timer owners include `bootstrap.ts`, `context-menu.ts`, `editor.ts`, `legacy-main.ts`, and `link-hover.ts`.
+- [x] Identify modules that own async request cancellation or stale-response guards.
+      Current stale-request / cancellation-sensitive modules are `search.ts` and `filenav.ts`.
+- [x] Identify modules that write `innerHTML`.
+      Markdown/content writers remain `renderer.ts`; other UI HTML writers currently include `bootstrap.ts`, `editor.ts`, `filenav.ts`, `format-toolbar.ts`, `palette.ts`, `revisions.ts`, `search.ts`, `settings.ts`, `tabs.ts`, and `vault-switcher.ts`.
+- [x] Identify modules that call `document.body.append`.
+      Current body-append owners are `autocomplete.ts`, `context-menu.ts`, `format-toolbar.ts`, `image-resize.ts`, `link-hover.ts`, `tabs.ts`, and `tag-autocomplete.ts`.
 
 ## Characterization Tests To Add Before Conversion
 
@@ -184,7 +192,7 @@ tests.
 - [x] Keep `web/index.html` as only the root mount and script/style links.
 - [x] Verify old modules still work against the JSX-rendered shell.
 - [x] Remove duplicated static app shell from `web/index.html`.
-- [ ] Add tests for shell render.
+- [x] Add tests for shell render.
 - [x] Run full frontend tests and e2e smoke.
 
 ## Leaf Component Conversions
