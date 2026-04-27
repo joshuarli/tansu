@@ -93,12 +93,12 @@ tests.
 
 - [x] Existing tests cover open/close/toggle, scoped placeholder, escape/backdrop close, rendering results, tags, score breakdown, create note, API error, settings failure, and stale response ordering.
 - [x] Add explicit test that scoped search sends `path` and suppresses create-note option.
-- [ ] Add explicit test that stale response from an old scope is ignored.
+- [x] Add explicit test that stale response from an old scope is ignored.
 - [x] Add explicit test that `show_score_breakdown: false` hides score details.
-- [ ] Add explicit test that click selection updates selected index before opening.
+- [x] Add explicit test that click selection updates selected index before opening.
 - [x] Add explicit test that ArrowDown wraps from last item to first.
 - [x] Add explicit test that ArrowUp wraps from first item to last.
-- [ ] Add explicit test that Enter on the create option creates the note.
+- [x] Add explicit test that Enter on the create option creates the note.
 - [x] Convert `search.ts` to `SearchModal.tsx`.
 - [x] Preserve temporary open/close/toggle imperative control surface.
 - [x] Keep stale request guard behavior.
@@ -107,10 +107,10 @@ tests.
 ### Command Palette
 
 - [x] Existing tests cover lifecycle, filtering, click, keyboard navigation, Enter, Escape, and `matchesKey`.
-- [ ] Add explicit test that selected index resets on open.
-- [ ] Add explicit test that selected index clamps when filtering reduces result count.
-- [ ] Add explicit test that backdrop click closes.
-- [ ] Add explicit test that empty filter result renders no command items.
+- [x] Add explicit test that selected index resets on open.
+- [x] Add explicit test that selected index clamps when filtering reduces result count.
+- [x] Add explicit test that backdrop click closes.
+- [x] Add explicit test that empty filter result renders no command items.
 - [ ] Add explicit test that command action errors do not leave inconsistent UI, if this behavior is desired.
 - [x] Convert `palette.ts` to `CommandPalette.tsx`.
 - [x] Move command registration to app-level state.
@@ -159,7 +159,7 @@ tests.
 - [x] Add explicit test for more-menu actions: revisions, backlinks, source mode, or available current items.
 - [ ] Add explicit test for conflict banner action integration.
 - [ ] Add explicit test for autosave timer scheduling and cancellation.
-- [ ] Add explicit test that autosave defers while a non-collapsed selection is active.
+- [x] Add explicit test that autosave defers while a non-collapsed selection is active.
 - [ ] Add explicit test for undo/redo keyboard behavior.
 - [ ] Add explicit test for source-mode save path.
 - [ ] Add explicit test for paste image handler integration.
@@ -169,8 +169,8 @@ tests.
 - [x] Existing enforcement test prevents direct render function imports outside `renderer.ts`.
 - [ ] Add enforcement test for markdown `innerHTML` writes remaining centralized.
 - [ ] Add enforcement test for converted modules not using app-root ID queries.
-- [ ] Add enforcement test for no broad `document.body.innerHTML` outside known bootstrap/test exceptions.
-- [ ] Add enforcement test for no direct `renderMarkdown*` calls from SolidJS components except approved adapter boundaries.
+- [x] Add enforcement test for no broad `document.body.innerHTML` outside known bootstrap/test exceptions.
+- [x] Add enforcement test for no direct `renderMarkdown*` calls from SolidJS components except approved adapter boundaries.
 
 ### `packages/md-wysiwyg`
 

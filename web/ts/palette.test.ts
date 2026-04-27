@@ -191,4 +191,62 @@ describe("palette", () => {
     expect(cmds).toHaveLength(3);
     expect(cmds[0]!.label).toBe("Save");
   });
+
+  it("selected index resets to 0 on open", () => {
+    openPalette();
+    const input = document.querySelector("#palette-input")! as HTMLInputElement;
+    input.value = "";
+    input.dispatchEvent(new Event("input"));
+    // Move to index 1
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+    const listEl = document.querySelector("#palette-list")!;
+    expect(listEl.children[1]!.classList.contains("selected")).toBeTruthy();
+    closePalette();
+
+    // Reopen — selection should reset to 0
+    openPalette();
+    input.value = "";
+    input.dispatchEvent(new Event("input"));
+    expect(listEl.children[0]!.classList.contains("selected")).toBeTruthy();
+    closePalette();
+  });
+
+  it("selected index clamps when filtering reduces visible results", () => {
+    openPalette();
+    const input = document.querySelector("#palette-input")! as HTMLInputElement;
+    input.value = "";
+    input.dispatchEvent(new Event("input"));
+    const listEl = document.querySelector("#palette-list")!;
+
+    // Move selection to index 2
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+    expect(listEl.children[2]!.classList.contains("selected")).toBeTruthy();
+
+    // Filter to one item — selection should reset to 0 because input handler fires
+    input.value = "sav";
+    input.dispatchEvent(new Event("input"));
+    expect(listEl.children).toHaveLength(1);
+    expect(listEl.children[0]!.classList.contains("selected")).toBeTruthy();
+    closePalette();
+  });
+
+  it("backdrop click (click on overlay but not modal) closes palette", () => {
+    openPalette();
+    expect(isPaletteOpen()).toBeTruthy();
+
+    const overlay = document.querySelector("#palette-overlay")! as HTMLElement;
+    overlay.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(isPaletteOpen()).toBeFalsy();
+  });
+
+  it("filter with no matches renders empty list", () => {
+    openPalette();
+    const input = document.querySelector("#palette-input")! as HTMLInputElement;
+    input.value = "zzznomatch";
+    input.dispatchEvent(new Event("input"));
+    const listEl = document.querySelector("#palette-list")!;
+    expect(listEl.children).toHaveLength(0);
+    closePalette();
+  });
 });

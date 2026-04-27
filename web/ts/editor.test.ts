@@ -1126,4 +1126,70 @@ describe("editor", () => {
 
     hideEditor();
   });
+
+  it("autosave defers then fires when selection becomes collapsed", async () => {
+    const { openTab, getTabs, closeTab } = await import("./tab-state.ts");
+    const { AUTOSAVE_DELAY_MS, AUTOSAVE_RETRY_DELAY_MS } = await import("./constants.ts");
+    mock.on("GET", "/api/note", { content: "# Defer Test", mtime: 1000 });
+    mock.on("PUT", "/api/note", { mtime: 2001 });
+    await openTab("defer-autosave.md");
+    showEditor("defer-autosave.md", "# Defer Test");
+    await new Promise((r) => setTimeout(r, 50));
+
+    const contentEl = document.querySelector(".editor-content") as HTMLElement;
+
+    // Actually mutate content so the tab becomes dirty
+    const heading = contentEl.querySelector("h1");
+    if (heading) {
+      heading.textContent = "Defer Changed";
+    }
+
+    // Snapshot request count before testing — mock.requests accumulates across tests
+    const saveCountBefore = mock.requests.filter(
+      (r) => r.method === "PUT" && r.url.includes("/api/note"),
+    ).length;
+
+    // Use a real child node of contentEl so contentEl.contains() returns true
+    const anchorNode = contentEl.firstChild ?? contentEl;
+    const origGetSelection = window.getSelection.bind(window);
+
+    vi.useFakeTimers();
+    try {
+      // Pretend user has an active (non-collapsed) selection inside contentEl
+      window.getSelection = () => ({ isCollapsed: false, anchorNode }) as unknown as Selection;
+
+      contentEl.dispatchEvent(new Event("input", { bubbles: true }));
+
+      // Advance past AUTOSAVE_DELAY_MS — tryAutosave should defer because selection is active
+      vi.advanceTimersByTime(AUTOSAVE_DELAY_MS + 1);
+
+      const savesAfterDefer =
+        mock.requests.filter((r) => r.method === "PUT" && r.url.includes("/api/note")).length -
+        saveCountBefore;
+      expect(savesAfterDefer).toBe(0);
+
+      // Restore real getSelection — retry should save (selection is now collapsed)
+      window.getSelection = origGetSelection;
+      vi.advanceTimersByTime(AUTOSAVE_RETRY_DELAY_MS + 1);
+    } finally {
+      // Always restore — prevents mock from leaking to other tests if assertion fails
+      window.getSelection = origGetSelection;
+      vi.useRealTimers();
+    }
+
+    // Let the async save settle
+    await new Promise((r) => setTimeout(r, 100));
+
+    const savesAfterRetry =
+      mock.requests.filter((r) => r.method === "PUT" && r.url.includes("/api/note")).length -
+      saveCountBefore;
+    expect(savesAfterRetry).toBeGreaterThan(0);
+
+    hideEditor();
+    while (getTabs().length > 0) {
+      closeTab(0);
+    }
+    mock.on("GET", "/api/note", { content: "# Test", mtime: 1000 });
+    mock.on("PUT", "/api/note", { mtime: 2000 });
+  });
 });

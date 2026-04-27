@@ -417,6 +417,164 @@ describe("search", () => {
     });
   });
 
+  it("Enter on create option creates note without clicking", async () => {
+    const input = document.querySelector("#search-input")! as HTMLInputElement;
+    const resultsEl = document.querySelector("#search-results")!;
+
+    mock.on("GET", "/api/search", []);
+    mock.on("POST", "/api/note", { mtime: 9999 });
+
+    openTabCalled = false;
+    openSearch2();
+    input.value = "enter-create-test";
+    input.dispatchEvent(new Event("input"));
+    await new Promise((r) => setTimeout(r, 200));
+
+    // Verify create option is shown
+    const createEl = resultsEl.querySelector(".search-create");
+    expect(createEl !== null).toBeTruthy();
+
+    // Navigate to the create option via ArrowDown (results are empty so one down lands on create)
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+    expect(createEl!.classList.contains("selected")).toBeTruthy();
+
+    // Press Enter — should create the note and close
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    await new Promise((r) => setTimeout(r, 100));
+
+    expect(openTabCalled).toBeTruthy();
+    expect(openTabPath).toBe("enter-create-test.md");
+    expect(isSearchOpen2()).toBeFalsy();
+
+    // Restore
+    mock.on("GET", "/api/search", [
+      {
+        path: "a.md",
+        title: "Alpha",
+        tags: [],
+        excerpt: "test",
+        score: 1.5,
+        field_scores: { title: 1, headings: 0.5, tags: 0, content: 0 },
+      },
+    ]);
+  });
+
+  it("click on result at index > 0 opens that result, not index 0", async () => {
+    const input = document.querySelector("#search-input")! as HTMLInputElement;
+    const resultsEl = document.querySelector("#search-results")!;
+
+    mock.on("GET", "/api/search", [
+      {
+        path: "first.md",
+        title: "First",
+        tags: [],
+        excerpt: "first",
+        score: 2,
+        field_scores: { title: 2, headings: 0, tags: 0, content: 0 },
+      },
+      {
+        path: "second.md",
+        title: "Second",
+        tags: [],
+        excerpt: "second",
+        score: 1,
+        field_scores: { title: 1, headings: 0, tags: 0, content: 0 },
+      },
+    ]);
+
+    openTabCalled = false;
+    openTabPath = "";
+    openSearch2();
+    input.value = "test";
+    input.dispatchEvent(new Event("input"));
+    await new Promise((r) => setTimeout(r, 200));
+
+    // Click the second result (index 1)
+    const secondResult = resultsEl.querySelectorAll<HTMLElement>(".search-result")[1];
+    expect(secondResult !== null).toBeTruthy();
+    secondResult!.click();
+    await new Promise((r) => setTimeout(r, 10));
+
+    expect(openTabCalled).toBeTruthy();
+    expect(openTabPath).toBe("second.md");
+
+    // Restore
+    mock.on("GET", "/api/search", [
+      {
+        path: "a.md",
+        title: "Alpha",
+        tags: [],
+        excerpt: "test",
+        score: 1.5,
+        field_scores: { title: 1, headings: 0.5, tags: 0, content: 0 },
+      },
+    ]);
+  });
+
+  it("stale response from an old scope is ignored", async () => {
+    const input = document.querySelector("#search-input")! as HTMLInputElement;
+    const resultsEl = document.querySelector("#search-results")!;
+
+    // Scoped to file-a.md — delayed response
+    mock.onDelayed(
+      "GET",
+      /path=file-a\.md/,
+      [
+        {
+          path: "scoped-a.md",
+          title: "ScopedA",
+          tags: [],
+          excerpt: "from a",
+          score: 1,
+          field_scores: { title: 1, headings: 0, tags: 0, content: 0 },
+        },
+      ],
+      100,
+    );
+    // Scoped to file-b.md — fast response
+    mock.on("GET", /path=file-b\.md/, [
+      {
+        path: "scoped-b.md",
+        title: "ScopedB",
+        tags: [],
+        excerpt: "from b",
+        score: 1,
+        field_scores: { title: 1, headings: 0, tags: 0, content: 0 },
+      },
+    ]);
+
+    openSearch("file-a.md");
+    input.value = "scoped";
+    input.dispatchEvent(new Event("input"));
+    // Close and immediately reopen with different scope
+    closeSearch();
+    openSearch("file-b.md");
+    input.value = "scoped";
+    input.dispatchEvent(new Event("input"));
+
+    // Wait for both responses to complete
+    await new Promise((r) => setTimeout(r, 200));
+
+    // Should show file-b.md results only
+    const results = [...resultsEl.querySelectorAll<HTMLElement>(".search-result")];
+    const titles = results.map((el) => el.textContent ?? "");
+    expect(titles.some((t) => t.includes("ScopedB"))).toBeTruthy();
+    expect(titles.some((t) => t.includes("ScopedA"))).toBeFalsy();
+    closeSearch();
+
+    // Restore
+    mock.on("GET", "/api/search", [
+      {
+        path: "a.md",
+        title: "Alpha",
+        tags: [],
+        excerpt: "test",
+        score: 1.5,
+        field_scores: { title: 1, headings: 0.5, tags: 0, content: 0 },
+      },
+    ]);
+  });
+
   it("ignores stale search responses", async () => {
     const input = document.querySelector("#search-input")! as HTMLInputElement;
     const resultsEl = document.querySelector("#search-results")!;
