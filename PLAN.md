@@ -231,10 +231,10 @@ tests.
 
 ### Revisions
 
-- [ ] Create `RevisionsPanel.tsx`.
-- [ ] Render loading, empty, error, list, diff preview, and restore states.
-- [ ] Keep restore event compatibility until editor is converted.
-- [ ] Remove direct DOM writes from `revisions.ts`.
+- [x] Create `RevisionsPanel.tsx`.
+- [x] Render loading, empty, error, list, diff preview, and restore states.
+- [x] Keep restore event compatibility until editor is converted.
+- [x] Remove direct DOM writes from `revisions.ts`.
 
 ### Vault Switcher
 
