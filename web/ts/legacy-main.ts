@@ -10,10 +10,17 @@ import {
   type AppStatus,
 } from "./api.ts";
 import {
-  MIN_SUPPORTED_FIREFOX_VERSION,
-  NOTIFICATION_AUTO_DISMISS_MS,
-  SSE_BACKOFF_DELAYS_MS,
-} from "./constants.ts";
+  bootApp,
+  checkBrowserSupport,
+  createBackoff,
+  createNotificationController,
+  createServerStatusController,
+  createSseLifecycle,
+  showUnlockScreen as renderUnlockScreen,
+  showUnsupportedPage,
+} from "./bootstrap.ts";
+import { NOTIFICATION_AUTO_DISMISS_MS, SSE_BACKOFF_DELAYS_MS } from "./constants.ts";
+import { MIN_SUPPORTED_FIREFOX_VERSION } from "./constants.ts";
 import { initEditor, invalidateNoteCache, type EditorInstance } from "./editor.ts";
 import { emit, on } from "./events.ts";
 import { initFileNav } from "./filenav.ts";
@@ -46,98 +53,16 @@ let sseReconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let pageUnloading = false;
 
 function showUnlockScreen(status?: AppStatus) {
-  appEl.style.display = "none";
-
-  let screen = document.querySelector("#unlock-screen");
-  if (!screen) {
-    screen = document.createElement("div");
-    screen.id = "unlock-screen";
-    document.body.append(screen);
-  }
-
-  const hasPrf = status && status.prf_credential_ids.length > 0 && isPrfLikelySupported();
-
-  screen.innerHTML = `
-    <h1>tansu</h1>
-    <p>This vault is locked.</p>
-    ${hasPrf ? '<button id="unlock-biometric" type="button">Unlock with biometrics</button>' : ""}
-    <form id="unlock-form">
-      <input id="unlock-key" type="text" placeholder="Recovery key" autocomplete="off" spellcheck="false" />
-      <button type="submit">Unlock with recovery key</button>
-      <div id="unlock-error"></div>
-      <div id="unlock-status"></div>
-    </form>
-  `;
-
-  const form = document.querySelector("#unlock-form") as HTMLFormElement;
-  const input = document.querySelector("#unlock-key") as HTMLInputElement;
-  const errorEl = document.querySelector("#unlock-error")!;
-  const statusEl = document.querySelector("#unlock-status")!;
-
-  function onUnlockSuccess() {
-    statusEl.textContent = "Unlocked. Loading...";
-    screen!.remove();
-    appEl.style.display = "";
-    startApp();
-  }
-
-  // Biometric unlock button
-  if (hasPrf && status) {
-    const credIds = status.prf_credential_ids;
-    const bioBtn = document.querySelector("#unlock-biometric") as HTMLButtonElement | null;
-    if (bioBtn) {
-      bioBtn.addEventListener("click", async () => {
-        errorEl.textContent = "";
-        statusEl.textContent = "Waiting for biometrics...";
-        try {
-          const prfKeyB64 = await getPrfKey(credIds);
-          statusEl.textContent = "Unlocking...";
-          const ok = await unlockWithPrf(prfKeyB64);
-          if (ok) {
-            onUnlockSuccess();
-          } else {
-            errorEl.textContent = "Biometric unlock failed.";
-            statusEl.textContent = "";
-          }
-        } catch (error) {
-          errorEl.textContent = error instanceof Error ? error.message : "Biometric unlock failed.";
-          statusEl.textContent = "";
-        }
-      });
-      // Auto-trigger biometric on load
-      bioBtn.click();
-    }
-  } else {
-    input.focus();
-  }
-
-  // Recovery key form
-  form.addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const key = input.value.trim();
-    if (!key) {
-      return;
-    }
-
-    errorEl.textContent = "";
-    statusEl.textContent = "Unlocking...";
-    const btn = form.querySelector("button[type=submit]") as HTMLButtonElement;
-    btn.disabled = true;
-
-    try {
-      const ok = await unlockWithRecoveryKey(key);
-      if (ok) {
-        onUnlockSuccess();
-        return;
-      }
-    } catch {
-      // Network error or server crash
-    }
-    errorEl.textContent = "Unlock failed. Check your recovery key.";
-    statusEl.textContent = "";
-    btn.disabled = false;
-    input.focus();
-    input.select();
+  renderUnlockScreen({
+    appEl,
+    ...(status ? { status } : {}),
+    isPrfLikelySupported,
+    getPrfKey,
+    unlockWithPrf,
+    unlockWithRecoveryKey,
+    onUnlocked: () => {
+      void startApp();
+    },
   });
 }
 
@@ -320,79 +245,31 @@ function initApp() {
 }
 
 // Notification pill
-const notif = document.querySelector("#notification")!;
-const serverStatus = document.querySelector("#server-status")!;
-let notifTimer: ReturnType<typeof setTimeout> | null = null;
+const notif = document.querySelector("#notification") as HTMLElement;
+const serverStatus = document.querySelector("#server-status") as HTMLElement;
+const notificationController = createNotificationController(notif, NOTIFICATION_AUTO_DISMISS_MS);
+const serverStatusController = createServerStatusController(serverStatus);
 
-function hideNotification() {
-  if (notifTimer) {
-    clearTimeout(notifTimer);
-    notifTimer = null;
-  }
-  notif.className = "notification hidden";
-}
-
-function showNotification(msg: string, type: "error" | "info" | "success" = "error") {
-  notif.textContent = msg;
-  notif.className = `notification ${type}`;
-  if (notifTimer) {
-    clearTimeout(notifTimer);
-  }
-  notifTimer = setTimeout(() => {
-    hideNotification();
-  }, NOTIFICATION_AUTO_DISMISS_MS);
-}
-
-notif.addEventListener("click", hideNotification);
-
-on("notification", ({ msg, type }) => showNotification(msg, type));
-
-function showServerStatus(msg: string) {
-  serverStatus.textContent = msg;
-  serverStatus.className = "server-status";
-}
-
-function hideServerStatus() {
-  serverStatus.textContent = "";
-  serverStatus.className = "server-status hidden";
-}
-
-function createBackoff(delays: number[]) {
-  let attempt = 0;
-  let unavailable = false;
-  return {
-    next(): number {
-      const delay = delays[Math.min(attempt, delays.length - 1)]!;
-      attempt++;
-      return delay;
-    },
-    format(delay: number): string {
-      return delay < 1000 ? `${delay}ms` : `${Math.round(delay / 1000)}s`;
-    },
-    reset() {
-      attempt = 0;
-    },
-    get wasUnavailable() {
-      return unavailable;
-    },
-    set wasUnavailable(v: boolean) {
-      unavailable = v;
-    },
-  };
-}
+on("notification", ({ msg, type }) => notificationController.show(msg, type));
 
 const sseBackoff = createBackoff([...SSE_BACKOFF_DELAYS_MS]);
-
-function requestImmediateSSEReconnect() {
-  if (pageUnloading || sse) {
-    return;
-  }
-  if (sseReconnectTimer) {
-    clearTimeout(sseReconnectTimer);
-    sseReconnectTimer = null;
-  }
-  connectSSE();
-}
+const sseLifecycle = createSseLifecycle({
+  getSse: () => sse,
+  setSse: (value) => {
+    sse = value;
+  },
+  getReconnectTimer: () => sseReconnectTimer,
+  setReconnectTimer: (value) => {
+    sseReconnectTimer = value;
+  },
+  getPageUnloading: () => pageUnloading,
+  setPageUnloading: (value) => {
+    pageUnloading = value;
+  },
+  connectSse: () => {
+    connectSSE();
+  },
+});
 
 function connectSSE() {
   if (sse) {
@@ -415,7 +292,7 @@ function connectSSE() {
     if (sseBackoff.wasUnavailable) {
       sseBackoff.wasUnavailable = false;
     }
-    hideServerStatus();
+    serverStatusController.hide();
     syncToServer();
   });
 
@@ -439,7 +316,7 @@ function connectSSE() {
     emit("files:changed", {});
     const active = getActiveTab();
     if (active && active.path === path) {
-      showNotification(`"${stemFromPath(path)}" was deleted externally.`);
+      notificationController.show(`"${stemFromPath(path)}" was deleted externally.`);
       closeActiveTab();
     }
   });
@@ -467,7 +344,7 @@ function connectSSE() {
     }
     sseBackoff.wasUnavailable = true;
     const delay = sseBackoff.next();
-    showServerStatus(`Server unavailable. Retrying in ${sseBackoff.format(delay)}...`);
+    serverStatusController.show(`Server unavailable. Retrying in ${sseBackoff.format(delay)}...`);
     sseReconnectTimer = setTimeout(() => {
       sseReconnectTimer = null;
       connectSSE();
@@ -475,67 +352,24 @@ function connectSSE() {
   };
 }
 
-function closeSSEForUnload() {
-  pageUnloading = true;
-  if (sseReconnectTimer) {
-    clearTimeout(sseReconnectTimer);
-    sseReconnectTimer = null;
-  }
-  if (sse) {
-    sse.close();
-    sse = null;
-  }
-}
+export function bootLegacyApp() {
+  window.addEventListener("pagehide", sseLifecycle.closeForUnload);
+  window.addEventListener("beforeunload", sseLifecycle.closeForUnload);
+  window.addEventListener("focus", sseLifecycle.requestImmediateReconnect);
+  document.addEventListener("visibilitychange", sseLifecycle.onVisibilityChange);
 
-window.addEventListener("pagehide", closeSSEForUnload);
-window.addEventListener("beforeunload", closeSSEForUnload);
-window.addEventListener("focus", requestImmediateSSEReconnect);
-document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible") {
-    requestImmediateSSEReconnect();
-  }
-});
-
-function checkBrowserSupport(): string[] {
-  const missing: string[] = [];
-  if (!("indexedDB" in window)) {
-    missing.push("IndexedDB");
-  }
-  if (!("EventSource" in window)) {
-    missing.push("Server-Sent Events");
-  }
-  if (!("setHTML" in Element.prototype)) {
-    missing.push("HTML Sanitizer API");
-  }
-  return missing;
-}
-
-function showUnsupportedPage(missing: string[]) {
-  document.body.innerHTML = `<div style="font-family:sans-serif;max-width:560px;margin:80px auto;padding:0 24px;line-height:1.6">
-    <h2 style="margin-top:0">Browser not supported</h2>
-    <p>tansu requires features your browser doesn't support:</p>
-    <ul>${missing.map((f) => `<li>${f}</li>`).join("")}</ul>
-    <p>Please upgrade to <strong>Firefox ${MIN_SUPPORTED_FIREFOX_VERSION}</strong> or later.</p>
-    <p style="color:#888;font-size:0.85em;word-break:break-all">Your browser: ${navigator.userAgent}</p>
-  </div>`;
-}
-
-// Boot: check if encrypted + locked, show unlock or start app
-const missingFeatures = checkBrowserSupport();
-if (missingFeatures.length > 0) {
-  showUnsupportedPage(missingFeatures);
-} else {
-  (async () => {
-    try {
-      const status = await getStatus();
-      if (status.locked) {
-        showUnlockScreen(status);
-      } else {
-        startApp();
-      }
-    } catch {
-      // Status check failed — server may be down, start normally
-      startApp();
-    }
-  })();
+  void bootApp({
+    checkBrowserSupport,
+    showUnsupportedPage: (missing) => {
+      showUnsupportedPage(
+        document.body,
+        missing,
+        navigator.userAgent,
+        MIN_SUPPORTED_FIREFOX_VERSION,
+      );
+    },
+    getStatus,
+    showUnlockScreen,
+    startApp,
+  });
 }

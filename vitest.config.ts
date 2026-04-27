@@ -17,10 +17,11 @@ export default defineConfig({
     sequence: { shuffle: true },
     coverage: {
       provider: "v8",
-      include: ["web/ts/**/*.ts"],
+      include: ["web/ts/**/*.ts", "web/ts/**/*.tsx"],
       exclude: [
         "web/ts/webauthn.ts",
-        "web/ts/main.ts",
+        "web/ts/main.tsx",
+        "web/ts/legacy-main.ts",
         "web/ts/search-cli.ts",
         "web/ts/e2e/**",
         "web/ts/**/*.test.ts",

@@ -1,17 +1,17 @@
-# Frontend Preact Migration Plan
+# Frontend SolidJS Migration Plan
 
 This plan tracks the migration from imperative DOM modules in `web/` to JSX and
-Preact. The migration is intentionally test-first: build characterization tests
+SolidJS. The migration is intentionally test-first: build characterization tests
 around existing behavior, then convert one UI island at a time behind those
 tests.
 
 ## Goals
 
-- [ ] Move app UI from scattered `document.querySelector`, `document.createElement`, and module-level DOM mutation to typed Preact components.
-- [ ] Keep the app lightweight: Preact only, no router, no global state library, no CSS framework, no Vite migration unless separately justified.
+- [ ] Move app UI from scattered `document.querySelector`, `document.createElement`, and module-level DOM mutation to typed SolidJS components.
+- [ ] Keep the app lightweight: SolidJS only, no router, no global state library, no CSS framework, no Vite migration unless separately justified.
 - [ ] Preserve current app behavior during migration.
 - [ ] Keep the editor's `contenteditable` surface stable by treating it as an imperative island until the surrounding shell is declarative.
-- [ ] Keep `packages/md-wysiwyg` framework-neutral at its core, with optional Preact adapters only if useful.
+- [ ] Keep `packages/md-wysiwyg` framework-neutral at its core, with optional SolidJS adapters only if useful.
 - [ ] Improve production readiness through stronger tests, explicit async states, cleanup discipline, and accessibility fixes.
 
 ## Non-Goals For The Initial Migration
@@ -28,12 +28,12 @@ tests.
 
 - [x] Record current `tsgo --noEmit` result. Passed.
 - [x] Record current `tsgo -p packages/md-wysiwyg/tsconfig.json --noEmit` result. Passed.
-- [x] Record current `vitest run` result. Passed: 27 files, 391 tests.
+- [x] Record current `vitest run` result. Passed: 28 files, 402 tests after adding bootstrap/global lifecycle coverage.
 - [x] Record current `cd packages/md-wysiwyg && vitest run` result. Passed via `pnpm exec vitest run`: 11 files, 394 tests.
 - [x] Record current `cargo test` result. Passed: 126 Rust tests across lib/bin targets.
 - [x] Record current `pnpm run test-e2e` result, or document blocker if the local binary/browser setup is not ready. Passed: 10 files, 37 tests. Harness now starts the server with a temp vault config and Playwright browsers are installed.
-- [x] Confirm `pnpm run bundle` succeeds before any Preact changes. Passed.
-- [x] Confirm `pnpm run bundle-dev` succeeds before any Preact changes. Passed.
+- [x] Confirm `pnpm run bundle` succeeds before any SolidJS changes. Passed.
+- [x] Confirm `pnpm run bundle-dev` succeeds before any SolidJS changes. Passed.
 
 ## Pre-Migration Test Inventory
 
@@ -50,17 +50,17 @@ tests.
 
 ### App Bootstrap And Global Lifecycle
 
-- [ ] Add test coverage for unlocked startup initializing the main app shell.
-- [ ] Add test coverage for locked startup hiding `#app` and showing unlock screen.
-- [ ] Add test coverage for recovery-key unlock success removing unlock screen and starting the app.
-- [ ] Add test coverage for recovery-key unlock failure showing an error and re-enabling the submit button.
-- [ ] Add test coverage for biometric unlock auto-trigger when PRF is available.
-- [ ] Add test coverage for biometric unlock failure message.
-- [ ] Add test coverage for unsupported browser feature page.
-- [ ] Add test coverage for notification show, auto-dismiss, and click-dismiss behavior.
-- [ ] Add test coverage for server status show/hide during SSE reconnect.
-- [ ] Add test coverage for pagehide/beforeunload closing SSE.
-- [ ] Add test coverage for focus/visibility reconnect behavior.
+- [x] Add test coverage for unlocked startup initializing the main app shell.
+- [x] Add test coverage for locked startup hiding `#app` and showing unlock screen.
+- [x] Add test coverage for recovery-key unlock success removing unlock screen and starting the app.
+- [x] Add test coverage for recovery-key unlock failure showing an error and re-enabling the submit button.
+- [x] Add test coverage for biometric unlock auto-trigger when PRF is available.
+- [x] Add test coverage for biometric unlock failure message.
+- [x] Add test coverage for unsupported browser feature page.
+- [x] Add test coverage for notification show, auto-dismiss, and click-dismiss behavior.
+- [x] Add test coverage for server status show/hide during SSE reconnect.
+- [x] Add test coverage for pagehide/beforeunload closing SSE.
+- [x] Add test coverage for focus/visibility reconnect behavior.
 
 ### Tabs
 
@@ -151,41 +151,41 @@ tests.
 - [ ] Add enforcement test for markdown `innerHTML` writes remaining centralized.
 - [ ] Add enforcement test for converted modules not using app-root ID queries.
 - [ ] Add enforcement test for no broad `document.body.innerHTML` outside known bootstrap/test exceptions.
-- [ ] Add enforcement test for no direct `renderMarkdown*` calls from Preact components except approved adapter boundaries.
+- [ ] Add enforcement test for no direct `renderMarkdown*` calls from SolidJS components except approved adapter boundaries.
 
 ### `packages/md-wysiwyg`
 
 - [x] Existing package tests cover markdown render, serialization, cursor offset, selection rendering, transforms, inline transforms, diff, merge, highlight, roundtrip, and utilities.
-- [ ] Add tests for any optional Preact entrypoint before adding it.
+- [ ] Add tests for any optional SolidJS entrypoint before adding it.
 - [ ] Add `MarkdownPreview` tests if introduced.
 - [ ] Add `MarkdownEditorSurface` tests if introduced.
 - [ ] Add `DiffView` component tests if introduced.
-- [ ] Add tests proving the core package remains usable without Preact adapters.
+- [ ] Add tests proving the core package remains usable without SolidJS adapters.
 
-## Preact Setup
+## SolidJS Setup
 
-- [ ] Add `preact` as the only production frontend dependency.
-- [ ] Update `package.json` bundle script to compile `web/ts/main.tsx`.
-- [ ] Add esbuild JSX settings: `--jsx=automatic --jsx-import-source=preact`.
-- [ ] Update `tsconfig.json` with `jsx: "react-jsx"` and `jsxImportSource: "preact"`.
+- [x] Add `solid-js` as the only production frontend dependency.
+- [x] Update `package.json` bundle script to compile `web/ts/main.tsx`.
+- [x] Add SolidJS-compatible JSX build settings and any minimal required build plugin/runtime glue.
+- [x] Update `tsconfig.json` for SolidJS TSX compilation.
 - [ ] Ensure `vitest.config.ts` coverage includes `web/ts/**/*.tsx`.
 - [ ] Ensure oxlint/oxfmt cover `.tsx` files.
 - [ ] Add `web/ts/component-test-helper.tsx`.
 - [ ] Add a minimal smoke component test.
-- [ ] Confirm production bundle succeeds.
-- [ ] Confirm dev bundle succeeds.
+- [x] Confirm production bundle succeeds.
+- [x] Confirm dev bundle succeeds.
 
 ## App Shell Conversion
 
-- [ ] Create `web/ts/main.tsx` as a thin Preact mount.
-- [ ] Create `web/ts/app.tsx`.
-- [ ] Render the existing static shell in JSX using the same IDs/classes.
-- [ ] Keep legacy init functions running from a single `useEffect`.
-- [ ] Keep `web/index.html` as only the root mount and script/style links.
-- [ ] Verify old modules still work against the JSX-rendered shell.
-- [ ] Remove duplicated static app shell from `web/index.html`.
+- [x] Create `web/ts/main.tsx` as a thin SolidJS mount.
+- [x] Create `web/ts/app.tsx`.
+- [x] Render the existing static shell in JSX using the same IDs/classes.
+- [x] Keep legacy init functions running from a single SolidJS mount/init boundary.
+- [x] Keep `web/index.html` as only the root mount and script/style links.
+- [x] Verify old modules still work against the JSX-rendered shell.
+- [x] Remove duplicated static app shell from `web/index.html`.
 - [ ] Add tests for shell render.
-- [ ] Run full frontend tests and e2e smoke.
+- [x] Run full frontend tests and e2e smoke.
 
 ## Leaf Component Conversions
 
@@ -237,7 +237,7 @@ tests.
 
 ## State Ownership Migration
 
-- [ ] Add a subscription API to `tab-state.ts` if needed by Preact hooks.
+- [ ] Add a subscription API to `tab-state.ts` if needed by SolidJS hooks/signals.
 - [ ] Add `useTabs()` hook.
 - [ ] Convert `tabs.ts` to `TabBar.tsx`.
 - [ ] Move tooltip state into `TabBar`.
@@ -282,15 +282,15 @@ tests.
 - [ ] Run editor unit tests after every editor slice.
 - [ ] Run e2e editor/save/transform/fuzz/firefox tests before considering this phase complete.
 
-## `packages/md-wysiwyg` Preact Adapter
+## `packages/md-wysiwyg` SolidJS Adapter
 
 - [ ] Keep core package framework-neutral.
-- [ ] Add optional `./preact` export only if app conversion benefits from it.
-- [ ] Add `src/preact.tsx` only after tests specify expected adapter behavior.
+- [ ] Add optional `./solid` export only if app conversion benefits from it.
+- [ ] Add `src/solid.tsx` only after tests specify expected adapter behavior.
 - [ ] Add `MarkdownPreview` if useful.
 - [ ] Add `MarkdownEditorSurface` only if it does not hide app-specific editor logic.
 - [ ] Add `DiffView` if revision UI benefits from it.
-- [ ] Ensure package core tests do not require Preact.
+- [ ] Ensure package core tests do not require SolidJS.
 - [ ] Ensure app can still import core package APIs from `@joshuarli98/md-wysiwyg`.
 
 ## CSS And Accessibility Hardening
@@ -316,17 +316,17 @@ tests.
 - [ ] Ensure every timer has cleanup.
 - [ ] Ensure SSE reconnect timers are owned and cleaned.
 - [ ] Ensure overlays/popovers clean up on unmount.
-- [ ] Measure bundle size before Preact.
-- [ ] Measure bundle size after Preact.
-- [ ] Avoid `preact/compat` unless explicitly justified.
+- [ ] Measure bundle size before SolidJS.
+- [ ] Measure bundle size after SolidJS.
+- [ ] Avoid compatibility layers unless explicitly justified.
 - [ ] Add final enforcement tests for post-migration DOM restrictions.
 
 ## Final Migration Completion Criteria
 
 - [ ] `web/ts/main.tsx` is the only app bootstrap entrypoint.
-- [ ] App shell is rendered by Preact.
-- [ ] Tabs, file nav, search, palette, settings, input dialog, context menu, notification, server status, and vault switcher are Preact components.
-- [ ] Editor shell is Preact, with the editable surface isolated behind refs.
+- [ ] App shell is rendered by SolidJS.
+- [ ] Tabs, file nav, search, palette, settings, input dialog, context menu, notification, server status, and vault switcher are SolidJS components.
+- [ ] Editor shell is SolidJS, with the editable surface isolated behind refs.
 - [ ] `renderer.ts` remains the only app markdown render sink.
 - [ ] No converted component relies on fixed app-root `document.querySelector` lookups.
 - [ ] No unowned global listeners are registered at module import time.
