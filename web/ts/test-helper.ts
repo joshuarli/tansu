@@ -2,7 +2,14 @@
 
 import { Window } from "happy-dom";
 
-import type { SaveResult, RecentFileEntry, SessionState, Settings, AppStatus } from "./api.ts";
+import type {
+  AppStatus,
+  RecentFileEntry,
+  SaveResult,
+  SessionState,
+  Settings,
+  VaultEntry,
+} from "./api.ts";
 
 type MockNote = { content: string; mtime: number; tags?: string[] };
 type MockNoteEntry = { path: string; title: string; tags?: string[] };
@@ -23,6 +30,7 @@ export type MockBody =
   | SaveResult
   | MockNoteEntry[]
   | RecentFileEntry[]
+  | VaultEntry[]
   | MockSearchResult[]
   | SessionState
   | Settings
@@ -52,6 +60,7 @@ const TANSU_HTML = `<!doctype html>
       <div id="sidebar-header">
         <input id="sidebar-search" type="text">
       </div>
+      <div id="vault-switcher"></div>
       <div id="sidebar-tree"></div>
     </div>
     <div id="notification" class="notification hidden"></div>

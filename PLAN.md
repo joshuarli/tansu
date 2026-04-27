@@ -238,10 +238,10 @@ tests.
 
 ### Vault Switcher
 
-- [ ] Create `VaultSwitcher.tsx`.
-- [ ] Render select and empty states declaratively.
-- [ ] Preserve current API behavior.
-- [ ] Ensure vault switch refresh and SSE behavior remain covered.
+- [x] Create `VaultSwitcher.tsx`.
+- [x] Render select and empty states declaratively.
+- [x] Preserve current API behavior.
+- [x] Ensure vault switch refresh and SSE behavior remain covered.
 
 ## State Ownership Migration
 
