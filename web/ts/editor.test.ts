@@ -1,4 +1,5 @@
 import { classifySaveResult, classifyReload, type SaveAction } from "./editor.ts";
+import { restoreRevisionIntoEditor } from "./revision-events.ts";
 import { setupDOM, mockFetch } from "./test-helper.ts";
 
 describe("classifySaveResult", () => {
@@ -90,9 +91,66 @@ describe("editor", () => {
     mock.on("GET", "/api/tags", { tags: [] });
 
     const mod = await import("./editor.ts");
+    const { createEditorShellRefs } = await import("./editor-shell.tsx");
+    const refs = createEditorShellRefs();
+    const editorArea = document.querySelector("#editor-area") as HTMLElement;
+    const shellHost = document.createElement("div");
+    shellHost.innerHTML = `
+      <div class="editor-toolbar">
+        <div class="editor-toolbar-fmt-group"></div>
+        <div style="flex:1"></div>
+        <button type="button" class="editor-toolbar-btn editor-toolbar-btn--source"></button>
+        <button type="button" class="editor-toolbar-btn" title="More"></button>
+      </div>
+      <div class="editor-container">
+        <div class="editor-tags">
+          <input type="text" class="editor-tags-input">
+        </div>
+        <div class="editor-mount"></div>
+        <div class="revisions-container" style="display:none"></div>
+      </div>
+      <div class="backlinks" style="display:none"></div>
+    `;
+    editorArea.append(shellHost);
+    refs.toolbarEl = shellHost.querySelector(".editor-toolbar") as HTMLDivElement;
+    refs.fmtGroupEl = shellHost.querySelector(".editor-toolbar-fmt-group") as HTMLDivElement;
+    refs.sourceBtnEl = shellHost.querySelector(".editor-toolbar-btn--source") as HTMLButtonElement;
+    refs.menuBtnEl = shellHost.querySelector('button[title="More"]') as HTMLButtonElement;
+    refs.containerEl = shellHost.querySelector(".editor-container") as HTMLDivElement;
+    refs.tagRowEl = shellHost.querySelector(".editor-tags") as HTMLDivElement;
+    refs.editorMountEl = shellHost.querySelector(".editor-mount") as HTMLDivElement;
+    refs.revisionsEl = shellHost.querySelector(".revisions-container") as HTMLDivElement;
+    refs.backlinksEl = shellHost.querySelector(".backlinks") as HTMLDivElement;
+    refs.getTagInputEl = () => shellHost.querySelector(".editor-tags-input") as HTMLInputElement;
+    const renderTags = (tags: readonly string[]) => {
+      refs.tagRowEl.textContent = "";
+      for (const tag of tags) {
+        const pill = document.createElement("span");
+        pill.className = "tag-pill tag-pill--editor";
+        const text = document.createElement("span");
+        text.textContent = `#${tag}`;
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "tag-pill-remove";
+        btn.dataset["tagRemove"] = tag;
+        btn.setAttribute("aria-label", `Remove tag #${tag}`);
+        btn.textContent = "×";
+        pill.append(text, btn);
+        refs.tagRowEl.append(pill);
+      }
+      const input = document.createElement("input");
+      input.type = "text";
+      input.className = "editor-tags-input";
+      input.placeholder = tags.length === 0 ? "Add tags" : "Add tag";
+      refs.tagRowEl.append(input);
+    };
+    renderTags([]);
     const instance = mod.initEditor({
-      editorArea: document.querySelector("#editor-area") as HTMLElement,
       emptyState: document.querySelector("#empty-state") as HTMLElement,
+      shellRefs: refs,
+      setTags: renderTags,
+      setSourceMode: () => {},
+      setVisible: () => {},
     });
     ({ showEditor, hideEditor, getCurrentContent, saveCurrentNote, reloadFromDisk } = instance);
   });
@@ -1092,9 +1150,8 @@ describe("editor", () => {
     hideEditor();
   });
 
-  it("revision:restore event updates editor content and marks tab clean", async () => {
+  it("revision restore updates editor content and marks tab clean", async () => {
     const { openTab, getTabs, getActiveTab, markDirty, closeTab } = await import("./tab-state.ts");
-    const { emit } = await import("./events.ts");
 
     mock.on("GET", "/api/note", { content: "# Rev Test", mtime: 1000 });
     await openTab("rev-test.md");
@@ -1104,7 +1161,7 @@ describe("editor", () => {
     markDirty("rev-test.md");
     expect(getActiveTab()!.dirty).toBeTruthy();
 
-    emit("revision:restore", { content: "# Restored Version", mtime: 8000 });
+    restoreRevisionIntoEditor({ content: "# Restored Version", mtime: 8000 });
     await new Promise((r) => setTimeout(r, 50));
 
     const tab = getActiveTab();

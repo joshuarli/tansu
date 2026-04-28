@@ -5,7 +5,7 @@ import { render } from "solid-js/web";
 
 import { getRevision, listRevisions, restoreRevision } from "./api.ts";
 import { DiffView } from "./DiffView.tsx";
-import { emit } from "./events.ts";
+import { restoreRevisionIntoEditor } from "./revision-events.ts";
 import { relativeTime } from "./util.ts";
 
 let hostEl: HTMLElement | null = null;
@@ -126,7 +126,7 @@ async function showRevisions(path: string, host: HTMLElement) {
     }
     const result = await restoreRevision(path, ts);
     const content = await getRevision(path, ts);
-    emit("revision:restore", { content, mtime: result.mtime });
+    restoreRevisionIntoEditor({ content, mtime: result.mtime });
     hideRevisions();
   };
 

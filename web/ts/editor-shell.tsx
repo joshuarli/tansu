@@ -1,5 +1,4 @@
-import { For, createSignal } from "solid-js";
-import { render } from "solid-js/web";
+import { For } from "solid-js";
 
 const SOURCE_ICON =
   '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="5,4 1,8 5,12"/><polyline points="11,4 15,8 11,12"/><line x1="9.5" y1="2" x2="6.5" y2="14"/></svg>';
@@ -19,24 +18,25 @@ export type EditorShellRefs = {
   getTagInputEl(): HTMLInputElement | null;
 };
 
-type EditorShellOptions = {
-  root: HTMLElement;
-  tags: readonly string[];
-  isSourceMode: boolean;
-};
+export function createEditorShellRefs(): EditorShellRefs {
+  return {
+    containerEl: null!,
+    toolbarEl: null!,
+    fmtGroupEl: null!,
+    sourceBtnEl: null!,
+    menuBtnEl: null!,
+    tagRowEl: null!,
+    editorMountEl: null!,
+    revisionsEl: null!,
+    backlinksEl: null!,
+    getTagInputEl: () => null,
+  };
+}
 
-export type EditorShellController = {
-  dispose(): void;
-  refs: EditorShellRefs;
-  setTags(tags: readonly string[]): void;
-  setSourceMode(value: boolean): void;
-};
-
-function EditorShellView(
+export function EditorShell(
   props: Readonly<{
     tags: () => readonly string[];
     isSourceMode: () => boolean;
-    options: EditorShellOptions;
     refs: EditorShellRefs;
   }>,
 ) {
@@ -102,38 +102,4 @@ function EditorShellView(
       <div ref={props.refs.backlinksEl} class="backlinks" style={{ display: "none" }} />
     </>
   );
-}
-
-export function mountEditorShell(options: EditorShellOptions): EditorShellController {
-  const [tags, setTags] = createSignal<readonly string[]>([...options.tags]);
-  const [isSourceMode, setIsSourceMode] = createSignal(options.isSourceMode);
-
-  const refs = {
-    containerEl: null!,
-    toolbarEl: null!,
-    fmtGroupEl: null!,
-    sourceBtnEl: null!,
-    menuBtnEl: null!,
-    tagRowEl: null!,
-    editorMountEl: null!,
-    revisionsEl: null!,
-    backlinksEl: null!,
-    getTagInputEl: () => null,
-  } satisfies EditorShellRefs;
-
-  const dispose = render(
-    () => <EditorShellView tags={tags} isSourceMode={isSourceMode} options={options} refs={refs} />,
-    options.root,
-  );
-
-  return {
-    dispose,
-    refs,
-    setTags(nextTags) {
-      setTags([...nextTags]);
-    },
-    setSourceMode(value) {
-      setIsSourceMode(value);
-    },
-  };
 }

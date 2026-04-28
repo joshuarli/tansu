@@ -1,0 +1,39 @@
+import { stemFromPath } from "@joshuarli98/md-wysiwyg";
+
+import { getNote, renameNote } from "./api.ts";
+import { invalidateNoteCache } from "./autocomplete.ts";
+import { reportActionError } from "./notify.ts";
+import { serverStore } from "./server-store.ts";
+import { getActiveTab, updateTabContent, updateTabPath } from "./tab-state.ts";
+
+export async function renameNoteAndRefresh(oldPath: string, newPath: string): Promise<void> {
+  try {
+    const result = await renameNote(oldPath, newPath);
+    invalidateNoteCache();
+    serverStore.notifyFilesChanged();
+    updateTabPath(oldPath, newPath);
+
+    await Promise.all(
+      result.updated.map(async (updated) => {
+        try {
+          const note = await getNote(updated);
+          updateTabContent(updated, note.content, note.mtime, note.tags);
+        } catch {
+          /* ignore reload failures */
+        }
+      }),
+    );
+
+    const active = getActiveTab();
+    if (active?.path === newPath) {
+      try {
+        const note = await getNote(newPath);
+        updateTabContent(newPath, note.content, note.mtime, note.tags);
+      } catch {
+        /* ignore reload failures */
+      }
+    }
+  } catch (error) {
+    reportActionError(`Failed to rename ${stemFromPath(oldPath)}`, error);
+  }
+}

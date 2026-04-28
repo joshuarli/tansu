@@ -1,15 +1,31 @@
-import { emit, on } from "./events.ts";
+import { render } from "solid-js/web";
+
+import { Sidebar } from "./filenav.tsx";
+import { serverStore } from "./server-store.ts";
 import { setupDOM, mockFetch } from "./test-helper.ts";
+import { uiStore } from "./ui-store.ts";
 
 const tick = () => new Promise<void>((r) => setTimeout(r, 0));
 const drain = () => new Promise<void>((r) => setTimeout(r, 50));
 const activeCount = () => document.querySelectorAll(".nav-file.active").length;
 
-describe("filenav", () => {
-  type NotificationEvent = { msg: string; type: "error" | "info" | "success" };
+function emit(
+  event: "files:changed" | "pinned:changed" | "vault:switched",
+  data?: { savedPath?: string },
+) {
+  if (event === "files:changed") {
+    serverStore.notifyFilesChanged(data?.savedPath);
+    return;
+  }
+  if (event === "pinned:changed") {
+    serverStore.notifyPinnedChanged();
+    return;
+  }
+  void serverStore.handleVaultSwitched();
+}
 
+describe("filenav", () => {
   let cleanup: () => void;
-  let navCleanup: () => void;
   let mock: ReturnType<typeof mockFetch>;
   let openTab: (path: string) => Promise<unknown>;
   let closeTab: (i: number) => void;
@@ -17,6 +33,8 @@ describe("filenav", () => {
 
   beforeAll(async () => {
     cleanup = setupDOM();
+    const { delegateEvents } = await import("solid-js/web");
+    delegateEvents(["click", "input", "change", "keydown", "contextmenu", "auxclick"]);
     mock = mockFetch();
     const inputDialogMod = await import("./input-dialog.tsx");
     inputDialogMod.initInputDialog(document.querySelector("#input-dialog-overlay") as HTMLElement);
@@ -39,17 +57,19 @@ describe("filenav", () => {
       closeTab(0);
     }
 
-    const navMod = await import("./filenav.tsx");
-    navCleanup = await navMod.initFileNav({
-      container: document.querySelector("#sidebar-tree") as HTMLElement,
-      collapseBtn: document.querySelector("#sidebar-collapse") as HTMLButtonElement,
-      appEl: document.querySelector("#app") as HTMLElement,
-      searchInput: document.querySelector("#sidebar-search") as HTMLInputElement,
-    });
+    const root = document.querySelector("#app") as HTMLElement;
+    const sidebarHost = document.querySelector("#sidebar") as HTMLElement;
+    sidebarHost.innerHTML = "";
+    render(
+      () =>
+        Sidebar({
+          appEl: root,
+        }),
+      sidebarHost,
+    );
   });
 
   afterAll(() => {
-    navCleanup();
     mock.restore();
     cleanup();
   });
@@ -70,7 +90,7 @@ describe("filenav", () => {
       { path: "notes/beta.md", title: "beta", mtime: 1000 },
     ]);
     mock.on("GET", "/api/pinned", []);
-    emit("pinned:changed");
+    serverStore.notifyPinnedChanged();
     await drain();
     while (getTabs().length > 0) {
       closeTab(0);
@@ -85,8 +105,8 @@ describe("filenav", () => {
     await tick();
 
     // Simulate local save emit + SSE emit fired in the same tick
-    emit("files:changed");
-    emit("files:changed");
+    serverStore.notifyFilesChanged();
+    serverStore.notifyFilesChanged();
 
     await drain();
 
@@ -100,7 +120,7 @@ describe("filenav", () => {
     await openTab("notes/alpha.md");
     await tick();
 
-    emit("files:changed");
+    serverStore.notifyFilesChanged();
     await drain();
     emit("files:changed");
     await drain();
@@ -115,8 +135,8 @@ describe("filenav", () => {
     await openTab("notes/alpha.md");
     await tick();
 
-    emit("files:changed");
-    emit("files:changed");
+    serverStore.notifyFilesChanged();
+    serverStore.notifyFilesChanged();
 
     await drain();
 
@@ -131,7 +151,7 @@ describe("filenav", () => {
     await tick();
 
     // Emit files:changed to start an in-flight render (it will await network)
-    emit("files:changed");
+    serverStore.notifyFilesChanged();
 
     // Immediately emit tab:change (simulates switching tab while render is in-flight)
     // openTab triggers tab:change via notifyChange → onTabChange
@@ -150,10 +170,10 @@ describe("filenav", () => {
     await tick();
 
     // Fire many events in rapid succession: save + SSE + tab switch all at once
-    emit("files:changed"); // local save
-    emit("files:changed"); // SSE
+    serverStore.notifyFilesChanged();
+    serverStore.notifyFilesChanged();
     await openTab("notes/beta.md"); // tab switch triggers tab:change
-    emit("files:changed"); // extra SSE (e.g. second watcher event)
+    serverStore.notifyFilesChanged();
 
     await drain();
 
@@ -182,8 +202,8 @@ describe("filenav", () => {
       10,
     );
 
-    emit("files:changed");
-    emit("files:changed");
+    serverStore.notifyFilesChanged();
+    serverStore.notifyFilesChanged();
 
     // tab:change fires synchronously when switching tabs
     await openTab("notes/beta.md");
@@ -490,12 +510,13 @@ describe("filenav", () => {
     expect((getTabs()[0] as { path: string }).path).toBe("notes/click-me.md");
   });
 
-  it("rename action in context menu emits file:rename via the typed bus", async () => {
+  it("rename action in context menu calls rename API with the new path", async () => {
     while (getTabs().length > 0) {
       closeTab(0);
     }
     mock.on("GET", "/api/recentfiles", [{ path: "notes/alpha.md", title: "alpha", mtime: 2000 }]);
     mock.on("GET", "/api/pinned", []);
+    mock.on("POST", "/api/rename", { updated: [] });
 
     emit("files:changed");
     await drain();
@@ -507,26 +528,22 @@ describe("filenav", () => {
     );
     await tick();
 
-    let renameDetail: { oldPath: string; newPath: string } | null = null;
-    const offRename = on("file:rename", (detail) => {
-      renameDetail = detail;
-    });
-
     const items = document.body.querySelectorAll(".context-menu-item");
     (items[0] as HTMLElement).click(); // Rename...
-    await tick();
+    await new Promise((r) => setTimeout(r, 20));
 
     const dialogInput = document.querySelector("#input-dialog-input") as HTMLInputElement;
     dialogInput.value = "alpha-renamed";
     dialogInput.dispatchEvent(
       new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }),
     );
-    await tick();
+    await drain();
 
-    offRename();
-    expect(renameDetail !== null).toBeTruthy();
-    expect(renameDetail!.oldPath).toBe("notes/alpha.md");
-    expect(renameDetail!.newPath).toBe("notes/alpha-renamed.md");
+    const renameReq = mock.requests.find(
+      (req) => req.method === "POST" && req.url === "/api/rename",
+    );
+    expect(renameReq?.body).toContain('"old_path":"notes/alpha.md"');
+    expect(renameReq?.body).toContain('"new_path":"notes/alpha-renamed.md"');
   });
 
   it("delete action in context menu calls deleteNote API", async () => {
@@ -561,11 +578,6 @@ describe("filenav", () => {
     mock.on("GET", "/api/pinned", []);
     mock.on("DELETE", "/api/note", { error: "delete failed" }, 500);
 
-    const notifications: NotificationEvent[] = [];
-    const offNotification = on("notification", (data) => {
-      notifications.push(data);
-    });
-
     emit("files:changed");
     await drain();
 
@@ -580,15 +592,9 @@ describe("filenav", () => {
     (items[2] as HTMLElement).click();
     await drain();
 
-    const notification = notifications.at(-1);
-    if (!notification) {
-      throw new Error("expected notification");
-    }
-    expect(notification.type).toBe("error");
-    expect(notification.msg).toContain("Failed to delete alpha");
-    expect(notification.msg).toContain("delete failed");
-
-    offNotification();
+    expect(uiStore.notification().type).toBe("error");
+    expect(uiStore.notification().msg).toContain("Failed to delete alpha");
+    expect(uiStore.notification().msg).toContain("delete failed");
   });
 
   it("active element is the correct one (not stale) after save", async () => {

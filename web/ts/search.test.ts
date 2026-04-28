@@ -1,17 +1,29 @@
+import { render } from "solid-js/web";
+
+import { SearchModal } from "./search.tsx";
 import { setupDOM, mockFetch } from "./test-helper.ts";
+import { uiStore } from "./ui-store.ts";
 
 describe("search", () => {
   let cleanup: () => void;
   let mock: ReturnType<typeof mockFetch>;
-  let toggle: () => void;
-  let open: (filterPath?: string) => void;
-  let close: () => void;
-  let isOpen: () => boolean;
   let openTabCalled = false;
   let openTabPath = "";
 
+  async function openSearch(scopePath?: string) {
+    uiStore.openSearch(scopePath);
+    await new Promise((r) => setTimeout(r, 0));
+  }
+
+  async function closeSearch() {
+    uiStore.closeSearch();
+    await new Promise((r) => setTimeout(r, 0));
+  }
+
   beforeAll(async () => {
     cleanup = setupDOM();
+    const { delegateEvents } = await import("solid-js/web");
+    delegateEvents(["click", "input", "change", "keydown", "contextmenu", "auxclick"]);
     mock = mockFetch();
 
     mock.on("GET", "/api/settings", {
@@ -39,19 +51,17 @@ describe("search", () => {
       },
     ]);
 
-    const { initSearch } = await import("./search.tsx");
-    const s = initSearch({
-      root: document.querySelector("#search-root") as HTMLElement,
-      openTab: async (path: string) => {
-        openTabCalled = true;
-        openTabPath = path;
-      },
-      invalidateNoteCache: () => {},
-    });
-    ({ toggle } = s);
-    ({ open } = s);
-    ({ close } = s);
-    ({ isOpen } = s);
+    render(
+      () =>
+        SearchModal({
+          openTab: async (path: string) => {
+            openTabCalled = true;
+            openTabPath = path;
+          },
+          invalidateNoteCache: () => {},
+        }),
+      document.querySelector("#search-root") as HTMLElement,
+    );
   });
 
   afterAll(() => {
@@ -60,18 +70,18 @@ describe("search", () => {
   });
 
   beforeEach(() => {
-    close();
+    uiStore.closeSearch();
     openTabCalled = false;
     openTabPath = "";
   });
 
-  it("search basic lifecycle", () => {
+  it("search basic lifecycle", async () => {
     // Initially closed
-    expect(isOpen()).toBeFalsy();
+    expect(uiStore.searchOpen()).toBeFalsy();
 
     // Open
-    open();
-    expect(isOpen()).toBeTruthy();
+    await openSearch();
+    expect(uiStore.searchOpen()).toBeTruthy();
     const overlay = document.querySelector("#search-overlay") as HTMLElement;
     expect(overlay.classList.contains("hidden")).toBeFalsy();
 
@@ -80,34 +90,36 @@ describe("search", () => {
     expect(input.value).toBe("");
 
     // Close
-    close();
-    expect(isOpen()).toBeFalsy();
+    await closeSearch();
+    expect(uiStore.searchOpen()).toBeFalsy();
     expect(overlay.classList.contains("hidden")).toBeTruthy();
 
     // Toggle
-    toggle();
-    expect(isOpen()).toBeTruthy();
-    toggle();
-    expect(isOpen()).toBeFalsy();
+    uiStore.toggleSearch();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(uiStore.searchOpen()).toBeTruthy();
+    uiStore.toggleSearch();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(uiStore.searchOpen()).toBeFalsy();
 
     // Open with scope
-    open("notes/a.md");
-    expect(isOpen()).toBeTruthy();
+    await openSearch("notes/a.md");
+    expect(uiStore.searchOpen()).toBeTruthy();
     expect(input.placeholder).toBe("Find in note...");
-    close();
+    await closeSearch();
 
     // Open without scope
-    open();
+    await openSearch();
     expect(input.placeholder).toBe("Search notes...");
 
     // Keyboard: Escape closes
     input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
-    expect(isOpen()).toBeFalsy();
+    expect(uiStore.searchOpen()).toBeFalsy();
 
     // Overlay click closes
-    open();
+    await openSearch();
     overlay.click();
-    expect(isOpen()).toBeFalsy();
+    expect(uiStore.searchOpen()).toBeFalsy();
   });
 
   it("search results and keyboard nav", async () => {
@@ -125,7 +137,7 @@ describe("search", () => {
     ]);
 
     // Type in search box → results render
-    open();
+    await openSearch();
     input.value = "alpha";
     input.dispatchEvent(new Event("input"));
     await new Promise((r) => setTimeout(r, 200));
@@ -171,12 +183,12 @@ describe("search", () => {
     openTabCalled = false;
     input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
     await new Promise((r) => setTimeout(r, 10));
-    expect(isOpen()).toBeFalsy();
+    expect(uiStore.searchOpen()).toBeFalsy();
     expect(openTabCalled).toBeTruthy();
     expect(openTabPath).toBe("a.md");
 
     // Click on result closes search
-    open();
+    await openSearch();
     input.value = "alpha";
     input.dispatchEvent(new Event("input"));
     await new Promise((r) => setTimeout(r, 200));
@@ -184,16 +196,16 @@ describe("search", () => {
     const clickResult = resultsEl.children[0]! as HTMLElement;
     clickResult.click();
     await new Promise((r) => setTimeout(r, 10));
-    expect(isOpen()).toBeFalsy();
+    expect(uiStore.searchOpen()).toBeFalsy();
     expect(openTabCalled).toBeTruthy();
 
     // Empty query clears results (no search results, no Create option)
-    open();
+    await openSearch();
     input.value = "";
     input.dispatchEvent(new Event("input"));
     await new Promise((r) => setTimeout(r, 200));
     expect(resultsEl.children).toHaveLength(0);
-    close();
+    await closeSearch();
   });
 
   it("scoped search sends the path and suppresses the create-note option", async () => {
@@ -212,7 +224,7 @@ describe("search", () => {
       },
     ]);
 
-    open("notes/alpha.md");
+    await openSearch("notes/alpha.md");
     input.value = "alpha";
     input.dispatchEvent(new Event("input"));
     await new Promise((r) => setTimeout(r, 200));
@@ -223,7 +235,7 @@ describe("search", () => {
     expect(resultsEl.querySelector(".search-result")?.textContent).toContain("Alpha");
     expect(resultsEl.querySelector(".search-create")).toBeNull();
 
-    close();
+    await closeSearch();
   });
 
   it("score breakdown is hidden when the setting is disabled", async () => {
@@ -252,7 +264,7 @@ describe("search", () => {
       },
     ]);
 
-    open();
+    await openSearch();
     await new Promise((r) => setTimeout(r, 50));
     input.value = "alpha";
     input.dispatchEvent(new Event("input"));
@@ -263,7 +275,7 @@ describe("search", () => {
     expect(firstResult!.querySelector(".score")).toBeNull();
     expect(firstResult!.textContent!).not.toContain("title:");
 
-    close();
+    await closeSearch();
     mock.on("GET", "/api/settings", {
       weight_title: 10,
       weight_headings: 5,
@@ -300,7 +312,7 @@ describe("search", () => {
       },
     ]);
 
-    open();
+    await openSearch();
     input.value = "alpha";
     input.dispatchEvent(new Event("input"));
     await new Promise((r) => setTimeout(r, 200));
@@ -315,7 +327,7 @@ describe("search", () => {
     input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
     expect(children[0]!.classList.contains("selected")).toBeTruthy();
 
-    close();
+    await closeSearch();
   });
 
   it("search API error clears results", async () => {
@@ -324,7 +336,7 @@ describe("search", () => {
 
     mock.on("GET", "/api/search", { error: "fail" }, 500);
 
-    open();
+    await openSearch();
     input.value = "broken query";
     input.dispatchEvent(new Event("input"));
     await new Promise((r) => setTimeout(r, 200));
@@ -336,7 +348,7 @@ describe("search", () => {
     expect(createEl !== null).toBeTruthy();
     expect(createEl!.textContent!).toContain("broken query");
 
-    close();
+    await closeSearch();
 
     mock.on("GET", "/api/search", [
       {
@@ -358,7 +370,7 @@ describe("search", () => {
     mock.on("POST", "/api/note", { mtime: 9999 });
 
     openTabCalled = false;
-    open();
+    await openSearch();
     input.value = "my new note";
     input.dispatchEvent(new Event("input"));
     await new Promise((r) => setTimeout(r, 200));
@@ -372,7 +384,7 @@ describe("search", () => {
 
     expect(openTabCalled).toBeTruthy();
     expect(openTabPath).toBe("my new note.md");
-    expect(isOpen()).toBeFalsy();
+    expect(uiStore.searchOpen()).toBeFalsy();
 
     mock.on("GET", "/api/search", [
       {
@@ -388,10 +400,10 @@ describe("search", () => {
 
   it("open() handles getSettings failure gracefully without crashing", async () => {
     mock.on("GET", "/api/settings", { error: "fail" }, 500);
-    open();
+    await openSearch();
     await new Promise((r) => setTimeout(r, 100));
-    expect(isOpen()).toBeTruthy();
-    close();
+    expect(uiStore.searchOpen()).toBeTruthy();
+    await closeSearch();
     mock.on("GET", "/api/settings", {
       weight_title: 10,
       weight_headings: 5,
@@ -413,7 +425,7 @@ describe("search", () => {
     mock.on("POST", "/api/note", { mtime: 9999 });
 
     openTabCalled = false;
-    open();
+    await openSearch();
     input.value = "enter-create-test";
     input.dispatchEvent(new Event("input"));
     await new Promise((r) => setTimeout(r, 200));
@@ -429,7 +441,7 @@ describe("search", () => {
 
     expect(openTabCalled).toBeTruthy();
     expect(openTabPath).toBe("enter-create-test.md");
-    expect(isOpen()).toBeFalsy();
+    expect(uiStore.searchOpen()).toBeFalsy();
 
     mock.on("GET", "/api/search", [
       {
@@ -468,7 +480,7 @@ describe("search", () => {
 
     openTabCalled = false;
     openTabPath = "";
-    open();
+    await openSearch();
     input.value = "test";
     input.dispatchEvent(new Event("input"));
     await new Promise((r) => setTimeout(r, 200));
@@ -523,11 +535,11 @@ describe("search", () => {
       },
     ]);
 
-    open("file-a.md");
+    await openSearch("file-a.md");
     input.value = "scoped";
     input.dispatchEvent(new Event("input"));
-    close();
-    open("file-b.md");
+    await closeSearch();
+    await openSearch("file-b.md");
     input.value = "scoped";
     input.dispatchEvent(new Event("input"));
 
@@ -537,7 +549,7 @@ describe("search", () => {
     const titles = results.map((el) => el.textContent ?? "");
     expect(titles.some((t) => t.includes("ScopedB"))).toBeTruthy();
     expect(titles.some((t) => t.includes("ScopedA"))).toBeFalsy();
-    close();
+    await closeSearch();
 
     mock.on("GET", "/api/search", [
       {
@@ -581,7 +593,7 @@ describe("search", () => {
       },
     ]);
 
-    open();
+    await openSearch();
     input.value = "alpha";
     input.dispatchEvent(new Event("input"));
     input.value = "beta";

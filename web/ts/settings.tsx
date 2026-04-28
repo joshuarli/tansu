@@ -1,5 +1,4 @@
-import { For, Show, createSignal } from "solid-js";
-import { render } from "solid-js/web";
+import { For, Show, createEffect, createSignal } from "solid-js";
 
 import {
   getSettings,
@@ -33,14 +32,8 @@ import { getEditorHandle, getEditorPrefs, saveEditorPrefs, type EditorPrefs } fr
 import { showInputDialog } from "./input-dialog.tsx";
 import { reportActionError } from "./notify.ts";
 import { createFocusRestorer, OverlayFrame } from "./overlay.tsx";
+import { uiStore } from "./ui-store.ts";
 import { createPrfCredential, isPrfLikelySupported } from "./webauthn.ts";
-
-type SettingsPanel = {
-  toggle(): void;
-  open(): Promise<void>;
-  close(): void;
-  isOpen(): boolean;
-};
 
 const defaultSettings = (): Settings => ({
   weight_title: SETTINGS_WEIGHT_TITLE_DEFAULT,
@@ -309,22 +302,20 @@ function SettingsView(props: Readonly<SettingsViewProps>) {
   );
 }
 
-export function createSettings(container: HTMLElement): SettingsPanel {
+export function SettingsModal() {
   const focus = createFocusRestorer();
-  const [isOpen, setIsOpen] = createSignal(false);
   const [current, setCurrent] = createSignal<Settings | null>(null);
   const [editorPrefs, setEditorPrefs] = createSignal<EditorPrefs>(getEditorPrefs());
   const [status, setStatus] = createSignal<AppStatus | null>(null);
   const [securityStatus, setSecurityStatus] = createSignal("");
 
   function close() {
-    setIsOpen(false);
+    uiStore.closeSettings();
     focus.restore();
   }
 
   async function open() {
     focus.remember();
-    setIsOpen(true);
     setSecurityStatus("");
     setEditorPrefs(getEditorPrefs());
     try {
@@ -336,14 +327,6 @@ export function createSettings(container: HTMLElement): SettingsPanel {
       setStatus(await getStatus());
     } catch {
       setStatus(null);
-    }
-  }
-
-  function toggle() {
-    if (isOpen()) {
-      close();
-    } else {
-      void open();
     }
   }
 
@@ -404,66 +387,67 @@ export function createSettings(container: HTMLElement): SettingsPanel {
     close();
   }
 
-  render(
-    () => (
-      <OverlayFrame id="settings-overlay" isOpen={isOpen()} onClose={close}>
-        <div id="settings-panel" role="dialog" aria-modal="true" aria-label="Settings">
-          <SettingsView
-            current={current}
-            status={status}
-            securityStatus={securityStatus}
-            onRange={(key, value) => {
-              setCurrent((prev) => (prev ? { ...prev, [key]: Number.parseFloat(value) } : prev));
-            }}
-            onSelect={(key, value) => {
-              setCurrent((prev) => (prev ? { ...prev, [key]: Number.parseInt(value, 10) } : prev));
-            }}
-            onNumber={(key, value) => {
-              setCurrent((prev) => (prev ? { ...prev, [key]: Number.parseInt(value, 10) } : prev));
-            }}
-            onCheckbox={(key, checked) => {
-              setCurrent((prev) => (prev ? { ...prev, [key]: checked } : prev));
-            }}
-            onFolders={(value) => {
-              setCurrent((prev) =>
-                prev
-                  ? {
-                      ...prev,
-                      excluded_folders: normalizeExcludedFolders(value.split(",")),
-                    }
-                  : prev,
-              );
-            }}
-            onFoldersKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault();
-                void save();
-              }
-            }}
-            onSave={() => {
-              void save();
-            }}
-            onClose={close}
-            onRemovePrf={(id) => {
-              void removeCredential(id);
-            }}
-            onAddPrf={() => {
-              void addCredential();
-            }}
-            onLock={() => {
-              void lockNow();
-            }}
-            editorPrefs={editorPrefs}
-            onEditorUndoStackMax={(value) => {
-              const n = Number.parseInt(value, 10);
-              if (!Number.isNaN(n)) setEditorPrefs((prev) => ({ ...prev, undoStackMax: n }));
-            }}
-          />
-        </div>
-      </OverlayFrame>
-    ),
-    container,
-  );
+  createEffect(() => {
+    if (uiStore.settingsOpen()) {
+      void open();
+    }
+  });
 
-  return { toggle, open, close, isOpen };
+  return (
+    <OverlayFrame id="settings-overlay" isOpen={uiStore.settingsOpen()} onClose={close}>
+      <div id="settings-panel" role="dialog" aria-modal="true" aria-label="Settings">
+        <SettingsView
+          current={current}
+          status={status}
+          securityStatus={securityStatus}
+          onRange={(key, value) => {
+            setCurrent((prev) => (prev ? { ...prev, [key]: Number.parseFloat(value) } : prev));
+          }}
+          onSelect={(key, value) => {
+            setCurrent((prev) => (prev ? { ...prev, [key]: Number.parseInt(value, 10) } : prev));
+          }}
+          onNumber={(key, value) => {
+            setCurrent((prev) => (prev ? { ...prev, [key]: Number.parseInt(value, 10) } : prev));
+          }}
+          onCheckbox={(key, checked) => {
+            setCurrent((prev) => (prev ? { ...prev, [key]: checked } : prev));
+          }}
+          onFolders={(value) => {
+            setCurrent((prev) =>
+              prev
+                ? {
+                    ...prev,
+                    excluded_folders: normalizeExcludedFolders(value.split(",")),
+                  }
+                : prev,
+            );
+          }}
+          onFoldersKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              void save();
+            }
+          }}
+          onSave={() => {
+            void save();
+          }}
+          onClose={close}
+          onRemovePrf={(id) => {
+            void removeCredential(id);
+          }}
+          onAddPrf={() => {
+            void addCredential();
+          }}
+          onLock={() => {
+            void lockNow();
+          }}
+          editorPrefs={editorPrefs}
+          onEditorUndoStackMax={(value) => {
+            const n = Number.parseInt(value, 10);
+            if (!Number.isNaN(n)) setEditorPrefs((prev) => ({ ...prev, undoStackMax: n }));
+          }}
+        />
+      </div>
+    </OverlayFrame>
+  );
 }

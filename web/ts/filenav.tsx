@@ -1,6 +1,5 @@
 import { stemFromPath } from "@joshuarli98/md-wysiwyg";
 import { For, Match, Show, Switch, createEffect, createMemo, createSignal } from "solid-js";
-import { render } from "solid-js/web";
 
 import {
   getPinnedFiles,
@@ -11,10 +10,11 @@ import {
   type RecentFileEntry,
 } from "./api.ts";
 import { showContextMenu } from "./context-menu.tsx";
-import { on } from "./events.ts";
 import { buildFileContextMenuItems } from "./file-actions.ts";
+import { serverStore } from "./server-store.ts";
 import { closeTabByPath, getActiveTab, openTab } from "./tab-state.ts";
 import { relativeTime } from "./util.ts";
+import { VaultSwitcher } from "./vault-switcher.tsx";
 
 type NavRow = {
   path: string;
@@ -24,13 +24,6 @@ type NavRow = {
   dir: string | null;
   isPinned: boolean;
   onContextMenu: (e: MouseEvent) => void;
-};
-
-type FileNavElements = {
-  container: HTMLElement;
-  collapseBtn: HTMLButtonElement;
-  appEl: HTMLElement;
-  searchInput: HTMLInputElement;
 };
 
 function showNavContextMenu(
@@ -57,7 +50,6 @@ function showNavContextMenu(
 function FileRow(props: Readonly<NavRow>) {
   let el!: HTMLDivElement;
 
-  // Scroll into view when this row becomes active (e.g. after tab switch).
   createEffect(() => {
     if (props.active) {
       queueMicrotask(() => el.scrollIntoView({ block: "center" }));
@@ -88,7 +80,7 @@ function FileRow(props: Readonly<NavRow>) {
   );
 }
 
-export async function initFileNav(elements: FileNavElements): Promise<() => void> {
+export function Sidebar(props: Readonly<{ appEl: HTMLElement }>) {
   const [currentMode, setCurrentMode] = createSignal<"recent" | "search">("recent");
   const [pinnedFiles, setPinnedFiles] = createSignal<PinnedFileEntry[]>([]);
   const [pinnedPaths, setPinnedPaths] = createSignal(new Set<string>());
@@ -97,15 +89,14 @@ export async function initFileNav(elements: FileNavElements): Promise<() => void
   const [currentQuery, setCurrentQuery] = createSignal("");
   const [recentError, setRecentError] = createSignal(false);
   const [searchError, setSearchError] = createSignal(false);
-  let renderQueued = false;
-  let renderInFlight = false;
+  const [collapsed, setCollapsed] = createSignal(false);
   let searchGen = 0;
 
   async function refreshPinned(): Promise<void> {
     try {
       const files = await getPinnedFiles();
       setPinnedFiles(files);
-      setPinnedPaths(new Set(files.map((f) => f.path)));
+      setPinnedPaths(new Set(files.map((file) => file.path)));
     } catch {
       /* keep stale data */
     }
@@ -113,15 +104,18 @@ export async function initFileNav(elements: FileNavElements): Promise<() => void
 
   function updateRecentOnSave(savedPath: string): void {
     const nowSecs = Math.floor(Date.now() / 1000);
-    const existing = recentFiles().find((f) => f.path === savedPath);
+    const existing = recentFiles().find((file) => file.path === savedPath);
     setRecentFiles(
       existing
-        ? [{ ...existing, mtime: nowSecs }, ...recentFiles().filter((f) => f.path !== savedPath)]
+        ? [
+            { ...existing, mtime: nowSecs },
+            ...recentFiles().filter((file) => file.path !== savedPath),
+          ]
         : [{ path: savedPath, title: "", mtime: nowSecs }, ...recentFiles()],
     );
   }
 
-  async function renderRecent(): Promise<void> {
+  async function refreshRecent(): Promise<void> {
     try {
       setRecentFiles(await getRecentFiles());
       setRecentError(false);
@@ -130,109 +124,132 @@ export async function initFileNav(elements: FileNavElements): Promise<() => void
     }
   }
 
-  async function renderSearch(q: string): Promise<void> {
+  async function refreshSearch(query: string): Promise<void> {
     const gen = ++searchGen;
     try {
-      const results = await searchFileNames(q);
-      if (gen !== searchGen) return;
+      const results = await searchFileNames(query);
+      if (gen !== searchGen) {
+        return;
+      }
       setSearchResults(results);
       setSearchError(false);
     } catch {
-      if (gen !== searchGen) return;
+      if (gen !== searchGen) {
+        return;
+      }
       setSearchResults([]);
       setSearchError(true);
     }
   }
 
-  async function renderNav(): Promise<void> {
-    await (currentMode() === "search" && currentQuery().trim()
-      ? renderSearch(currentQuery())
-      : renderRecent());
+  async function refreshNav(): Promise<void> {
+    await refreshPinned();
+    if (currentMode() === "search" && currentQuery().trim()) {
+      await refreshSearch(currentQuery());
+      return;
+    }
+    await refreshRecent();
   }
 
-  function NavView() {
-    const recentNonPinned = createMemo(() =>
-      recentFiles().filter((f) => !pinnedPaths().has(f.path)),
-    );
+  createEffect(() => {
+    const change = serverStore.fileChange();
+    if (change.version === 0) {
+      void refreshNav();
+      return;
+    }
+    if (change.savedPath) {
+      updateRecentOnSave(change.savedPath);
+      return;
+    }
+    void refreshNav();
+  });
 
-    return (
-      <Switch>
-        <Match when={currentMode() === "search" && searchError()}>
-          <div class="nav-empty">Search failed</div>
-        </Match>
-        <Match when={currentMode() === "search" && searchResults().length === 0}>
-          <div class="nav-empty">No matches</div>
-        </Match>
-        <Match when={currentMode() === "search"}>
-          <For each={searchResults()}>
-            {(result) => (
-              <FileRow
-                path={result.path}
-                title={result.title}
-                active={result.path === getActiveTab()?.path}
-                timeLabel={null}
-                dir={
-                  result.path.includes("/")
-                    ? result.path.slice(0, result.path.lastIndexOf("/"))
-                    : null
-                }
-                isPinned={false}
-                onContextMenu={(e) =>
-                  showNavContextMenu(
-                    e,
-                    result.path,
-                    result.title || stemFromPath(result.path),
-                    false,
-                    refreshPinned,
-                  )
-                }
-              />
-            )}
-          </For>
-        </Match>
-        <Match when={recentError()}>
-          <div class="nav-empty">Failed to load</div>
-        </Match>
-        <Match when={pinnedFiles().length === 0 && recentNonPinned().length === 0}>
-          <div class="nav-empty">No files</div>
-        </Match>
-        <Match when={true}>
-          <>
-            <For each={pinnedFiles()}>
-              {(file) => (
+  createEffect(() => {
+    serverStore.pinnedVersion();
+    void refreshPinned();
+  });
+
+  createEffect(() => {
+    serverStore.vaultVersion();
+    void refreshNav();
+  });
+
+  const recentNonPinned = createMemo(() =>
+    recentFiles().filter((file) => !pinnedPaths().has(file.path)),
+  );
+
+  return (
+    <div id="sidebar" class={collapsed() ? "sidebar-collapsed" : ""}>
+      <div class="sidebar-header">
+        <input
+          id="sidebar-search"
+          type="text"
+          placeholder="Filter files..."
+          aria-label="Filter files"
+          autocomplete="off"
+          spellcheck={false}
+          value={currentQuery()}
+          onInput={(e) => {
+            const query = e.currentTarget.value;
+            setCurrentQuery(query);
+            if (query.trim()) {
+              setCurrentMode("search");
+            } else {
+              setCurrentMode("recent");
+            }
+            void refreshNav();
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Escape" && currentMode() === "search") {
+              e.currentTarget.value = "";
+              setCurrentQuery("");
+              setCurrentMode("recent");
+              void refreshNav();
+            }
+          }}
+        />
+        <button
+          id="sidebar-collapse"
+          title={collapsed() ? "Expand sidebar" : "Collapse sidebar"}
+          aria-label={collapsed() ? "Expand sidebar" : "Collapse sidebar"}
+          onClick={() => {
+            setCollapsed((value) => !value);
+            props.appEl.classList.toggle("sidebar-collapsed");
+          }}
+        >
+          {collapsed() ? "\u203A" : "\u2039"}
+        </button>
+      </div>
+      <div id="vault-switcher">
+        <VaultSwitcher />
+      </div>
+      <div id="sidebar-tree">
+        <Switch>
+          <Match when={currentMode() === "search" && searchError()}>
+            <div class="nav-empty">Search failed</div>
+          </Match>
+          <Match when={currentMode() === "search" && searchResults().length === 0}>
+            <div class="nav-empty">No matches</div>
+          </Match>
+          <Match when={currentMode() === "search"}>
+            <For each={searchResults()}>
+              {(result) => (
                 <FileRow
-                  path={file.path}
-                  title={file.title}
-                  active={file.path === getActiveTab()?.path}
+                  path={result.path}
+                  title={result.title}
+                  active={result.path === getActiveTab()?.path}
                   timeLabel={null}
-                  dir={null}
-                  isPinned={true}
-                  onContextMenu={(e) =>
-                    showNavContextMenu(
-                      e,
-                      file.path,
-                      file.title || stemFromPath(file.path),
-                      true,
-                      refreshPinned,
-                    )
+                  dir={
+                    result.path.includes("/")
+                      ? result.path.slice(0, result.path.lastIndexOf("/"))
+                      : null
                   }
-                />
-              )}
-            </For>
-            <For each={recentNonPinned()}>
-              {(file) => (
-                <FileRow
-                  path={file.path}
-                  title={file.title}
-                  active={file.path === getActiveTab()?.path}
-                  timeLabel={relativeTime(file.mtime * 1000)}
-                  dir={null}
                   isPinned={false}
                   onContextMenu={(e) =>
                     showNavContextMenu(
                       e,
-                      file.path,
-                      file.title || stemFromPath(file.path),
+                      result.path,
+                      result.title || stemFromPath(result.path),
                       false,
                       refreshPinned,
                     )
@@ -240,88 +257,61 @@ export async function initFileNav(elements: FileNavElements): Promise<() => void
                 />
               )}
             </For>
-          </>
-        </Match>
-      </Switch>
-    );
-  }
-
-  await refreshPinned();
-  await renderNav();
-
-  // Mount the nav view once; signals drive all subsequent updates.
-  let dispose: (() => void) | null = null;
-  dispose = render(() => <NavView />, elements.container);
-
-  const onCollapse = () => {
-    const collapsed = elements.appEl.classList.toggle("sidebar-collapsed");
-    elements.collapseBtn.textContent = collapsed ? "\u203A" : "\u2039";
-    const label = collapsed ? "Expand sidebar" : "Collapse sidebar";
-    elements.collapseBtn.title = label;
-    elements.collapseBtn.setAttribute("aria-label", label);
-  };
-
-  const onInput = () => {
-    const q = elements.searchInput.value;
-    setCurrentQuery(q);
-    if (q.trim()) {
-      setCurrentMode("search");
-    } else if (currentMode() === "search") {
-      setCurrentMode("recent");
-    }
-    void renderNav();
-  };
-
-  const onKeydown = (e: KeyboardEvent) => {
-    if (e.key === "Escape" && currentMode() === "search") {
-      elements.searchInput.value = "";
-      setCurrentQuery("");
-      setCurrentMode("recent");
-      void renderNav();
-    }
-  };
-
-  elements.collapseBtn.addEventListener("click", onCollapse);
-  elements.searchInput.addEventListener("input", onInput);
-  elements.searchInput.addEventListener("keydown", onKeydown);
-
-  const offFilesChanged = on("files:changed", async (data) => {
-    if (data?.savedPath) {
-      updateRecentOnSave(data.savedPath);
-      return;
-    }
-
-    if (renderInFlight) {
-      renderQueued = true;
-      return;
-    }
-    renderInFlight = true;
-    try {
-      await renderNav();
-      if (renderQueued) {
-        renderQueued = false;
-        await renderNav();
-      }
-    } finally {
-      renderInFlight = false;
-      renderQueued = false;
-    }
-  });
-  const offPinnedChanged = on("pinned:changed", async () => {
-    await refreshPinned();
-  });
-  const offVaultSwitched = on("vault:switched", async () => {
-    await refreshPinned();
-    await renderNav();
-  });
-
-  return () => {
-    elements.collapseBtn.removeEventListener("click", onCollapse);
-    elements.searchInput.removeEventListener("input", onInput);
-    elements.searchInput.removeEventListener("keydown", onKeydown);
-    offFilesChanged();
-    offPinnedChanged();
-    offVaultSwitched();
-    dispose?.();
-  };
+          </Match>
+          <Match when={recentError()}>
+            <div class="nav-empty">Failed to load</div>
+          </Match>
+          <Match when={pinnedFiles().length === 0 && recentNonPinned().length === 0}>
+            <div class="nav-empty">No files</div>
+          </Match>
+          <Match when={true}>
+            <>
+              <For each={pinnedFiles()}>
+                {(file) => (
+                  <FileRow
+                    path={file.path}
+                    title={file.title}
+                    active={file.path === getActiveTab()?.path}
+                    timeLabel={null}
+                    dir={null}
+                    isPinned={true}
+                    onContextMenu={(e) =>
+                      showNavContextMenu(
+                        e,
+                        file.path,
+                        file.title || stemFromPath(file.path),
+                        true,
+                        refreshPinned,
+                      )
+                    }
+                  />
+                )}
+              </For>
+              <For each={recentNonPinned()}>
+                {(file) => (
+                  <FileRow
+                    path={file.path}
+                    title={file.title}
+                    active={file.path === getActiveTab()?.path}
+                    timeLabel={relativeTime(file.mtime * 1000)}
+                    dir={null}
+                    isPinned={false}
+                    onContextMenu={(e) =>
+                      showNavContextMenu(
+                        e,
+                        file.path,
+                        file.title || stemFromPath(file.path),
+                        false,
+                        refreshPinned,
+                      )
+                    }
+                  />
+                )}
+              </For>
+            </>
+          </Match>
+        </Switch>
+      </div>
+    </div>
+  );
 }

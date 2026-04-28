@@ -1,54 +1,43 @@
 import { stemFromPath } from "@joshuarli98/md-wysiwyg";
-import { ErrorBoundary, onCleanup, onMount } from "solid-js";
+import { ErrorBoundary, createEffect, createSignal, onCleanup, onMount } from "solid-js";
 
 import {
-  renameNote,
-  getNote,
-  listNotes,
+  createNote,
   getStatus,
-  unlockWithRecoveryKey,
-  unlockWithPrf,
+  listNotes,
   type AppStatus,
+  unlockWithPrf,
+  unlockWithRecoveryKey,
 } from "./api.ts";
 import {
   bootApp,
   checkBrowserSupport,
-  createBackoff,
-  createNotificationController,
-  createServerStatusController,
-  createSseLifecycle,
   showUnlockScreen as renderUnlockScreen,
   showUnsupportedPage,
 } from "./bootstrap.ts";
-import {
-  MIN_SUPPORTED_FIREFOX_VERSION,
-  NOTIFICATION_AUTO_DISMISS_MS,
-  SSE_BACKOFF_DELAYS_MS,
-} from "./constants.ts";
+import { MIN_SUPPORTED_FIREFOX_VERSION } from "./constants.ts";
+import { createEditorShellRefs, EditorShell } from "./editor-shell.tsx";
 import { initEditor, invalidateNoteCache, type EditorInstance } from "./editor.ts";
-import { emit, on } from "./events.ts";
-import { initFileNav } from "./filenav.tsx";
+import { Sidebar } from "./filenav.tsx";
 import { initInputDialog } from "./input-dialog.tsx";
 import { openStore } from "./local-store.ts";
-import { reportActionError } from "./notify.ts";
-import { createPalette, matchesKey } from "./palette.tsx";
-import { initSearch } from "./search.tsx";
-import { createSettings } from "./settings.tsx";
+import { matchesKey, PaletteModal, type Command } from "./palette.tsx";
+import { SearchModal } from "./search.tsx";
+import { serverStore } from "./server-store.ts";
+import { SettingsModal } from "./settings.tsx";
 import {
   closeActiveTab,
-  nextTab,
-  prevTab,
   getActiveTab,
+  nextTab,
   openTab,
-  updateTabPath,
-  updateTabContent,
-  restoreSession,
+  prevTab,
   reopenClosedTab,
+  restoreSession,
   syncToServer,
+  useTabs,
 } from "./tab-state.ts";
-import { promptNewNote } from "./tabs.tsx";
-import { TabBarShell } from "./tabs.tsx";
-import { initVaultSwitcher, refreshVaultSwitcher } from "./vault-switcher.tsx";
+import { promptNewNote, TabBarShell } from "./tabs.tsx";
+import { uiStore } from "./ui-store.ts";
 import { isPrfLikelySupported, getPrfKey } from "./webauthn.ts";
 import { registerWikiLinkClickHandler } from "./wikilinks.ts";
 
@@ -57,25 +46,19 @@ type AppProps = {
 };
 
 export function App(props: Readonly<AppProps>) {
-  let notifRef!: HTMLDivElement;
-  let statusRef!: HTMLDivElement;
-  let sidebarCollapseRef!: HTMLButtonElement;
-  let vaultSwitcherRef!: HTMLDivElement;
-  let sidebarTreeRef!: HTMLDivElement;
-  let sidebarSearchRef!: HTMLInputElement;
-  let editorAreaRef!: HTMLDivElement;
-  let emptyStateRef!: HTMLDivElement;
-  let searchRootRef!: HTMLDivElement;
-  let settingsRootRef!: HTMLDivElement;
   let inputDialogOverlayRef!: HTMLDivElement;
-  let paletteRootRef!: HTMLDivElement;
+  let emptyStateRef!: HTMLDivElement;
+
+  const shellRefs = createEditorShellRefs();
+  const [editorVisible, setEditorVisible] = createSignal(false);
+  const [editorTags, setEditorTags] = createSignal<readonly string[]>([]);
+  const [editorSourceMode, setEditorSourceMode] = createSignal(false);
+  const [commands, setCommands] = createSignal<readonly Command[]>([]);
+  const tabs = useTabs();
 
   onMount(() => {
     let appInitialized = false;
     let editor: EditorInstance | null = null;
-    let palette: ReturnType<typeof createPalette> | null = null;
-    let search: ReturnType<typeof initSearch> | null = null;
-    let settings: ReturnType<typeof createSettings> | null = null;
 
     function showUnlockScreen(status?: AppStatus) {
       renderUnlockScreen({
@@ -91,63 +74,53 @@ export function App(props: Readonly<AppProps>) {
       });
     }
 
-    async function startApp() {
-      if (!appInitialized) {
-        initApp();
-        appInitialized = true;
-      }
-      await openStore();
-      if (!sseLifecycle?.getSse()) connectSSE();
-      restoreSession();
-    }
-
     function initApp() {
       initInputDialog(inputDialogOverlayRef);
-      editor = initEditor({ editorArea: editorAreaRef, emptyState: emptyStateRef });
-      void initFileNav({
-        container: sidebarTreeRef,
-        collapseBtn: sidebarCollapseRef,
-        appEl: props.appEl,
-        searchInput: sidebarSearchRef,
+      editor = initEditor({
+        emptyState: emptyStateRef,
+        shellRefs,
+        setTags: (tags) => setEditorTags([...tags]),
+        setSourceMode: setEditorSourceMode,
+        setVisible: setEditorVisible,
       });
-      void initVaultSwitcher(vaultSwitcherRef);
-      palette = createPalette(paletteRootRef);
-      settings = createSettings(settingsRootRef);
-      search = initSearch({ root: searchRootRef, openTab, invalidateNoteCache });
 
       registerWikiLinkClickHandler(async (target: string) => {
         const notes = await listNotes();
         const normalized = target.toLowerCase().replaceAll(/\s+/g, "-");
-        const match = notes.find((n) => {
-          const stem = stemFromPath(n.path).toLowerCase().replaceAll(/\s+/g, "-");
+        const match = notes.find((note) => {
+          const stem = stemFromPath(note.path).toLowerCase().replaceAll(/\s+/g, "-");
           return stem === normalized;
         });
 
         if (match) {
           await openTab(match.path);
-        } else {
-          const path = `${target}.md`;
-          const { createNote } = await import("./api.ts");
-          await createNote(path);
-          invalidateNoteCache();
-          await openTab(path);
+          return;
         }
+
+        const path = `${target}.md`;
+        await createNote(path);
+        invalidateNoteCache();
+        await openTab(path);
       });
 
-      on("tab:change", (tab) => {
-        if (tab) {
-          editor?.showEditor(tab.path, tab.content, tab.tags);
-        } else {
-          editor?.hideEditor();
-        }
+      serverStore.configure({
+        invalidateNoteCache,
+        getActivePath: () => getActiveTab()?.path ?? null,
+        reloadActiveNote: (content, mtime) => {
+          editor?.reloadFromDisk(content, mtime);
+        },
+        closeActiveTab,
+        syncSessionToServer: syncToServer,
+        refreshVaultSwitcher: async () => undefined,
+        showUnlockScreen: () => showUnlockScreen(),
       });
 
-      palette.registerCommands([
+      setCommands([
         {
           label: "Search notes",
           shortcut: "⌘K",
           keys: { key: "k", meta: true },
-          action: () => search?.toggle(),
+          action: () => uiStore.openSearch(),
         },
         {
           label: "Search in current note",
@@ -155,36 +128,38 @@ export function App(props: Readonly<AppProps>) {
           keys: { key: "f", meta: true },
           action: () => {
             const tab = getActiveTab();
-            if (tab) {
-              search?.open(tab.path);
-            } else {
-              search?.open();
-            }
+            uiStore.openSearch(tab?.path);
           },
         },
         {
           label: "Global search",
           shortcut: "⇧⌘F",
           keys: { key: "f", meta: true, shift: true },
-          action: () => search?.open(),
+          action: () => uiStore.openSearch(),
         },
         {
           label: "New note",
           shortcut: "⌘N",
           keys: { key: "n", meta: true },
-          action: () => promptNewNote(),
+          action: () => {
+            void promptNewNote();
+          },
         },
         {
           label: "Reopen closed tab",
           shortcut: "⇧⌘T",
           keys: { key: "t", meta: true, shift: true },
-          action: () => reopenClosedTab(),
+          action: () => {
+            void reopenClosedTab();
+          },
         },
         {
           label: "Save",
           shortcut: "⌘S",
           keys: { key: "s", meta: true },
-          action: () => editor?.saveCurrentNote(),
+          action: () => {
+            void editor?.saveCurrentNote();
+          },
         },
         {
           label: "Close tab",
@@ -208,181 +183,68 @@ export function App(props: Readonly<AppProps>) {
           label: "Settings",
           shortcut: "⇧⌘S",
           keys: { key: "s", meta: true, shift: true },
-          action: () => settings?.toggle(),
+          action: () => uiStore.openSettings(),
         },
       ]);
-
-      on("file:rename", async ({ oldPath, newPath }) => {
-        try {
-          const result = await renameNote(oldPath, newPath);
-          invalidateNoteCache();
-          emit("files:changed");
-          updateTabPath(oldPath, newPath);
-
-          await Promise.all(
-            result.updated.map(async (updated) => {
-              try {
-                const note = await getNote(updated);
-                updateTabContent(updated, note.content, note.mtime, note.tags);
-              } catch {
-                /* reload failed silently */
-              }
-            }),
-          );
-
-          const active = getActiveTab();
-          if (active && active.path === newPath) {
-            editor?.showEditor(active.path, active.content, active.tags);
-          }
-        } catch (error) {
-          reportActionError(`Failed to rename ${stemFromPath(oldPath)}`, error);
-        }
-      });
     }
 
-    let notificationController: ReturnType<typeof createNotificationController> | null = null;
-    let serverStatusController: ReturnType<typeof createServerStatusController> | null = null;
-    let sseBackoff: ReturnType<typeof createBackoff> | null = null;
-    let sseLifecycle: ReturnType<typeof createSseLifecycle> | null = null;
-
-    function connectSSE() {
-      const sl = sseLifecycle!;
-      const sb = sseBackoff!;
-      const nc = notificationController!;
-      const sc = serverStatusController!;
-
-      const existing = sl.getSse();
-      if (existing) {
-        existing.close();
-        sl.setSse(null);
+    async function startApp() {
+      if (!appInitialized) {
+        initApp();
+        appInitialized = true;
       }
-      const timer = sl.getReconnectTimer();
-      if (timer) {
-        clearTimeout(timer);
-        sl.setReconnectTimer(null);
-      }
-      if (sl.isPageUnloading()) {
-        return;
-      }
-      const es = new EventSource("/events");
-      sl.setSse(es);
-
-      es.addEventListener("connected", () => {
-        if (sl.getSse() !== es) return;
-        sb.reset();
-        if (sb.wasUnavailable) {
-          sb.wasUnavailable = false;
-        }
-        sc.hide();
-        syncToServer();
-      });
-
-      es.addEventListener("changed", async (e) => {
-        const path = e.data;
-        emit("files:changed", { savedPath: path });
-        const active = getActiveTab();
-        if (active && active.path === path) {
-          try {
-            const note = await getNote(path);
-            editor?.reloadFromDisk(note.content, note.mtime);
-          } catch {
-            /* reload failed silently */
-          }
-        }
-      });
-
-      es.addEventListener("deleted", (e) => {
-        const path = e.data;
-        invalidateNoteCache();
-        emit("files:changed", {});
-        const active = getActiveTab();
-        if (active && active.path === path) {
-          nc.show(`"${stemFromPath(path)}" was deleted externally.`);
-          closeActiveTab();
-        }
-      });
-
-      es.addEventListener("locked", () => {
-        if (sl.getSse() !== es) return;
-        es.close();
-        sl.setSse(null);
-        showUnlockScreen();
-      });
-
-      es.addEventListener("vault_switched", () => {
-        if (sl.getSse() !== es) return;
-        void refreshVaultSwitcher();
-        emit("vault:switched");
-        emit("files:changed", {});
-      });
-
-      es.onerror = () => {
-        if (sl.getSse() !== es) return;
-        es.close();
-        sl.setSse(null);
-        if (sl.isPageUnloading()) {
-          return;
-        }
-        sb.wasUnavailable = true;
-        const delay = sb.next();
-        sc.show(`Server unavailable. Retrying in ${sb.format(delay)}...`);
-        sl.setReconnectTimer(
-          setTimeout(() => {
-            sl.setReconnectTimer(null);
-            connectSSE();
-          }, delay),
-        );
-      };
+      await openStore();
+      await restoreSession();
+      serverStore.start();
     }
 
     function globalKeydown(e: KeyboardEvent) {
       if (e.key === "Escape") {
-        if (palette?.isOpen()) {
+        if (uiStore.paletteOpen()) {
           e.preventDefault();
-          palette.close();
+          uiStore.closePalette();
           return;
         }
-        if (settings?.isOpen()) {
+        if (uiStore.settingsOpen()) {
           e.preventDefault();
-          settings.close();
+          uiStore.closeSettings();
           return;
         }
-        if (search?.isOpen()) {
+        if (uiStore.searchOpen()) {
           e.preventDefault();
-          search.close();
-          return;
+          uiStore.closeSearch();
         }
         return;
       }
 
       if ((e.metaKey || e.ctrlKey) && e.key === "p") {
         e.preventDefault();
-        palette?.toggle();
+        uiStore.togglePalette();
         return;
       }
 
-      if (palette) {
-        for (const cmd of palette.getCommands()) {
-          if (cmd.keys && matchesKey(e, cmd.keys)) {
-            e.preventDefault();
-            cmd.action();
-            return;
-          }
+      for (const command of commands()) {
+        if (command.keys && matchesKey(e, command.keys)) {
+          e.preventDefault();
+          command.action();
+          return;
         }
       }
     }
 
-    notificationController = createNotificationController(notifRef, NOTIFICATION_AUTO_DISMISS_MS);
-    serverStatusController = createServerStatusController(statusRef);
-    on("notification", ({ msg, type }) => notificationController!.show(msg, type));
-    sseBackoff = createBackoff([...SSE_BACKOFF_DELAYS_MS]);
-    sseLifecycle = createSseLifecycle({ connectSse: connectSSE });
+    createEffect(() => {
+      const tab = tabs.activeTab();
+      if (!editor) {
+        return;
+      }
+      if (tab) {
+        editor.showEditor(tab.path, tab.content, tab.tags);
+      } else {
+        editor.hideEditor();
+      }
+    });
 
     document.addEventListener("keydown", globalKeydown);
-    window.addEventListener("pagehide", sseLifecycle.closeForUnload);
-    window.addEventListener("beforeunload", sseLifecycle.closeForUnload);
-    window.addEventListener("focus", sseLifecycle.requestImmediateReconnect);
-    document.addEventListener("visibilitychange", sseLifecycle.onVisibilityChange);
 
     void bootApp({
       checkBrowserSupport,
@@ -401,12 +263,7 @@ export function App(props: Readonly<AppProps>) {
 
     onCleanup(() => {
       document.removeEventListener("keydown", globalKeydown);
-      window.removeEventListener("pagehide", sseLifecycle!.closeForUnload);
-      window.removeEventListener("beforeunload", sseLifecycle!.closeForUnload);
-      window.removeEventListener("focus", sseLifecycle!.requestImmediateReconnect);
-      document.removeEventListener("visibilitychange", sseLifecycle!.onVisibilityChange);
-      sseLifecycle!.closeForUnload();
-      notificationController?.dispose();
+      serverStore.stop();
     });
   });
 
@@ -418,50 +275,46 @@ export function App(props: Readonly<AppProps>) {
         </div>
       }
     >
-      <div id="sidebar">
-        <div class="sidebar-header">
-          <input
-            id="sidebar-search"
-            type="text"
-            placeholder="Filter files..."
-            aria-label="Filter files"
-            autocomplete="off"
-            spellcheck={false}
-            ref={sidebarSearchRef}
-          />
-          <button
-            id="sidebar-collapse"
-            title="Collapse sidebar"
-            aria-label="Collapse sidebar"
-            ref={sidebarCollapseRef}
-          >
-            &#x2039;
-          </button>
-        </div>
-        <div id="vault-switcher" ref={vaultSwitcherRef}></div>
-        <div id="sidebar-tree" ref={sidebarTreeRef}></div>
-      </div>
+      <Sidebar appEl={props.appEl} />
       <div class="app-main">
         <div
-          class="notification hidden"
+          class={
+            uiStore.notification().hidden
+              ? "notification hidden"
+              : `notification ${uiStore.notification().type}`
+          }
           aria-live="assertive"
           aria-atomic="true"
-          ref={notifRef}
-        ></div>
+          onClick={() => uiStore.hideNotification()}
+        >
+          {uiStore.notification().msg}
+        </div>
         <div id="tab-bar">
           <TabBarShell />
         </div>
-        <div class="server-status hidden" aria-live="polite" ref={statusRef}></div>
-        <div id="editor-area" ref={editorAreaRef}>
-          <div id="empty-state" ref={emptyStateRef}>
+        <div
+          class={uiStore.serverStatus() ? "server-status" : "server-status hidden"}
+          aria-live="polite"
+        >
+          {uiStore.serverStatus()}
+        </div>
+        <div id="editor-area">
+          <div
+            id="empty-state"
+            ref={emptyStateRef}
+            style={{ display: editorVisible() ? "none" : "flex" }}
+          >
             Press <kbd>Cmd+K</kbd> to search &middot; <kbd>Cmd+P</kbd> for commands
+          </div>
+          <div style={{ display: editorVisible() ? "" : "none" }}>
+            <EditorShell refs={shellRefs} tags={editorTags} isSourceMode={editorSourceMode} />
           </div>
         </div>
       </div>
-      <div id="search-root" ref={searchRootRef}></div>
-      <div id="settings-root" ref={settingsRootRef}></div>
+      <SearchModal openTab={openTab} invalidateNoteCache={invalidateNoteCache} />
+      <SettingsModal />
       <div id="input-dialog-overlay" class="hidden" ref={inputDialogOverlayRef}></div>
-      <div id="palette-root" ref={paletteRootRef}></div>
+      <PaletteModal commands={commands} />
     </ErrorBoundary>
   );
 }

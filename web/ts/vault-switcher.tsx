@@ -1,15 +1,47 @@
-import { For, Show, createSignal } from "solid-js";
-import { render } from "solid-js/web";
+import { For, Show, createEffect, createSignal } from "solid-js";
 
 import { activateVault, getVaults, type VaultEntry } from "./api.ts";
-import { emit } from "./events.ts";
+import { serverStore } from "./server-store.ts";
 import { closeAllTabs, getTabs, restoreSession } from "./tab-state.ts";
 
-const [vaults, setVaults] = createSignal<VaultEntry[]>([]);
-let mounted = false;
-let rootEl: HTMLElement | null = null;
+export function VaultSwitcher() {
+  const [vaults, setVaults] = createSignal<VaultEntry[]>([]);
 
-function VaultSwitcher() {
+  async function refresh() {
+    try {
+      setVaults(await getVaults());
+    } catch {
+      /* keep stale list */
+    }
+  }
+
+  async function handleVaultSwitch(index: number): Promise<void> {
+    const dirty = getTabs().filter((tab) => tab.dirty);
+    if (dirty.length > 0) {
+      const names = dirty.map((tab) => tab.title || tab.path).join(", ");
+      if (!confirm(`Unsaved changes in: ${names}. Discard and switch vault?`)) {
+        await refresh();
+        return;
+      }
+    }
+
+    const ok = await activateVault(index);
+    if (!ok) {
+      await refresh();
+      return;
+    }
+
+    closeAllTabs();
+    await restoreSession();
+    await refresh();
+    await serverStore.handleVaultSwitched();
+  }
+
+  createEffect(() => {
+    serverStore.vaultVersion();
+    void refresh();
+  });
+
   return (
     <Show when={vaults().length > 1}>
       <select
@@ -17,8 +49,8 @@ function VaultSwitcher() {
         title="Switch vault"
         aria-label="Switch vault"
         onChange={(e) => {
-          const idx = Number(e.currentTarget.value);
-          void handleVaultSwitch(idx);
+          const index = Number(e.currentTarget.value);
+          void handleVaultSwitch(index);
         }}
       >
         <For each={vaults()}>
@@ -31,65 +63,4 @@ function VaultSwitcher() {
       </select>
     </Show>
   );
-}
-
-async function handleVaultSwitch(index: number): Promise<void> {
-  const dirty = getTabs().filter((t) => t.dirty);
-  if (dirty.length > 0) {
-    const names = dirty.map((t) => t.title || t.path).join(", ");
-    if (!confirm(`Unsaved changes in: ${names}. Discard and switch vault?`)) {
-      try {
-        setVaults(await getVaults());
-      } catch {
-        // keep stale list
-      }
-      return;
-    }
-  }
-
-  const ok = await activateVault(index);
-  if (!ok) {
-    try {
-      setVaults(await getVaults());
-    } catch {
-      // keep stale list
-    }
-    return;
-  }
-
-  closeAllTabs();
-  await restoreSession();
-
-  try {
-    setVaults(await getVaults());
-  } catch {
-    // keep stale list
-  }
-
-  emit("vault:switched");
-  emit("files:changed", {});
-}
-
-export async function initVaultSwitcher(container: HTMLElement): Promise<void> {
-  rootEl = container;
-  if (!mounted) {
-    render(() => <VaultSwitcher />, container);
-    mounted = true;
-  }
-  try {
-    setVaults(await getVaults());
-  } catch {
-    return;
-  }
-}
-
-export async function refreshVaultSwitcher(): Promise<void> {
-  if (!rootEl) {
-    return;
-  }
-  try {
-    setVaults(await getVaults());
-  } catch {
-    return;
-  }
 }

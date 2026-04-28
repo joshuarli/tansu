@@ -1,12 +1,13 @@
-import { on } from "./events.ts";
+import { render } from "solid-js/web";
+
 import type { Tab } from "./tab-state.ts";
+import { TabBarShell } from "./tabs.tsx";
 import { setupDOM, mockFetch } from "./test-helper.ts";
+import { uiStore } from "./ui-store.ts";
 
 const tick = () => new Promise<void>((r) => setTimeout(r, 0));
 
 describe("tabs", () => {
-  type NotificationEvent = { msg: string; type: "error" | "info" | "success" };
-
   let cleanup: () => void;
   let mock: ReturnType<typeof mockFetch>;
   let openTab: (path: string) => Promise<Tab>;
@@ -18,6 +19,8 @@ describe("tabs", () => {
 
   beforeAll(async () => {
     cleanup = setupDOM();
+    const { delegateEvents } = await import("solid-js/web");
+    delegateEvents(["click", "input", "change", "keydown", "contextmenu", "auxclick"]);
     mock = mockFetch();
     const inputDialogMod = await import("./input-dialog.tsx");
     inputDialogMod.initInputDialog(document.querySelector("#input-dialog-overlay") as HTMLElement);
@@ -31,18 +34,17 @@ describe("tabs", () => {
     mock.on("POST", "/api/pin", {});
     mock.on("DELETE", "/api/pin", {});
 
-    const mod = await import("./tabs.tsx");
     const stateMod = await import("./tab-state.ts");
     ({ openTab } = stateMod);
     ({ closeTab } = stateMod);
     ({ getTabs } = stateMod);
     ({ getActiveTab } = stateMod);
     ({ markDirty } = stateMod);
+    const mod = await import("./tabs.tsx");
     createNewNoteViaDialog = mod.promptNewNote;
 
-    // Mount TabBar into the test DOM (previously done via on("tab:render")).
     const tabBarEl = document.querySelector("#tab-bar") as HTMLElement;
-    mod.mountTabBar(tabBarEl);
+    render(() => TabBarShell(), tabBarEl);
 
     // Clean up any leaked state from other test files sharing the module.
     while (getTabs().length > 0) {
@@ -75,15 +77,15 @@ describe("tabs", () => {
     }
   });
 
-  it("empty-state hides when tabs are open, shows when all closed", async () => {
+  it("tab rendering no longer mutates empty-state visibility directly", async () => {
     const emptyState = document.querySelector("#empty-state") as HTMLElement;
     await openTwo();
-    expect(emptyState.style.display).toBe("none");
+    expect(emptyState.style.display).toBe("");
     while (getTabs().length > 0) {
       closeTab(0);
       await tick();
     }
-    expect(emptyState.style.display).toBe("flex");
+    expect(emptyState.style.display).toBe("");
   });
 
   it("active tab gets .active class; others do not", async () => {
@@ -425,11 +427,6 @@ describe("tabs", () => {
     const tabBar = document.querySelector("#tab-bar")!;
     const tabEl = tabBar.querySelectorAll(".tab:not(.tab-new)")[0]!;
 
-    const notifications: NotificationEvent[] = [];
-    const offNotification = on("notification", (data) => {
-      notifications.push(data);
-    });
-
     mock.on("GET", "/api/pinned", []);
     mock.on("POST", "/api/pin", { error: "pin failed" }, 500);
 
@@ -441,15 +438,9 @@ describe("tabs", () => {
     (items[1] as HTMLElement).click();
     await new Promise((r) => setTimeout(r, 50));
 
-    const notification = notifications.at(-1);
-    if (!notification) {
-      throw new Error("expected notification");
-    }
-    expect(notification.type).toBe("error");
-    expect(notification.msg).toContain("Failed to pin to-pin");
-    expect(notification.msg).toContain("pin failed");
-
-    offNotification();
+    expect(uiStore.notification().type).toBe("error");
+    expect(uiStore.notification().msg).toContain("Failed to pin to-pin");
+    expect(uiStore.notification().msg).toContain("pin failed");
     while (getTabs().length > 0) {
       closeTab(0);
     }
@@ -518,19 +509,15 @@ describe("tabs", () => {
     expect(getTabs()).toHaveLength(0);
   });
 
-  it("context menu Rename emits file:rename via the typed bus", async () => {
+  it("context menu Rename opens the rename dialog and calls rename API", async () => {
     while (getTabs().length > 0) {
       closeTab(0);
     }
+    mock.on("POST", "/api/rename", { updated: [] });
     await openTab("notes/to-rename.md");
     await tick();
     const tabBar = document.querySelector("#tab-bar")!;
     const tabEl = tabBar.querySelectorAll(".tab:not(.tab-new)")[getTabs().length - 1]!;
-
-    let renameDetail: { oldPath: string; newPath: string } | null = null;
-    const offRename = on("file:rename", (detail) => {
-      renameDetail = detail;
-    });
 
     (tabEl as HTMLElement).dispatchEvent(
       new MouseEvent("contextmenu", { bubbles: true, cancelable: true }),
@@ -550,13 +537,13 @@ describe("tabs", () => {
     dialogInput.dispatchEvent(
       new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }),
     );
-    await tick();
+    await new Promise((r) => setTimeout(r, 50));
 
-    expect(renameDetail !== null).toBeTruthy();
-    expect(renameDetail!.oldPath).toBe("notes/to-rename.md");
-    expect(renameDetail!.newPath).toBe("notes/renamed-note.md");
-
-    offRename();
+    const renameReq = mock.requests.find(
+      (req) => req.method === "POST" && req.url === "/api/rename",
+    );
+    expect(renameReq?.body).toContain('"old_path":"notes/to-rename.md"');
+    expect(renameReq?.body).toContain('"new_path":"notes/renamed-note.md"');
     while (getTabs().length > 0) {
       closeTab(0);
     }

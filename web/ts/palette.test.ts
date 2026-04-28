@@ -1,28 +1,16 @@
+import { render } from "solid-js/web";
+
+import { PaletteModal } from "./palette.tsx";
 import { setupDOM } from "./test-helper.ts";
+import { uiStore } from "./ui-store.ts";
 
 describe("palette", () => {
   let cleanup: () => void;
-  let togglePalette: () => void;
-  let openPalette: () => void;
-  let closePalette: () => void;
-  let isPaletteOpen: () => boolean;
-  let registerCommands: (cmds: { label: string; shortcut: string; action: () => void }[]) => void;
-  let getCommands: () => { label: string; shortcut: string; action: () => void }[];
+  let commands: { label: string; shortcut: string; action: () => void }[];
   let actionCalled = false;
 
-  beforeAll(async () => {
-    cleanup = setupDOM();
-
-    const { createPalette } = await import("./palette.tsx");
-    const p = createPalette(document.querySelector("#palette-root") as HTMLElement);
-    togglePalette = p.toggle;
-    openPalette = p.open;
-    closePalette = p.close;
-    isPaletteOpen = p.isOpen;
-    ({ registerCommands } = p);
-    ({ getCommands } = p);
-
-    registerCommands([
+  function buildCommands() {
+    return [
       {
         label: "Save",
         shortcut: "⌘S",
@@ -32,21 +20,42 @@ describe("palette", () => {
       },
       { label: "Search", shortcut: "⌘K", action: () => {} },
       { label: "New note", shortcut: "⌘T", action: () => {} },
-    ]);
+    ];
+  }
+
+  beforeAll(async () => {
+    cleanup = setupDOM();
+    const { delegateEvents } = await import("solid-js/web");
+    delegateEvents(["click", "input", "change", "keydown", "contextmenu", "auxclick"]);
+    commands = buildCommands();
+
+    render(
+      () =>
+        PaletteModal({
+          commands: () => commands,
+        }),
+      document.querySelector("#palette-root") as HTMLElement,
+    );
   });
 
   afterAll(() => {
-    closePalette();
+    uiStore.closePalette();
     cleanup();
+  });
+
+  beforeEach(() => {
+    uiStore.closePalette();
+    actionCalled = false;
+    commands = buildCommands();
   });
 
   it("palette lifecycle", () => {
     // Initially closed
-    expect(isPaletteOpen()).toBeFalsy();
+    expect(uiStore.paletteOpen()).toBeFalsy();
 
     // Open
-    openPalette();
-    expect(isPaletteOpen()).toBeTruthy();
+    uiStore.openPalette();
+    expect(uiStore.paletteOpen()).toBeTruthy();
     const overlay = document.querySelector("#palette-overlay")!;
     expect(overlay.classList.contains("hidden")).toBeFalsy();
 
@@ -56,13 +65,13 @@ describe("palette", () => {
     expect(listEl.children[0]!.textContent!).toContain("Save");
 
     // Toggle closes
-    togglePalette();
-    expect(isPaletteOpen()).toBeFalsy();
+    uiStore.togglePalette();
+    expect(uiStore.paletteOpen()).toBeFalsy();
     expect(overlay.classList.contains("hidden")).toBeTruthy();
 
     // Toggle opens again
-    togglePalette();
-    expect(isPaletteOpen()).toBeTruthy();
+    uiStore.togglePalette();
+    expect(uiStore.paletteOpen()).toBeTruthy();
 
     // Filter via input
     const input = document.querySelector("#palette-input")! as HTMLInputElement;
@@ -77,22 +86,22 @@ describe("palette", () => {
     expect(listEl.children).toHaveLength(3);
 
     // Keyboard: Escape closes
-    closePalette();
-    openPalette();
+    uiStore.closePalette();
+    uiStore.openPalette();
     input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
-    expect(isPaletteOpen()).toBeFalsy();
+    expect(uiStore.paletteOpen()).toBeFalsy();
 
     // Keyboard: Enter selects
-    openPalette();
+    uiStore.openPalette();
     input.value = "";
     input.dispatchEvent(new Event("input"));
     actionCalled = false;
     input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
     expect(actionCalled).toBeTruthy();
-    expect(isPaletteOpen()).toBeFalsy();
+    expect(uiStore.paletteOpen()).toBeFalsy();
 
     // Keyboard: ArrowDown moves selection
-    openPalette();
+    uiStore.openPalette();
     input.value = "";
     input.dispatchEvent(new Event("input"));
     input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
@@ -102,11 +111,11 @@ describe("palette", () => {
     input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }));
     expect(listEl.children[0]!.classList.contains("selected")).toBeTruthy();
 
-    closePalette();
+    uiStore.closePalette();
   });
 
   it("clicking a command item executes its action", () => {
-    openPalette();
+    uiStore.openPalette();
     const listEl = document.querySelector("#palette-list")!;
 
     actionCalled = false;
@@ -114,7 +123,7 @@ describe("palette", () => {
     const saveItem = listEl.children[0]! as HTMLElement;
     saveItem.click();
     expect(actionCalled).toBeTruthy();
-    expect(isPaletteOpen()).toBeFalsy();
+    expect(uiStore.paletteOpen()).toBeFalsy();
   });
 
   it("matchesKey correctly matches keyboard events", async () => {
@@ -187,13 +196,12 @@ describe("palette", () => {
   });
 
   it("getCommands returns registered commands", () => {
-    const cmds = getCommands();
-    expect(cmds).toHaveLength(3);
-    expect(cmds[0]!.label).toBe("Save");
+    expect(commands).toHaveLength(3);
+    expect(commands[0]!.label).toBe("Save");
   });
 
   it("selected index resets to 0 on open", () => {
-    openPalette();
+    uiStore.openPalette();
     const input = document.querySelector("#palette-input")! as HTMLInputElement;
     input.value = "";
     input.dispatchEvent(new Event("input"));
@@ -201,18 +209,18 @@ describe("palette", () => {
     input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
     const listEl = document.querySelector("#palette-list")!;
     expect(listEl.children[1]!.classList.contains("selected")).toBeTruthy();
-    closePalette();
+    uiStore.closePalette();
 
     // Reopen — selection should reset to 0
-    openPalette();
+    uiStore.openPalette();
     input.value = "";
     input.dispatchEvent(new Event("input"));
     expect(listEl.children[0]!.classList.contains("selected")).toBeTruthy();
-    closePalette();
+    uiStore.closePalette();
   });
 
   it("selected index clamps when filtering reduces visible results", () => {
-    openPalette();
+    uiStore.openPalette();
     const input = document.querySelector("#palette-input")! as HTMLInputElement;
     input.value = "";
     input.dispatchEvent(new Event("input"));
@@ -228,32 +236,32 @@ describe("palette", () => {
     input.dispatchEvent(new Event("input"));
     expect(listEl.children).toHaveLength(1);
     expect(listEl.children[0]!.classList.contains("selected")).toBeTruthy();
-    closePalette();
+    uiStore.closePalette();
   });
 
   it("backdrop click (click on overlay but not modal) closes palette", () => {
-    openPalette();
-    expect(isPaletteOpen()).toBeTruthy();
+    uiStore.openPalette();
+    expect(uiStore.paletteOpen()).toBeTruthy();
 
     const overlay = document.querySelector("#palette-overlay")! as HTMLElement;
     overlay.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    expect(isPaletteOpen()).toBeFalsy();
+    expect(uiStore.paletteOpen()).toBeFalsy();
   });
 
   it("filter with no matches renders empty list", () => {
-    openPalette();
+    uiStore.openPalette();
     const input = document.querySelector("#palette-input")! as HTMLInputElement;
     input.value = "zzznomatch";
     input.dispatchEvent(new Event("input"));
     const listEl = document.querySelector("#palette-list")!;
     expect(listEl.children).toHaveLength(0);
-    closePalette();
+    uiStore.closePalette();
   });
 
   it("command action error does not leave palette open", () => {
-    openPalette();
+    uiStore.openPalette();
 
-    registerCommands([
+    commands = [
       {
         label: "ThrowCmd",
         shortcut: "",
@@ -261,7 +269,7 @@ describe("palette", () => {
           throw new Error("oops");
         },
       },
-    ]);
+    ];
     const input = document.querySelector("#palette-input")! as HTMLInputElement;
     input.value = "";
     input.dispatchEvent(new Event("input"));
@@ -273,18 +281,8 @@ describe("palette", () => {
       // action threw; palette should already be closed before the action ran
     }
 
-    expect(isPaletteOpen()).toBeFalsy();
+    expect(uiStore.paletteOpen()).toBeFalsy();
 
-    registerCommands([
-      {
-        label: "Save",
-        shortcut: "⌘S",
-        action: () => {
-          actionCalled = true;
-        },
-      },
-      { label: "Search", shortcut: "⌘K", action: () => {} },
-      { label: "New note", shortcut: "⌘T", action: () => {} },
-    ]);
+    commands = buildCommands();
   });
 });

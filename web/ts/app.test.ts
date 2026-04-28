@@ -1,7 +1,7 @@
 import { render } from "solid-js/web";
 
 import { App } from "./app.tsx";
-import { setupDOM } from "./test-helper.ts";
+import { mockFetch, setupDOM } from "./test-helper.ts";
 
 // Prevent the onMount boot sequence from running side-effectful browser APIs
 // (checkBrowserSupport, getStatus, etc.) during this structural render test.
@@ -33,12 +33,20 @@ vi.mock("./bootstrap.ts", async () => {
 
 describe("app shell", () => {
   let cleanup: () => void;
+  let mock: ReturnType<typeof mockFetch>;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     cleanup = setupDOM();
+    const { delegateEvents } = await import("solid-js/web");
+    delegateEvents(["click", "input", "change", "keydown", "contextmenu", "auxclick"]);
+    mock = mockFetch();
+    mock.on("GET", "/api/pinned", []);
+    mock.on("GET", "/api/recentfiles", []);
+    mock.on("GET", "/api/vaults", []);
   });
 
   afterEach(() => {
+    mock.restore();
     cleanup();
   });
 
@@ -57,10 +65,10 @@ describe("app shell", () => {
     expect(root.querySelector("#tab-bar")).toBeTruthy();
     expect(root.querySelector(".server-status")).toBeTruthy();
     expect(root.querySelector("#editor-area")).toBeTruthy();
-    expect(root.querySelector("#search-root")).toBeTruthy();
-    expect(root.querySelector("#settings-root")).toBeTruthy();
+    expect(root.querySelector("#search-overlay")).toBeTruthy();
+    expect(root.querySelector("#settings-overlay")).toBeTruthy();
     expect(root.querySelector("#input-dialog-overlay")).toBeTruthy();
-    expect(root.querySelector("#palette-root")).toBeTruthy();
+    expect(root.querySelector("#palette-overlay")).toBeTruthy();
     expect(root.querySelector("#empty-state")?.textContent).toContain("Cmd+K");
     expect(root.querySelectorAll(":scope > div")).toHaveLength(6);
 

@@ -1,6 +1,9 @@
+import { render } from "solid-js/web";
+
 import type { Settings } from "./api.ts";
-import { on } from "./events.ts";
+import { SettingsModal } from "./settings.tsx";
 import { setupDOM, mockFetch } from "./test-helper.ts";
+import { uiStore } from "./ui-store.ts";
 
 vi.mock("./webauthn.ts", () => ({
   createPrfCredential: vi.fn(),
@@ -8,14 +11,8 @@ vi.mock("./webauthn.ts", () => ({
 }));
 
 describe("settings", () => {
-  type NotificationEvent = { msg: string; type: "error" | "info" | "success" };
-
   let cleanup: () => void;
   let mock: ReturnType<typeof mockFetch>;
-  let toggleSettings: () => void;
-  let openSettings: () => Promise<void>;
-  let closeSettings: () => void;
-  let isSettingsOpen: () => boolean;
 
   function setInputValue(el: HTMLInputElement, value: string) {
     el.value = value;
@@ -32,8 +29,30 @@ describe("settings", () => {
     el.dispatchEvent(new Event("change", { bubbles: true }));
   }
 
+  async function openSettings() {
+    uiStore.closeSettings();
+    await new Promise((r) => setTimeout(r, 0));
+    uiStore.openSettings();
+    await new Promise((r) => setTimeout(r, 30));
+  }
+
+  function closeSettings() {
+    uiStore.closeSettings();
+  }
+
+  function isSettingsOpen() {
+    return uiStore.settingsOpen();
+  }
+
+  beforeEach(() => {
+    uiStore.closeSettings();
+    uiStore.hideNotification();
+  });
+
   beforeAll(async () => {
     cleanup = setupDOM();
+    const { delegateEvents } = await import("solid-js/web");
+    delegateEvents(["click", "input", "change", "keydown", "contextmenu", "auxclick"]);
     mock = mockFetch();
     const inputDialogMod = await import("./input-dialog.tsx");
     inputDialogMod.initInputDialog(document.querySelector("#input-dialog-overlay") as HTMLElement);
@@ -51,12 +70,7 @@ describe("settings", () => {
     });
     mock.on("PUT", "/api/settings", {});
 
-    const { createSettings } = await import("./settings.tsx");
-    const s = createSettings(document.querySelector("#settings-root") as HTMLElement);
-    toggleSettings = s.toggle;
-    openSettings = s.open;
-    closeSettings = s.close;
-    isSettingsOpen = s.isOpen;
+    render(() => SettingsModal(), document.querySelector("#settings-root") as HTMLElement);
   });
 
   afterAll(() => {
@@ -65,7 +79,8 @@ describe("settings", () => {
   });
 
   it("save() collects form values and calls saveSettings", async () => {
-    await openSettings();
+    uiStore.openSettings();
+    await new Promise((r) => setTimeout(r, 20));
     const panel = document.querySelector("#settings-panel")!;
 
     // Modify some form values
@@ -86,7 +101,7 @@ describe("settings", () => {
     await new Promise((r) => setTimeout(r, 10));
 
     // Settings should be closed after successful save
-    expect(isSettingsOpen()).toBeFalsy();
+    expect(uiStore.settingsOpen()).toBeFalsy();
   });
 
   it("save sends the exact settings payload", async () => {
@@ -103,7 +118,8 @@ describe("settings", () => {
     });
     mock.on("PUT", "/api/settings", {});
 
-    await openSettings();
+    uiStore.openSettings();
+    await new Promise((r) => setTimeout(r, 20));
     mock.clearRequests();
     const panel = document.querySelector("#settings-panel")!;
 
@@ -149,11 +165,12 @@ describe("settings", () => {
       show_score_breakdown: false,
       excluded_folders: ["archive", "drafts", "private"],
     });
-    expect(isSettingsOpen()).toBeFalsy();
+    expect(uiStore.settingsOpen()).toBeFalsy();
   });
 
   it("cancel closes without saving", async () => {
-    await openSettings();
+    uiStore.openSettings();
+    await new Promise((r) => setTimeout(r, 20));
     mock.clearRequests();
     const panel = document.querySelector("#settings-panel")!;
     setInputValue(panel.querySelector('input[data-key="weight_title"]') as HTMLInputElement, "1");
@@ -161,7 +178,7 @@ describe("settings", () => {
     (panel.querySelector("#settings-cancel") as HTMLButtonElement).click();
     await new Promise((r) => setTimeout(r, 10));
 
-    expect(isSettingsOpen()).toBeFalsy();
+    expect(uiStore.settingsOpen()).toBeFalsy();
     expect(
       mock.requests.some((req) => req.method === "PUT" && req.url === "/api/settings"),
     ).toBeFalsy();
@@ -177,7 +194,8 @@ describe("settings", () => {
       prf_credential_ids: ["abc123"],
     });
 
-    await openSettings();
+    uiStore.openSettings();
+    await new Promise((r) => setTimeout(r, 20));
     const panel = document.querySelector("#settings-panel")!;
 
     // Security section should be rendered
@@ -280,11 +298,6 @@ describe("settings", () => {
     await openSettings();
     mock.on("PUT", "/api/settings", { error: "server error" }, 500);
 
-    const notifications: NotificationEvent[] = [];
-    const offNotification = on("notification", (data) => {
-      notifications.push(data);
-    });
-
     const panel = document.querySelector("#settings-panel")!;
     const saveBtn = panel.querySelector("#settings-save") as HTMLButtonElement;
     saveBtn.click();
@@ -292,14 +305,9 @@ describe("settings", () => {
 
     // Panel stays open on save error
     expect(isSettingsOpen()).toBeTruthy();
-    const notification = notifications.at(-1);
-    if (!notification) {
-      throw new Error("expected notification");
-    }
-    expect(notification.type).toBe("error");
-    expect(notification.msg).toContain("Failed to save settings");
-    expect(notification.msg).toContain("500");
-    offNotification();
+    expect(uiStore.notification().type).toBe("error");
+    expect(uiStore.notification().msg).toContain("Failed to save settings");
+    expect(uiStore.notification().msg).toContain("500");
     closeSettings();
 
     // Restore working mock
@@ -504,11 +512,10 @@ describe("settings", () => {
     expect(overlay.classList.contains("hidden")).toBeTruthy();
 
     // Toggle
-    toggleSettings();
-    // toggleSettings calls openSettings which is async, give it a tick
+    uiStore.toggleSettings();
     await new Promise((r) => setTimeout(r, 10));
     expect(isSettingsOpen()).toBeTruthy();
-    toggleSettings();
+    uiStore.toggleSettings();
     expect(isSettingsOpen()).toBeFalsy();
 
     // Overlay click closes

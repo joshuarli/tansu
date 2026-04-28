@@ -1,8 +1,9 @@
 import { deleteNote, pinFile, unpinFile } from "./api.ts";
 import type { MenuItem } from "./context-menu.tsx";
-import { emit } from "./events.ts";
 import { showInputDialog } from "./input-dialog.tsx";
+import { renameNoteAndRefresh } from "./note-actions.ts";
 import { reportActionError } from "./notify.ts";
+import { serverStore } from "./server-store.ts";
 
 type FileActionsOptions = {
   path: string;
@@ -24,7 +25,7 @@ async function requestRename(path: string, title: string): Promise<void> {
     return;
   }
 
-  emit("file:rename", { oldPath: path, newPath: buildRenamedPath(path, newName) });
+  await renameNoteAndRefresh(path, buildRenamedPath(path, newName));
 }
 
 async function togglePinned(
@@ -34,7 +35,7 @@ async function togglePinned(
 ) {
   await (isPinned ? unpinFile(path) : pinFile(path));
   await onPinChanged?.();
-  emit("pinned:changed");
+  serverStore.notifyPinnedChanged();
 }
 
 async function confirmDelete(path: string, title: string, onDeleted?: () => void | Promise<void>) {
@@ -43,7 +44,7 @@ async function confirmDelete(path: string, title: string, onDeleted?: () => void
   }
   await deleteNote(path);
   await onDeleted?.();
-  emit("files:changed", {});
+  serverStore.notifyFilesChanged();
 }
 
 export function buildFileContextMenuItems(opts: FileActionsOptions): MenuItem[] {

@@ -45,6 +45,10 @@ function removeConflictBanner(container: HTMLElement) {
   container.querySelector(".conflict-banner-host")?.remove();
 }
 
+export function clearConflictBanner(container: HTMLElement): void {
+  removeConflictBanner(container);
+}
+
 /// Show a conflict banner when disk and editor content diverge.
 export function showConflictBanner(
   container: HTMLElement,

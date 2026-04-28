@@ -1,21 +1,13 @@
-import { For, Show, createSignal } from "solid-js";
-import { render } from "solid-js/web";
+import { For, Show, createEffect, createSignal } from "solid-js";
 
 import { createNote, getSettings, searchNotes, type SearchResult } from "./api.ts";
 import { SEARCH_MIN_QUERY_LENGTH, SEARCH_SCORE_PRECISION } from "./constants.ts";
 import { scrollSelectedIndexIntoView, wrapSelectionIndex } from "./listbox.ts";
 import { reportActionError } from "./notify.ts";
 import { createFocusRestorer, OverlayFrame } from "./overlay.tsx";
+import { uiStore } from "./ui-store.ts";
 
-export type Search = {
-  toggle(): void;
-  open(filterPath?: string): void;
-  close(): void;
-  isOpen(): boolean;
-};
-
-type SearchDeps = {
-  root: HTMLElement;
+type SearchModalProps = {
   openTab: (path: string) => Promise<unknown>;
   invalidateNoteCache: () => void;
 };
@@ -63,79 +55,13 @@ function Score(props: Readonly<{ result: SearchResult }>) {
   );
 }
 
-type SearchViewProps = {
-  inputRef: (el: HTMLInputElement) => void;
-  resultsRef: (el: HTMLDivElement) => void;
-  scopePath: () => string | null;
-  results: () => SearchResult[];
-  selectedIndex: () => number;
-  showScoreBreakdown: () => boolean;
-  query: () => string;
-  onInput: () => void;
-  onKeyDown: (e: KeyboardEvent) => void;
-  onSelectResult: (index: number) => void;
-  onSelectCreate: () => void;
-};
-
-function SearchView(props: Readonly<SearchViewProps>) {
-  return (
-    <div class="search-modal" role="dialog" aria-modal="true" aria-label="Search notes">
-      <input
-        id="search-input"
-        ref={props.inputRef}
-        type="text"
-        placeholder={props.scopePath() ? "Find in note..." : "Search notes..."}
-        aria-label={props.scopePath() ? "Find in note" : "Search notes"}
-        autocomplete="off"
-        spellcheck={false}
-        on:input={props.onInput}
-        on:keydown={props.onKeyDown}
-      />
-      <div id="search-results" ref={props.resultsRef}>
-        <For each={props.results()}>
-          {(result, i) => (
-            <button
-              type="button"
-              class={`search-result${i() === props.selectedIndex() ? " selected" : ""}`}
-              onClick={() => props.onSelectResult(i())}
-            >
-              <span class="title">
-                <span>{result.title}</span>
-                <For each={result.tags}>{(tag) => <span class="tag-pill">#{tag}</span>}</For>
-              </span>
-              <span class="path">{result.path}</span>
-              <Show when={props.showScoreBreakdown()}>
-                <Score result={result} />
-              </Show>
-              <Show when={result.excerpt}>
-                <Excerpt excerpt={result.excerpt} />
-              </Show>
-            </button>
-          )}
-        </For>
-        <Show when={props.query().length > 0 && !props.scopePath()}>
-          <button
-            type="button"
-            class={`search-create${props.selectedIndex() === props.results().length ? " selected" : ""}`}
-            onClick={props.onSelectCreate}
-          >
-            Create "{props.query()}"
-          </button>
-        </Show>
-      </div>
-    </div>
-  );
-}
-
-export function initSearch(deps: SearchDeps): Search {
+export function SearchModal(props: Readonly<SearchModalProps>) {
   let inputEl: HTMLInputElement | null = null;
   let resultsEl: HTMLDivElement | null = null;
   let searchRequestId = 0;
   let settingsRequestId = 0;
   const focus = createFocusRestorer();
 
-  const [isOpen, setIsOpen] = createSignal(false);
-  const [scopePath, setScopePath] = createSignal<string | null>(null);
   const [query, setQuery] = createSignal("");
   const [results, setResults] = createSignal<SearchResult[]>([]);
   const [selectedIndex, setSelectedIndex] = createSignal(0);
@@ -149,21 +75,23 @@ export function initSearch(deps: SearchDeps): Search {
     const reqId = ++settingsRequestId;
     try {
       const settings = await getSettings();
-      if (reqId !== settingsRequestId) return;
+      if (reqId !== settingsRequestId) {
+        return;
+      }
       setShowScoreBreakdown(settings.show_score_breakdown);
     } catch {
       /* ignore */
     }
   }
 
-  async function doSearch() {
-    const q = inputEl?.value.trim() ?? "";
+  async function runSearch(rawQuery: string) {
+    const trimmed = rawQuery.trim();
     const reqId = ++searchRequestId;
-    const scope = scopePath();
+    const scope = uiStore.searchScopePath();
 
-    setQuery(q);
+    setQuery(trimmed);
 
-    if (q.length < SEARCH_MIN_QUERY_LENGTH) {
+    if (trimmed.length < SEARCH_MIN_QUERY_LENGTH) {
       setResults([]);
       setSelectedIndex(0);
       return;
@@ -171,49 +99,59 @@ export function initSearch(deps: SearchDeps): Search {
 
     let nextResults: SearchResult[] = [];
     try {
-      nextResults = await searchNotes(q, scope ?? undefined);
+      nextResults = await searchNotes(trimmed, scope ?? undefined);
     } catch {
       nextResults = [];
     }
 
-    const latestQ = inputEl?.value.trim() ?? "";
-    if (reqId !== searchRequestId || !isOpen() || latestQ !== q || scopePath() !== scope) return;
+    const latestQuery = inputEl?.value.trim() ?? "";
+    if (
+      reqId !== searchRequestId ||
+      !uiStore.searchOpen() ||
+      latestQuery !== trimmed ||
+      uiStore.searchScopePath() !== scope
+    ) {
+      return;
+    }
     setResults(nextResults);
     setSelectedIndex(0);
   }
 
   async function selectItem(index = selectedIndex()) {
-    const q = inputEl?.value.trim() ?? "";
-    const res = results();
-    if (index < res.length) {
-      const result = res[index];
+    const trimmed = inputEl?.value.trim() ?? "";
+    const currentResults = results();
+    if (index < currentResults.length) {
+      const result = currentResults[index];
       if (result) {
         close();
-        await deps.openTab(result.path);
+        await props.openTab(result.path);
       }
       return;
     }
-    if (!q) return;
-    const path = q.endsWith(".md") ? q : `${q}.md`;
+    if (!trimmed || uiStore.searchScopePath()) {
+      return;
+    }
+    const path = trimmed.endsWith(".md") ? trimmed : `${trimmed}.md`;
     close();
     try {
       await createNote(path);
-      deps.invalidateNoteCache();
-      await deps.openTab(path);
+      props.invalidateNoteCache();
+      await props.openTab(path);
     } catch (error) {
       reportActionError(`Failed to create ${path}`, error);
     }
   }
 
   function handleKeyDown(e: KeyboardEvent) {
-    const totalItems = results().length + ((inputEl?.value.trim().length ?? 0) > 0 ? 1 : 0);
+    const totalItems =
+      results().length + (query().length > 0 && !uiStore.searchScopePath() ? 1 : 0);
     if (e.key === "ArrowDown") {
       e.preventDefault();
-      setSelectedIndex((i) => wrapSelectionIndex(i, 1, totalItems));
+      setSelectedIndex((index) => wrapSelectionIndex(index, 1, totalItems));
       updateScroll();
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
-      setSelectedIndex((i) => wrapSelectionIndex(i, -1, totalItems));
+      setSelectedIndex((index) => wrapSelectionIndex(index, -1, totalItems));
       updateScroll();
     } else if (e.key === "Enter") {
       e.preventDefault();
@@ -224,67 +162,93 @@ export function initSearch(deps: SearchDeps): Search {
     }
   }
 
-  function open(filterPath?: string) {
+  function open() {
     focus.remember();
     searchRequestId++;
-    setIsOpen(true);
-    setScopePath(filterPath ?? null);
     setResults([]);
     setSelectedIndex(0);
     setQuery("");
-    if (inputEl) {
-      inputEl.value = "";
-      inputEl.focus();
-    }
+    queueMicrotask(() => {
+      if (inputEl) {
+        inputEl.value = "";
+        inputEl.focus();
+      }
+    });
     void refreshSettings();
   }
 
   function close() {
     searchRequestId++;
-    setIsOpen(false);
     setQuery("");
-    if (inputEl) inputEl.blur();
+    if (inputEl) {
+      inputEl.blur();
+    }
+    uiStore.closeSearch();
     focus.restore();
   }
 
-  render(
-    () => (
-      <OverlayFrame id="search-overlay" isOpen={isOpen()} onClose={close}>
-        <SearchView
-          inputRef={(el) => {
+  createEffect(() => {
+    if (uiStore.searchOpen()) {
+      open();
+    }
+  });
+
+  return (
+    <OverlayFrame id="search-overlay" isOpen={uiStore.searchOpen()} onClose={close}>
+      <div class="search-modal" role="dialog" aria-modal="true" aria-label="Search notes">
+        <input
+          id="search-input"
+          ref={(el) => {
             inputEl = el;
           }}
-          resultsRef={(el) => {
+          type="text"
+          placeholder={uiStore.searchScopePath() ? "Find in note..." : "Search notes..."}
+          aria-label={uiStore.searchScopePath() ? "Find in note" : "Search notes"}
+          autocomplete="off"
+          spellcheck={false}
+          on:input={(e) => {
+            void runSearch(e.currentTarget.value);
+          }}
+          on:keydown={handleKeyDown}
+        />
+        <div
+          id="search-results"
+          ref={(el) => {
             resultsEl = el;
           }}
-          scopePath={scopePath}
-          results={results}
-          selectedIndex={selectedIndex}
-          showScoreBreakdown={showScoreBreakdown}
-          query={query}
-          onInput={() => void doSearch()}
-          onKeyDown={handleKeyDown}
-          onSelectResult={(i) => {
-            setSelectedIndex(i);
-            void selectItem(i);
-          }}
-          onSelectCreate={() => {
-            setSelectedIndex(results().length);
-            void selectItem(results().length);
-          }}
-        />
-      </OverlayFrame>
-    ),
-    deps.root,
+        >
+          <For each={results()}>
+            {(result, index) => (
+              <button
+                type="button"
+                class={`search-result${index() === selectedIndex() ? " selected" : ""}`}
+                onClick={() => void selectItem(index())}
+              >
+                <span class="title">
+                  <span>{result.title}</span>
+                  <For each={result.tags}>{(tag) => <span class="tag-pill">#{tag}</span>}</For>
+                </span>
+                <span class="path">{result.path}</span>
+                <Show when={showScoreBreakdown()}>
+                  <Score result={result} />
+                </Show>
+                <Show when={result.excerpt}>
+                  <Excerpt excerpt={result.excerpt} />
+                </Show>
+              </button>
+            )}
+          </For>
+          <Show when={query().length > 0 && !uiStore.searchScopePath()}>
+            <button
+              type="button"
+              class={`search-create${selectedIndex() === results().length ? " selected" : ""}`}
+              onClick={() => void selectItem(results().length)}
+            >
+              Create "{query()}"
+            </button>
+          </Show>
+        </div>
+      </div>
+    </OverlayFrame>
   );
-
-  return {
-    toggle() {
-      if (isOpen()) close();
-      else open();
-    },
-    open,
-    close,
-    isOpen,
-  };
 }
