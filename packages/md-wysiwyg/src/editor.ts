@@ -3,7 +3,7 @@
 /// the render/serialize/transform modules; callers configure extensions and callbacks.
 
 import type { MarkdownExtension } from "./extension.js";
-import { shiftIndent } from "./format-ops.js";
+import { shiftIndent, toggleBold, toggleHighlight, toggleItalic } from "./format-ops.js";
 import type { FormatResult } from "./format-ops.js";
 import { checkInlineTransform } from "./inline-transforms.js";
 import {
@@ -15,10 +15,6 @@ import { domToMarkdown, getCursorMarkdownOffset } from "./serialize.js";
 import { checkBlockInputTransform, handleBlockTransform } from "./transforms.js";
 import { clampNodeOffset, CURSOR_SENTINEL } from "./util.js";
 
-const UNDO_STACK_MAX = 200;
-const TYPING_CHECKPOINT_MS = 1000;
-const IMAGE_WEBP_QUALITY = 0.85;
-const INDENT_UNIT = "\t";
 const MAX_INDENT_SPACES = 4;
 const INDENTABLE_BLOCKS = new Set([
   "P",
@@ -39,6 +35,13 @@ export type EditorConfig = {
   extensions?: MarkdownExtension[];
   onImagePaste?: (blob: Blob) => Promise<string | null>;
   onChange?: () => void;
+  onSave?: () => void;
+  contentClassName?: string;
+  sourceClassName?: string;
+  undoStackMax?: number;
+  typingCheckpointMs?: number;
+  imageWebpQuality?: number;
+  indentUnit?: string;
 };
 
 export type EditorHandle = {
@@ -51,6 +54,7 @@ export type EditorHandle = {
   redo(): void;
   toggleSourceMode(): void;
   focus(): void;
+  setConfig(partial: Partial<EditorConfig>): void;
   readonly isSourceMode: boolean;
   readonly contentEl: HTMLElement;
   readonly sourceEl: HTMLTextAreaElement;
@@ -58,14 +62,15 @@ export type EditorHandle = {
 };
 
 export function createEditor(container: HTMLElement, config: EditorConfig = {}): EditorHandle {
-  const extensions = config.extensions ?? [];
+  let cfg = { ...config };
+  const extensions = cfg.extensions ?? [];
   const renderOpts = { extensions };
 
   const contentEl = document.createElement("div");
   contentEl.contentEditable = "true";
-  contentEl.className = "md-editor-content";
+  contentEl.className = cfg.contentClassName ?? "md-editor-content";
   const sourceEl = document.createElement("textarea");
-  sourceEl.className = "md-editor-source";
+  sourceEl.className = cfg.sourceClassName ?? "md-editor-source";
   sourceEl.style.display = "none";
   container.append(contentEl, sourceEl);
 
@@ -226,7 +231,7 @@ export function createEditor(container: HTMLElement, config: EditorConfig = {}):
     const top = undoStack[undoIndex];
     if (top && top.md === md && top.selStart === selStart && top.selEnd === selEnd) return;
     undoStack.push({ md, selStart, selEnd });
-    if (undoStack.length > UNDO_STACK_MAX) {
+    if (undoStack.length > (cfg.undoStackMax ?? 200)) {
       undoStack.shift();
     } else {
       undoIndex++;
@@ -254,7 +259,7 @@ export function createEditor(container: HTMLElement, config: EditorConfig = {}):
     const { md: newMd, selStart, selEnd } = op(md, sel.start, sel.end);
     setContentWithSelection(newMd, selStart, selEnd);
     restoreSelectionFromRenderedMarkers();
-    config.onChange?.();
+    cfg.onChange?.();
   }
 
   // ── Undo / redo ─────────────────────────────────────────────────────────────
@@ -266,7 +271,7 @@ export function createEditor(container: HTMLElement, config: EditorConfig = {}):
     const entry = undoStack[undoIndex]!;
     setContentWithSelection(entry.md, entry.selStart, entry.selEnd);
     restoreSelectionFromRenderedMarkers();
-    config.onChange?.();
+    cfg.onChange?.();
   }
 
   function redo(): void {
@@ -275,7 +280,7 @@ export function createEditor(container: HTMLElement, config: EditorConfig = {}):
     const entry = undoStack[undoIndex]!;
     setContentWithSelection(entry.md, entry.selStart, entry.selEnd);
     restoreSelectionFromRenderedMarkers();
-    config.onChange?.();
+    cfg.onChange?.();
   }
 
   // ── List-editing helpers ────────────────────────────────────────────────────
@@ -294,7 +299,7 @@ export function createEditor(container: HTMLElement, config: EditorConfig = {}):
   function isListItemEmpty(item: HTMLElement): boolean {
     const clone = item.cloneNode(true) as HTMLElement;
     for (const nested of clone.querySelectorAll("ul, ol")) nested.remove();
-    const text = (clone.textContent ?? "").replaceAll("​", "").replaceAll(" ", " ").trim();
+    const text = (clone.textContent ?? "").replaceAll("​", "").replaceAll(" ", " ").trim();
     return text === "";
   }
 
@@ -412,29 +417,31 @@ export function createEditor(container: HTMLElement, config: EditorConfig = {}):
     } else {
       removeEmptyTopLevelListItem(listItem);
     }
-    config.onChange?.();
+    cfg.onChange?.();
     return true;
   }
 
   // ── Source mode Tab key ─────────────────────────────────────────────────────
 
   function dedentLine(line: string): string {
-    if (line.startsWith(INDENT_UNIT)) return line.slice(INDENT_UNIT.length);
+    const indentUnit = cfg.indentUnit ?? "\t";
+    if (line.startsWith(indentUnit)) return line.slice(indentUnit.length);
     const match = line.match(new RegExp(`^[ ]{1,${MAX_INDENT_SPACES}}`));
     return match ? line.slice(match[0].length) : line;
   }
 
   function handleSourceTabKey(e: KeyboardEvent): void {
     e.preventDefault();
+    const indentUnit = cfg.indentUnit ?? "\t";
     const { value } = sourceEl;
     const start = sourceEl.selectionStart;
     const end = sourceEl.selectionEnd;
 
     if (!e.shiftKey && start === end) {
-      sourceEl.value = value.slice(0, start) + INDENT_UNIT + value.slice(end);
-      sourceEl.selectionStart = start + INDENT_UNIT.length;
-      sourceEl.selectionEnd = start + INDENT_UNIT.length;
-      config.onChange?.();
+      sourceEl.value = value.slice(0, start) + indentUnit + value.slice(end);
+      sourceEl.selectionStart = start + indentUnit.length;
+      sourceEl.selectionEnd = start + indentUnit.length;
+      cfg.onChange?.();
       return;
     }
 
@@ -443,17 +450,23 @@ export function createEditor(container: HTMLElement, config: EditorConfig = {}):
     const nextNewline = value.indexOf("\n", adjustedEnd);
     const lineEnd = nextNewline === -1 ? value.length : nextNewline;
     const lines = value.slice(lineStart, lineEnd).split("\n");
-    const transformed = e.shiftKey ? lines.map(dedentLine) : lines.map((l) => INDENT_UNIT + l);
+    const transformed = e.shiftKey ? lines.map(dedentLine) : lines.map((l) => indentUnit + l);
     sourceEl.setRangeText(transformed.join("\n"), lineStart, lineEnd, "select");
     sourceEl.selectionStart = lineStart;
     sourceEl.selectionEnd = lineStart + transformed.join("\n").length;
-    config.onChange?.();
+    cfg.onChange?.();
   }
 
   // ── Event handlers ──────────────────────────────────────────────────────────
 
   function onKeyDown(e: KeyboardEvent): void {
     const meta = e.metaKey || e.ctrlKey;
+    if (meta && e.key === "s") {
+      e.preventDefault();
+      e.stopPropagation();
+      cfg.onSave?.();
+      return;
+    }
     if (meta && e.key === "z" && !e.shiftKey) {
       e.preventDefault();
       undo();
@@ -470,15 +483,30 @@ export function createEditor(container: HTMLElement, config: EditorConfig = {}):
       applyFormat((md, s, end) => shiftIndent(md, s, end, dedent));
       return;
     }
+    if (meta && e.key === "b") {
+      e.preventDefault();
+      applyFormat(toggleBold);
+      return;
+    }
+    if (meta && e.key === "i") {
+      e.preventDefault();
+      applyFormat(toggleItalic);
+      return;
+    }
+    if (meta && e.key === "h") {
+      e.preventDefault();
+      applyFormat(toggleHighlight);
+      return;
+    }
     if (e.key === "Backspace" && handleEmptyListItemBackspace(e)) return;
     if (e.key === "Enter" && !e.shiftKey) {
-      handleBlockTransform(e, contentEl, () => config.onChange?.());
+      handleBlockTransform(e, contentEl, () => cfg.onChange?.());
     }
   }
 
   function onInput(): void {
     if (checkBlockInputTransform(contentEl)) {
-      config.onChange?.();
+      cfg.onChange?.();
       return;
     }
     checkInlineTransform();
@@ -488,8 +516,8 @@ export function createEditor(container: HTMLElement, config: EditorConfig = {}):
       const md = getValue();
       const sel = getSelectionOffsets();
       pushUndo(md, sel?.start ?? 0, sel?.end ?? 0);
-    }, TYPING_CHECKPOINT_MS);
-    config.onChange?.();
+    }, cfg.typingCheckpointMs ?? 1000);
+    cfg.onChange?.();
   }
 
   async function onPaste(e: ClipboardEvent): Promise<void> {
@@ -498,7 +526,7 @@ export function createEditor(container: HTMLElement, config: EditorConfig = {}):
     if (!clipData) return;
 
     const imageItem = [...clipData.items].find((item) => item.type.startsWith("image/"));
-    if (imageItem && config.onImagePaste) {
+    if (imageItem && cfg.onImagePaste) {
       const file = imageItem.getAsFile();
       if (file) {
         const bitmap = await createImageBitmap(file);
@@ -507,13 +535,13 @@ export function createEditor(container: HTMLElement, config: EditorConfig = {}):
         ctx.drawImage(bitmap, 0, 0);
         const blob = await canvas.convertToBlob({
           type: "image/webp",
-          quality: IMAGE_WEBP_QUALITY,
+          quality: cfg.imageWebpQuality ?? 0.85,
         });
         bitmap.close();
-        const html = await config.onImagePaste(blob);
+        const html = await cfg.onImagePaste(blob);
         if (html) {
           document.execCommand("insertHTML", false, html);
-          config.onChange?.();
+          cfg.onChange?.();
         }
       }
       return;
@@ -539,13 +567,13 @@ export function createEditor(container: HTMLElement, config: EditorConfig = {}):
       const cur = start + pastedText.length;
       setContentWithSelection(newMd, cur, cur);
       restoreSelectionFromRenderedMarkers();
-      config.onChange?.();
+      cfg.onChange?.();
     }
   }
 
   function onCheckboxEvent(e: Event): void {
     if (e.target instanceof HTMLInputElement && e.target.type === "checkbox") {
-      config.onChange?.();
+      cfg.onChange?.();
     }
   }
 
@@ -556,8 +584,15 @@ export function createEditor(container: HTMLElement, config: EditorConfig = {}):
   });
   contentEl.addEventListener("change", onCheckboxEvent);
   contentEl.addEventListener("click", onCheckboxEvent);
-  sourceEl.addEventListener("input", () => config.onChange?.());
+  sourceEl.addEventListener("input", () => cfg.onChange?.());
   sourceEl.addEventListener("keydown", (e) => {
+    const meta = e.metaKey || e.ctrlKey;
+    if (meta && e.key === "s") {
+      e.preventDefault();
+      e.stopPropagation();
+      cfg.onSave?.();
+      return;
+    }
     if (e.key === "Tab") handleSourceTabKey(e);
   });
 
@@ -576,6 +611,12 @@ export function createEditor(container: HTMLElement, config: EditorConfig = {}):
       contentEl.style.display = "none";
       sourceEl.style.display = "";
     }
+  }
+
+  function setConfig(partial: Partial<EditorConfig>): void {
+    cfg = { ...cfg, ...partial };
+    if (partial.contentClassName !== undefined) contentEl.className = partial.contentClassName;
+    if (partial.sourceClassName !== undefined) sourceEl.className = partial.sourceClassName;
   }
 
   function destroy(): void {
@@ -598,6 +639,7 @@ export function createEditor(container: HTMLElement, config: EditorConfig = {}):
     redo,
     toggleSourceMode,
     focus: () => contentEl.focus(),
+    setConfig,
     get isSourceMode() {
       return _isSourceMode;
     },

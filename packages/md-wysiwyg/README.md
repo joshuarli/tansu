@@ -31,6 +31,9 @@ import { createEditor, createWikiLinkExtension } from "@joshuarli98/md-wysiwyg";
 const handle = createEditor(document.getElementById("mount")!, {
   extensions: [createWikiLinkExtension()],
   onChange: () => console.log(handle.getValue()),
+  onSave: () => persistToDisk(handle.getValue()),
+  contentClassName: "my-editor",
+  sourceClassName: "my-editor-source",
   onImagePaste: async (blob) => {
     const url = await upload(blob);
     return url ? `<img src="${url}" alt="pasted">` : null;
@@ -41,7 +44,26 @@ handle.setValue("# Hello");
 handle.focus();
 ```
 
-`EditorHandle` exposes: `getValue()`, `setValue(md, cursorOffset?)`, `getSelectionOffsets()`, `getCursorOffset()`, `applyFormat(op)`, `undo()`, `redo()`, `toggleSourceMode()`, `focus()`, `isSourceMode`, `contentEl`, `sourceEl`, `destroy()`.
+`EditorConfig` options:
+
+| Option               | Default               | Description                                                   |
+| -------------------- | --------------------- | ------------------------------------------------------------- |
+| `extensions`         | `[]`                  | Custom markdown extensions                                    |
+| `onChange`           | —                     | Called on every content mutation                              |
+| `onSave`             | —                     | Called on Cmd/Ctrl+S in both WYSIWYG and source modes         |
+| `onImagePaste`       | —                     | Upload handler; return HTML string or `null`                  |
+| `contentClassName`   | `"md-editor-content"` | Class applied to the contenteditable div                      |
+| `sourceClassName`    | `"md-editor-source"`  | Class applied to the source textarea                          |
+| `undoStackMax`       | `200`                 | Maximum undo history entries                                  |
+| `typingCheckpointMs` | `1000`                | Milliseconds of idle time before a typing run is checkpointed |
+| `imageWebpQuality`   | `0.85`                | WebP quality (0–1) for pasted images                          |
+| `indentUnit`         | `"\t"`                | Indent string used in source mode tab/shift-tab               |
+
+`EditorHandle` exposes: `getValue()`, `setValue(md, cursorOffset?)`, `getSelectionOffsets()`, `getCursorOffset()`, `applyFormat(op)`, `undo()`, `redo()`, `toggleSourceMode()`, `focus()`, `setConfig(partial)`, `isSourceMode`, `contentEl`, `sourceEl`, `destroy()`.
+
+`setConfig(partial)` updates config at runtime — callbacks, class names, and numeric tunables all take effect immediately. Note: `extensions` are fixed at construction time and cannot be changed via `setConfig`.
+
+**Built-in keyboard shortcuts** (WYSIWYG mode): Cmd/Ctrl+Z (undo), Cmd/Ctrl+Shift+Z / Cmd/Ctrl+Y (redo), Tab/Shift+Tab (indent/dedent), Cmd/Ctrl+B (bold), Cmd/Ctrl+I (italic), Cmd/Ctrl+H (highlight), Cmd/Ctrl+S (calls `onSave`).
 
 ### Extensions
 

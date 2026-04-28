@@ -3,9 +3,6 @@ import {
   type EditorHandle,
   escapeHtml,
   stemFromPath,
-  toggleBold,
-  toggleItalic,
-  toggleHighlight,
   shiftIndent,
 } from "@joshuarli98/md-wysiwyg";
 
@@ -39,6 +36,38 @@ import {
   getCursor,
   updateTabDraft,
 } from "./tab-state.ts";
+
+const EDITOR_PREFS_KEY = "editor_prefs";
+
+export type EditorPrefs = {
+  undoStackMax: number;
+};
+
+const EDITOR_PREFS_DEFAULTS: EditorPrefs = { undoStackMax: 200 };
+
+export function getEditorPrefs(): EditorPrefs {
+  try {
+    const raw = localStorage.getItem(EDITOR_PREFS_KEY);
+    if (!raw) return { ...EDITOR_PREFS_DEFAULTS };
+    return { ...EDITOR_PREFS_DEFAULTS, ...(JSON.parse(raw) as Partial<EditorPrefs>) };
+  } catch {
+    return { ...EDITOR_PREFS_DEFAULTS };
+  }
+}
+
+export function saveEditorPrefs(prefs: EditorPrefs): void {
+  try {
+    localStorage.setItem(EDITOR_PREFS_KEY, JSON.stringify(prefs));
+  } catch {
+    /* ignore: localStorage may be unavailable */
+  }
+}
+
+let _currentHandle: EditorHandle | null = null;
+
+export function getEditorHandle(): EditorHandle | null {
+  return _currentHandle;
+}
 
 export type SaveAction =
   | { type: "clean"; content: string; mtime: number }
@@ -497,6 +526,12 @@ export function initEditor(): EditorInstance {
     handle = createEditor(shell.refs.editorMountEl, {
       extensions: editorExtensions,
       onChange: onEditorTabMutation,
+      onSave: () => {
+        void saveCurrentNote();
+      },
+      contentClassName: "editor-content",
+      sourceClassName: "editor-source",
+      undoStackMax: getEditorPrefs().undoStackMax,
       onImagePaste: async (blob) => {
         const now = new Date();
         const ts =
@@ -518,46 +553,7 @@ export function initEditor(): EditorInstance {
       },
     });
 
-    // Apply tansu-specific classes so existing CSS continues to work.
-    handle.contentEl.className = "editor-content";
-    handle.contentEl.spellcheck = true;
-    handle.sourceEl.className = "editor-source";
-
-    // Wire save and format keyboard shortcuts on contentEl (beyond what the library handles).
-    handle.contentEl.addEventListener("keydown", (e) => {
-      const meta = e.metaKey || e.ctrlKey;
-      if (meta && e.key === "s") {
-        e.preventDefault();
-        e.stopPropagation();
-        saveCurrentNote();
-        return;
-      }
-      if (meta && e.key === "b") {
-        e.preventDefault();
-        handle!.applyFormat(toggleBold);
-        return;
-      }
-      if (meta && e.key === "i") {
-        e.preventDefault();
-        handle!.applyFormat(toggleItalic);
-        return;
-      }
-      if (meta && e.key === "h") {
-        e.preventDefault();
-        handle!.applyFormat(toggleHighlight);
-        return;
-      }
-    });
-
-    handle.sourceEl.addEventListener("keydown", (e) => {
-      const meta = e.metaKey || e.ctrlKey;
-      if (meta && e.key === "s") {
-        e.preventDefault();
-        e.stopPropagation();
-        saveCurrentNote();
-        return;
-      }
-    });
+    _currentHandle = handle;
 
     if (formatToolbarCleanup) {
       formatToolbarCleanup();
@@ -604,6 +600,7 @@ export function initEditor(): EditorInstance {
 
     handle?.destroy();
     handle = null;
+    _currentHandle = null;
 
     container = null;
     backlinksEl = null;

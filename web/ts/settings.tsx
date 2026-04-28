@@ -29,6 +29,7 @@ import {
   SETTINGS_WEIGHT_TAGS_DEFAULT,
   SETTINGS_WEIGHT_TITLE_DEFAULT,
 } from "./constants.ts";
+import { getEditorHandle, getEditorPrefs, saveEditorPrefs, type EditorPrefs } from "./editor.ts";
 import { showInputDialog } from "./input-dialog.tsx";
 import { createPrfCredential, isPrfLikelySupported } from "./webauthn.ts";
 
@@ -79,6 +80,8 @@ type SettingsViewProps = {
   onAddPrf: () => void;
   onLock: () => void;
   securityStatus: () => string;
+  editorPrefs: () => EditorPrefs;
+  onEditorUndoStackMax: (value: string) => void;
 };
 
 function SettingsView(props: Readonly<SettingsViewProps>) {
@@ -271,6 +274,20 @@ function SettingsView(props: Readonly<SettingsViewProps>) {
                 </div>
               </div>
             </Show>
+            <div class="settings-section">
+              <h3>Editor</h3>
+              <label class="settings-row">
+                <span>Undo history</span>
+                <input
+                  type="number"
+                  min="50"
+                  max="1000"
+                  step="50"
+                  value={props.editorPrefs().undoStackMax}
+                  onInput={(e) => props.onEditorUndoStackMax(e.currentTarget.value)}
+                />
+              </label>
+            </div>
             <div class="settings-actions">
               <button id="settings-save" onClick={props.onSave}>
                 Save
@@ -294,6 +311,7 @@ export function createSettings(): SettingsPanel {
   let savedFocus: Element | null = null;
   const [isOpen, setIsOpen] = createSignal(false);
   const [current, setCurrent] = createSignal<Settings | null>(null);
+  const [editorPrefs, setEditorPrefs] = createSignal<EditorPrefs>(getEditorPrefs());
   const [status, setStatus] = createSignal<AppStatus | null>(null);
   const [securityStatus, setSecurityStatus] = createSignal("");
 
@@ -309,6 +327,7 @@ export function createSettings(): SettingsPanel {
     savedFocus = document.activeElement;
     setIsOpen(true);
     setSecurityStatus("");
+    setEditorPrefs(getEditorPrefs());
     try {
       setCurrent(await getSettings());
     } catch {
@@ -366,6 +385,8 @@ export function createSettings(): SettingsPanel {
 
     try {
       await saveSettings(updated);
+      saveEditorPrefs(editorPrefs());
+      getEditorHandle()?.setConfig({ undoStackMax: editorPrefs().undoStackMax });
       setCurrent(updated);
       close();
     } catch {
@@ -474,6 +495,11 @@ export function createSettings(): SettingsPanel {
             }}
             onLock={() => {
               void lockNow();
+            }}
+            editorPrefs={editorPrefs}
+            onEditorUndoStackMax={(value) => {
+              const n = Number.parseInt(value, 10);
+              if (!Number.isNaN(n)) setEditorPrefs((prev) => ({ ...prev, undoStackMax: n }));
             }}
           />
         </div>
