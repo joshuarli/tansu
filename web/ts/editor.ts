@@ -52,12 +52,13 @@ type EditorElements = {
 };
 
 export function initEditor(elements: Readonly<EditorElements>): EditorInstance {
-  registerLinkHover();
+  const disposeLinkHover = registerLinkHover();
 
   let handle: EditorAdapter | null = null;
   let container: HTMLElement | null = null;
   let backlinksEl: HTMLElement | null = null;
   let currentPath: string | null = null;
+  let disposeImageResize: (() => void) | null = null;
   const displayState = createEditorDisplayStateController((state) => {
     elements.setDisplayState?.(state);
     elements.setVisible(state.type !== "empty");
@@ -153,6 +154,8 @@ export function initEditor(elements: Readonly<EditorElements>): EditorInstance {
     displayState.setType("editing");
     elements.emptyState.style.display = "none";
 
+    disposeImageResize?.();
+    disposeImageResize = null;
     handle?.destroy();
     handle = null;
 
@@ -174,7 +177,7 @@ export function initEditor(elements: Readonly<EditorElements>): EditorInstance {
 
     const cursor = getCursor(path);
     loadContent(content, cursor);
-    initImageResize(handle.contentEl, onEditorTabMutation);
+    disposeImageResize = initImageResize(handle.contentEl, onEditorTabMutation);
     loadBacklinks(backlinksEl, path);
     handle.focus();
   }
@@ -192,6 +195,8 @@ export function initEditor(elements: Readonly<EditorElements>): EditorInstance {
     tagState.setTags([]);
     displayState.setType("empty");
 
+    disposeImageResize?.();
+    disposeImageResize = null;
     handle?.destroy();
     handle = null;
 
@@ -220,6 +225,7 @@ export function initEditor(elements: Readonly<EditorElements>): EditorInstance {
   function destroy() {
     hideEditor();
     shellWiring.dispose();
+    disposeLinkHover();
   }
 
   return {

@@ -1,34 +1,34 @@
 import { IMAGE_RESIZE_MIN_WIDTH_PX, IMAGE_RESIZE_WHEEL_SCALE } from "./constants.ts";
 
-let resizeCallback: (() => void) | null = null;
+export function initImageResize(editorContent: HTMLElement, onResize: () => void): () => void {
+  let hoveredImg: HTMLImageElement | null = null;
+  let dragging = false;
+  let dragDir = "";
+  let dragStartX = 0;
+  let dragStartWidth = 0;
 
-export function initImageResize(editorContent: HTMLElement, onResize: () => void) {
-  resizeCallback = onResize;
+  const onWheel = (e: WheelEvent) => {
+    if (!e.ctrlKey) {
+      return;
+    }
+    const target = e.target as HTMLElement;
+    if (target.tagName !== "IMG" || !target.dataset["wikiImage"]) {
+      return;
+    }
+    e.preventDefault();
 
-  editorContent.addEventListener(
-    "wheel",
-    (e) => {
-      if (!e.ctrlKey) {
-        return;
-      }
-      const target = e.target as HTMLElement;
-      if (target.tagName !== "IMG" || !target.dataset["wikiImage"]) {
-        return;
-      }
-      e.preventDefault();
-
-      const img = target as HTMLImageElement;
-      const currentWidth = img.getBoundingClientRect().width;
-      const newWidth = Math.max(
-        IMAGE_RESIZE_MIN_WIDTH_PX,
-        Math.round(currentWidth - e.deltaY * IMAGE_RESIZE_WHEEL_SCALE),
-      );
-      img.setAttribute("width", String(newWidth));
-      if (hoveredImg === img) positionOverlay(img);
-      resizeCallback?.();
-    },
-    { passive: false },
-  );
+    const img = target as HTMLImageElement;
+    const currentWidth = img.getBoundingClientRect().width;
+    const newWidth = Math.max(
+      IMAGE_RESIZE_MIN_WIDTH_PX,
+      Math.round(currentWidth - e.deltaY * IMAGE_RESIZE_WHEEL_SCALE),
+    );
+    img.setAttribute("width", String(newWidth));
+    if (hoveredImg === img) {
+      positionOverlay(img);
+    }
+    onResize();
+  };
 
   const overlay = document.createElement("div");
   overlay.className = "img-resize-overlay";
@@ -39,12 +39,6 @@ export function initImageResize(editorContent: HTMLElement, onResize: () => void
     overlay.append(handle);
   }
   document.body.append(overlay);
-
-  let hoveredImg: HTMLImageElement | null = null;
-  let dragging = false;
-  let dragDir = "";
-  let dragStartX = 0;
-  let dragStartWidth = 0;
 
   function positionOverlay(img: HTMLImageElement) {
     const rect = img.getBoundingClientRect();
@@ -67,61 +61,91 @@ export function initImageResize(editorContent: HTMLElement, onResize: () => void
     }
   }
 
-  editorContent.addEventListener("mouseover", (e) => {
+  const onMouseOver = (e: MouseEvent) => {
     const target = e.target as HTMLElement;
     if (target.tagName === "IMG" && target.dataset["wikiImage"]) {
       showOverlay(target as HTMLImageElement);
     }
-  });
+  };
 
-  editorContent.addEventListener("mouseout", (e) => {
+  const onMouseOut = (e: MouseEvent) => {
     const target = e.target as HTMLElement;
-    if (target.tagName !== "IMG" || !target.dataset["wikiImage"]) return;
+    if (target.tagName !== "IMG" || !target.dataset["wikiImage"]) {
+      return;
+    }
     const rel = e.relatedTarget as Node | null;
-    if (rel && overlay.contains(rel)) return;
+    if (rel && overlay.contains(rel)) {
+      return;
+    }
     maybeHideOverlay();
-  });
+  };
 
-  overlay.addEventListener("mouseleave", (e) => {
+  const onOverlayMouseLeave = (e: MouseEvent) => {
     const rel = e.relatedTarget as Node | null;
-    if (rel && hoveredImg && (rel === hoveredImg || hoveredImg.contains(rel as Node))) return;
+    if (rel && hoveredImg && (rel === hoveredImg || hoveredImg.contains(rel))) {
+      return;
+    }
     maybeHideOverlay();
-  });
+  };
 
-  overlay.addEventListener("mousedown", (e) => {
+  const onOverlayMouseDown = (e: MouseEvent) => {
     const handle = (e.target as HTMLElement).closest("[data-dir]") as HTMLElement | null;
-    if (!handle || !hoveredImg) return;
+    if (!handle || !hoveredImg) {
+      return;
+    }
     e.preventDefault();
     e.stopPropagation();
     dragging = true;
     dragDir = handle.dataset["dir"] ?? "se";
     dragStartX = e.clientX;
     dragStartWidth = hoveredImg.getBoundingClientRect().width;
-  });
+  };
 
-  document.addEventListener("mousemove", (e) => {
-    if (!dragging || !hoveredImg) return;
+  const onDocumentMouseMove = (e: MouseEvent) => {
+    if (!dragging || !hoveredImg) {
+      return;
+    }
     const dx = e.clientX - dragStartX;
     // west handles: dragging left increases width (negative dx = bigger)
     const sign = dragDir.includes("w") ? -1 : 1;
     const newWidth = Math.max(IMAGE_RESIZE_MIN_WIDTH_PX, Math.round(dragStartWidth + sign * dx));
     hoveredImg.setAttribute("width", String(newWidth));
     positionOverlay(hoveredImg);
-    resizeCallback?.();
-  });
+    onResize();
+  };
 
-  document.addEventListener("mouseup", () => {
+  const onDocumentMouseUp = () => {
     if (dragging) {
       dragging = false;
     }
-  });
+  };
 
-  // Reposition on scroll (e.g. long page)
-  document.addEventListener(
-    "scroll",
-    () => {
-      if (hoveredImg) positionOverlay(hoveredImg);
-    },
-    true,
-  );
+  const onDocumentScroll = () => {
+    if (hoveredImg) {
+      positionOverlay(hoveredImg);
+    }
+  };
+
+  editorContent.addEventListener("wheel", onWheel, { passive: false });
+  editorContent.addEventListener("mouseover", onMouseOver);
+  editorContent.addEventListener("mouseout", onMouseOut);
+  overlay.addEventListener("mouseleave", onOverlayMouseLeave);
+  overlay.addEventListener("mousedown", onOverlayMouseDown);
+  document.addEventListener("mousemove", onDocumentMouseMove);
+  document.addEventListener("mouseup", onDocumentMouseUp);
+  document.addEventListener("scroll", onDocumentScroll, true);
+
+  return () => {
+    hoveredImg = null;
+    dragging = false;
+    editorContent.removeEventListener("wheel", onWheel);
+    editorContent.removeEventListener("mouseover", onMouseOver);
+    editorContent.removeEventListener("mouseout", onMouseOut);
+    overlay.removeEventListener("mouseleave", onOverlayMouseLeave);
+    overlay.removeEventListener("mousedown", onOverlayMouseDown);
+    document.removeEventListener("mousemove", onDocumentMouseMove);
+    document.removeEventListener("mouseup", onDocumentMouseUp);
+    document.removeEventListener("scroll", onDocumentScroll, true);
+    overlay.remove();
+  };
 }

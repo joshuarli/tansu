@@ -1,7 +1,7 @@
 /// Click handler for [[wiki-links]] rendered by markdown.ts.
 
-export function registerWikiLinkClickHandler(onLinkClick: (target: string) => void) {
-  document.addEventListener("click", (e) => {
+export function registerWikiLinkClickHandler(onLinkClick: (target: string) => void): () => void {
+  const onClick = (e: MouseEvent) => {
     const target = e.target as HTMLElement;
     if (target.classList.contains("wiki-link")) {
       e.preventDefault();
@@ -10,5 +10,10 @@ export function registerWikiLinkClickHandler(onLinkClick: (target: string) => vo
         onLinkClick(linkTarget);
       }
     }
-  });
+  };
+
+  document.addEventListener("click", onClick);
+  return () => {
+    document.removeEventListener("click", onClick);
+  };
 }

@@ -3,7 +3,7 @@
 const isMac = navigator.platform.startsWith("Mac");
 const hint = isMac ? "⌘+click to open" : "Ctrl+click to open";
 
-export function registerLinkHover() {
+export function registerLinkHover(): () => void {
   const tooltip = document.createElement("div");
   tooltip.className = "link-hover-tooltip";
   tooltip.textContent = hint;
@@ -12,7 +12,7 @@ export function registerLinkHover() {
 
   let hideTimer: ReturnType<typeof setTimeout> | null = null;
 
-  document.addEventListener("mouseover", (e) => {
+  const onMouseOver = (e: MouseEvent) => {
     const anchor = (e.target as HTMLElement).closest<HTMLAnchorElement>(".editor-content a[href]");
     if (!anchor) {
       return;
@@ -25,17 +25,17 @@ export function registerLinkHover() {
     tooltip.style.display = "block";
     tooltip.style.top = `${rect.bottom + window.scrollY + 4}px`;
     tooltip.style.left = `${rect.left + window.scrollX}px`;
-  });
+  };
 
-  document.addEventListener("mouseout", (e) => {
+  const onMouseOut = (e: MouseEvent) => {
     if ((e.target as HTMLElement).closest(".editor-content a[href]")) {
       hideTimer = setTimeout(() => {
         tooltip.style.display = "none";
       }, 100);
     }
-  });
+  };
 
-  document.addEventListener("click", (e) => {
+  const onClick = (e: MouseEvent) => {
     const anchor = (e.target as HTMLElement).closest<HTMLAnchorElement>(".editor-content a[href]");
     if (!anchor) {
       return;
@@ -44,5 +44,19 @@ export function registerLinkHover() {
       e.preventDefault();
       window.open(anchor.getAttribute("href")!, "_blank", "noopener,noreferrer");
     }
-  });
+  };
+
+  document.addEventListener("mouseover", onMouseOver);
+  document.addEventListener("mouseout", onMouseOut);
+  document.addEventListener("click", onClick);
+
+  return () => {
+    if (hideTimer !== null) {
+      clearTimeout(hideTimer);
+    }
+    document.removeEventListener("mouseover", onMouseOver);
+    document.removeEventListener("mouseout", onMouseOut);
+    document.removeEventListener("click", onClick);
+    tooltip.remove();
+  };
 }

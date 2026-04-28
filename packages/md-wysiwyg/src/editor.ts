@@ -403,15 +403,15 @@ export function createEditor(container: HTMLElement, config: EditorConfig = {}):
     }
   }
 
-  contentEl.addEventListener("keydown", onKeyDown);
-  contentEl.addEventListener("input", onInput);
-  contentEl.addEventListener("paste", (e) => {
+  function onContentPaste(e: ClipboardEvent): void {
     void onPaste(e);
-  });
-  contentEl.addEventListener("change", onCheckboxEvent);
-  contentEl.addEventListener("click", onCheckboxEvent);
-  sourceEl.addEventListener("input", () => cfg.onChange?.());
-  sourceEl.addEventListener("keydown", (e) => {
+  }
+
+  function onSourceInput(): void {
+    cfg.onChange?.();
+  }
+
+  function onSourceKeyDown(e: KeyboardEvent): void {
     const meta = e.metaKey || e.ctrlKey;
     if (meta && e.key === "s") {
       e.preventDefault();
@@ -419,8 +419,18 @@ export function createEditor(container: HTMLElement, config: EditorConfig = {}):
       cfg.onSave?.();
       return;
     }
-    if (e.key === "Tab") handleSourceTabKey(e);
-  });
+    if (e.key === "Tab") {
+      handleSourceTabKey(e);
+    }
+  }
+
+  contentEl.addEventListener("keydown", onKeyDown);
+  contentEl.addEventListener("input", onInput);
+  contentEl.addEventListener("paste", onContentPaste);
+  contentEl.addEventListener("change", onCheckboxEvent);
+  contentEl.addEventListener("click", onCheckboxEvent);
+  sourceEl.addEventListener("input", onSourceInput);
+  sourceEl.addEventListener("keydown", onSourceKeyDown);
 
   // ── Source mode ─────────────────────────────────────────────────────────────
 
@@ -449,8 +459,11 @@ export function createEditor(container: HTMLElement, config: EditorConfig = {}):
     undoController.destroy();
     contentEl.removeEventListener("keydown", onKeyDown);
     contentEl.removeEventListener("input", onInput);
+    contentEl.removeEventListener("paste", onContentPaste);
     contentEl.removeEventListener("change", onCheckboxEvent);
     contentEl.removeEventListener("click", onCheckboxEvent);
+    sourceEl.removeEventListener("input", onSourceInput);
+    sourceEl.removeEventListener("keydown", onSourceKeyDown);
     container.removeChild(contentEl);
     container.removeChild(sourceEl);
   }

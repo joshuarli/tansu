@@ -37,6 +37,7 @@ export function createServerStore() {
   let deps: ServerStoreDeps | null = null;
   let backoff = createBackoff([...SSE_BACKOFF_DELAYS_MS]);
   let lifecycle: ReturnType<typeof createSseLifecycle> | null = null;
+  let started = false;
 
   function notifyFilesChanged(savedPath?: string) {
     setFileChange((current) => ({ version: current.version + 1, savedPath: savedPath ?? null }));
@@ -169,6 +170,10 @@ export function createServerStore() {
       if (!lifecycle) {
         throw new Error("server store not configured");
       }
+      if (started) {
+        return;
+      }
+      started = true;
       if (!lifecycle.getSse()) {
         connect();
       }
@@ -181,6 +186,10 @@ export function createServerStore() {
       if (!lifecycle) {
         return;
       }
+      if (!started) {
+        return;
+      }
+      started = false;
       window.removeEventListener("pagehide", lifecycle.closeForUnload);
       window.removeEventListener("beforeunload", lifecycle.closeForUnload);
       window.removeEventListener("focus", lifecycle.requestImmediateReconnect);

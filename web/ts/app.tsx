@@ -28,9 +28,10 @@ export function App(props: Readonly<AppProps>) {
 
   onMount(() => {
     let boot: ReturnType<typeof createAppBootController>;
+    let disposeWikiLinkNavigation: (() => void) | null = null;
 
     function initApp() {
-      registerWikiLinkNavigation();
+      disposeWikiLinkNavigation = registerWikiLinkNavigation();
       configureServerRuntime({
         getEditor: () => editor,
         showUnlockScreen: () => boot.showUnlockScreen(),
@@ -53,6 +54,7 @@ export function App(props: Readonly<AppProps>) {
     void boot.boot();
 
     onCleanup(() => {
+      disposeWikiLinkNavigation?.();
       document.removeEventListener("keydown", globalKeydown);
       serverStore.stop();
     });

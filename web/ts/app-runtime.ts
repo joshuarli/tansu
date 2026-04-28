@@ -7,8 +7,8 @@ import { closeActiveTab, getActiveTab, openTab, syncToServer } from "./tab-state
 import { uiStore } from "./ui-store.ts";
 import { registerWikiLinkClickHandler } from "./wikilinks.ts";
 
-export function registerWikiLinkNavigation(): void {
-  registerWikiLinkClickHandler(async (target: string) => {
+export function registerWikiLinkNavigation(): () => void {
+  return registerWikiLinkClickHandler(async (target: string) => {
     const notes = await listNotes();
     const normalized = target.toLowerCase().replaceAll(/\s+/g, "-");
     const match = notes.find((note) => {
