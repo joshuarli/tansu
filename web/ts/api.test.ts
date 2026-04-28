@@ -1,4 +1,5 @@
 import {
+  ApiError,
   searchNotes,
   getNote,
   saveNote,
@@ -181,7 +182,33 @@ describe("api", () => {
 
   it("listNotes error", async () => {
     mock.on("GET", "/api/notes", {}, 500);
-    await expect(listNotes()).rejects.toThrow();
+    await expect(listNotes()).rejects.toThrow(ApiError);
+  });
+
+  it("throws contextual error for invalid JSON", async () => {
+    mock.onResponse(
+      "GET",
+      "/api/notes",
+      new Response("not-json", {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    await expect(listNotes()).rejects.toThrow("list: invalid JSON");
+  });
+
+  it("includes status and body on non-2xx errors", async () => {
+    mock.onResponse("GET", "/api/notes", new Response("broken", { status: 500 }));
+    await expect(listNotes()).rejects.toMatchObject({
+      context: "list",
+      status: 500,
+      body: "broken",
+    });
+  });
+
+  it("accepts empty successful responses for void endpoints", async () => {
+    mock.onResponse("DELETE", "/api/note", new Response(null, { status: 204 }));
+    await expect(deleteNote("empty.md")).resolves.toBeUndefined();
   });
 
   it("unlockWithRecoveryKey returns true on 200", async () => {

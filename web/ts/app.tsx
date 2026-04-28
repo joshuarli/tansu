@@ -1,10 +1,10 @@
-import { ErrorBoundary, createEffect, createSignal, onCleanup, onMount } from "solid-js";
+import { ErrorBoundary, createSignal, onCleanup, onMount } from "solid-js";
 
 import { createAppBootController } from "./app-boot.ts";
 import { createAppCommands, handleGlobalAppKeydown } from "./app-commands.ts";
 import { configureServerRuntime, registerWikiLinkNavigation } from "./app-runtime.ts";
-import { createEditorShellRefs, EditorShell } from "./editor-shell.tsx";
-import { initEditor, invalidateNoteCache, type EditorInstance } from "./editor.ts";
+import { invalidateNoteCache, type EditorInstance } from "./editor.ts";
+import { NoteEditor } from "./features/editor/note-editor.tsx";
 import { Sidebar } from "./filenav.tsx";
 import { InputDialogHost } from "./input-dialog.tsx";
 import { PaletteModal, type Command } from "./palette.tsx";
@@ -20,13 +20,9 @@ type AppProps = {
 };
 
 export function App(props: Readonly<AppProps>) {
-  let emptyStateRef!: HTMLDivElement;
   let editor: EditorInstance | null = null;
 
-  const shellRefs = createEditorShellRefs();
-  const [editorVisible, setEditorVisible] = createSignal(false);
-  const [editorTags, setEditorTags] = createSignal<readonly string[]>([]);
-  const [editorSourceMode, setEditorSourceMode] = createSignal(false);
+  const [editorEnabled, setEditorEnabled] = createSignal(false);
   const [commands, setCommands] = createSignal<readonly Command[]>([]);
   const tabs = useTabs();
 
@@ -34,14 +30,6 @@ export function App(props: Readonly<AppProps>) {
     let boot: ReturnType<typeof createAppBootController>;
 
     function initApp() {
-      editor = initEditor({
-        emptyState: emptyStateRef,
-        shellRefs,
-        setTags: (tags) => setEditorTags([...tags]),
-        setSourceMode: setEditorSourceMode,
-        setVisible: setEditorVisible,
-      });
-
       registerWikiLinkNavigation();
       configureServerRuntime({
         getEditor: () => editor,
@@ -49,23 +37,12 @@ export function App(props: Readonly<AppProps>) {
       });
 
       setCommands(createAppCommands({ getEditor: () => editor }));
+      setEditorEnabled(true);
     }
 
     boot = createAppBootController({
       appEl: props.appEl,
       initApp,
-    });
-
-    createEffect(() => {
-      const tab = tabs.activeTab();
-      if (!editor) {
-        return;
-      }
-      if (tab) {
-        editor.showEditor(tab.path, tab.content, tab.tags);
-      } else {
-        editor.hideEditor();
-      }
     });
 
     const globalKeydown = (e: KeyboardEvent) => {
@@ -77,7 +54,6 @@ export function App(props: Readonly<AppProps>) {
 
     onCleanup(() => {
       document.removeEventListener("keydown", globalKeydown);
-      editor?.destroy();
       serverStore.stop();
     });
   });
@@ -113,18 +89,13 @@ export function App(props: Readonly<AppProps>) {
         >
           {uiStore.serverStatus()}
         </div>
-        <div id="editor-area">
-          <div
-            id="empty-state"
-            ref={emptyStateRef}
-            style={{ display: editorVisible() ? "none" : "flex" }}
-          >
-            Press <kbd>Cmd+K</kbd> to search &middot; <kbd>Cmd+P</kbd> for commands
-          </div>
-          <div style={{ display: editorVisible() ? "" : "none" }}>
-            <EditorShell refs={shellRefs} tags={editorTags} isSourceMode={editorSourceMode} />
-          </div>
-        </div>
+        <NoteEditor
+          enabled={editorEnabled}
+          activeTab={tabs.activeTab}
+          onEditorChange={(nextEditor) => {
+            editor = nextEditor;
+          }}
+        />
       </div>
       <SearchModal openTab={openTab} invalidateNoteCache={invalidateNoteCache} />
       <SettingsModal

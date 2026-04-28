@@ -8,7 +8,7 @@ export type NotificationState = {
   type: "error" | "info" | "success";
 };
 
-function createUiStore() {
+export function createUiStore() {
   const [searchOpen, setSearchOpen] = createSignal(false);
   const [searchScopePath, setSearchScopePath] = createSignal<string | null>(null);
   const [paletteOpen, setPaletteOpen] = createSignal(false);
@@ -100,3 +100,4 @@ function createUiStore() {
 }
 
 export const uiStore = createUiStore();
+export type UiStore = ReturnType<typeof createUiStore>;

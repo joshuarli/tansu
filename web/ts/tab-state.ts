@@ -25,7 +25,7 @@ export type Tab = {
   lastSavedTags: string[];
 };
 
-function createTabsStore() {
+export function createTabsStore() {
   const tabs: Tab[] = [];
   let activeIndex = -1;
   const closedTabs: string[] = [];
@@ -59,7 +59,7 @@ function createTabsStore() {
     persistState();
   }
 
-  return {
+  const store = {
     closedTabs,
     getTabs: () => tabsSignal(),
     getActiveIndex: () => activeIndexSignal(),
@@ -84,7 +84,7 @@ function createTabsStore() {
     async openTab(path: string): Promise<Tab> {
       const existing = tabs.findIndex((tab) => tab.path === path);
       if (existing !== -1) {
-        await tabsStore.switchTab(existing);
+        await store.switchTab(existing);
         return tabs[existing]!;
       }
 
@@ -100,7 +100,7 @@ function createTabsStore() {
         lastSavedTags: tags,
       };
       tabs.push(tab);
-      await tabsStore.switchTab(tabs.length - 1);
+      await store.switchTab(tabs.length - 1);
       persistState();
       return tab;
     },
@@ -161,7 +161,7 @@ function createTabsStore() {
     },
     closeActiveTab() {
       if (activeIndex >= 0) {
-        tabsStore.closeTab(activeIndex);
+        store.closeTab(activeIndex);
       }
     },
     closeAllTabs() {
@@ -172,7 +172,7 @@ function createTabsStore() {
     closeTabByPath(path: string) {
       const index = tabs.findIndex((tab) => tab.path === path);
       if (index !== -1) {
-        tabsStore.closeTab(index);
+        store.closeTab(index);
       }
     },
     async reopenClosedTab() {
@@ -182,19 +182,19 @@ function createTabsStore() {
       }
       persistState();
       try {
-        await tabsStore.openTab(path);
+        await store.openTab(path);
       } catch {
         console.warn(`Could not reopen ${path}`);
       }
     },
     nextTab() {
       if (tabs.length > 1) {
-        void tabsStore.switchTab((activeIndex + 1) % tabs.length);
+        void store.switchTab((activeIndex + 1) % tabs.length);
       }
     },
     prevTab() {
       if (tabs.length > 1) {
-        void tabsStore.switchTab((activeIndex - 1 + tabs.length) % tabs.length);
+        void store.switchTab((activeIndex - 1 + tabs.length) % tabs.length);
       }
     },
     markDirty(path: string) {
@@ -338,9 +338,11 @@ function createTabsStore() {
       persistState();
     },
   };
+  return store;
 }
 
 export const tabsStore = createTabsStore();
+export type TabsStore = ReturnType<typeof createTabsStore>;
 
 export const closedTabs = tabsStore.closedTabs;
 export const getTabs = tabsStore.getTabs;

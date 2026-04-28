@@ -164,6 +164,19 @@ export function mockFetch(): MockFetch {
       });
       return mock;
     },
+    onResponse(method: string, urlPattern: string | RegExp, response: Response) {
+      handlers.push({
+        match: (url, init) => {
+          const m = (init?.method ?? "GET").toUpperCase() === method.toUpperCase();
+          if (typeof urlPattern === "string") {
+            return m && url.includes(urlPattern);
+          }
+          return m && urlPattern.test(url);
+        },
+        respond: () => response.clone(),
+      });
+      return mock;
+    },
     onDelayed(
       method: string,
       urlPattern: string | RegExp,
@@ -238,6 +251,7 @@ export type MockFetch = {
   requests: MockRequest[];
   clearRequests(): MockFetch;
   on(method: string, urlPattern: string | RegExp, body: MockBody, status?: number): MockFetch;
+  onResponse(method: string, urlPattern: string | RegExp, response: Response): MockFetch;
   onDelayed(
     method: string,
     urlPattern: string | RegExp,

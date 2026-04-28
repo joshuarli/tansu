@@ -13,20 +13,27 @@ import {
   classifyReload,
   classifySaveResult,
   type SaveAction,
+  type ReloadAction,
 } from "./editor-save.ts";
 import { wireEditorShell } from "./editor-shell-wiring.ts";
 import { createTagState } from "./editor-tags.ts";
-import { splitFrontmatter, withFrontmatter } from "./frontmatter.ts";
+import { loadEditorContent } from "./features/editor/content.ts";
+import {
+  createEditorDisplayStateController,
+  type EditorDisplayState,
+} from "./features/editor/display-state.ts";
+import { toggleEditorSourceMode } from "./features/editor/source-mode.ts";
 import { initImageResize } from "./image-resize.ts";
 import { hideRevisions } from "./revisions.tsx";
 import { getCursor, markClean, updateTabDraft } from "./tab-state.ts";
 
 export { getEditorPrefs, saveEditorPrefs, classifySaveResult, classifyReload };
-export type { EditorPrefs, SaveAction };
+export type { EditorPrefs, SaveAction, ReloadAction, EditorDisplayState };
 
 export type EditorInstance = {
   showEditor(path: string, content: string, tags?: string[]): void;
   hideEditor(): void;
+  getDisplayState(): EditorDisplayState;
   getCurrentContent(): string;
   saveCurrentNote(opts?: { silent?: boolean }): Promise<void>;
   reloadFromDisk(content: string, mtime: number): void;
@@ -41,6 +48,7 @@ type EditorElements = {
   setTags: (tags: readonly string[]) => void;
   setSourceMode: (value: boolean) => void;
   setVisible: (value: boolean) => void;
+  setDisplayState?: (state: EditorDisplayState) => void;
 };
 
 export function initEditor(elements: Readonly<EditorElements>): EditorInstance {
@@ -50,6 +58,11 @@ export function initEditor(elements: Readonly<EditorElements>): EditorInstance {
   let container: HTMLElement | null = null;
   let backlinksEl: HTMLElement | null = null;
   let currentPath: string | null = null;
+  const displayState = createEditorDisplayStateController((state) => {
+    elements.setDisplayState?.(state);
+    elements.setVisible(state.type !== "empty");
+    elements.setSourceMode(state.type === "source");
+  });
 
   function getHandle() {
     return handle;
@@ -67,41 +80,12 @@ export function initEditor(elements: Readonly<EditorElements>): EditorInstance {
   }
 
   function loadContent(markdown: string, explicitOffset?: number) {
-    const handle = getHandle();
-    if (!handle) {
-      return;
-    }
-    const parsed = splitFrontmatter(markdown);
-    if (handle.isSourceMode) {
-      const position = handle.sourceEl.selectionStart;
-      handle.sourceEl.value = markdown;
-      handle.sourceEl.selectionStart = position;
-      handle.sourceEl.selectionEnd = position;
-    } else {
-      const focused =
-        handle.contentEl === document.activeElement ||
-        handle.contentEl.contains(document.activeElement);
-      const offset = explicitOffset ?? (focused ? handle.getCursorOffset() : -1);
-      if (offset >= 0) {
-        handle.setValue(parsed.body, offset);
-        if (explicitOffset !== undefined) {
-          const selection = window.getSelection();
-          if (selection && selection.rangeCount > 0) {
-            const range = selection.getRangeAt(0);
-            const node =
-              range.startContainer instanceof Element
-                ? range.startContainer
-                : range.startContainer.parentElement;
-            node?.scrollIntoView({ block: "center", behavior: "instant" });
-          }
-        }
-      } else {
-        handle.setValue(parsed.body);
-      }
-    }
-    if (parsed.hasFrontmatter) {
-      tagState.setTags(parsed.tags);
-    }
+    loadEditorContent({
+      handle: getHandle(),
+      markdown,
+      setTags: tagState.setTags,
+      ...(explicitOffset !== undefined ? { explicitOffset } : {}),
+    });
   }
 
   const saveController = createSaveController({
@@ -110,6 +94,7 @@ export function initEditor(elements: Readonly<EditorElements>): EditorInstance {
     getCurrentContent,
     getContainer: () => container,
     loadContent,
+    onDisplayState: displayState.setType,
   });
 
   const shellWiring = wireEditorShell({
@@ -127,6 +112,7 @@ export function initEditor(elements: Readonly<EditorElements>): EditorInstance {
       elements.shellRefs.getTagInputEl()?.focus();
     },
     onRestoreRevision: (content, mtime) => restoreRevision(content, mtime),
+    onDisplayState: displayState.setType,
   });
 
   function toggleSourceMode() {
@@ -136,19 +122,12 @@ export function initEditor(elements: Readonly<EditorElements>): EditorInstance {
     }
     hideRevisions();
     hideTagAutocomplete();
-
-    if (handle.isSourceMode) {
-      const markdown = handle.sourceEl.value;
-      const parsed = splitFrontmatter(markdown);
-      tagState.setTags(parsed.hasFrontmatter ? parsed.tags : []);
-      handle.sourceEl.value = parsed.hasFrontmatter ? parsed.body : markdown;
-      handle.toggleSourceMode();
-    } else {
-      const body = handle.getValue();
-      handle.toggleSourceMode();
-      handle.sourceEl.value = withFrontmatter(body, tagState.tags());
-    }
-    elements.setSourceMode(handle.isSourceMode);
+    toggleEditorSourceMode({
+      handle,
+      tags: tagState.tags(),
+      setTags: tagState.setTags,
+      setDisplayState: displayState.setType,
+    });
   }
 
   function onEditorTabMutation() {
@@ -171,8 +150,7 @@ export function initEditor(elements: Readonly<EditorElements>): EditorInstance {
     hideTagAutocomplete();
     container?.querySelector(".conflict-banner-host")?.remove();
     tagState.setTags(tags);
-    elements.setVisible(true);
-    elements.setSourceMode(false);
+    displayState.setType("editing");
     elements.emptyState.style.display = "none";
 
     handle?.destroy();
@@ -212,8 +190,7 @@ export function initEditor(elements: Readonly<EditorElements>): EditorInstance {
       clearConflictBanner(container);
     }
     tagState.setTags([]);
-    elements.setVisible(false);
-    elements.setSourceMode(false);
+    displayState.setType("empty");
 
     handle?.destroy();
     handle = null;
@@ -233,6 +210,7 @@ export function initEditor(elements: Readonly<EditorElements>): EditorInstance {
     }
     loadContent(content);
     markClean(currentPath, content, mtime);
+    displayState.setType("editing");
   }
 
   function applyPrefs(prefs: EditorPrefs) {
@@ -247,6 +225,7 @@ export function initEditor(elements: Readonly<EditorElements>): EditorInstance {
   return {
     showEditor,
     hideEditor,
+    getDisplayState: displayState.get,
     getCurrentContent,
     saveCurrentNote: saveController.saveCurrentNote,
     reloadFromDisk: saveController.reloadFromDisk,

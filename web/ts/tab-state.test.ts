@@ -152,6 +152,8 @@ describe("tab-state", () => {
     while (getTabs().length > 0) {
       closeTab(0);
     }
+    mock.on("POST", "/api/note", { mtime: 2000 });
+    mock.on("GET", "/api/note", { content: "# Test", mtime: 1000 });
 
     await createNewNote("already.md");
 
@@ -284,7 +286,7 @@ describe("tab-state", () => {
     expect(uiStore.notification().hidden).toBeFalsy();
     expect(uiStore.notification().type).toBe("error");
     expect(uiStore.notification().msg).toContain("Failed to create note Failing Note.md");
-    expect(uiStore.notification().msg).toContain("create failed");
+    expect(uiStore.notification().msg).toContain("create note failed");
     // No tab should have been created since createNote threw
     expect(getTabs()).toHaveLength(0);
 

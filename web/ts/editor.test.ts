@@ -1,4 +1,9 @@
-import { classifySaveResult, classifyReload, type SaveAction } from "./editor.ts";
+import {
+  classifySaveResult,
+  classifyReload,
+  type ReloadAction,
+  type SaveAction,
+} from "./editor.ts";
 import { setupDOM, mockFetch } from "./test-helper.ts";
 
 describe("classifySaveResult", () => {
@@ -59,6 +64,11 @@ describe("classifyReload", () => {
   it("dirty → conflict", () => {
     expect(classifyReload(true).type).toBe("conflict");
   });
+
+  it("returns explicit reload actions", () => {
+    const actions: ReloadAction[] = [classifyReload(false), classifyReload(true)];
+    expect(actions).toStrictEqual([{ type: "load" }, { type: "conflict" }]);
+  });
 });
 
 describe("editor", () => {
@@ -69,6 +79,7 @@ describe("editor", () => {
   let shellHost: HTMLDivElement;
   let showEditor: (path: string, content: string, tags?: string[]) => void;
   let hideEditor: () => void;
+  let getDisplayState: () => import("./editor.ts").EditorDisplayState;
   let getCurrentContent: () => string;
   let saveCurrentNote: () => Promise<void>;
   let reloadFromDisk: (content: string, mtime: number) => void;
@@ -184,6 +195,7 @@ describe("editor", () => {
     ({
       showEditor,
       hideEditor,
+      getDisplayState,
       getCurrentContent,
       saveCurrentNote,
       reloadFromDisk,
@@ -218,6 +230,7 @@ describe("editor", () => {
     showEditor("test.md", "# Hello\n\nWorld");
     await new Promise((r) => setTimeout(r, 50));
 
+    expect(getDisplayState()).toStrictEqual({ type: "editing" });
     const contentEl = latestEditorContent();
     expect(contentEl !== null).toBeTruthy();
     expect(contentEl.innerHTML).toContain("<h1>Hello</h1>");
@@ -225,6 +238,7 @@ describe("editor", () => {
     expect(contentEl.contentEditable).toBe("true");
 
     hideEditor();
+    expect(getDisplayState()).toStrictEqual({ type: "empty" });
   });
 
   it("showEditor hides frontmatter in content mode and preserves it in source mode", async () => {
@@ -239,6 +253,7 @@ describe("editor", () => {
     const sourceBtn = document.querySelector(".editor-toolbar-btn--source") as HTMLButtonElement;
     sourceBtn.click();
     const sourceEl = latestEditorSource();
+    expect(getDisplayState()).toStrictEqual({ type: "source" });
     expect(sourceEl.value).toContain("tags: [alpha]");
     expect(sourceEl.value).toContain("# Hello");
 
@@ -745,6 +760,7 @@ describe("editor", () => {
     const banner = document.querySelector(".conflict-banner");
     expect(banner !== null).toBeTruthy();
     expect(banner!.textContent).toContain("conflict");
+    expect(getDisplayState()).toStrictEqual({ type: "conflict" });
 
     hideEditor();
     while (getTabs().length > 0) {
@@ -830,6 +846,7 @@ describe("editor", () => {
 
     const banner = document.querySelector(".conflict-banner");
     expect(banner !== null).toBeTruthy();
+    expect(getDisplayState()).toStrictEqual({ type: "conflict" });
 
     hideEditor();
     while (getTabs().length > 0) {
@@ -880,8 +897,11 @@ describe("editor", () => {
     const labels = [...items].map((i) => i.textContent);
     expect(labels).toContain("Revisions");
 
-    // Dismiss
-    document.body.click();
+    const revisionsItem = [...items].find((item) => item.textContent === "Revisions");
+    (revisionsItem as HTMLButtonElement).click();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(getDisplayState()).toStrictEqual({ type: "revisions" });
+
     hideEditor();
   });
 

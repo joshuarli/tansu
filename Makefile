@@ -12,7 +12,7 @@ release: release-rs release-ts
 build-rs:
 	cargo build
 
-check: types
+check: types-check
 	tsgo --noEmit --pretty false
 	tsgo -p packages/md-wysiwyg/tsconfig.json --noEmit --pretty false
 	cargo check -q
@@ -31,6 +31,9 @@ publish-pkg:
 types:
 	cargo run --quiet --bin gen-api-types
 
+types-check:
+	cargo run --quiet --bin gen-api-types -- --check
+
 ts: types ts-lint ts-check
 	pnpm run bundle-dev
 
@@ -38,14 +41,14 @@ ts-lint:
 	oxfmt --config oxfmt.config.mjs web/ts/ packages/
 	oxlint --quiet --config oxlint.config.mjs web/ts/ packages/
 
-ts-check: types
+ts-check: types-check
 	tsgo --noEmit --pretty false
 	pnpm run bundle-dev
 
 release-ts: types ts-lint ts-check
 	pnpm run bundle
 
-test: types test-pkg test-ts test-rs
+test: types-check test-pkg test-ts test-rs
 
 test-pkg:
 	cd packages/md-wysiwyg && vitest run

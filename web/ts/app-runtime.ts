@@ -4,6 +4,7 @@ import { createNote, listNotes } from "./api.ts";
 import { invalidateNoteCache, type EditorInstance } from "./editor.ts";
 import { serverStore } from "./server-store.ts";
 import { closeActiveTab, getActiveTab, openTab, syncToServer } from "./tab-state.ts";
+import { uiStore } from "./ui-store.ts";
 import { registerWikiLinkClickHandler } from "./wikilinks.ts";
 
 export function registerWikiLinkNavigation(): void {
@@ -43,5 +44,8 @@ export function configureServerRuntime(opts: Readonly<ConfigureServerRuntimeOpti
     syncSessionToServer: syncToServer,
     refreshVaultSwitcher: async () => undefined,
     showUnlockScreen: opts.showUnlockScreen,
+    clearServerStatus: () => uiStore.clearServerStatus(),
+    setServerStatus: (msg) => uiStore.setServerStatus(msg),
+    showNotification: (msg, type) => uiStore.showNotification(msg, type),
   });
 }

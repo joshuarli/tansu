@@ -53,6 +53,31 @@ export type {
 export type Note = NoteResponse;
 export type SearchResult = SearchHit;
 
+export class ApiError extends Error {
+  readonly status: number;
+  readonly context: string;
+  readonly body: string | undefined;
+
+  constructor(context: string, status: number, body?: string) {
+    super(`${context} failed: ${status}`);
+    this.name = "ApiError";
+    this.context = context;
+    this.status = status;
+    this.body = body;
+  }
+}
+
+function apiPath(path: string, params?: Record<string, string | number | undefined>): string {
+  if (!params) {
+    return path;
+  }
+  const query = Object.entries(params)
+    .filter((entry): entry is [string, string | number] => entry[1] !== undefined)
+    .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(String(value))}`)
+    .join("&");
+  return query ? `${path}?${query}` : path;
+}
+
 async function readJson<T>(res: Response, ctx: string): Promise<T> {
   try {
     return (await res.json()) as T;
@@ -64,25 +89,51 @@ async function readJson<T>(res: Response, ctx: string): Promise<T> {
   }
 }
 
-export async function searchNotes(q: string, path?: string): Promise<SearchResult[]> {
-  let url = `/api/search?q=${encodeURIComponent(q)}`;
-  if (path) {
-    url += `&path=${encodeURIComponent(path)}`;
+async function readErrorBody(res: Response): Promise<string | undefined> {
+  try {
+    const body = await res.text();
+    return body || undefined;
+  } catch {
+    return undefined;
   }
-  const res = await fetch(url);
+}
+
+async function requestJson<T>(
+  url: string,
+  ctx: string,
+  init?: RequestInit,
+  okStatuses: readonly number[] = [],
+): Promise<T> {
+  return (await requestJsonWithStatus<T>(url, ctx, init, okStatuses)).data;
+}
+
+async function requestJsonWithStatus<T>(
+  url: string,
+  ctx: string,
+  init?: RequestInit,
+  okStatuses: readonly number[] = [],
+): Promise<{ data: T; status: number }> {
+  const res = await fetch(url, init);
+  if (!res.ok && !okStatuses.includes(res.status)) {
+    throw new ApiError(ctx, res.status, await readErrorBody(res));
+  }
+  return { data: await readJson<T>(res, ctx), status: res.status };
+}
+
+async function requestVoid(url: string, ctx: string, init?: RequestInit): Promise<void> {
+  const res = await fetch(url, init);
   if (!res.ok) {
-    throw new Error(`search failed: ${res.status}`);
+    throw new ApiError(ctx, res.status, await readErrorBody(res));
   }
-  const results = await readJson<SearchResult[]>(res, "search");
+}
+
+export async function searchNotes(q: string, path?: string): Promise<SearchResult[]> {
+  const results = await requestJson<SearchResult[]>(apiPath("/api/search", { q, path }), "search");
   return results.map((result) => ({ ...result, tags: result.tags ?? [] }));
 }
 
 export async function getNote(path: string): Promise<Note> {
-  const res = await fetch(`/api/note?path=${encodeURIComponent(path)}`);
-  if (!res.ok) {
-    throw new Error(`get note failed: ${res.status}`);
-  }
-  const note = await readJson<Note>(res, "get note");
+  const note = await requestJson<Note>(apiPath("/api/note", { path }), "get note");
   return { ...note, tags: note.tags ?? [] };
 }
 
@@ -91,28 +142,24 @@ export async function saveNote(
   content: string,
   expectedMtime: number,
 ): Promise<SaveResult> {
-  const res = await fetch(`/api/note?path=${encodeURIComponent(path)}`, {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ content, expected_mtime: expectedMtime } satisfies PutNoteRequest),
-  });
-  const data = await readJson<SaveResult>(res, "save note");
-  if (res.status === 409) {
+  const { data, status } = await requestJsonWithStatus<SaveResult>(
+    apiPath("/api/note", { path }),
+    "save note",
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content, expected_mtime: expectedMtime } satisfies PutNoteRequest),
+    },
+    [409],
+  );
+  if (status === 409) {
     return { ...data, conflict: true };
-  }
-  if (!res.ok) {
-    throw new Error(`save failed: ${res.status}`);
   }
   return data;
 }
 
 export async function listTags(path?: string): Promise<string[]> {
-  const url = path ? `/api/tags?path=${encodeURIComponent(path)}` : "/api/tags";
-  const res = await fetch(url);
-  if (!res.ok) {
-    throw new Error(`list tags failed: ${res.status}`);
-  }
-  const data = await readJson<TagListResponse>(res, "list tags");
+  const data = await requestJson<TagListResponse>(apiPath("/api/tags", { path }), "list tags");
   return data.tags;
 }
 
@@ -122,149 +169,95 @@ export function forceSaveNote(path: string, content: string): Promise<SaveResult
 }
 
 export async function createNote(path: string): Promise<SaveResult> {
-  const res = await fetch(`/api/note?path=${encodeURIComponent(path)}`, {
+  return requestJson<SaveResult>(apiPath("/api/note", { path }), "create note", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ content: "" } satisfies CreateNoteRequest),
   });
-  if (!res.ok) {
-    throw new Error(`create failed: ${res.status}`);
-  }
-  return readJson<SaveResult>(res, "create note");
 }
 
 export async function deleteNote(path: string): Promise<void> {
-  const res = await fetch(`/api/note?path=${encodeURIComponent(path)}`, { method: "DELETE" });
-  if (!res.ok) {
-    throw new Error(`delete failed: ${res.status}`);
-  }
+  await requestVoid(apiPath("/api/note", { path }), "delete", { method: "DELETE" });
 }
 
 export async function renameNote(oldPath: string, newPath: string): Promise<RenameResponse> {
-  const res = await fetch("/api/rename", {
+  return requestJson<RenameResponse>("/api/rename", "rename", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ old_path: oldPath, new_path: newPath } satisfies RenameRequest),
   });
-  if (!res.ok) {
-    throw new Error(`rename failed: ${res.status}`);
-  }
-  return readJson<RenameResponse>(res, "rename note");
 }
 
 export async function listNotes(): Promise<NoteEntry[]> {
-  const res = await fetch("/api/notes");
-  if (!res.ok) {
-    throw new Error(`list failed: ${res.status}`);
-  }
-  const notes = await readJson<NoteEntry[]>(res, "list notes");
+  const notes = await requestJson<NoteEntry[]>("/api/notes", "list");
   return notes.map((note) => ({ ...note, tags: note.tags ?? [] }));
 }
 
 export async function searchFileNames(q: string): Promise<FileSearchResult[]> {
-  const res = await fetch(`/api/filesearch?q=${encodeURIComponent(q)}`);
-  if (!res.ok) {
-    throw new Error(`filesearch failed: ${res.status}`);
-  }
-  return readJson<FileSearchResult[]>(res, "search file names");
+  return requestJson<FileSearchResult[]>(apiPath("/api/filesearch", { q }), "filesearch");
 }
 
 export async function getRecentFiles(): Promise<RecentFileEntry[]> {
-  const res = await fetch("/api/recentfiles");
-  if (!res.ok) {
-    throw new Error(`recentfiles failed: ${res.status}`);
-  }
-  return readJson<RecentFileEntry[]>(res, "recent files");
+  return requestJson<RecentFileEntry[]>("/api/recentfiles", "recentfiles");
 }
 
 export async function getPinnedFiles(): Promise<PinnedFileEntry[]> {
-  const res = await fetch("/api/pinned");
-  if (!res.ok) {
-    throw new Error(`pinned failed: ${res.status}`);
-  }
-  return readJson<PinnedFileEntry[]>(res, "pinned files");
+  return requestJson<PinnedFileEntry[]>("/api/pinned", "pinned");
 }
 
 export async function pinFile(path: string): Promise<void> {
-  const res = await fetch("/api/pin", {
+  await requestVoid("/api/pin", "pin", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ path } satisfies PinRequest),
   });
-  if (!res.ok) {
-    throw new Error(`pin failed: ${res.status}`);
-  }
 }
 
 export async function unpinFile(path: string): Promise<void> {
-  const res = await fetch("/api/pin", {
+  await requestVoid("/api/pin", "unpin", {
     method: "DELETE",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ path } satisfies PinRequest),
   });
-  if (!res.ok) {
-    throw new Error(`unpin failed: ${res.status}`);
-  }
 }
 
 export async function getBacklinks(path: string): Promise<string[]> {
-  const res = await fetch(`/api/backlinks?path=${encodeURIComponent(path)}`);
-  if (!res.ok) {
-    throw new Error(`backlinks failed: ${res.status}`);
-  }
-  return readJson<string[]>(res, "backlinks");
+  return requestJson<string[]>(apiPath("/api/backlinks", { path }), "backlinks");
 }
 
 export async function uploadImage(blob: Blob, filename: string): Promise<string> {
-  const res = await fetch("/api/image", {
+  const data = await requestJson<FilenameResponse>("/api/image", "upload", {
     method: "POST",
     headers: { "X-Filename": filename },
     body: blob,
   });
-  if (!res.ok) {
-    throw new Error(`upload failed: ${res.status}`);
-  }
-  const data = await readJson<FilenameResponse>(res, "upload image");
   return data.filename;
 }
 
 export async function listRevisions(path: string): Promise<number[]> {
-  const res = await fetch(`/api/revisions?path=${encodeURIComponent(path)}`);
-  if (!res.ok) {
-    throw new Error(`revisions failed: ${res.status}`);
-  }
-  return readJson<number[]>(res, "list revisions");
+  return requestJson<number[]>(apiPath("/api/revisions", { path }), "revisions");
 }
 
 export async function getRevision(path: string, ts: number): Promise<string> {
-  const res = await fetch(`/api/revision?path=${encodeURIComponent(path)}&ts=${ts}`);
-  if (!res.ok) {
-    throw new Error(`revision failed: ${res.status}`);
-  }
-  const data = await readJson<ContentResponse>(res, "get revision");
+  const data = await requestJson<ContentResponse>(
+    apiPath("/api/revision", { path, ts }),
+    "revision",
+  );
   return data.content;
 }
 
 export async function restoreRevision(path: string, ts: number): Promise<SaveResult> {
-  const res = await fetch(`/api/restore?path=${encodeURIComponent(path)}&ts=${ts}`, {
+  return requestJson<SaveResult>(apiPath("/api/restore", { path, ts }), "restore", {
     method: "POST",
   });
-  if (!res.ok) {
-    throw new Error(`restore failed: ${res.status}`);
-  }
-  return readJson<SaveResult>(res, "restore revision");
 }
 
 export async function getState(): Promise<SessionState> {
-  const res = await fetch("/api/state");
-  if (!res.ok) {
-    throw new Error(`state failed: ${res.status}`);
-  }
-  return readJson<SessionState>(res, "get state");
+  return requestJson<SessionState>("/api/state", "state");
 }
 
 export async function saveState(state: SessionState): Promise<void> {
-  await fetch("/api/state", {
+  await requestVoid("/api/state", "save state", {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(state),
@@ -272,11 +265,7 @@ export async function saveState(state: SessionState): Promise<void> {
 }
 
 export async function getStatus(): Promise<AppStatus> {
-  const res = await fetch("/api/status");
-  if (!res.ok) {
-    throw new Error(`status failed: ${res.status}`);
-  }
-  return readJson<AppStatus>(res, "get status");
+  return requestJson<AppStatus>("/api/status", "status");
 }
 
 export async function unlockWithRecoveryKey(recoveryKey: string): Promise<boolean> {
@@ -330,30 +319,19 @@ export async function removePrf(credentialId: string): Promise<boolean> {
 }
 
 export async function getSettings(): Promise<Settings> {
-  const res = await fetch("/api/settings");
-  if (!res.ok) {
-    throw new Error(`settings failed: ${res.status}`);
-  }
-  return readJson<Settings>(res, "get settings");
+  return requestJson<Settings>("/api/settings", "settings");
 }
 
 export async function saveSettings(settings: Settings): Promise<void> {
-  const res = await fetch("/api/settings", {
+  await requestVoid("/api/settings", "save settings", {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(settings),
   });
-  if (!res.ok) {
-    throw new Error(`save settings failed: ${res.status}`);
-  }
 }
 
 export async function getVaults(): Promise<VaultEntry[]> {
-  const res = await fetch("/api/vaults");
-  if (!res.ok) {
-    throw new Error(`vaults failed: ${res.status}`);
-  }
-  return readJson<VaultEntry[]>(res, "get vaults");
+  return requestJson<VaultEntry[]>("/api/vaults", "vaults");
 }
 
 export async function activateVault(index: number): Promise<boolean> {

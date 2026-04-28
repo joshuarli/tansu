@@ -16,6 +16,7 @@ type ShellWiringOptions = {
   onToggleSourceMode: () => void;
   onRemoveTag: (tag: string) => void;
   onRestoreRevision: (content: string, mtime: number) => void;
+  onDisplayState: (state: "editing" | "source" | "revisions") => void;
 };
 
 export function wireEditorShell(opts: Readonly<ShellWiringOptions>): {
@@ -49,8 +50,10 @@ export function wireEditorShell(opts: Readonly<ShellWiringOptions>): {
                 opts.shellRefs.revisionsEl.style.display = "none";
                 if (handle.isSourceMode) {
                   handle.sourceEl.style.display = "";
+                  opts.onDisplayState("source");
                 } else {
                   handle.contentEl.style.display = "";
+                  opts.onDisplayState("editing");
                 }
               },
             });
@@ -58,6 +61,7 @@ export function wireEditorShell(opts: Readonly<ShellWiringOptions>): {
               handle.contentEl.style.display = "none";
               handle.sourceEl.style.display = "none";
               opts.shellRefs.revisionsEl.style.display = "";
+              opts.onDisplayState("revisions");
             }
           },
         },

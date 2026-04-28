@@ -57,6 +57,7 @@ export function showConflictBanner(
   diskMtime: number,
   loadContent: (md: string) => void,
   getCurrentContent: () => string,
+  onClose?: () => void,
 ) {
   removeConflictBanner(container);
 
@@ -75,6 +76,7 @@ export function showConflictBanner(
         onClose={() => {
           dispose();
           host.remove();
+          onClose?.();
         }}
       />
     ),
@@ -91,7 +93,8 @@ export function handleReloadConflict(
   diskMtime: number,
   loadContent: (md: string) => void,
   getCurrentContent: () => string,
-) {
+  onClose?: () => void,
+): "merged" | "conflict" {
   const base = tab.content;
   const ours = getCurrentContent();
   const theirs = diskContent;
@@ -101,7 +104,7 @@ export function handleReloadConflict(
     loadContent(merged);
     tab.content = diskContent;
     tab.mtime = diskMtime;
-    return;
+    return "merged";
   }
 
   showConflictBanner(
@@ -111,5 +114,7 @@ export function handleReloadConflict(
     diskMtime,
     loadContent,
     getCurrentContent,
+    onClose,
   );
+  return "conflict";
 }

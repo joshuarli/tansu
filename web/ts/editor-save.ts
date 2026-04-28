@@ -7,8 +7,7 @@ import { getActiveTab, getTabs, markClean, setCursor } from "./tab-state.ts";
 export type SaveAction =
   | { type: "clean"; content: string; mtime: number }
   | { type: "false-conflict"; content: string }
-  | { type: "real-conflict"; diskContent: string; diskMtime: number }
-  | { type: "no-op" };
+  | { type: "real-conflict"; diskContent: string; diskMtime: number };
 
 export function classifySaveResult(
   result: { conflict?: boolean; content?: string; mtime: number },
@@ -25,7 +24,11 @@ export function classifySaveResult(
   return { type: "real-conflict", diskContent, diskMtime: result.mtime };
 }
 
-type ReloadAction = { type: "load" } | { type: "conflict" };
+export type ReloadAction = { type: "load" } | { type: "conflict" };
+
+function assertNever(value: never): never {
+  throw new Error(`unhandled action: ${JSON.stringify(value)}`);
+}
 
 export function classifyReload(isDirty: boolean): ReloadAction {
   return isDirty ? { type: "conflict" } : { type: "load" };
@@ -41,6 +44,7 @@ type SaveControllerOptions = {
   getCurrentContent: () => string;
   getContainer: () => HTMLElement | null;
   loadContent: (markdown: string, explicitOffset?: number) => void;
+  onDisplayState: (state: "editing" | "conflict") => void;
 };
 
 export function createSaveController(opts: Readonly<SaveControllerOptions>) {
@@ -118,11 +122,13 @@ export function createSaveController(opts: Readonly<SaveControllerOptions>) {
       case "clean":
         markClean(currentPath, action.content, action.mtime);
         serverStore.notifyFilesChanged(currentPath);
+        opts.onDisplayState("editing");
         break;
       case "false-conflict": {
         const retry = await forceSaveNote(currentPath, content);
         markClean(currentPath, content, retry.mtime);
         serverStore.notifyFilesChanged(currentPath);
+        opts.onDisplayState("editing");
         break;
       }
       case "real-conflict": {
@@ -135,12 +141,14 @@ export function createSaveController(opts: Readonly<SaveControllerOptions>) {
             action.diskMtime,
             (markdown) => opts.loadContent(markdown),
             opts.getCurrentContent,
+            () => opts.onDisplayState("editing"),
           );
+          opts.onDisplayState("conflict");
         }
         return;
       }
       default:
-        return;
+        assertNever(action);
     }
 
     if (cursorOffset >= 0) {
@@ -161,12 +169,13 @@ export function createSaveController(opts: Readonly<SaveControllerOptions>) {
         opts.loadContent(content);
       }
       markClean(currentPath, content, mtime);
+      opts.onDisplayState("editing");
       return;
     }
 
     const container = opts.getContainer();
     if (container) {
-      handleReloadConflict(
+      const result = handleReloadConflict(
         tab,
         container,
         currentPath,
@@ -174,7 +183,9 @@ export function createSaveController(opts: Readonly<SaveControllerOptions>) {
         mtime,
         (markdown) => opts.loadContent(markdown),
         opts.getCurrentContent,
+        () => opts.onDisplayState("editing"),
       );
+      opts.onDisplayState(result === "conflict" ? "conflict" : "editing");
     }
   }
 

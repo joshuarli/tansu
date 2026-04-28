@@ -638,7 +638,7 @@ impl Server {
         });
         config.save(&dir)?;
 
-        write_json(sock, r#"{"ok":true}"#)
+        respond_json(sock, &OkResponse { ok: true })
     }
 
     fn api_prf_remove(
@@ -663,7 +663,7 @@ impl Server {
         config.prf_credentials.retain(|c| c.id != req.credential_id);
         config.save(&dir)?;
 
-        write_json(sock, r#"{"ok":true}"#)
+        respond_json(sock, &OkResponse { ok: true })
     }
 
     fn api_search(&self, sock: &TcpStream, path_raw: &str) -> io::Result<()> {

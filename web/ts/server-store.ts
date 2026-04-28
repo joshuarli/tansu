@@ -4,12 +4,14 @@ import { createSignal } from "solid-js";
 import { getNote } from "./api.ts";
 import { createBackoff, createSseLifecycle } from "./bootstrap.ts";
 import { SSE_BACKOFF_DELAYS_MS } from "./constants.ts";
-import { uiStore } from "./ui-store.ts";
+import type { ServerConnectionState } from "./features/sync/connection-state.ts";
 
 type FileChange = {
   version: number;
   savedPath: string | null;
 };
+
+export type { ServerConnectionState };
 
 type ServerStoreDeps = {
   invalidateNoteCache: () => void;
@@ -19,12 +21,18 @@ type ServerStoreDeps = {
   syncSessionToServer: () => Promise<void>;
   refreshVaultSwitcher: () => Promise<void>;
   showUnlockScreen: () => void;
+  clearServerStatus: () => void;
+  setServerStatus: (msg: string) => void;
+  showNotification: (msg: string, type: "error" | "info" | "success") => void;
 };
 
-function createServerStore() {
+export function createServerStore() {
   const [fileChange, setFileChange] = createSignal<FileChange>({ version: 0, savedPath: null });
   const [pinnedVersion, setPinnedVersion] = createSignal(0);
   const [vaultVersion, setVaultVersion] = createSignal(0);
+  const [connectionState, setConnectionState] = createSignal<ServerConnectionState>({
+    type: "unavailable",
+  });
 
   let deps: ServerStoreDeps | null = null;
   let backoff = createBackoff([...SSE_BACKOFF_DELAYS_MS]);
@@ -64,6 +72,7 @@ function createServerStore() {
       return;
     }
 
+    setConnectionState({ type: "connecting" });
     const es = new EventSource("/events");
     lifecycle.setSse(es);
 
@@ -73,7 +82,8 @@ function createServerStore() {
       }
       backoff.reset();
       backoff.wasUnavailable = false;
-      uiStore.clearServerStatus();
+      setConnectionState({ type: "connected" });
+      deps?.clearServerStatus();
       void deps?.syncSessionToServer();
     });
 
@@ -101,7 +111,7 @@ function createServerStore() {
       currentDeps.invalidateNoteCache();
       notifyFilesChanged();
       if (currentDeps.getActivePath() === path) {
-        uiStore.showNotification(`"${stemFromPath(path)}" was deleted externally.`, "info");
+        currentDeps.showNotification(`"${stemFromPath(path)}" was deleted externally.`, "info");
         currentDeps.closeActiveTab();
       }
     });
@@ -112,6 +122,7 @@ function createServerStore() {
       }
       es.close();
       lifecycle?.setSse(null);
+      setConnectionState({ type: "locked" });
       deps?.showUnlockScreen();
     });
 
@@ -133,7 +144,9 @@ function createServerStore() {
       }
       backoff.wasUnavailable = true;
       const delay = backoff.next();
-      uiStore.setServerStatus(`Server unavailable. Retrying in ${backoff.format(delay)}...`);
+      const message = `Server unavailable. Retrying in ${backoff.format(delay)}...`;
+      setConnectionState({ type: "retrying", delayMs: delay, message });
+      deps?.setServerStatus(message);
       lifecycle?.setReconnectTimer(
         setTimeout(() => {
           lifecycle?.setReconnectTimer(null);
@@ -147,6 +160,7 @@ function createServerStore() {
     fileChange,
     pinnedVersion,
     vaultVersion,
+    connectionState,
     configure(nextDeps: ServerStoreDeps) {
       deps = nextDeps;
       lifecycle = createSseLifecycle({ connectSse: connect });
@@ -172,6 +186,7 @@ function createServerStore() {
       window.removeEventListener("focus", lifecycle.requestImmediateReconnect);
       document.removeEventListener("visibilitychange", lifecycle.onVisibilityChange);
       lifecycle.closeForUnload();
+      setConnectionState({ type: "unavailable" });
     },
     notifyFilesChanged,
     notifyPinnedChanged,
@@ -180,3 +195,4 @@ function createServerStore() {
 }
 
 export const serverStore = createServerStore();
+export type ServerStore = ReturnType<typeof createServerStore>;
