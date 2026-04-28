@@ -1,16 +1,18 @@
 import {
-  checkInlineTransform,
-  clampNodeOffset,
-  CURSOR_SENTINEL,
-  domToMarkdown,
-  getCursorMarkdownOffset,
-  checkBlockInputTransform,
-  handleBlockTransform,
+  createEditor,
+  type EditorHandle,
+  escapeHtml,
+  stemFromPath,
+  toggleBold,
+  toggleItalic,
+  toggleHighlight,
+  shiftIndent,
 } from "@joshuarli98/md-wysiwyg";
 
-import { forceSaveNote, saveNote } from "./api.ts";
+import { forceSaveNote, saveNote, uploadImage } from "./api.ts";
 import { checkWikiLinkTrigger, hideAutocomplete } from "./autocomplete.ts";
 export { invalidateNoteCache } from "./autocomplete.ts";
+import { editorExtensions } from "./editor-config.ts";
 import { mountEditorShell, type EditorShellController } from "./editor-shell.tsx";
 import { splitFrontmatter, withFrontmatter } from "./frontmatter.ts";
 import {
@@ -22,31 +24,12 @@ import {
 export { invalidateTagCache } from "./tag-autocomplete.ts";
 import { loadBacklinks } from "./backlinks.tsx";
 import { showConflictBanner, handleReloadConflict } from "./conflict.tsx";
-import {
-  AUTOSAVE_DELAY_MS,
-  AUTOSAVE_RETRY_DELAY_MS,
-  MAX_INDENT_SPACES,
-  UNDO_STACK_MAX_ENTRIES,
-} from "./constants.ts";
+import { AUTOSAVE_DELAY_MS, AUTOSAVE_RETRY_DELAY_MS } from "./constants.ts";
 import { showContextMenu } from "./context-menu.tsx";
 import { on, emit } from "./events.ts";
-import {
-  toggleBold,
-  toggleItalic,
-  toggleHighlight,
-  shiftIndent,
-  type FormatResult,
-} from "./format-ops.ts";
 import { initFormatToolbar, populateFormatButtons } from "./format-toolbar.ts";
-import { handleImagePaste } from "./image-paste.ts";
 import { initImageResize } from "./image-resize.ts";
 import { registerLinkHover } from "./link-hover.ts";
-import {
-  setContent,
-  setContentWithCursor,
-  setContentWithSelection,
-  restoreSelectionFromRenderedMarkers,
-} from "./renderer.ts";
 import { toggleRevisions, hideRevisions, isRevisionsOpen } from "./revisions.tsx";
 import {
   markClean,
@@ -86,137 +69,6 @@ export function classifyReload(isDirty: boolean): ReloadAction {
   return isDirty ? { type: "conflict" } : { type: "load" };
 }
 
-const INDENT_UNIT = "\t";
-const INDENTABLE_BLOCKS = new Set([
-  "P",
-  "DIV",
-  "LI",
-  "H1",
-  "H2",
-  "H3",
-  "H4",
-  "H5",
-  "H6",
-  "TD",
-  "TH",
-  "CODE",
-]);
-
-function isListItemBlock(el: HTMLElement): boolean {
-  return (
-    el.tagName === "LI" &&
-    (el.parentElement?.tagName === "UL" || el.parentElement?.tagName === "OL")
-  );
-}
-
-function isNestedListItem(el: HTMLElement): boolean {
-  return isListItemBlock(el) && el.parentElement?.parentElement?.tagName === "LI";
-}
-
-function isListItemEmpty(item: HTMLElement): boolean {
-  const clone = item.cloneNode(true) as HTMLElement;
-  for (const nested of clone.querySelectorAll("ul, ol")) {
-    nested.remove();
-  }
-  const text = (clone.textContent ?? "").replaceAll("\u200b", "").replaceAll("\u00a0", " ").trim();
-  return text === "";
-}
-
-function getNextListElementSibling(node: Node): HTMLElement | null {
-  let current = node.nextSibling;
-  while (current) {
-    if (current instanceof HTMLElement) {
-      return current;
-    }
-    current = current.nextSibling;
-  }
-  return null;
-}
-
-function getPreviousListElementSibling(node: Node): HTMLElement | null {
-  let current = node.previousSibling;
-  while (current) {
-    if (current instanceof HTMLElement) {
-      return current;
-    }
-    current = current.previousSibling;
-  }
-  return null;
-}
-
-function placeCursorAtBlockStart(block: HTMLElement) {
-  const sel = window.getSelection();
-  if (!sel) {
-    return;
-  }
-  const range = document.createRange();
-  range.selectNodeContents(block);
-  range.collapse(true);
-  sel.removeAllRanges();
-  sel.addRange(range);
-}
-
-function placeCursorAtBlockEnd(block: HTMLElement) {
-  const sel = window.getSelection();
-  if (!sel) {
-    return;
-  }
-  const range = document.createRange();
-  range.selectNodeContents(block);
-  range.collapse(false);
-  sel.removeAllRanges();
-  sel.addRange(range);
-}
-
-function isRangeAtStartOfBlock(range: Range, block: HTMLElement): boolean {
-  const before = range.cloneRange();
-  before.selectNodeContents(block);
-  before.setEnd(range.startContainer, clampNodeOffset(range.startContainer, range.startOffset));
-  return before.toString().replaceAll("\u200b", "") === "";
-}
-
-function removeEmptyTopLevelListItem(item: HTMLElement) {
-  const parentList = item.parentElement;
-  if (
-    !(parentList instanceof HTMLElement) ||
-    (parentList.tagName !== "UL" && parentList.tagName !== "OL")
-  ) {
-    return;
-  }
-
-  const previous = getPreviousListElementSibling(item);
-  const next = getNextListElementSibling(item);
-  item.remove();
-
-  if (parentList.children.length === 0) {
-    const paragraph = document.createElement("p");
-    paragraph.append(document.createElement("br"));
-    parentList.replaceWith(paragraph);
-    placeCursorAtBlockStart(paragraph);
-    return;
-  }
-
-  if (previous) {
-    placeCursorAtBlockEnd(previous);
-    return;
-  }
-
-  if (next) {
-    placeCursorAtBlockStart(next);
-    return;
-  }
-
-  placeCursorAtBlockEnd(parentList);
-}
-
-function dedentLine(line: string): string {
-  if (line.startsWith(INDENT_UNIT)) {
-    return line.slice(INDENT_UNIT.length);
-  }
-  const match = line.match(new RegExp(`^[ ]{1,${MAX_INDENT_SPACES}}`));
-  return match ? line.slice(match[0].length) : line;
-}
-
 export type EditorInstance = {
   showEditor(path: string, content: string, tags?: string[]): void;
   hideEditor(): void;
@@ -229,27 +81,16 @@ export function initEditor(): EditorInstance {
   const editorArea = document.querySelector("#editor-area")!;
   registerLinkHover();
 
-  let toolbarEl: HTMLElement | null = null;
   let formatToolbarCleanup: (() => void) | null = null;
   let container: HTMLElement | null = null;
-  let contentEl: HTMLElement | null = null;
-  let sourceEl: HTMLTextAreaElement | null = null;
   let tagInputEl: HTMLInputElement | null = null;
   let backlinksEl: HTMLElement | null = null;
   let revisionsEl: HTMLElement | null = null;
   let shell: EditorShellController | null = null;
   let shellHost: HTMLElement | null = null;
-  let isSourceMode = false;
+  let handle: EditorHandle | null = null;
   let currentPath: string | null = null;
   let currentTags: string[] = [];
-
-  interface UndoEntry {
-    md: string;
-    selStart: number;
-    selEnd: number;
-  }
-  const undoStack: UndoEntry[] = [];
-  let undoIndex = -1;
   let saving = false;
   let autosaveTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -261,8 +102,9 @@ export function initEditor(): EditorInstance {
   });
 
   function getCurrentContent(): string {
-    if (isSourceMode && sourceEl) {
-      const parsed = splitFrontmatter(sourceEl.value);
+    if (!handle) return "";
+    if (handle.isSourceMode) {
+      const parsed = splitFrontmatter(handle.sourceEl.value);
       if (parsed.hasFrontmatter) {
         const changed =
           currentTags.length !== parsed.tags.length ||
@@ -272,12 +114,9 @@ export function initEditor(): EditorInstance {
           renderTagRow();
         }
       }
-      return sourceEl.value;
+      return handle.sourceEl.value;
     }
-    if (contentEl) {
-      return withFrontmatter(domToMarkdown(contentEl), currentTags);
-    }
-    return "";
+    return withFrontmatter(handle.getValue(), currentTags);
   }
 
   function getCurrentTags(): string[] {
@@ -337,12 +176,12 @@ export function initEditor(): EditorInstance {
   }
 
   function syncSourceFromTags() {
-    if (!isSourceMode || !sourceEl) {
+    if (!handle || !handle.isSourceMode) {
       return;
     }
-    const parsed = splitFrontmatter(sourceEl.value);
-    const body = parsed.hasFrontmatter ? parsed.body : sourceEl.value;
-    sourceEl.value = withFrontmatter(body, currentTags);
+    const parsed = splitFrontmatter(handle.sourceEl.value);
+    const body = parsed.hasFrontmatter ? parsed.body : handle.sourceEl.value;
+    handle.sourceEl.value = withFrontmatter(body, currentTags);
   }
 
   function handleTagSelected(tag: string) {
@@ -366,9 +205,9 @@ export function initEditor(): EditorInstance {
   function tryAutosave() {
     autosaveTimer = null;
     // Defer if the user has an active selection — they may be mid-formatting.
-    if (contentEl) {
+    if (handle && !handle.isSourceMode) {
       const sel = window.getSelection();
-      if (sel && !sel.isCollapsed && contentEl.contains(sel.anchorNode)) {
+      if (sel && !sel.isCollapsed && handle.contentEl.contains(sel.anchorNode)) {
         autosaveTimer = setTimeout(tryAutosave, AUTOSAVE_RETRY_DELAY_MS);
         return;
       }
@@ -393,7 +232,7 @@ export function initEditor(): EditorInstance {
   }
 
   async function _doSave(silent: boolean) {
-    if (!currentPath) {
+    if (!currentPath || !handle) {
       return;
     }
     const savePath = currentPath;
@@ -411,12 +250,9 @@ export function initEditor(): EditorInstance {
     if (!contentChanged) {
       return;
     }
-    if (contentEl) {
-      const sel = getSelectionMarkdownOffsets(contentEl);
-      pushUndo(content, sel?.start ?? 0, sel?.end ?? 0);
-    }
+
     // Capture cursor synchronously before the first await
-    const cursorOffset = isSourceMode ? -1 : saveCursorOffset();
+    const cursorOffset = handle.isSourceMode ? -1 : handle.getCursorOffset();
 
     if (contentChanged) {
       const result = await saveNote(savePath, content, tab.mtime);
@@ -467,7 +303,7 @@ export function initEditor(): EditorInstance {
     const action = classifyReload(tab.dirty);
 
     if (action.type === "load") {
-      // Skip domToMarkdown when the SSE is bouncing our own save back.
+      // Skip re-render when the SSE is bouncing our own save back.
       if (tab.lastSavedMd !== content && getCurrentContent() !== content) {
         loadContent(content);
       }
@@ -488,194 +324,68 @@ export function initEditor(): EditorInstance {
     }
   }
 
-  function saveCursorOffset(): number {
-    if (!contentEl) {
-      return -1;
-    }
-    const sel = window.getSelection();
-    if (!sel || !sel.rangeCount) {
-      return -1;
-    }
-    const range = sel.getRangeAt(0);
-    if (!contentEl.contains(range.startContainer)) {
-      return -1;
-    }
-    return getCursorMarkdownOffset(contentEl, range);
-  }
-
-  /// Get the markdown offsets for the current selection's start and end.
-  /// Uses a single domToMarkdown pass with two cursor sentinel spans inserted,
-  /// so the first and second CURSOR_SENTINEL positions map to start and end.
-  /// Returns null if there is no selection or it is outside contentEl.
-  function getSelectionMarkdownOffsets(el: HTMLElement): { start: number; end: number } | null {
-    const sel = window.getSelection();
-    if (!sel || sel.rangeCount === 0) {
-      return null;
-    }
-    const range = sel.getRangeAt(0);
-    if (!el.contains(range.startContainer) || !el.contains(range.endContainer)) {
-      return null;
-    }
-
-    // Insert end marker first (higher DOM position → inserting it doesn't shift start).
-    const endMarker = document.createElement("span");
-    endMarker.dataset["mdCursor"] = "true";
-    const endRange = range.cloneRange();
-    endRange.collapse(false);
-    endRange.insertNode(endMarker);
-
-    const startMarker = document.createElement("span");
-    startMarker.dataset["mdCursor"] = "true";
-    const startRange = range.cloneRange();
-    startRange.collapse(true);
-    startRange.insertNode(startMarker);
-
-    const md = domToMarkdown(el);
-
-    // Both markers serialize as CURSOR_SENTINEL. Find them in order.
-    const firstIdx = md.indexOf(CURSOR_SENTINEL);
-    const secondIdx = firstIdx !== -1 ? md.indexOf(CURSOR_SENTINEL, firstIdx + 1) : -1;
-
-    const startParent = startMarker.parentNode;
-    const endParent = endMarker.parentNode;
-    startMarker.remove();
-    endMarker.remove();
-    startParent?.normalize();
-    if (endParent && endParent !== startParent) {
-      endParent.normalize();
-    }
-
-    // Restore selection
-    try {
-      sel.removeAllRanges();
-      sel.addRange(range);
-    } catch {
-      // Ignore if range is no longer valid
-    }
-
-    if (firstIdx === -1) {
-      return null;
-    }
-    const start = firstIdx;
-    // If collapsed, secondIdx will be -1; treat as collapsed selection
-    const end = secondIdx !== -1 ? secondIdx - 1 : start; // -1 because first sentinel char was removed
-    return { start, end };
-  }
-
-  function restoreCursorOffset(offset: number, markdown: string, scroll = false) {
-    if (!contentEl || offset < 0) {
-      return;
-    }
-    setContentWithCursor(contentEl, markdown, offset);
-    restoreCursorMarker(scroll);
-  }
-
-  function restoreCursorMarker(scroll = false) {
-    if (!contentEl) {
-      return;
-    }
-    const sel = window.getSelection();
-    if (!sel) {
-      return;
-    }
-    const marker = contentEl.querySelector('[data-md-cursor="true"]');
-    if (!(marker instanceof HTMLElement)) {
-      placeCursorAtEnd();
-      return;
-    }
-    const range = document.createRange();
-    range.setStartBefore(marker);
-    range.collapse(true);
-    sel.removeAllRanges();
-    sel.addRange(range);
-    if (scroll) {
-      marker.parentElement?.scrollIntoView({ block: "center", behavior: "instant" });
-    }
-    marker.remove();
-  }
-
   function loadContent(markdown: string, explicitOffset?: number) {
+    if (!handle) {
+      return;
+    }
     const parsed = splitFrontmatter(markdown);
-    if (isSourceMode && sourceEl) {
-      const pos = sourceEl.selectionStart;
-      sourceEl.value = markdown;
-      sourceEl.selectionStart = pos;
-      sourceEl.selectionEnd = pos;
-    } else if (contentEl) {
+    if (handle.isSourceMode) {
+      const pos = handle.sourceEl.selectionStart;
+      handle.sourceEl.value = markdown;
+      handle.sourceEl.selectionStart = pos;
+      handle.sourceEl.selectionEnd = pos;
+    } else {
       const focused =
-        contentEl === document.activeElement || contentEl.contains(document.activeElement);
-      const offset = explicitOffset ?? (focused ? saveCursorOffset() : -1);
+        handle.contentEl === document.activeElement ||
+        handle.contentEl.contains(document.activeElement);
+      const offset = explicitOffset ?? (focused ? handle.getCursorOffset() : -1);
       if (offset >= 0) {
-        restoreCursorOffset(offset, parsed.body, explicitOffset !== undefined);
+        handle.setValue(parsed.body, offset);
+        if (explicitOffset !== undefined) {
+          // Scroll saved cursor position into view when opening a note
+          const sel = window.getSelection();
+          if (sel && sel.rangeCount > 0) {
+            const range = sel.getRangeAt(0);
+            const node =
+              range.startContainer instanceof Element
+                ? range.startContainer
+                : range.startContainer.parentElement;
+            node?.scrollIntoView({ block: "center", behavior: "instant" });
+          }
+        }
       } else {
-        setContent(contentEl, parsed.body);
+        handle.setValue(parsed.body);
       }
     }
-
     if (parsed.hasFrontmatter) {
       setCurrentTags(parsed.tags);
     }
   }
 
   function toggleSourceMode() {
-    if (!contentEl || !sourceEl) {
+    if (!handle) {
       return;
     }
     hideRevisions();
     hideTagAutocomplete();
 
-    if (isSourceMode) {
-      const md = sourceEl.value;
+    if (handle.isSourceMode) {
+      // Leaving source mode: strip frontmatter so library re-renders body only,
+      // then sync tags from whatever was edited in source.
+      const md = handle.sourceEl.value;
       const parsed = splitFrontmatter(md);
       setCurrentTags(parsed.hasFrontmatter ? parsed.tags : []);
-      setContent(contentEl, parsed.body);
-      isSourceMode = false;
+      handle.sourceEl.value = parsed.hasFrontmatter ? parsed.body : md;
+      handle.toggleSourceMode();
     } else {
-      sourceEl.value = getCurrentContent();
-      isSourceMode = true;
+      // Entering source mode: capture body before toggle, then inject full content
+      // with frontmatter. (After toggleSourceMode the library has set sourceEl.value
+      // to the body-only value, so getCurrentContent() would read back that partial value.)
+      const body = handle.getValue();
+      handle.toggleSourceMode();
+      handle.sourceEl.value = withFrontmatter(body, currentTags);
     }
-    shell?.setSourceMode(isSourceMode);
-  }
-
-  function isIndentableBlock(el: HTMLElement): boolean {
-    if (el === contentEl) {
-      return false;
-    }
-    if (!INDENTABLE_BLOCKS.has(el.tagName)) {
-      return false;
-    }
-    return el.tagName !== "CODE" || el.parentElement?.tagName === "PRE";
-  }
-
-  function getIndentableBlock(node: Node): HTMLElement | null {
-    let current: Node | null = node;
-    while (current && current !== contentEl) {
-      if (current instanceof HTMLElement && isIndentableBlock(current)) {
-        return current;
-      }
-      current = current.parentNode;
-    }
-    return null;
-  }
-
-  function getListItemBlock(node: Node): HTMLElement | null {
-    const block = getIndentableBlock(node);
-    return block && isListItemBlock(block) ? block : null;
-  }
-
-  function placeCursorAtEnd() {
-    if (!contentEl) {
-      return;
-    }
-    const sel = window.getSelection();
-    if (!sel) {
-      return;
-    }
-    const range = document.createRange();
-    range.selectNodeContents(contentEl);
-    range.collapse(false);
-    sel.removeAllRanges();
-    sel.addRange(range);
+    shell?.setSourceMode(handle.isSourceMode);
   }
 
   function onEditorTabMutation() {
@@ -683,319 +393,9 @@ export function initEditor(): EditorInstance {
       updateTabDraft(currentPath, { content: getCurrentContent(), tags: getCurrentTags() });
     }
     scheduleAutosave();
-    if (contentEl && !isSourceMode) {
-      checkWikiLinkTrigger(contentEl, currentPath);
+    if (handle && !handle.isSourceMode) {
+      checkWikiLinkTrigger(handle.contentEl, currentPath);
     }
-  }
-
-  function pushUndo(md: string, selStart: number, selEnd: number): void {
-    // Truncate any redo tail
-    undoStack.splice(undoIndex + 1);
-    undoStack.push({ md, selStart, selEnd });
-    if (undoStack.length > UNDO_STACK_MAX_ENTRIES) {
-      undoStack.shift();
-    } else {
-      undoIndex++;
-    }
-  }
-
-  function applyUndoEntry(idx: number): void {
-    const entry = undoStack[idx]!;
-    setContentWithSelection(contentEl!, entry.md, entry.selStart, entry.selEnd);
-    restoreSelectionFromRenderedMarkers(contentEl!);
-    const tab = getActiveTab();
-    if (currentPath && tab && entry.md === tab.lastSavedMd) {
-      markClean(currentPath, entry.md, tab.mtime);
-      if (!isSourceMode) {
-        checkWikiLinkTrigger(contentEl!, currentPath);
-      }
-    } else {
-      onEditorTabMutation();
-    }
-  }
-
-  function undoEdit(): void {
-    if (undoIndex <= 0 || !contentEl) {
-      return;
-    }
-    undoIndex--;
-    applyUndoEntry(undoIndex);
-  }
-
-  function redoEdit(): void {
-    if (undoIndex >= undoStack.length - 1 || !contentEl) {
-      return;
-    }
-    undoIndex++;
-    applyUndoEntry(undoIndex);
-  }
-
-  /// Apply a source-text format transform to the current editor content.
-  /// Gets the selection offsets, applies the transform, re-renders, and restores the selection.
-  function applySourceFormatInEditor(
-    transform: (md: string, s: number, e: number) => FormatResult,
-  ): void {
-    if (!contentEl) {
-      return;
-    }
-    const sel = getSelectionMarkdownOffsets(contentEl);
-    if (!sel) {
-      return;
-    }
-    const md = domToMarkdown(contentEl);
-    // Save before-state to undo stack
-    pushUndo(md, sel.start, sel.end);
-    const { md: newMd, selStart, selEnd } = transform(md, sel.start, sel.end);
-    setContentWithSelection(contentEl, newMd, selStart, selEnd);
-    restoreSelectionFromRenderedMarkers(contentEl);
-    onEditorTabMutation();
-  }
-
-  function applyIndentInEditor(dedent: boolean): void {
-    if (!contentEl) {
-      return;
-    }
-    const sel = getSelectionMarkdownOffsets(contentEl);
-    if (!sel) {
-      return;
-    }
-    const md = domToMarkdown(contentEl);
-    pushUndo(md, sel.start, sel.end);
-    const { md: newMd, selStart, selEnd } = shiftIndent(md, sel.start, sel.end, dedent);
-    setContentWithSelection(contentEl, newMd, selStart, selEnd);
-    restoreSelectionFromRenderedMarkers(contentEl);
-    onEditorTabMutation();
-  }
-
-  function handleSourceTabKey(e: KeyboardEvent): boolean {
-    if (!sourceEl) {
-      return false;
-    }
-
-    e.preventDefault();
-    const { value } = sourceEl;
-    const start = sourceEl.selectionStart;
-    const end = sourceEl.selectionEnd;
-
-    if (!e.shiftKey && start === end) {
-      sourceEl.value = value.slice(0, start) + INDENT_UNIT + value.slice(end);
-      sourceEl.selectionStart = start + INDENT_UNIT.length;
-      sourceEl.selectionEnd = start + INDENT_UNIT.length;
-      onEditorTabMutation();
-      return true;
-    }
-
-    const lineStart = value.lastIndexOf("\n", Math.max(0, start - 1)) + 1;
-    const adjustedEnd = end > start && value[end - 1] === "\n" ? end - 1 : end;
-    const nextNewline = value.indexOf("\n", adjustedEnd);
-    const lineEnd = nextNewline === -1 ? value.length : nextNewline;
-    const lines = value.slice(lineStart, lineEnd).split("\n");
-    const transformed = e.shiftKey
-      ? lines.map(dedentLine)
-      : lines.map((line) => INDENT_UNIT + line);
-
-    sourceEl.setRangeText(transformed.join("\n"), lineStart, lineEnd, "select");
-    sourceEl.selectionStart = lineStart;
-    sourceEl.selectionEnd = lineStart + transformed.join("\n").length;
-    onEditorTabMutation();
-    return true;
-  }
-
-  function handleEmptyListItemBackspace(e: KeyboardEvent): boolean {
-    if (!contentEl) {
-      return false;
-    }
-    const sel = window.getSelection();
-    if (!sel || sel.rangeCount === 0 || !sel.isCollapsed) {
-      return false;
-    }
-
-    const range = sel.getRangeAt(0);
-    if (!contentEl.contains(range.startContainer)) {
-      return false;
-    }
-
-    const listItem = getListItemBlock(range.startContainer);
-    if (!listItem) {
-      return false;
-    }
-    if (!isRangeAtStartOfBlock(range, listItem)) {
-      return false;
-    }
-    if (!isListItemEmpty(listItem)) {
-      return false;
-    }
-
-    e.preventDefault();
-    if (isNestedListItem(listItem)) {
-      const md = domToMarkdown(contentEl);
-      const offsets = getSelectionMarkdownOffsets(contentEl);
-      if (!offsets) {
-        return false;
-      }
-      pushUndo(md, offsets.start, offsets.end);
-      const { md: newMd, selStart, selEnd } = shiftIndent(md, offsets.start, offsets.end, true);
-      setContentWithSelection(contentEl, newMd, selStart, selEnd);
-      restoreSelectionFromRenderedMarkers(contentEl);
-    } else {
-      removeEmptyTopLevelListItem(listItem);
-    }
-    onEditorTabMutation();
-    return true;
-  }
-
-  function setupEditorEvents() {
-    if (!contentEl || !sourceEl) {
-      return;
-    }
-
-    if (formatToolbarCleanup) {
-      formatToolbarCleanup();
-    }
-    formatToolbarCleanup = initFormatToolbar({
-      contentEl,
-      applyIndent: applyIndentInEditor,
-      applySourceFormat: applySourceFormatInEditor,
-      onMutation: onEditorTabMutation,
-    });
-
-    contentEl.addEventListener("input", () => {
-      if (contentEl && checkBlockInputTransform(contentEl)) {
-        onEditorTabMutation();
-        return;
-      }
-      checkInlineTransform();
-      onEditorTabMutation();
-    });
-
-    contentEl.addEventListener("change", (e) => {
-      const target = e.target;
-      if (!(target instanceof HTMLInputElement) || target.type !== "checkbox") {
-        return;
-      }
-      onEditorTabMutation();
-    });
-
-    contentEl.addEventListener("click", (e) => {
-      const target = e.target;
-      if (!(target instanceof HTMLInputElement) || target.type !== "checkbox") {
-        return;
-      }
-      onEditorTabMutation();
-    });
-
-    sourceEl.addEventListener("input", () => {
-      onEditorTabMutation();
-    });
-
-    contentEl.addEventListener("keydown", (e) => {
-      const meta = e.metaKey || e.ctrlKey;
-
-      if (meta && e.key === "s") {
-        e.preventDefault();
-        e.stopPropagation();
-        saveCurrentNote();
-        return;
-      }
-
-      if (meta && e.key === "z" && !e.shiftKey) {
-        e.preventDefault();
-        undoEdit();
-        return;
-      }
-
-      if ((meta && e.shiftKey && e.key === "z") || (meta && e.key === "y")) {
-        e.preventDefault();
-        redoEdit();
-        return;
-      }
-
-      if (meta && e.key === "b") {
-        e.preventDefault();
-        applySourceFormatInEditor(toggleBold);
-        return;
-      }
-
-      if (meta && e.key === "i") {
-        e.preventDefault();
-        applySourceFormatInEditor(toggleItalic);
-        return;
-      }
-
-      if (meta && e.key === "h") {
-        e.preventDefault();
-        applySourceFormatInEditor(toggleHighlight);
-        return;
-      }
-
-      if (e.key === "Tab") {
-        e.preventDefault();
-        applyIndentInEditor(e.shiftKey);
-        return;
-      }
-
-      if (e.key === "Backspace" && handleEmptyListItemBackspace(e)) {
-        return;
-      }
-
-      if (e.key === "Enter" && !e.shiftKey) {
-        handleBlockTransform(e, contentEl!, onEditorTabMutation);
-      }
-    });
-
-    function htmlToMarkdown(html: string): string {
-      const div = document.createElement("div");
-      div.setHTML(html);
-      return domToMarkdown(div);
-    }
-
-    contentEl.addEventListener("paste", (e) => {
-      e.preventDefault();
-      const clipData = e.clipboardData;
-      if (!clipData) {
-        return;
-      }
-
-      const imageItem = [...clipData.items].find((item) => item.type.startsWith("image/"));
-      if (imageItem) {
-        handleImagePaste(imageItem, currentPath);
-        return;
-      }
-
-      const htmlData = clipData.getData("text/html");
-      const pastedText = htmlData ? htmlToMarkdown(htmlData) : clipData.getData("text/plain");
-
-      if (pastedText && contentEl) {
-        const md = domToMarkdown(contentEl);
-        const sel = getSelectionMarkdownOffsets(contentEl);
-        const start = sel?.start ?? md.length;
-        const end = sel?.end ?? start;
-        pushUndo(md, start, end);
-        const newMd = md.slice(0, start) + pastedText + md.slice(end);
-        const newCursor = start + pastedText.length;
-        setContentWithSelection(contentEl, newMd, newCursor, newCursor);
-        restoreSelectionFromRenderedMarkers(contentEl);
-        onEditorTabMutation();
-      }
-    });
-
-    initImageResize(contentEl, () => {
-      onEditorTabMutation();
-    });
-
-    sourceEl.addEventListener("keydown", (e) => {
-      const meta = e.metaKey || e.ctrlKey;
-      if (meta && e.key === "s") {
-        e.preventDefault();
-        e.stopPropagation();
-        saveCurrentNote();
-        return;
-      }
-
-      if (e.key === "Tab") {
-        handleSourceTabKey(e);
-      }
-    });
   }
 
   function showEditor(path: string, content: string, tags: string[] = []) {
@@ -1005,7 +405,6 @@ export function initEditor(): EditorInstance {
       void saveCurrentNote({ silent: true });
     }
     currentPath = path;
-    isSourceMode = false;
     hideRevisions();
     hideAutocomplete();
     hideTagAutocomplete();
@@ -1016,6 +415,9 @@ export function initEditor(): EditorInstance {
       emptyState.style.display = "none";
     }
 
+    handle?.destroy();
+    handle = null;
+
     shellHost?.remove();
     shellHost = document.createElement("div");
     editorArea.append(shellHost);
@@ -1023,18 +425,12 @@ export function initEditor(): EditorInstance {
     shell = mountEditorShell({
       root: shellHost,
       tags: currentTags,
-      isSourceMode,
+      isSourceMode: false,
     });
 
-    ({
-      containerEl: container,
-      toolbarEl,
-      contentEl,
-      sourceEl,
-      revisionsEl,
-      backlinksEl,
-    } = shell.refs);
+    ({ containerEl: container, backlinksEl, revisionsEl } = shell.refs);
     tagInputEl = shell.refs.getTagInputEl();
+
     shell.refs.sourceBtnEl.onclick = () => {
       toggleSourceMode();
     };
@@ -1057,20 +453,18 @@ export function initEditor(): EditorInstance {
                     if (revisionsEl) {
                       revisionsEl.style.display = "none";
                     }
-                    if (isSourceMode && sourceEl) {
-                      sourceEl.style.display = "";
-                    } else if (contentEl) {
-                      contentEl.style.display = "";
+                    if (handle) {
+                      if (handle.isSourceMode) {
+                        handle.sourceEl.style.display = "";
+                      } else {
+                        handle.contentEl.style.display = "";
+                      }
                     }
                   },
                 });
-                if (isRevisionsOpen()) {
-                  if (contentEl) {
-                    contentEl.style.display = "none";
-                  }
-                  if (sourceEl) {
-                    sourceEl.style.display = "none";
-                  }
+                if (isRevisionsOpen() && handle) {
+                  handle.contentEl.style.display = "none";
+                  handle.sourceEl.style.display = "none";
                   if (revisionsEl) {
                     revisionsEl.style.display = "";
                   }
@@ -1100,10 +494,85 @@ export function initEditor(): EditorInstance {
       tagInputEl?.focus();
     };
 
+    handle = createEditor(shell.refs.editorMountEl, {
+      extensions: editorExtensions,
+      onChange: onEditorTabMutation,
+      onImagePaste: async (blob) => {
+        const now = new Date();
+        const ts =
+          now.getFullYear().toString() +
+          String(now.getMonth() + 1).padStart(2, "0") +
+          String(now.getDate()).padStart(2, "0") +
+          String(now.getHours()).padStart(2, "0") +
+          String(now.getMinutes()).padStart(2, "0") +
+          String(now.getSeconds()).padStart(2, "0");
+        const noteName = currentPath ? stemFromPath(currentPath) : "image";
+        const filename = `${noteName} ${ts}.webp`;
+        try {
+          const savedName = await uploadImage(blob, filename);
+          const src = `/z-images/${encodeURIComponent(savedName)}`;
+          return `<img src="${escapeHtml(src)}" alt="${escapeHtml(savedName)}" data-wiki-image="${escapeHtml(savedName)}" loading="lazy">`;
+        } catch {
+          return null;
+        }
+      },
+    });
+
+    // Apply tansu-specific classes so existing CSS continues to work.
+    handle.contentEl.className = "editor-content";
+    handle.contentEl.spellcheck = true;
+    handle.sourceEl.className = "editor-source";
+
+    // Wire save and format keyboard shortcuts on contentEl (beyond what the library handles).
+    handle.contentEl.addEventListener("keydown", (e) => {
+      const meta = e.metaKey || e.ctrlKey;
+      if (meta && e.key === "s") {
+        e.preventDefault();
+        e.stopPropagation();
+        saveCurrentNote();
+        return;
+      }
+      if (meta && e.key === "b") {
+        e.preventDefault();
+        handle!.applyFormat(toggleBold);
+        return;
+      }
+      if (meta && e.key === "i") {
+        e.preventDefault();
+        handle!.applyFormat(toggleItalic);
+        return;
+      }
+      if (meta && e.key === "h") {
+        e.preventDefault();
+        handle!.applyFormat(toggleHighlight);
+        return;
+      }
+    });
+
+    handle.sourceEl.addEventListener("keydown", (e) => {
+      const meta = e.metaKey || e.ctrlKey;
+      if (meta && e.key === "s") {
+        e.preventDefault();
+        e.stopPropagation();
+        saveCurrentNote();
+        return;
+      }
+    });
+
+    if (formatToolbarCleanup) {
+      formatToolbarCleanup();
+    }
+    formatToolbarCleanup = initFormatToolbar({
+      contentEl: handle.contentEl,
+      applyIndent: (dedent) => handle!.applyFormat((md, s, e) => shiftIndent(md, s, e, dedent)),
+      applySourceFormat: (transform) => handle!.applyFormat(transform),
+      onMutation: onEditorTabMutation,
+    });
+
     const fmtGroup = shell.refs.fmtGroupEl;
     populateFormatButtons(fmtGroup, {
-      applyIndent: applyIndentInEditor,
-      applySourceFormat: applySourceFormatInEditor,
+      applyIndent: (dedent) => handle!.applyFormat((md, s, e) => shiftIndent(md, s, e, dedent)),
+      applySourceFormat: (transform) => handle!.applyFormat(transform),
       afterInline: onEditorTabMutation,
       afterBlock: onEditorTabMutation,
     });
@@ -1111,13 +580,9 @@ export function initEditor(): EditorInstance {
 
     const cursor = getCursor(path);
     loadContent(content, cursor);
-    // Initialize undo stack with the initial content snapshot
-    undoIndex = -1;
-    undoStack.length = 0;
-    pushUndo(content, 0, 0);
-    setupEditorEvents();
+    initImageResize(handle.contentEl, onEditorTabMutation);
     loadBacklinks(backlinksEl, path);
-    contentEl.focus();
+    handle.focus();
   }
 
   function hideEditor() {
@@ -1126,8 +591,6 @@ export function initEditor(): EditorInstance {
       autosaveTimer = null;
       void saveCurrentNote({ silent: true });
     }
-    undoStack.length = 0;
-    undoIndex = -1;
     currentPath = null;
     hideRevisions();
     hideAutocomplete();
@@ -1138,23 +601,19 @@ export function initEditor(): EditorInstance {
       formatToolbarCleanup();
       formatToolbarCleanup = null;
     }
-    if (toolbarEl) {
-      toolbarEl = null;
-    }
-    if (container) {
-      container = null;
-    }
-    if (backlinksEl) {
-      backlinksEl = null;
-    }
+
+    handle?.destroy();
+    handle = null;
+
+    container = null;
+    backlinksEl = null;
     shell?.dispose();
     shell = null;
     shellHost?.remove();
     shellHost = null;
-    contentEl = null;
-    sourceEl = null;
     tagInputEl = null;
     revisionsEl = null;
+
     const emptyState = document.querySelector("#empty-state") as HTMLElement | null;
     if (emptyState) {
       emptyState.style.display = "flex";

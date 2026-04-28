@@ -9,7 +9,7 @@ import {
   toggleHeading,
   toggleCodeFence,
   shiftIndent,
-} from "./format-ops.ts";
+} from "@joshuarli98/md-wysiwyg";
 
 describe("toggleBold", () => {
   it("wraps plain text selection with **", () => {

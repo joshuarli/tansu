@@ -1,17 +1,29 @@
 /// Roundtrip tests: markdown → HTML → markdown.
 /// Verifies that domToMarkdown(renderMarkdown(md)) produces equivalent output.
 
+import type { MarkdownExtension } from "../src/extension.ts";
+import {
+  createWikiLinkExtension,
+  createWikiImageExtension,
+  createCalloutExtension,
+} from "../src/index.ts";
 import { setupDOM } from "./test-helper.ts";
+
+const allExts = [
+  createWikiLinkExtension(),
+  createWikiImageExtension({ resolveUrl: (n) => `/z-images/${n}` }),
+  createCalloutExtension(),
+];
 
 describe("roundtrip", () => {
   let cleanup: () => void;
-  let renderMarkdown: (md: string) => string;
-  let domToMarkdown: (el: HTMLElement) => string;
+  let renderMarkdown: (md: string, opts?: { extensions?: MarkdownExtension[] }) => string;
+  let domToMarkdown: (el: HTMLElement, opts?: { extensions?: MarkdownExtension[] }) => string;
 
-  function roundtrip(md: string): string {
+  function roundtrip(md: string, opts?: { extensions?: MarkdownExtension[] }): string {
     const el = document.createElement("div");
-    el.innerHTML = renderMarkdown(md);
-    return domToMarkdown(el);
+    el.innerHTML = renderMarkdown(md, opts);
+    return domToMarkdown(el, opts);
   }
 
   beforeAll(async () => {
@@ -98,16 +110,16 @@ describe("roundtrip", () => {
     expect(roundtrip("Visit https://example.com today")).toBe("Visit https://example.com today");
   });
   it("wiki-link roundtrip", () => {
-    expect(roundtrip("[[my note]]")).toBe("[[my note]]");
+    expect(roundtrip("[[my note]]", { extensions: allExts })).toBe("[[my note]]");
   });
   it("wiki-link pipe roundtrip", () => {
-    expect(roundtrip("[[target|display]]")).toBe("[[target|display]]");
+    expect(roundtrip("[[target|display]]", { extensions: allExts })).toBe("[[target|display]]");
   });
   it("image roundtrip", () => {
     expect(roundtrip("![alt](src.png)")).toBe("![alt](src.png)");
   });
   it("wiki-image roundtrip", () => {
-    expect(roundtrip("![[photo.webp]]")).toBe("![[photo.webp]]");
+    expect(roundtrip("![[photo.webp]]", { extensions: allExts })).toBe("![[photo.webp]]");
   });
   it("hr roundtrip", () => {
     expect(roundtrip("---")).toBe("---");
@@ -163,19 +175,19 @@ describe("roundtrip", () => {
 
   it("callout type roundtrip", () => {
     const callout = "> [!warning] Be careful\n> This is important";
-    const rt = roundtrip(callout);
+    const rt = roundtrip(callout, { extensions: allExts });
     expect(rt).toContain("[!warning]");
   });
 
   it("callout title roundtrip", () => {
     const callout = "> [!warning] Be careful\n> This is important";
-    const rt = roundtrip(callout);
+    const rt = roundtrip(callout, { extensions: allExts });
     expect(rt).toContain("Be careful");
   });
 
   it("callout body roundtrip", () => {
     const callout = "> [!warning] Be careful\n> This is important";
-    const rt = roundtrip(callout);
+    const rt = roundtrip(callout, { extensions: allExts });
     expect(rt).toContain("This is important");
   });
 

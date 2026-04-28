@@ -1,5 +1,5 @@
-/// Tests for renderer.ts helpers and an enforcement test that render functions
-/// are only called from renderer.ts (not scattered across other source files).
+/// Enforcement tests that markdown rendering and innerHTML assignments are
+/// kept out of web/ts source files (all such work lives inside packages/md-wysiwyg).
 
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
@@ -16,8 +16,8 @@ function sourceFiles(): string[] {
 }
 
 describe("renderer invariants", () => {
-  it("renderMarkdown/renderMarkdownWithCursor/renderMarkdownWithSelection only called from renderer.ts", () => {
-    const files = sourceFiles().filter((f) => f !== "renderer.ts");
+  it("renderMarkdown/renderMarkdownWithCursor/renderMarkdownWithSelection not called from web/ts source files", () => {
+    const files = sourceFiles();
     const renderFnPattern =
       /\b(renderMarkdown|renderMarkdownWithCursor|renderMarkdownWithSelection)\b/;
 
@@ -49,14 +49,14 @@ describe("renderer invariants", () => {
     expect(violations).toStrictEqual([]);
   });
 
-  it("element.innerHTML assignments are only in renderer.ts, bootstrap.ts, and filenav.tsx", () => {
-    // Markdown HTML must only be injected via renderer.ts.
+  it("element.innerHTML assignments are only in bootstrap.ts and filenav.tsx", () => {
+    // Markdown HTML is injected only by packages/md-wysiwyg (editor.ts); web/ts must not
+    // assign .innerHTML directly except for the listed cases:
     // bootstrap.ts sets body.innerHTML for the unlock/unsupported-browser screens.
     // filenav.tsx sets innerHTML for the collapse-button glyph (not markdown).
     // format-toolbar.ts sets innerHTML for SVG toolbar icons (not markdown).
-    // All other files must use renderer helpers or JSX innerHTML prop (which does not
-    // match the "el.innerHTML =" DOM pattern).
-    const allowList = new Set(["renderer.ts", "bootstrap.ts", "filenav.tsx", "format-toolbar.ts"]);
+    // All other files must use JSX innerHTML prop (which does not match "el.innerHTML =" pattern).
+    const allowList = new Set(["bootstrap.ts", "filenav.tsx", "format-toolbar.ts"]);
     const files = sourceFiles().filter((f) => !allowList.has(f));
     // Match DOM assignment "el.innerHTML =" but not JSX attribute "innerHTML={"
     const pattern = /[^{]\.innerHTML\s*=/;

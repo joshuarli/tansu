@@ -13,8 +13,7 @@ export type EditorShellRefs = {
   sourceBtnEl: HTMLButtonElement;
   menuBtnEl: HTMLButtonElement;
   tagRowEl: HTMLDivElement;
-  contentEl: HTMLDivElement;
-  sourceEl: HTMLTextAreaElement;
+  editorMountEl: HTMLDivElement;
   revisionsEl: HTMLDivElement;
   backlinksEl: HTMLDivElement;
   getTagInputEl(): HTMLInputElement | null;
@@ -97,20 +96,7 @@ function EditorShellView(
             spellcheck={false}
           />
         </div>
-        <div
-          ref={(el) => {
-            props.refs.contentEl = el;
-            el.contentEditable = "true";
-          }}
-          class="editor-content"
-          spellcheck={true}
-          style={{ display: props.isSourceMode() ? "none" : "" }}
-        />
-        <textarea
-          ref={props.refs.sourceEl}
-          class="editor-source"
-          style={{ display: props.isSourceMode() ? "" : "none" }}
-        />
+        <div ref={props.refs.editorMountEl} style={{ display: "contents" }} />
         <div ref={props.refs.revisionsEl} class="revisions-container" style={{ display: "none" }} />
       </div>
       <div ref={props.refs.backlinksEl} class="backlinks" style={{ display: "none" }} />
@@ -129,8 +115,7 @@ export function mountEditorShell(options: EditorShellOptions): EditorShellContro
     sourceBtnEl: null!,
     menuBtnEl: null!,
     tagRowEl: null!,
-    contentEl: null!,
-    sourceEl: null!,
+    editorMountEl: null!,
     revisionsEl: null!,
     backlinksEl: null!,
     getTagInputEl: () => null,

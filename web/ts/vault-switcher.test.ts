@@ -18,6 +18,9 @@ describe("vault-switcher", () => {
     mock.on("POST", /\/api\/vaults\/\d+\/activate/, {});
     const mod = await import("./vault-switcher.tsx");
     ({ initVaultSwitcher, refreshVaultSwitcher } = mod);
+    // Mount the component now so tests don't depend on "renders nothing" running first.
+    mock.on("GET", "/api/vaults", []);
+    await initVaultSwitcher();
   });
 
   afterAll(() => {

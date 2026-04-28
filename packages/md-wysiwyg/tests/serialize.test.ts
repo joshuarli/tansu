@@ -1,5 +1,16 @@
+import {
+  createWikiLinkExtension,
+  createWikiImageExtension,
+  createCalloutExtension,
+} from "../src/index.ts";
 import { domToMarkdown } from "../src/serialize.ts";
 import { setupDOM } from "./test-helper.ts";
+
+const wikiLinkOpts = { extensions: [createWikiLinkExtension()] };
+const wikiImageOpts = {
+  extensions: [createWikiImageExtension({ resolveUrl: (n) => `/z-images/${n}` })],
+};
+const calloutOpts = { extensions: [createCalloutExtension()] };
 
 describe("serialize", () => {
   let cleanup: () => void;
@@ -89,13 +100,19 @@ describe("serialize", () => {
 
   it("wiki-link same display", () => {
     expect(
-      domToMarkdown(html('<p><a class="wiki-link" data-target="My Note">My Note</a></p>')),
+      domToMarkdown(
+        html('<p><a class="wiki-link" data-target="My Note">My Note</a></p>'),
+        wikiLinkOpts,
+      ),
     ).toBe("[[My Note]]");
   });
 
   it("wiki-link different display", () => {
     expect(
-      domToMarkdown(html('<p><a class="wiki-link" data-target="target">display</a></p>')),
+      domToMarkdown(
+        html('<p><a class="wiki-link" data-target="target">display</a></p>'),
+        wikiLinkOpts,
+      ),
     ).toBe("[[target|display]]");
   });
 
@@ -111,6 +128,7 @@ describe("serialize", () => {
         html(
           '<p><img data-wiki-image="photo.webp" src="/z-images/photo.webp" alt="photo.webp"></p>',
         ),
+        wikiImageOpts,
       ),
     ).toBe("![[photo.webp]]");
   });
@@ -232,7 +250,7 @@ describe("serialize", () => {
   <div class="callout-title">\u26A0\uFE0F Be careful</div>
   <div class="callout-body"><p>This is important</p></div>
 </div>`;
-    expect(domToMarkdown(html(calloutHtml))).toContain("> [!warning]");
+    expect(domToMarkdown(html(calloutHtml), calloutOpts)).toContain("> [!warning]");
   });
 
   it("callout title", () => {
@@ -240,7 +258,7 @@ describe("serialize", () => {
   <div class="callout-title">\u26A0\uFE0F Be careful</div>
   <div class="callout-body"><p>This is important</p></div>
 </div>`;
-    expect(domToMarkdown(html(calloutHtml))).toContain("Be careful");
+    expect(domToMarkdown(html(calloutHtml), calloutOpts)).toContain("Be careful");
   });
 
   it("callout body", () => {
@@ -248,7 +266,7 @@ describe("serialize", () => {
   <div class="callout-title">\u26A0\uFE0F Be careful</div>
   <div class="callout-body"><p>This is important</p></div>
 </div>`;
-    expect(domToMarkdown(html(calloutHtml))).toContain("> This is important");
+    expect(domToMarkdown(html(calloutHtml), calloutOpts)).toContain("> This is important");
   });
 
   it("nbsp in plain text normalizes to space", () => {

@@ -1161,8 +1161,10 @@ describe("editor", () => {
 
     vi.useFakeTimers();
     try {
-      // Pretend user has an active (non-collapsed) selection inside contentEl
-      window.getSelection = () => ({ isCollapsed: false, anchorNode }) as unknown as Selection;
+      // Pretend user has an active (non-collapsed) selection inside contentEl.
+      // rangeCount: 0 prevents library internals (typing checkpoint) from calling getRangeAt.
+      window.getSelection = () =>
+        ({ isCollapsed: false, anchorNode, rangeCount: 0 }) as unknown as Selection;
 
       contentEl.dispatchEvent(new Event("input", { bubbles: true }));
 

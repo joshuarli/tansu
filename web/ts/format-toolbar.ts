@@ -3,13 +3,6 @@
 /// to preserve editor focus and selection while applying formats.
 
 import {
-  FORMAT_TOOLBAR_EDGE_PADDING_PX,
-  FORMAT_TOOLBAR_GAP_PX,
-  FORMAT_TOOLBAR_HEADING_LEVELS,
-  FORMAT_TOOLBAR_ICON_SIZE_PX,
-  FORMAT_TOOLBAR_STROKE_WIDTH,
-} from "./constants.ts";
-import {
   toggleBold,
   toggleItalic,
   toggleStrikethrough,
@@ -18,7 +11,15 @@ import {
   toggleHeading,
   toggleCodeFence,
   type FormatResult,
-} from "./format-ops.ts";
+} from "@joshuarli98/md-wysiwyg";
+
+import {
+  FORMAT_TOOLBAR_EDGE_PADDING_PX,
+  FORMAT_TOOLBAR_GAP_PX,
+  FORMAT_TOOLBAR_HEADING_LEVELS,
+  FORMAT_TOOLBAR_ICON_SIZE_PX,
+  FORMAT_TOOLBAR_STROKE_WIDTH,
+} from "./constants.ts";
 
 type FormatToolbarOptions = {
   contentEl: HTMLElement;

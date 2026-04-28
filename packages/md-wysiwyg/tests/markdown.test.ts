@@ -1,4 +1,15 @@
+import {
+  createWikiLinkExtension,
+  createWikiImageExtension,
+  createCalloutExtension,
+} from "../src/index.ts";
 import { renderMarkdown } from "../src/markdown.ts";
+
+const wikiLinkOpts = { extensions: [createWikiLinkExtension()] };
+const wikiImageOpts = {
+  extensions: [createWikiImageExtension({ resolveUrl: (n) => `/z-images/${n}` })],
+};
+const calloutOpts = { extensions: [createCalloutExtension()] };
 
 describe("headings", () => {
   it("h1", () => {
@@ -52,28 +63,32 @@ describe("inline formatting", () => {
 
 describe("wiki-links", () => {
   it("wiki-link class", () => {
-    expect(renderMarkdown("See [[my note]]")).toContain('class="wiki-link"');
+    expect(renderMarkdown("See [[my note]]", wikiLinkOpts)).toContain('class="wiki-link"');
   });
   it("wiki-link target", () => {
-    expect(renderMarkdown("See [[my note]]")).toContain('data-target="my note"');
+    expect(renderMarkdown("See [[my note]]", wikiLinkOpts)).toContain('data-target="my note"');
   });
   it("wiki-link pipe target", () => {
-    expect(renderMarkdown("See [[target|display]]")).toContain('data-target="target"');
+    expect(renderMarkdown("See [[target|display]]", wikiLinkOpts)).toContain(
+      'data-target="target"',
+    );
   });
   it("wiki-link pipe display", () => {
-    expect(renderMarkdown("See [[target|display]]")).toContain(">display</a>");
+    expect(renderMarkdown("See [[target|display]]", wikiLinkOpts)).toContain(">display</a>");
   });
 });
 
 describe("wiki-images", () => {
   it("wiki-image tag", () => {
-    expect(renderMarkdown("![[photo.webp]]")).toContain("<img");
+    expect(renderMarkdown("![[photo.webp]]", wikiImageOpts)).toContain("<img");
   });
   it("wiki-image data", () => {
-    expect(renderMarkdown("![[photo.webp]]")).toContain('data-wiki-image="photo.webp"');
+    expect(renderMarkdown("![[photo.webp]]", wikiImageOpts)).toContain(
+      'data-wiki-image="photo.webp"',
+    );
   });
   it("wiki-image src", () => {
-    expect(renderMarkdown("![[photo.webp]]")).toContain("/z-images/");
+    expect(renderMarkdown("![[photo.webp]]", wikiImageOpts)).toContain("/z-images/");
   });
 });
 
@@ -195,20 +210,22 @@ describe("blockquotes", () => {
 
 describe("callouts", () => {
   it("callout type", () => {
-    expect(renderMarkdown("> [!warning] Be careful\n> This is important")).toContain(
+    expect(renderMarkdown("> [!warning] Be careful\n> This is important", calloutOpts)).toContain(
       "callout-warning",
     );
   });
   it("callout title", () => {
-    expect(renderMarkdown("> [!warning] Be careful\n> This is important")).toContain("Be careful");
+    expect(renderMarkdown("> [!warning] Be careful\n> This is important", calloutOpts)).toContain(
+      "Be careful",
+    );
   });
   it("callout body", () => {
-    expect(renderMarkdown("> [!warning] Be careful\n> This is important")).toContain(
+    expect(renderMarkdown("> [!warning] Be careful\n> This is important", calloutOpts)).toContain(
       "This is important",
     );
   });
   it("callout default title", () => {
-    expect(renderMarkdown("> [!note]\n> Body here")).toContain("Note");
+    expect(renderMarkdown("> [!note]\n> Body here", calloutOpts)).toContain("Note");
   });
 });
 
@@ -298,7 +315,7 @@ describe("inline branches", () => {
   });
 
   it("wiki-image renders img tag with src", () => {
-    const html = renderMarkdown("![[image.png]]");
+    const html = renderMarkdown("![[image.png]]", wikiImageOpts);
     expect(html).toContain("<img");
     expect(html).toContain('data-wiki-image="image.png"');
     expect(html).toContain("/z-images/image.png");
