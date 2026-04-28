@@ -10,8 +10,6 @@ vi.mock("./bootstrap.ts", async () => {
   return {
     ...mod,
     bootApp: vi.fn().mockResolvedValue(undefined),
-    createNotificationController: vi.fn(() => ({ show: vi.fn(), hide: vi.fn(), dispose: vi.fn() })),
-    createServerStatusController: vi.fn(() => ({ show: vi.fn(), hide: vi.fn() })),
     createBackoff: vi.fn(() => ({
       next: vi.fn(() => 1000),
       format: vi.fn(() => "1s"),

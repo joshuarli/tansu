@@ -5,7 +5,6 @@ import { render } from "solid-js/web";
 
 import { getRevision, listRevisions, restoreRevision } from "./api.ts";
 import { DiffView } from "./DiffView.tsx";
-import { restoreRevisionIntoEditor } from "./revision-events.ts";
 import { relativeTime } from "./util.ts";
 
 let hostEl: HTMLElement | null = null;
@@ -18,6 +17,7 @@ export type RevisionsOpts = {
   path: string;
   host: HTMLElement;
   getCurrentContent: () => string;
+  onRestoreRevision: (content: string, mtime: number) => void;
   onHide: () => void;
 };
 
@@ -95,7 +95,7 @@ export function toggleRevisions(opts: RevisionsOpts) {
   }
   getContent = opts.getCurrentContent;
   ({ onHide } = opts);
-  void showRevisions(opts.path, opts.host);
+  void showRevisions(opts);
 }
 
 export function hideRevisions() {
@@ -113,7 +113,8 @@ export function isRevisionsOpen(): boolean {
   return hostEl !== null;
 }
 
-async function showRevisions(path: string, host: HTMLElement) {
+async function showRevisions(opts: RevisionsOpts) {
+  const { path, host, onRestoreRevision } = opts;
   hideRevisions();
   currentPath = path;
   hostEl = host;
@@ -126,7 +127,7 @@ async function showRevisions(path: string, host: HTMLElement) {
     }
     const result = await restoreRevision(path, ts);
     const content = await getRevision(path, ts);
-    restoreRevisionIntoEditor({ content, mtime: result.mtime });
+    onRestoreRevision(content, result.mtime);
     hideRevisions();
   };
 

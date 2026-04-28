@@ -18,15 +18,8 @@ import { wireEditorShell } from "./editor-shell-wiring.ts";
 import { createTagState } from "./editor-tags.ts";
 import { splitFrontmatter, withFrontmatter } from "./frontmatter.ts";
 import { initImageResize } from "./image-resize.ts";
-import { setRevisionRestoreHandler } from "./revision-events.ts";
 import { hideRevisions } from "./revisions.tsx";
 import { getCursor, markClean, updateTabDraft } from "./tab-state.ts";
-
-let currentHandle: EditorAdapter | null = null;
-
-export function getEditorHandle(): EditorAdapter | null {
-  return currentHandle;
-}
 
 export { getEditorPrefs, saveEditorPrefs, classifySaveResult, classifyReload };
 export type { EditorPrefs, SaveAction };
@@ -37,6 +30,9 @@ export type EditorInstance = {
   getCurrentContent(): string;
   saveCurrentNote(opts?: { silent?: boolean }): Promise<void>;
   reloadFromDisk(content: string, mtime: number): void;
+  restoreRevision(content: string, mtime: number): void;
+  applyPrefs(prefs: EditorPrefs): void;
+  destroy(): void;
 };
 
 type EditorElements = {
@@ -50,12 +46,13 @@ type EditorElements = {
 export function initEditor(elements: Readonly<EditorElements>): EditorInstance {
   registerLinkHover();
 
+  let handle: EditorAdapter | null = null;
   let container: HTMLElement | null = null;
   let backlinksEl: HTMLElement | null = null;
   let currentPath: string | null = null;
 
   function getHandle() {
-    return currentHandle;
+    return handle;
   }
 
   const tagState = createTagState({
@@ -129,14 +126,7 @@ export function initEditor(elements: Readonly<EditorElements>): EditorInstance {
       onEditorTabMutation();
       elements.shellRefs.getTagInputEl()?.focus();
     },
-  });
-
-  setRevisionRestoreHandler((payload) => {
-    if (!currentPath) {
-      return;
-    }
-    loadContent(payload.content);
-    markClean(currentPath, payload.content, payload.mtime);
+    onRestoreRevision: (content, mtime) => restoreRevision(content, mtime),
   });
 
   function toggleSourceMode() {
@@ -185,14 +175,14 @@ export function initEditor(elements: Readonly<EditorElements>): EditorInstance {
     elements.setSourceMode(false);
     elements.emptyState.style.display = "none";
 
-    currentHandle?.destroy();
-    currentHandle = null;
+    handle?.destroy();
+    handle = null;
 
     elements.shellRefs.editorMountEl.textContent = "";
     container = elements.shellRefs.containerEl;
     backlinksEl = elements.shellRefs.backlinksEl;
 
-    currentHandle = createEditorAdapter(elements.shellRefs.editorMountEl, {
+    handle = createEditorAdapter(elements.shellRefs.editorMountEl, {
       undoStackMax: getEditorPrefs().undoStackMax,
       getCurrentPath: () => currentPath,
       onChange: onEditorTabMutation,
@@ -201,14 +191,14 @@ export function initEditor(elements: Readonly<EditorElements>): EditorInstance {
       },
     });
 
-    shellWiring.attachToHandle(currentHandle);
+    shellWiring.attachToHandle(handle);
     tagState.renderTagRow();
 
     const cursor = getCursor(path);
     loadContent(content, cursor);
-    initImageResize(currentHandle.contentEl, onEditorTabMutation);
+    initImageResize(handle.contentEl, onEditorTabMutation);
     loadBacklinks(backlinksEl, path);
-    currentHandle.focus();
+    handle.focus();
   }
 
   function hideEditor() {
@@ -225,8 +215,8 @@ export function initEditor(elements: Readonly<EditorElements>): EditorInstance {
     elements.setVisible(false);
     elements.setSourceMode(false);
 
-    currentHandle?.destroy();
-    currentHandle = null;
+    handle?.destroy();
+    handle = null;
 
     container = null;
     backlinksEl = null;
@@ -237,11 +227,31 @@ export function initEditor(elements: Readonly<EditorElements>): EditorInstance {
     elements.emptyState.style.display = "flex";
   }
 
+  function restoreRevision(content: string, mtime: number) {
+    if (!currentPath) {
+      return;
+    }
+    loadContent(content);
+    markClean(currentPath, content, mtime);
+  }
+
+  function applyPrefs(prefs: EditorPrefs) {
+    handle?.setConfig({ undoStackMax: prefs.undoStackMax });
+  }
+
+  function destroy() {
+    hideEditor();
+    shellWiring.dispose();
+  }
+
   return {
     showEditor,
     hideEditor,
     getCurrentContent,
     saveCurrentNote: saveController.saveCurrentNote,
     reloadFromDisk: saveController.reloadFromDisk,
+    restoreRevision,
+    applyPrefs,
+    destroy,
   };
 }

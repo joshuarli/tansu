@@ -3,7 +3,6 @@
 
 import "fake-indexeddb/auto";
 import type { SessionState } from "./api.ts";
-import { on } from "./events.ts";
 import { openStore, closeStore, kvGet, kvPut, noteGet, notePut } from "./local-store.ts";
 import type { Tab } from "./tab-state.ts";
 import { setupDOM, mockFetch } from "./test-helper.ts";
@@ -19,7 +18,6 @@ describe("offline resilience", () => {
   let reopenClosedTab: () => Promise<void>;
   let syncToServer: () => Promise<void>;
   let restoreSession: () => Promise<void>;
-  let offChange: () => void;
 
   function cleanState() {
     while (getTabs().length > 0) {
@@ -46,12 +44,9 @@ describe("offline resilience", () => {
     ({ reopenClosedTab } = mod);
     ({ syncToServer } = mod);
     ({ restoreSession } = mod);
-
-    offChange = on("tab:change", () => {});
   });
 
   afterAll(() => {
-    offChange();
     mock.restore();
     closeStore();
     cleanup();
@@ -264,7 +259,6 @@ describe("closed-tab stack", () => {
   let reopenClosedTab: () => Promise<void>;
   let restoreSession: () => Promise<void>;
   let closedTabs: string[];
-  let offChange: () => void;
 
   function cleanState() {
     while (getTabs().length > 0) {
@@ -289,12 +283,9 @@ describe("closed-tab stack", () => {
     ({ reopenClosedTab } = mod);
     ({ restoreSession } = mod);
     ({ closedTabs } = mod);
-
-    offChange = on("tab:change", () => {});
   });
 
   afterAll(() => {
-    offChange();
     mock.restore();
     closeStore();
     cleanup();

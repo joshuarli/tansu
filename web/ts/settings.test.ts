@@ -13,6 +13,7 @@ vi.mock("./webauthn.ts", () => ({
 describe("settings", () => {
   let cleanup: () => void;
   let mock: ReturnType<typeof mockFetch>;
+  let disposeDialogHost: (() => void) | null = null;
 
   function setInputValue(el: HTMLInputElement, value: string) {
     el.value = value;
@@ -54,8 +55,6 @@ describe("settings", () => {
     const { delegateEvents } = await import("solid-js/web");
     delegateEvents(["click", "input", "change", "keydown", "contextmenu", "auxclick"]);
     mock = mockFetch();
-    const inputDialogMod = await import("./input-dialog.tsx");
-    inputDialogMod.initInputDialog(document.querySelector("#input-dialog-overlay") as HTMLElement);
 
     mock.on("GET", "/api/settings", {
       weight_title: 10,
@@ -70,10 +69,16 @@ describe("settings", () => {
     });
     mock.on("PUT", "/api/settings", {});
 
+    const dialogMod = await import("./input-dialog.tsx");
+    disposeDialogHost = render(
+      () => dialogMod.InputDialogHost(),
+      document.querySelector("#app") as HTMLElement,
+    );
     render(() => SettingsModal(), document.querySelector("#settings-root") as HTMLElement);
   });
 
   afterAll(() => {
+    disposeDialogHost?.();
     mock.restore();
     cleanup();
   });

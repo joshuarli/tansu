@@ -1,30 +1,11 @@
-import { For, createEffect, createSignal } from "solid-js";
+import { For, createSignal } from "solid-js";
 
+import type { Command } from "./commands.ts";
+export { matchesKey, type Command } from "./commands.ts";
 import { scrollSelectedIndexIntoView, wrapSelectionIndex } from "./listbox.ts";
-import { createFocusRestorer, OverlayFrame } from "./overlay.tsx";
+import { createOverlayLifecycle } from "./overlay-lifecycle.ts";
+import { OverlayFrame } from "./overlay.tsx";
 import { uiStore } from "./ui-store.ts";
-
-type KeyBinding = {
-  key: string;
-  meta?: boolean;
-  shift?: boolean;
-};
-
-export type Command = {
-  label: string;
-  shortcut: string;
-  keys?: KeyBinding;
-  action: () => void;
-};
-
-export function matchesKey(e: KeyboardEvent, k: KeyBinding): boolean {
-  const meta = e.metaKey || e.ctrlKey;
-  if (k.meta && !meta) return false;
-  if (!k.meta && meta) return false;
-  if (k.shift && !e.shiftKey) return false;
-  if (!k.shift && e.shiftKey) return false;
-  return e.key === k.key;
-}
 
 type PaletteProps = {
   commands: () => readonly Command[];
@@ -33,7 +14,6 @@ type PaletteProps = {
 export function PaletteModal(props: Readonly<PaletteProps>) {
   let inputEl: HTMLInputElement | null = null;
   let listEl: HTMLDivElement | null = null;
-  const focus = createFocusRestorer();
   const [query, setQuery] = createSignal("");
   const [selectedIndex, setSelectedIndex] = createSignal(0);
 
@@ -46,7 +26,6 @@ export function PaletteModal(props: Readonly<PaletteProps>) {
   }
 
   function open() {
-    focus.remember();
     setQuery("");
     setSelectedIndex(0);
     queueMicrotask(() => {
@@ -60,7 +39,6 @@ export function PaletteModal(props: Readonly<PaletteProps>) {
   function close() {
     uiStore.closePalette();
     inputEl?.blur();
-    focus.restore();
   }
 
   function selectCommand(command: Command) {
@@ -94,14 +72,14 @@ export function PaletteModal(props: Readonly<PaletteProps>) {
     }
   }
 
-  createEffect(() => {
-    if (uiStore.paletteOpen()) {
-      open();
-    }
+  const overlay = createOverlayLifecycle({
+    isOpen: uiStore.paletteOpen,
+    onOpen: open,
+    onClose: close,
   });
 
   return (
-    <OverlayFrame id="palette-overlay" isOpen={uiStore.paletteOpen()} onClose={close}>
+    <OverlayFrame id="palette-overlay" isOpen={uiStore.paletteOpen()} onClose={overlay.close}>
       <div class="palette-modal" role="dialog" aria-modal="true" aria-label="Command palette">
         <input
           id="palette-input"

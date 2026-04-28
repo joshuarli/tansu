@@ -15,6 +15,7 @@ type ShellWiringOptions = {
   onMutation: () => void;
   onToggleSourceMode: () => void;
   onRemoveTag: (tag: string) => void;
+  onRestoreRevision: (content: string, mtime: number) => void;
 };
 
 export function wireEditorShell(opts: Readonly<ShellWiringOptions>): {
@@ -43,6 +44,7 @@ export function wireEditorShell(opts: Readonly<ShellWiringOptions>): {
               path: currentPath,
               host: opts.shellRefs.revisionsEl,
               getCurrentContent: opts.getCurrentContent,
+              onRestoreRevision: opts.onRestoreRevision,
               onHide: () => {
                 opts.shellRefs.revisionsEl.style.display = "none";
                 if (handle.isSourceMode) {

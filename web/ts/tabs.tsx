@@ -4,13 +4,8 @@ import { getPinnedFiles } from "./api.ts";
 import { showContextMenu } from "./context-menu.tsx";
 import { buildFileContextMenuItems } from "./file-actions.ts";
 import { showInputDialog } from "./input-dialog.tsx";
-import {
-  closeTab,
-  createNewNote as _createNewNote,
-  getActiveIndex,
-  getTabs,
-  switchTab,
-} from "./tab-state.ts";
+import { createNewNote as _createNewNote } from "./tab-actions.ts";
+import { closeTab, getActiveIndex, getTabs, switchTab } from "./tab-state.ts";
 
 export async function promptNewNote(): Promise<void> {
   const name = await showInputDialog("New note name...");

@@ -1,4 +1,4 @@
-import { For, Show, createEffect, createSignal } from "solid-js";
+import { For, Show, createSignal } from "solid-js";
 
 import {
   getSettings,
@@ -28,10 +28,11 @@ import {
   SETTINGS_WEIGHT_TAGS_DEFAULT,
   SETTINGS_WEIGHT_TITLE_DEFAULT,
 } from "./constants.ts";
-import { getEditorHandle, getEditorPrefs, saveEditorPrefs, type EditorPrefs } from "./editor.ts";
+import { getEditorPrefs, saveEditorPrefs, type EditorPrefs } from "./editor.ts";
 import { showInputDialog } from "./input-dialog.tsx";
 import { reportActionError } from "./notify.ts";
-import { createFocusRestorer, OverlayFrame } from "./overlay.tsx";
+import { createOverlayLifecycle } from "./overlay-lifecycle.ts";
+import { OverlayFrame } from "./overlay.tsx";
 import { uiStore } from "./ui-store.ts";
 import { createPrfCredential, isPrfLikelySupported } from "./webauthn.ts";
 
@@ -302,8 +303,11 @@ function SettingsView(props: Readonly<SettingsViewProps>) {
   );
 }
 
-export function SettingsModal() {
-  const focus = createFocusRestorer();
+type SettingsModalProps = {
+  onApplyEditorPrefs?: (prefs: EditorPrefs) => void;
+};
+
+export function SettingsModal(props: Readonly<SettingsModalProps> = {}) {
   const [current, setCurrent] = createSignal<Settings | null>(null);
   const [editorPrefs, setEditorPrefs] = createSignal<EditorPrefs>(getEditorPrefs());
   const [status, setStatus] = createSignal<AppStatus | null>(null);
@@ -311,11 +315,9 @@ export function SettingsModal() {
 
   function close() {
     uiStore.closeSettings();
-    focus.restore();
   }
 
   async function open() {
-    focus.remember();
     setSecurityStatus("");
     setEditorPrefs(getEditorPrefs());
     try {
@@ -342,8 +344,9 @@ export function SettingsModal() {
 
     try {
       await saveSettings(updated);
-      saveEditorPrefs(editorPrefs());
-      getEditorHandle()?.setConfig({ undoStackMax: editorPrefs().undoStackMax });
+      const nextEditorPrefs = editorPrefs();
+      saveEditorPrefs(nextEditorPrefs);
+      props.onApplyEditorPrefs?.(nextEditorPrefs);
       setCurrent(updated);
       close();
     } catch (error) {
@@ -387,14 +390,16 @@ export function SettingsModal() {
     close();
   }
 
-  createEffect(() => {
-    if (uiStore.settingsOpen()) {
+  const overlay = createOverlayLifecycle({
+    isOpen: uiStore.settingsOpen,
+    onOpen: () => {
       void open();
-    }
+    },
+    onClose: close,
   });
 
   return (
-    <OverlayFrame id="settings-overlay" isOpen={uiStore.settingsOpen()} onClose={close}>
+    <OverlayFrame id="settings-overlay" isOpen={uiStore.settingsOpen()} onClose={overlay.close}>
       <div id="settings-panel" role="dialog" aria-modal="true" aria-label="Settings">
         <SettingsView
           current={current}

@@ -30,41 +30,6 @@ describe("bootstrap", () => {
     expect(document.body.textContent).toContain("UA/1.0");
   });
 
-  it("notification controller auto-dismisses and click-dismisses", async () => {
-    vi.useFakeTimers();
-    const { createNotificationController } = await import("./bootstrap.ts");
-    const notif = document.querySelector("#notification") as HTMLElement;
-    const controller = createNotificationController(notif, 1000);
-
-    controller.show("problem", "error");
-    expect(notif.className).toBe("notification error");
-    expect(notif.textContent).toBe("problem");
-
-    notif.click();
-    expect(notif.className).toBe("notification hidden");
-
-    controller.show("info", "info");
-    vi.advanceTimersByTime(1000);
-    expect(notif.className).toBe("notification hidden");
-
-    controller.dispose();
-    vi.useRealTimers();
-  });
-
-  it("server status controller toggles visible and hidden states", async () => {
-    const { createServerStatusController } = await import("./bootstrap.ts");
-    const el = document.querySelector("#server-status") as HTMLElement;
-    const controller = createServerStatusController(el);
-
-    controller.show("retrying");
-    expect(el.className).toBe("server-status");
-    expect(el.textContent).toBe("retrying");
-
-    controller.hide();
-    expect(el.className).toBe("server-status hidden");
-    expect(el.textContent).toBe("");
-  });
-
   it("showUnlockScreen unlocks with recovery key success", async () => {
     const { showUnlockScreen } = await import("./bootstrap.ts");
     const appEl = document.querySelector("#app") as HTMLElement;

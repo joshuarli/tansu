@@ -1,13 +1,18 @@
-/// Pure tab state management — no DOM dependencies.
+/// Tab/session state management with persistence delegated to tab-state-storage.ts.
 
 import { stemFromPath } from "@joshuarli98/md-wysiwyg";
 import { batch, createSignal } from "solid-js";
 
-import { getNote, createNote, saveState, getState, type SessionState } from "./api.ts";
+import type { SessionState } from "./api.ts";
 import { MAX_CLOSED_TABS } from "./constants.ts";
-import { kvGet, kvPut, noteGet, notePut } from "./local-store.ts";
-import { serverStore } from "./server-store.ts";
-import { uiStore } from "./ui-store.ts";
+import {
+  cacheNoteSnapshot,
+  fetchNoteWithOfflineFallback,
+  loadSessionState,
+  persistSessionCache,
+  persistSessionState,
+  syncCachedSessionToServer,
+} from "./tab-state-storage.ts";
 
 export type Tab = {
   path: string;
@@ -46,27 +51,7 @@ function createTabsStore() {
   }
 
   function persistState() {
-    const state = buildState();
-    /* c8 ignore start */
-    kvPut("session", state).catch(() => void 0);
-    saveState(state).catch(() => void 0);
-    /* c8 ignore stop */
-  }
-
-  async function fetchNote(
-    path: string,
-  ): Promise<{ content: string; mtime: number; tags: string[] }> {
-    try {
-      const note = await getNote(path);
-      notePut(path, note.content, note.mtime, note.tags).catch(() => void 0);
-      return note;
-    } catch {
-      const cached = await noteGet(path);
-      if (cached) {
-        return cached;
-      }
-      throw new Error(`Note ${path} not available offline`);
-    }
+    persistSessionState(buildState());
   }
 
   function notifyChange() {
@@ -88,17 +73,13 @@ function createTabsStore() {
     },
     setCursor(path: string, offset: number) {
       cursors[path] = offset;
-      /* c8 ignore next */
-      kvPut("session", buildState()).catch(() => void 0);
+      persistSessionCache(buildState());
     },
     getCursor(path: string) {
       return cursors[path];
     },
     async syncToServer() {
-      const cached = await kvGet<SessionState>("session");
-      if (cached) {
-        saveState(cached).catch(() => void 0);
-      }
+      await syncCachedSessionToServer();
     },
     async openTab(path: string): Promise<Tab> {
       const existing = tabs.findIndex((tab) => tab.path === path);
@@ -107,7 +88,7 @@ function createTabsStore() {
         return tabs[existing]!;
       }
 
-      const { content, mtime, tags } = await fetchNote(path);
+      const { content, mtime, tags } = await fetchNoteWithOfflineFallback(path);
       const tab: Tab = {
         path,
         title: stemFromPath(path),
@@ -132,7 +113,7 @@ function createTabsStore() {
       const tabPath = tab?.path;
       if (tab && tab.mtime === 0 && !tab.dirty) {
         try {
-          const note = await fetchNote(tab.path);
+          const note = await fetchNoteWithOfflineFallback(tab.path);
           if (activeIndex !== index || tabs[index]?.path !== tabPath) {
             return;
           }
@@ -164,9 +145,7 @@ function createTabsStore() {
       if (closedTabs.length > MAX_CLOSED_TABS) {
         closedTabs.shift();
       }
-      /* c8 ignore start */
-      notePut(tab.path, tab.content, tab.mtime, tab.tags).catch(() => void 0);
-      /* c8 ignore stop */
+      cacheNoteSnapshot(tab.path, tab.content, tab.mtime, tab.tags);
 
       tabs.splice(index, 1);
 
@@ -237,9 +216,7 @@ function createTabsStore() {
           title: stemFromPath(path),
           dirty: false,
         };
-        /* c8 ignore start */
-        notePut(path, content, mtime, tab.tags).catch(() => void 0);
-        /* c8 ignore stop */
+        cacheNoteSnapshot(path, content, mtime, tab.tags);
         syncSignals();
       }
     },
@@ -254,9 +231,7 @@ function createTabsStore() {
           lastSavedTags: newTags,
           dirty: tab.content !== tab.lastSavedMd,
         };
-        /* c8 ignore start */
-        notePut(path, tab.content, tab.mtime, newTags).catch(() => void 0);
-        /* c8 ignore stop */
+        cacheNoteSnapshot(path, tab.content, tab.mtime, newTags);
         syncSignals();
       }
     },
@@ -300,27 +275,8 @@ function createTabsStore() {
         notifyChange();
       }
     },
-    async createNewNote(name: string) {
-      const path = name.endsWith(".md") ? name : `${name}.md`;
-      try {
-        await createNote(path);
-        serverStore.notifyFilesChanged();
-        await tabsStore.openTab(path);
-      } catch (error) {
-        const reason = error instanceof Error ? error.message : String(error);
-        uiStore.showNotification(`Failed to create note ${path}: ${reason}`, "error");
-      }
-    },
     async restoreSession() {
-      let state: SessionState;
-      try {
-        state = await getState();
-        /* c8 ignore start */
-        kvPut("session", state).catch(() => void 0);
-        /* c8 ignore stop */
-      } catch {
-        state = (await kvGet<SessionState>("session")) ?? {};
-      }
+      const state = await loadSessionState();
 
       closedTabs.length = 0;
       if (state.closed?.length) {
@@ -346,7 +302,7 @@ function createTabsStore() {
           let mtime = 0;
           let tags: string[] = [];
           try {
-            const note = await fetchNote(path);
+            const note = await fetchNoteWithOfflineFallback(path);
             ({ content } = note);
             ({ mtime } = note);
             ({ tags } = note);
@@ -409,5 +365,4 @@ export const markTagsClean = tabsStore.markTagsClean;
 export const updateTabDraft = tabsStore.updateTabDraft;
 export const updateTabContent = tabsStore.updateTabContent;
 export const updateTabPath = tabsStore.updateTabPath;
-export const createNewNote = tabsStore.createNewNote;
 export const restoreSession = tabsStore.restoreSession;

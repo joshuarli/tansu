@@ -10,6 +10,7 @@ const tick = () => new Promise<void>((r) => setTimeout(r, 0));
 describe("tabs", () => {
   let cleanup: () => void;
   let mock: ReturnType<typeof mockFetch>;
+  let disposeDialogHost: (() => void) | null = null;
   let openTab: (path: string) => Promise<Tab>;
   let closeTab: (i: number) => void;
   let getTabs: () => Tab[];
@@ -22,8 +23,6 @@ describe("tabs", () => {
     const { delegateEvents } = await import("solid-js/web");
     delegateEvents(["click", "input", "change", "keydown", "contextmenu", "auxclick"]);
     mock = mockFetch();
-    const inputDialogMod = await import("./input-dialog.tsx");
-    inputDialogMod.initInputDialog(document.querySelector("#input-dialog-overlay") as HTMLElement);
 
     mock.on("GET", "/api/note", { content: "# Test", mtime: 1000 });
     mock.on("PUT", "/api/state", {});
@@ -42,7 +41,10 @@ describe("tabs", () => {
     ({ markDirty } = stateMod);
     const mod = await import("./tabs.tsx");
     createNewNoteViaDialog = mod.promptNewNote;
+    const dialogMod = await import("./input-dialog.tsx");
 
+    const appEl = document.querySelector("#app") as HTMLElement;
+    disposeDialogHost = render(() => dialogMod.InputDialogHost(), appEl);
     const tabBarEl = document.querySelector("#tab-bar") as HTMLElement;
     render(() => TabBarShell(), tabBarEl);
 
@@ -53,6 +55,7 @@ describe("tabs", () => {
   });
 
   afterAll(() => {
+    disposeDialogHost?.();
     mock.restore();
     cleanup();
   });

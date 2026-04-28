@@ -1,19 +1,24 @@
+import { render } from "solid-js/web";
+
 import { setupDOM } from "./test-helper.ts";
 
 const tick = () => new Promise<void>((r) => setTimeout(r, 0));
 
 describe("input-dialog", () => {
   let cleanup: () => void;
+  let dispose: (() => void) | null = null;
   let showInputDialog: (placeholder: string, defaultValue?: string) => Promise<string | null>;
 
   beforeAll(async () => {
     cleanup = setupDOM();
     const mod = await import("./input-dialog.tsx");
-    mod.initInputDialog(document.querySelector("#input-dialog-overlay") as HTMLElement);
+    const host = document.querySelector("#app") as HTMLElement;
+    dispose = render(() => mod.InputDialogHost(), host);
     ({ showInputDialog } = mod);
   });
 
   afterAll(() => {
+    dispose?.();
     cleanup();
   });
 

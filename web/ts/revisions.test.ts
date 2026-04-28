@@ -7,15 +7,15 @@ describe("revisions", () => {
   let toggleRevisions: (opts: RevisionsOpts) => void;
   let hideRevisions: () => void;
   let isRevisionsOpen: () => boolean;
-  let offRestore: () => void;
   let host: HTMLDivElement;
 
   function makeOpts(path: string) {
     let hideCalled = false;
-    return {
+    const opts: RevisionsOpts & { hideCalled: boolean } = {
       path,
       host,
       getCurrentContent: () => "current content",
+      onRestoreRevision: () => undefined,
       onHide: () => {
         hideCalled = true;
       },
@@ -26,6 +26,7 @@ describe("revisions", () => {
         hideCalled = v;
       },
     };
+    return opts;
   }
 
   beforeAll(async () => {
@@ -41,9 +42,6 @@ describe("revisions", () => {
     ({ hideRevisions } = revMod);
     ({ isRevisionsOpen } = revMod);
 
-    const { on } = await import("./events.ts");
-    offRestore = on("revision:restore", () => {});
-
     host = document.createElement("div");
     host.className = "revisions-container";
     document.body.append(host);
@@ -52,7 +50,6 @@ describe("revisions", () => {
   afterAll(() => {
     host.remove();
     mock.restore();
-    offRestore();
     cleanup();
   });
 
@@ -101,15 +98,13 @@ describe("revisions", () => {
     hideRevisions();
   });
 
-  it("clicking restore button emits revision:restore", async () => {
-    const { on } = await import("./events.ts");
-
+  it("clicking restore button forwards the restored revision to the editor bridge", async () => {
     let restoreEvent: { content: string; mtime: number } | null = null;
-    const offR = on("revision:restore", (data) => {
-      restoreEvent = data;
-    });
 
     const opts = makeOpts("test.md");
+    opts.onRestoreRevision = (content, mtime) => {
+      restoreEvent = { content, mtime };
+    };
     toggleRevisions(opts);
     await new Promise((r) => setTimeout(r, 200));
 
@@ -126,7 +121,6 @@ describe("revisions", () => {
     expect(restoreEvent!.content).toBe("# Old version");
     expect(restoreEvent!.mtime).toBe(5000);
 
-    offR();
     // Panel is hidden after restore
     expect(isRevisionsOpen()).toBeFalsy();
   });

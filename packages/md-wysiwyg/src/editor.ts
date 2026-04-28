@@ -2,18 +2,16 @@
 /// events, and handles image paste. All markdown-specific behavior is delegated to
 /// the render/serialize/transform modules; callers configure extensions and callbacks.
 
+import { createEditorRenderer } from "./editor-renderer.js";
+import { createEditorSelectionController, isRangeAtStartOfBlock } from "./editor-selection.js";
+import { createSelectionTransactionController } from "./editor-transactions.js";
+import { createEditorUndoController } from "./editor-undo.js";
 import type { MarkdownExtension } from "./extension.js";
 import { shiftIndent, toggleBold, toggleHighlight, toggleItalic } from "./format-ops.js";
 import type { FormatResult } from "./format-ops.js";
 import { checkInlineTransform } from "./inline-transforms.js";
-import {
-  renderMarkdown,
-  renderMarkdownWithCursor,
-  renderMarkdownWithSelection,
-} from "./markdown.js";
-import { domToMarkdown, getCursorMarkdownOffset } from "./serialize.js";
+import { domToMarkdown } from "./serialize.js";
 import { checkBlockInputTransform, handleBlockTransform } from "./transforms.js";
-import { clampNodeOffset, CURSOR_SENTINEL } from "./util.js";
 
 const MAX_INDENT_SPACES = 4;
 const INDENTABLE_BLOCKS = new Set([
@@ -64,7 +62,6 @@ export type EditorHandle = {
 export function createEditor(container: HTMLElement, config: EditorConfig = {}): EditorHandle {
   let cfg = { ...config };
   const extensions = cfg.extensions ?? [];
-  const renderOpts = { extensions };
 
   const contentEl = document.createElement("div");
   contentEl.contentEditable = "true";
@@ -75,212 +72,63 @@ export function createEditor(container: HTMLElement, config: EditorConfig = {}):
   container.append(contentEl, sourceEl);
 
   let _isSourceMode = false;
-
-  interface UndoEntry {
-    md: string;
-    selStart: number;
-    selEnd: number;
-  }
-  const undoStack: UndoEntry[] = [];
-  let undoIndex = -1;
-  let typingTimer: ReturnType<typeof setTimeout> | null = null;
-
-  // ── Render helpers ──────────────────────────────────────────────────────────
-
-  function setContent(md: string): void {
-    contentEl.innerHTML = renderMarkdown(md, renderOpts);
-  }
-
-  function setContentWithCursor(md: string, offset: number): void {
-    contentEl.innerHTML = renderMarkdownWithCursor(md, offset, renderOpts);
-  }
-
-  function setContentWithSelection(md: string, selStart: number, selEnd: number): void {
-    contentEl.innerHTML = renderMarkdownWithSelection(md, selStart, selEnd, renderOpts);
-  }
-
-  function restoreSelectionFromRenderedMarkers(): void {
-    const startSpan = contentEl.querySelector("[data-md-sel-start]");
-    const endSpan = contentEl.querySelector("[data-md-sel-end]");
-    if (!(startSpan instanceof HTMLElement) || !(endSpan instanceof HTMLElement)) return;
-    const sel = window.getSelection();
-    if (!sel) {
-      startSpan.remove();
-      endSpan.remove();
-      return;
-    }
-    try {
-      const r = document.createRange();
-      r.setStartAfter(startSpan);
-      r.setEndBefore(endSpan);
-      sel.removeAllRanges();
-      sel.addRange(r);
-    } catch {
-      /* degrade gracefully */
-    }
-    startSpan.remove();
-    endSpan.remove();
-  }
-
-  function restoreCursorMarker(scroll = false): void {
-    const sel = window.getSelection();
-    if (!sel) return;
-    const marker = contentEl.querySelector('[data-md-cursor="true"]');
-    if (!(marker instanceof HTMLElement)) {
-      placeCursorAtEnd();
-      return;
-    }
-    const range = document.createRange();
-    range.setStartBefore(marker);
-    range.collapse(true);
-    sel.removeAllRanges();
-    sel.addRange(range);
-    if (scroll) marker.parentElement?.scrollIntoView({ block: "center", behavior: "instant" });
-    marker.remove();
-  }
-
-  function placeCursorAtEnd(): void {
-    const sel = window.getSelection();
-    if (!sel) return;
-    const range = document.createRange();
-    range.selectNodeContents(contentEl);
-    range.collapse(false);
-    sel.removeAllRanges();
-    sel.addRange(range);
-  }
-
-  // ── Cursor / selection ──────────────────────────────────────────────────────
-
-  function getSelectionOffsets(): { start: number; end: number } | null {
-    const sel = window.getSelection();
-    if (!sel || sel.rangeCount === 0) return null;
-    const range = sel.getRangeAt(0);
-    if (!contentEl.contains(range.startContainer) || !contentEl.contains(range.endContainer)) {
-      return null;
-    }
-
-    // Insert end marker first (higher DOM position) so start insertion doesn't shift it.
-    const endMarker = document.createElement("span");
-    endMarker.dataset["mdCursor"] = "true";
-    const endRange = range.cloneRange();
-    endRange.collapse(false);
-    endRange.insertNode(endMarker);
-
-    const startMarker = document.createElement("span");
-    startMarker.dataset["mdCursor"] = "true";
-    const startRange = range.cloneRange();
-    startRange.collapse(true);
-    startRange.insertNode(startMarker);
-
-    const md = domToMarkdown(contentEl, renderOpts);
-
-    const firstIdx = md.indexOf(CURSOR_SENTINEL);
-    const secondIdx = firstIdx !== -1 ? md.indexOf(CURSOR_SENTINEL, firstIdx + 1) : -1;
-
-    const startParent = startMarker.parentNode;
-    const endParent = endMarker.parentNode;
-    startMarker.remove();
-    endMarker.remove();
-    startParent?.normalize();
-    if (endParent && endParent !== startParent) endParent.normalize();
-
-    try {
-      sel.removeAllRanges();
-      sel.addRange(range);
-    } catch {
-      /* ignore */
-    }
-
-    if (firstIdx === -1) return null;
-    // secondIdx is shifted by +1 because the first sentinel occupies one char before it
-    const end = secondIdx !== -1 ? secondIdx - 1 : firstIdx;
-    return { start: firstIdx, end };
-  }
-
-  function getCursorOffset(): number {
-    const sel = window.getSelection();
-    if (!sel || !sel.rangeCount) return -1;
-    const range = sel.getRangeAt(0);
-    if (!contentEl.contains(range.startContainer)) return -1;
-    return getCursorMarkdownOffset(contentEl, range, renderOpts);
-  }
+  const renderer = createEditorRenderer(contentEl, extensions);
+  const selection = createEditorSelectionController(contentEl, extensions);
 
   // ── getValue / setValue ─────────────────────────────────────────────────────
 
   function getValue(): string {
-    return _isSourceMode ? sourceEl.value : domToMarkdown(contentEl, renderOpts);
+    return _isSourceMode ? sourceEl.value : domToMarkdown(contentEl, { extensions });
   }
 
   function setValue(md: string, cursorOffset?: number): void {
     if (_isSourceMode) {
       sourceEl.value = md;
     } else if (cursorOffset !== undefined) {
-      setContentWithCursor(md, cursorOffset);
-      restoreCursorMarker();
+      renderer.renderWithCursor(md, cursorOffset);
+      selection.restoreCursorMarker();
     } else {
-      setContent(md);
+      renderer.render(md);
     }
-    const sel = getSelectionOffsets();
-    pushUndo(md, sel?.start ?? 0, sel?.end ?? 0);
+    const sel = selection.getSelectionOffsets();
+    undoController.pushUndo(md, sel?.start ?? 0, sel?.end ?? 0);
   }
 
-  // ── Undo stack ──────────────────────────────────────────────────────────────
+  const undoController = createEditorUndoController({
+    getValue,
+    getSelectionOffsets: selection.getSelectionOffsets,
+    renderSelection: renderer.renderWithSelection,
+    restoreSelection: selection.restoreSelectionFromRenderedMarkers,
+    getUndoStackMax: () => cfg.undoStackMax ?? 200,
+    getTypingCheckpointMs: () => cfg.typingCheckpointMs ?? 1000,
+    ...(cfg.onChange ? { onChange: cfg.onChange } : {}),
+  });
 
-  function pushUndo(md: string, selStart: number, selEnd: number): void {
-    undoStack.splice(undoIndex + 1);
-    const top = undoStack[undoIndex];
-    if (top && top.md === md && top.selStart === selStart && top.selEnd === selEnd) return;
-    undoStack.push({ md, selStart, selEnd });
-    if (undoStack.length > (cfg.undoStackMax ?? 200)) {
-      undoStack.shift();
-    } else {
-      undoIndex++;
-    }
-  }
-
-  function checkpoint(): void {
-    if (typingTimer !== null) {
-      clearTimeout(typingTimer);
-      typingTimer = null;
-    }
-    const md = getValue();
-    const sel = getSelectionOffsets();
-    pushUndo(md, sel?.start ?? 0, sel?.end ?? 0);
-  }
+  const transactions = createSelectionTransactionController({
+    getValue,
+    getSelectionOffsets: selection.getSelectionOffsets,
+    pushUndo: undoController.pushUndo,
+    checkpoint: undoController.checkpoint,
+    renderSelection: renderer.renderWithSelection,
+    restoreSelection: selection.restoreSelectionFromRenderedMarkers,
+    ...(cfg.onChange ? { onChange: cfg.onChange } : {}),
+  });
 
   // ── Format ──────────────────────────────────────────────────────────────────
 
   function applyFormat(op: (md: string, s: number, e: number) => FormatResult): void {
     if (_isSourceMode) return;
-    const sel = getSelectionOffsets();
-    if (!sel) return;
-    const md = getValue();
-    pushUndo(md, sel.start, sel.end);
-    const { md: newMd, selStart, selEnd } = op(md, sel.start, sel.end);
-    setContentWithSelection(newMd, selStart, selEnd);
-    restoreSelectionFromRenderedMarkers();
-    cfg.onChange?.();
+    transactions.applySelectionEdit(op);
   }
 
   // ── Undo / redo ─────────────────────────────────────────────────────────────
 
   function undo(): void {
-    checkpoint(); // push current state so redo can recover it
-    if (undoIndex <= 0) return;
-    undoIndex--;
-    const entry = undoStack[undoIndex]!;
-    setContentWithSelection(entry.md, entry.selStart, entry.selEnd);
-    restoreSelectionFromRenderedMarkers();
-    cfg.onChange?.();
+    undoController.undo();
   }
 
   function redo(): void {
-    if (undoIndex >= undoStack.length - 1) return;
-    undoIndex++;
-    const entry = undoStack[undoIndex]!;
-    setContentWithSelection(entry.md, entry.selStart, entry.selEnd);
-    restoreSelectionFromRenderedMarkers();
-    cfg.onChange?.();
+    undoController.redo();
   }
 
   // ── List-editing helpers ────────────────────────────────────────────────────
@@ -339,13 +187,6 @@ export function createEditor(container: HTMLElement, config: EditorConfig = {}):
     range.collapse(false);
     sel.removeAllRanges();
     sel.addRange(range);
-  }
-
-  function isRangeAtStartOfBlock(range: Range, block: HTMLElement): boolean {
-    const before = range.cloneRange();
-    before.selectNodeContents(block);
-    before.setEnd(range.startContainer, clampNodeOffset(range.startContainer, range.startOffset));
-    return before.toString().replaceAll("​", "") === "";
   }
 
   function removeEmptyTopLevelListItem(item: HTMLElement): void {
@@ -408,12 +249,12 @@ export function createEditor(container: HTMLElement, config: EditorConfig = {}):
     e.preventDefault();
     if (isNestedListItem(listItem)) {
       const md = getValue();
-      const offsets = getSelectionOffsets();
+      const offsets = selection.getSelectionOffsets();
       if (!offsets) return false;
-      pushUndo(md, offsets.start, offsets.end);
+      undoController.pushUndo(md, offsets.start, offsets.end);
       const { md: newMd, selStart, selEnd } = shiftIndent(md, offsets.start, offsets.end, true);
-      setContentWithSelection(newMd, selStart, selEnd);
-      restoreSelectionFromRenderedMarkers();
+      renderer.renderWithSelection(newMd, selStart, selEnd);
+      selection.restoreSelectionFromRenderedMarkers();
     } else {
       removeEmptyTopLevelListItem(listItem);
     }
@@ -510,13 +351,7 @@ export function createEditor(container: HTMLElement, config: EditorConfig = {}):
       return;
     }
     checkInlineTransform();
-    if (typingTimer !== null) clearTimeout(typingTimer);
-    typingTimer = setTimeout(() => {
-      typingTimer = null;
-      const md = getValue();
-      const sel = getSelectionOffsets();
-      pushUndo(md, sel?.start ?? 0, sel?.end ?? 0);
-    }, cfg.typingCheckpointMs ?? 1000);
+    undoController.scheduleTypingCheckpoint();
     cfg.onChange?.();
   }
 
@@ -552,22 +387,13 @@ export function createEditor(container: HTMLElement, config: EditorConfig = {}):
     if (htmlData) {
       const div = document.createElement("div");
       div.innerHTML = htmlData;
-      pastedText = domToMarkdown(div, renderOpts);
+      pastedText = domToMarkdown(div, { extensions });
     } else {
       pastedText = clipData.getData("text/plain");
     }
 
     if (pastedText) {
-      const md = getValue();
-      const sel = getSelectionOffsets();
-      const start = sel?.start ?? md.length;
-      const end = sel?.end ?? start;
-      checkpoint();
-      const newMd = md.slice(0, start) + pastedText + md.slice(end);
-      const cur = start + pastedText.length;
-      setContentWithSelection(newMd, cur, cur);
-      restoreSelectionFromRenderedMarkers();
-      cfg.onChange?.();
+      transactions.replaceSelection(pastedText);
     }
   }
 
@@ -601,7 +427,7 @@ export function createEditor(container: HTMLElement, config: EditorConfig = {}):
   function toggleSourceMode(): void {
     if (_isSourceMode) {
       const md = sourceEl.value;
-      setContent(md);
+      renderer.render(md);
       _isSourceMode = false;
       sourceEl.style.display = "none";
       contentEl.style.display = "";
@@ -620,7 +446,7 @@ export function createEditor(container: HTMLElement, config: EditorConfig = {}):
   }
 
   function destroy(): void {
-    if (typingTimer !== null) clearTimeout(typingTimer);
+    undoController.destroy();
     contentEl.removeEventListener("keydown", onKeyDown);
     contentEl.removeEventListener("input", onInput);
     contentEl.removeEventListener("change", onCheckboxEvent);
@@ -632,8 +458,8 @@ export function createEditor(container: HTMLElement, config: EditorConfig = {}):
   return {
     getValue,
     setValue,
-    getSelectionOffsets,
-    getCursorOffset,
+    getSelectionOffsets: selection.getSelectionOffsets,
+    getCursorOffset: selection.getCursorOffset,
     applyFormat,
     undo,
     redo,

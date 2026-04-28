@@ -1,5 +1,4 @@
 import { classifySaveResult, classifyReload, type SaveAction } from "./editor.ts";
-import { restoreRevisionIntoEditor } from "./revision-events.ts";
 import { setupDOM, mockFetch } from "./test-helper.ts";
 
 describe("classifySaveResult", () => {
@@ -65,11 +64,33 @@ describe("classifyReload", () => {
 describe("editor", () => {
   let cleanup: () => void;
   let mock: ReturnType<typeof mockFetch>;
+  let initEditor: typeof import("./editor.ts").initEditor;
+  let createEditorShellRefs: typeof import("./editor-shell.tsx").createEditorShellRefs;
+  let shellHost: HTMLDivElement;
   let showEditor: (path: string, content: string, tags?: string[]) => void;
   let hideEditor: () => void;
   let getCurrentContent: () => string;
   let saveCurrentNote: () => Promise<void>;
   let reloadFromDisk: (content: string, mtime: number) => void;
+  let restoreRevision: (content: string, mtime: number) => void;
+  let destroyEditor: () => void;
+
+  function latest<T extends Element>(selector: string): T {
+    const matches = document.querySelectorAll<T>(selector);
+    const el = matches[matches.length - 1];
+    if (!el) {
+      throw new Error(`expected element for selector: ${selector}`);
+    }
+    return el;
+  }
+
+  function latestEditorContent(): HTMLElement {
+    return latest<HTMLElement>(".editor-mount .editor-content");
+  }
+
+  function latestEditorSource(): HTMLTextAreaElement {
+    return latest<HTMLTextAreaElement>(".editor-mount .editor-source");
+  }
 
   beforeAll(async () => {
     cleanup = setupDOM();
@@ -90,11 +111,19 @@ describe("editor", () => {
     mock.on("GET", "/api/revisions", []);
     mock.on("GET", "/api/tags", { tags: [] });
 
-    const mod = await import("./editor.ts");
-    const { createEditorShellRefs } = await import("./editor-shell.tsx");
+    ({ initEditor } = await import("./editor.ts"));
+    ({ createEditorShellRefs } = await import("./editor-shell.tsx"));
+  });
+
+  beforeEach(async () => {
+    const { getTabs, closeTab } = await import("./tab-state.ts");
+    while (getTabs().length > 0) {
+      closeTab(0);
+    }
+
     const refs = createEditorShellRefs();
     const editorArea = document.querySelector("#editor-area") as HTMLElement;
-    const shellHost = document.createElement("div");
+    shellHost = document.createElement("div");
     shellHost.innerHTML = `
       <div class="editor-toolbar">
         <div class="editor-toolbar-fmt-group"></div>
@@ -145,14 +174,39 @@ describe("editor", () => {
       refs.tagRowEl.append(input);
     };
     renderTags([]);
-    const instance = mod.initEditor({
+    const instance = initEditor({
       emptyState: document.querySelector("#empty-state") as HTMLElement,
       shellRefs: refs,
       setTags: renderTags,
       setSourceMode: () => {},
       setVisible: () => {},
     });
-    ({ showEditor, hideEditor, getCurrentContent, saveCurrentNote, reloadFromDisk } = instance);
+    ({
+      showEditor,
+      hideEditor,
+      getCurrentContent,
+      saveCurrentNote,
+      reloadFromDisk,
+      restoreRevision,
+      destroy: destroyEditor,
+    } = instance);
+  });
+
+  afterEach(async () => {
+    document.body.querySelector(".context-menu")?.parentElement?.remove();
+    hideEditor();
+    destroyEditor();
+    shellHost.remove();
+    const { getTabs, closeTab } = await import("./tab-state.ts");
+    while (getTabs().length > 0) {
+      closeTab(0);
+    }
+    mock.on("GET", "/api/note", { content: "# Test", mtime: 1000 });
+    mock.on("PUT", "/api/note", { mtime: 2000 });
+    mock.on("GET", "/api/backlinks", []);
+    mock.on("GET", "/api/notes", []);
+    mock.on("GET", "/api/revisions", []);
+    mock.on("GET", "/api/tags", { tags: [] });
   });
 
   afterAll(() => {
@@ -164,7 +218,7 @@ describe("editor", () => {
     showEditor("test.md", "# Hello\n\nWorld");
     await new Promise((r) => setTimeout(r, 50));
 
-    const contentEl = document.querySelector(".editor-content") as HTMLElement;
+    const contentEl = latestEditorContent();
     expect(contentEl !== null).toBeTruthy();
     expect(contentEl.innerHTML).toContain("<h1>Hello</h1>");
     expect(contentEl.innerHTML).toContain("<p>World</p>");
@@ -177,14 +231,14 @@ describe("editor", () => {
     showEditor("frontmatter.md", "---\ntags: [alpha]\n---\n\n# Hello");
     await new Promise((r) => setTimeout(r, 50));
 
-    const contentEl = document.querySelector(".editor-content") as HTMLElement;
+    const contentEl = latestEditorContent();
     expect(contentEl.innerHTML).toContain("<h1>Hello</h1>");
     expect(contentEl.innerHTML).not.toContain("tags:");
     expect(contentEl.innerHTML).not.toContain("---");
 
     const sourceBtn = document.querySelector(".editor-toolbar-btn--source") as HTMLButtonElement;
     sourceBtn.click();
-    const sourceEl = document.querySelector(".editor-source") as HTMLTextAreaElement;
+    const sourceEl = latestEditorSource();
     expect(sourceEl.value).toContain("tags: [alpha]");
     expect(sourceEl.value).toContain("# Hello");
 
@@ -195,7 +249,7 @@ describe("editor", () => {
     showEditor("test.md", "# Hi");
     await new Promise((r) => setTimeout(r, 50));
 
-    const sourceEl = document.querySelector(".editor-source") as HTMLTextAreaElement;
+    const sourceEl = latestEditorSource();
     expect(sourceEl !== null).toBeTruthy();
     expect(sourceEl.style.display).toBe("none");
 
@@ -290,8 +344,8 @@ describe("editor", () => {
     showEditor("toggle.md", "# Toggle");
     await new Promise((r) => setTimeout(r, 50));
 
-    const contentEl = document.querySelector(".editor-content") as HTMLElement;
-    const sourceEl = document.querySelector(".editor-source") as HTMLTextAreaElement;
+    const contentEl = latestEditorContent();
+    const sourceEl = latestEditorSource();
     const sourceBtn = document.querySelector(".editor-toolbar-btn--source") as HTMLButtonElement;
 
     sourceBtn.click();
@@ -305,7 +359,7 @@ describe("editor", () => {
     showEditor("toggle.md", "# Toggle");
     await new Promise((r) => setTimeout(r, 50));
 
-    const sourceEl = document.querySelector(".editor-source") as HTMLTextAreaElement;
+    const sourceEl = latestEditorSource();
     const sourceBtn = document.querySelector(".editor-toolbar-btn--source") as HTMLButtonElement;
 
     sourceBtn.click();
@@ -319,8 +373,8 @@ describe("editor", () => {
     showEditor("toggle.md", "# Toggle");
     await new Promise((r) => setTimeout(r, 50));
 
-    const contentEl = document.querySelector(".editor-content") as HTMLElement;
-    const sourceEl = document.querySelector(".editor-source") as HTMLTextAreaElement;
+    const contentEl = latestEditorContent();
+    const sourceEl = latestEditorSource();
     const sourceBtn = document.querySelector(".editor-toolbar-btn--source") as HTMLButtonElement;
 
     sourceBtn.click();
@@ -335,7 +389,7 @@ describe("editor", () => {
     showEditor("no-body-tags.md", "hello");
     await new Promise((r) => setTimeout(r, 50));
 
-    const contentEl = document.querySelector(".editor-content") as HTMLElement;
+    const contentEl = latestEditorContent();
     contentEl.focus();
     const node = contentEl.querySelector("p")!.firstChild as Text;
     node.textContent = "hello #ru";
@@ -352,7 +406,7 @@ describe("editor", () => {
 
     const sourceBtn = document.querySelector(".editor-toolbar-btn--source") as HTMLButtonElement;
     sourceBtn.click();
-    const sourceEl = document.querySelector(".editor-source") as HTMLTextAreaElement;
+    const sourceEl = latestEditorSource();
     sourceEl.value = "hello #ru";
     sourceEl.selectionStart = sourceEl.value.length;
     sourceEl.selectionEnd = sourceEl.value.length;
@@ -372,7 +426,7 @@ describe("editor", () => {
     const sourceBtn = document.querySelector(".editor-toolbar-btn--source") as HTMLButtonElement;
     sourceBtn.click();
 
-    const sourceEl = document.querySelector(".editor-source") as HTMLTextAreaElement;
+    const sourceEl = latestEditorSource();
     sourceEl.value = "hello";
     sourceEl.selectionStart = 2;
     sourceEl.selectionEnd = 2;
@@ -392,7 +446,7 @@ describe("editor", () => {
     const sourceBtn = document.querySelector(".editor-toolbar-btn--source") as HTMLButtonElement;
     sourceBtn.click();
 
-    const sourceEl = document.querySelector(".editor-source") as HTMLTextAreaElement;
+    const sourceEl = latestEditorSource();
     sourceEl.value = "alpha\nbeta";
     sourceEl.selectionStart = 0;
     sourceEl.selectionEnd = sourceEl.value.length;
@@ -417,7 +471,7 @@ describe("editor", () => {
     showEditor("tab-wysiwyg.md", "hello");
     await new Promise((r) => setTimeout(r, 50));
 
-    const contentEl = document.querySelector(".editor-content") as HTMLElement;
+    const contentEl = latestEditorContent();
     const textNode = contentEl.querySelector("p")!.firstChild as Text;
     const range = document.createRange();
     range.setStart(textNode, 2);
@@ -437,7 +491,7 @@ describe("editor", () => {
     showEditor("highlight-shortcut.md", "hello world");
     await new Promise((r) => setTimeout(r, 50));
 
-    const contentEl = document.querySelector(".editor-content") as HTMLElement;
+    const contentEl = latestEditorContent();
     const textNode = contentEl.querySelector("p")!.firstChild as Text;
     const range = document.createRange();
     range.setStart(textNode, 0);
@@ -461,7 +515,7 @@ describe("editor", () => {
     showEditor("highlight-multiblock.md", "foo\n\nbar");
     await new Promise((r) => setTimeout(r, 50));
 
-    const contentEl = document.querySelector(".editor-content") as HTMLElement;
+    const contentEl = latestEditorContent();
     const paragraphs = [...contentEl.querySelectorAll("p")].filter(
       (p) => (p.textContent ?? "").trim() !== "",
     );
@@ -487,7 +541,7 @@ describe("editor", () => {
     showEditor("tab-wysiwyg-blocks.md", "alpha\n\nbeta");
     await new Promise((r) => setTimeout(r, 50));
 
-    const contentEl = document.querySelector(".editor-content") as HTMLElement;
+    const contentEl = latestEditorContent();
     const paragraphs = [...contentEl.querySelectorAll("p")].filter(
       (p) => (p.textContent ?? "").trim() !== "",
     );
@@ -518,7 +572,7 @@ describe("editor", () => {
     showEditor("list-indent.md", "- one\n- two");
     await new Promise((r) => setTimeout(r, 50));
 
-    const contentEl = document.querySelector(".editor-content") as HTMLElement;
+    const contentEl = latestEditorContent();
     const items = contentEl.querySelectorAll("li");
     const textNode = items[1]!.firstChild as Text;
     const range = document.createRange();
@@ -543,7 +597,7 @@ describe("editor", () => {
     showEditor("list-dedent-selection.md", "- one\n  - two\n  - three");
     await new Promise((r) => setTimeout(r, 50));
 
-    const contentEl = document.querySelector(".editor-content") as HTMLElement;
+    const contentEl = latestEditorContent();
     const items = contentEl.querySelectorAll("li");
     const startNode = items[1]!.firstChild as Text;
     const endNode = items[2]!.firstChild as Text;
@@ -570,7 +624,7 @@ describe("editor", () => {
     showEditor("nested-empty-backspace.md", "- one\n  - ");
     await new Promise((r) => setTimeout(r, 50));
 
-    const contentEl = document.querySelector(".editor-content") as HTMLElement;
+    const contentEl = latestEditorContent();
     const items = contentEl.querySelectorAll("li");
     const emptyNested = items[1] as HTMLElement;
     const range = document.createRange();
@@ -594,7 +648,7 @@ describe("editor", () => {
     showEditor("top-level-empty-backspace.md", "- a\n- ");
     await new Promise((r) => setTimeout(r, 50));
 
-    const contentEl = document.querySelector(".editor-content") as HTMLElement;
+    const contentEl = latestEditorContent();
     const items = contentEl.querySelectorAll("li");
     const emptyItem = items[1] as HTMLElement;
     const range = document.createRange();
@@ -621,7 +675,7 @@ describe("editor", () => {
 
     const sourceBtn = document.querySelector(".editor-toolbar-btn--source") as HTMLButtonElement;
     sourceBtn.click();
-    const sourceEl = document.querySelector(".editor-source") as HTMLTextAreaElement;
+    const sourceEl = latestEditorSource();
     sourceEl.value = "# Updated Content";
     sourceEl.dispatchEvent(new Event("input", { bubbles: true }));
 
@@ -650,7 +704,7 @@ describe("editor", () => {
     showEditor("tag-save.md", raw, ["alpha"]);
     await new Promise((r) => setTimeout(r, 50));
 
-    const removeBtn = document.querySelector(".tag-pill-remove") as HTMLButtonElement;
+    const removeBtn = latest<HTMLButtonElement>(".tag-pill-remove");
     removeBtn.click();
 
     mock.on("PUT", "/api/note", { mtime: 2000 });
@@ -679,7 +733,7 @@ describe("editor", () => {
 
     const sourceBtn = document.querySelector(".editor-toolbar-btn--source") as HTMLButtonElement;
     sourceBtn.click();
-    const sourceEl = document.querySelector(".editor-source") as HTMLTextAreaElement;
+    const sourceEl = latestEditorSource();
     sourceEl.value = "# My edits";
     sourceEl.dispatchEvent(new Event("input", { bubbles: true }));
 
@@ -730,7 +784,7 @@ describe("editor", () => {
     showEditor("reload-same-selection.md", content);
     await new Promise((r) => setTimeout(r, 50));
 
-    const contentEl = document.querySelector(".editor-content") as HTMLElement;
+    const contentEl = latestEditorContent();
     const paragraph = contentEl.querySelectorAll("p")[1] as HTMLElement;
     const textNode = paragraph.firstChild as Text;
     const range = document.createRange();
@@ -766,7 +820,7 @@ describe("editor", () => {
     // In source mode, write content that is entirely different from disk (no merge possible)
     const sourceBtn = document.querySelector(".editor-toolbar-btn--source") as HTMLButtonElement;
     sourceBtn.click();
-    const sourceEl = document.querySelector(".editor-source") as HTMLTextAreaElement;
+    const sourceEl = latestEditorSource();
     sourceEl.value = "# Totally different ours";
 
     markDirty("dirty-reload.md");
@@ -792,7 +846,7 @@ describe("editor", () => {
     await new Promise((r) => setTimeout(r, 50));
 
     // Simulate input to schedule the autosave timer
-    const contentEl = document.querySelector(".editor-content") as HTMLElement;
+    const contentEl = latestEditorContent();
     contentEl.dispatchEvent(new Event("input", { bubbles: true }));
 
     // Immediately open another file — should cancel the timer and trigger silent save
@@ -838,7 +892,7 @@ describe("editor", () => {
     showEditor("input-test.md", "# Input Test");
     await new Promise((r) => setTimeout(r, 50));
 
-    const contentEl = document.querySelector(".editor-content") as HTMLElement;
+    const contentEl = latestEditorContent();
     const heading = contentEl.querySelector("h1");
     if (heading) {
       heading.textContent = "Changed";
@@ -861,7 +915,7 @@ describe("editor", () => {
     showEditor("undo-test.md", "# Undo Test");
     await new Promise((r) => setTimeout(r, 50));
 
-    const contentEl = document.querySelector(".editor-content") as HTMLElement;
+    const contentEl = latestEditorContent();
     const inputEvent = new InputEvent("input", { bubbles: true, inputType: "historyUndo" });
     contentEl.dispatchEvent(inputEvent);
 
@@ -882,7 +936,7 @@ describe("editor", () => {
     const sourceBtn = document.querySelector(".editor-toolbar-btn--source") as HTMLButtonElement;
     sourceBtn.click();
 
-    const sourceEl = document.querySelector(".editor-source") as HTMLTextAreaElement;
+    const sourceEl = latestEditorSource();
     sourceEl.value = "# Changed";
     sourceEl.dispatchEvent(new Event("input", { bubbles: true }));
 
@@ -903,7 +957,7 @@ describe("editor", () => {
     showEditor("cmds-test.md", "# Cmd+S Test");
     await new Promise((r) => setTimeout(r, 50));
 
-    const contentEl = document.querySelector(".editor-content") as HTMLElement;
+    const contentEl = latestEditorContent();
     contentEl.dispatchEvent(
       new KeyboardEvent("keydown", { key: "s", ctrlKey: true, bubbles: true, cancelable: true }),
     );
@@ -921,7 +975,7 @@ describe("editor", () => {
     showEditor("cmdb-test.md", "hello");
     await new Promise((r) => setTimeout(r, 50));
 
-    const contentEl = document.querySelector(".editor-content") as HTMLElement;
+    const contentEl = latestEditorContent();
     contentEl.dispatchEvent(
       new KeyboardEvent("keydown", { key: "b", ctrlKey: true, bubbles: true, cancelable: true }),
     );
@@ -933,7 +987,7 @@ describe("editor", () => {
     showEditor("cmdi-test.md", "hello");
     await new Promise((r) => setTimeout(r, 50));
 
-    const contentEl = document.querySelector(".editor-content") as HTMLElement;
+    const contentEl = latestEditorContent();
     contentEl.dispatchEvent(
       new KeyboardEvent("keydown", { key: "i", ctrlKey: true, bubbles: true, cancelable: true }),
     );
@@ -952,7 +1006,7 @@ describe("editor", () => {
     const sourceBtn = document.querySelector(".editor-toolbar-btn--source") as HTMLButtonElement;
     sourceBtn.click();
 
-    const sourceEl = document.querySelector(".editor-source") as HTMLTextAreaElement;
+    const sourceEl = latestEditorSource();
     sourceEl.dispatchEvent(
       new KeyboardEvent("keydown", { key: "s", ctrlKey: true, bubbles: true, cancelable: true }),
     );
@@ -975,7 +1029,7 @@ describe("editor", () => {
 
     const sourceBtn = document.querySelector(".editor-toolbar-btn--source") as HTMLButtonElement;
     sourceBtn.click();
-    const sourceEl = document.querySelector(".editor-source") as HTMLTextAreaElement;
+    const sourceEl = latestEditorSource();
     sourceEl.value = "# Mine";
     sourceEl.dispatchEvent(new Event("input", { bubbles: true }));
 
@@ -1006,7 +1060,7 @@ describe("editor", () => {
     await new Promise((r) => setTimeout(r, 50));
 
     // Schedule autosave via input event
-    const contentEl = document.querySelector(".editor-content") as HTMLElement;
+    const contentEl = latestEditorContent();
     contentEl.dispatchEvent(new Event("input", { bubbles: true }));
 
     // Immediately save manually (clears autosave timer)
@@ -1029,7 +1083,7 @@ describe("editor", () => {
 
     const sourceBtn = document.querySelector(".editor-toolbar-btn--source") as HTMLButtonElement;
     sourceBtn.click();
-    const sourceEl = document.querySelector(".editor-source") as HTMLTextAreaElement;
+    const sourceEl = latestEditorSource();
     sourceEl.value = "# Load Source";
     sourceEl.selectionStart = 3;
     sourceEl.selectionEnd = 3;
@@ -1050,7 +1104,7 @@ describe("editor", () => {
     showEditor("enter-test.md", "- item");
     await new Promise((r) => setTimeout(r, 50));
 
-    const contentEl = document.querySelector(".editor-content") as HTMLElement;
+    const contentEl = latestEditorContent();
     const li = contentEl.querySelector("li");
     if (li) {
       const textNode = li.firstChild as Text;
@@ -1073,7 +1127,7 @@ describe("editor", () => {
     showEditor("task-input.md", "[ ]");
     await new Promise((r) => setTimeout(r, 50));
 
-    const contentEl = document.querySelector(".editor-content") as HTMLElement;
+    const contentEl = latestEditorContent();
     contentEl.innerHTML = '<ul class="task-list"><li class="task-item">[ ] </li></ul>';
     const li = contentEl.querySelector("li.task-item") as HTMLLIElement;
     const textNode = li.firstChild as Text;
@@ -1095,7 +1149,7 @@ describe("editor", () => {
     showEditor("task-enter.md", "[ ] foo");
     await new Promise((r) => setTimeout(r, 50));
 
-    const contentEl = document.querySelector(".editor-content") as HTMLElement;
+    const contentEl = latestEditorContent();
     const li = contentEl.querySelector("li.task-item") as HTMLLIElement;
     const textNode = [...li.childNodes].find((node) => node.nodeType === Node.TEXT_NODE) as Text;
     const range = document.createRange();
@@ -1121,7 +1175,7 @@ describe("editor", () => {
     showEditor("task-nesting.md", src);
     await new Promise((r) => setTimeout(r, 50));
 
-    const contentEl = document.querySelector(".editor-content") as HTMLElement;
+    const contentEl = latestEditorContent();
     expect(contentEl.querySelectorAll("li.task-item")).toHaveLength(4);
     expect(contentEl.querySelectorAll("ul.task-list")).toHaveLength(3);
     expect(contentEl.querySelectorAll(".task-list li ul.task-list")).toHaveLength(2);
@@ -1134,7 +1188,7 @@ describe("editor", () => {
     showEditor("paste-test.md", "# Paste");
     await new Promise((r) => setTimeout(r, 50));
 
-    const contentEl = document.querySelector(".editor-content") as HTMLElement;
+    const contentEl = latestEditorContent();
 
     const clipData = {
       items: [],
@@ -1161,7 +1215,7 @@ describe("editor", () => {
     markDirty("rev-test.md");
     expect(getActiveTab()!.dirty).toBeTruthy();
 
-    restoreRevisionIntoEditor({ content: "# Restored Version", mtime: 8000 });
+    restoreRevision("# Restored Version", 8000);
     await new Promise((r) => setTimeout(r, 50));
 
     const tab = getActiveTab();
@@ -1180,7 +1234,7 @@ describe("editor", () => {
     showEditor("checkbox.md", "- [ ] todo");
     await new Promise((r) => setTimeout(r, 50));
 
-    const contentEl = document.querySelector(".editor-content") as HTMLElement;
+    const contentEl = latestEditorContent();
     const checkbox = contentEl.querySelector('input[type="checkbox"]') as HTMLInputElement;
     expect(checkbox !== null).toBeTruthy();
     expect(checkbox.disabled).toBeFalsy();
@@ -1202,7 +1256,7 @@ describe("editor", () => {
     showEditor("defer-autosave.md", "# Defer Test");
     await new Promise((r) => setTimeout(r, 50));
 
-    const contentEl = document.querySelector(".editor-content") as HTMLElement;
+    const contentEl = latestEditorContent();
 
     // Actually mutate content so the tab becomes dirty
     const heading = contentEl.querySelector("h1");
@@ -1306,7 +1360,7 @@ describe("editor", () => {
 
     const sourceBtn = document.querySelector(".editor-toolbar-btn--source") as HTMLButtonElement;
     sourceBtn.click();
-    const sourceEl = document.querySelector(".editor-source") as HTMLTextAreaElement;
+    const sourceEl = latestEditorSource();
     sourceEl.value = "# My Edits";
     sourceEl.dispatchEvent(new Event("input", { bubbles: true }));
 
@@ -1344,7 +1398,7 @@ describe("editor", () => {
 
     const sourceBtn = document.querySelector(".editor-toolbar-btn--source") as HTMLButtonElement;
     sourceBtn.click();
-    const sourceEl = document.querySelector(".editor-source") as HTMLTextAreaElement;
+    const sourceEl = latestEditorSource();
     sourceEl.value = "# Local Edits";
     sourceEl.dispatchEvent(new Event("input", { bubbles: true }));
 
@@ -1364,8 +1418,8 @@ describe("editor", () => {
     expect(document.querySelector(".conflict-banner")).toBeNull();
 
     // Source mode textarea should contain disk content after reload
-    const updatedSource = document.querySelector(".editor-source") as HTMLTextAreaElement | null;
-    expect(updatedSource?.value).toBe("# Disk Content");
+    const updatedSource = latestEditorSource();
+    expect(updatedSource.value).toBe("# Disk Content");
 
     const tab = getActiveTab();
     expect(tab!.dirty).toBeFalsy();
@@ -1386,7 +1440,7 @@ describe("editor", () => {
     showEditor("debounce.md", "# Debounce");
     await new Promise((r) => setTimeout(r, 50));
 
-    const contentEl = document.querySelector(".editor-content") as HTMLElement;
+    const contentEl = latestEditorContent();
     const h1 = contentEl.querySelector("h1");
     if (h1) h1.textContent = "Debounced";
 
@@ -1438,7 +1492,7 @@ describe("editor", () => {
     showEditor("undo-redo.md", "# UndoRedo Base");
     await new Promise((r) => setTimeout(r, 50));
 
-    const contentEl = document.querySelector(".editor-content") as HTMLElement;
+    const contentEl = latestEditorContent();
 
     // Mutate content and save to push a second undo entry
     const h1 = contentEl.querySelector("h1");
@@ -1482,7 +1536,7 @@ describe("editor", () => {
 
     const sourceBtn = document.querySelector(".editor-toolbar-btn--source") as HTMLButtonElement;
     sourceBtn.click();
-    const sourceEl = document.querySelector(".editor-source") as HTMLTextAreaElement;
+    const sourceEl = latestEditorSource();
     sourceEl.value = "# From Source Textarea\n\nEdited in source mode.";
     sourceEl.dispatchEvent(new Event("input", { bubbles: true }));
 
@@ -1504,7 +1558,7 @@ describe("editor", () => {
     showEditor("img-paste.md", "# Image Paste");
     await new Promise((r) => setTimeout(r, 50));
 
-    const contentEl = document.querySelector(".editor-content") as HTMLElement;
+    const contentEl = latestEditorContent();
     const contentBefore = getCurrentContent();
 
     const imageItem = {
@@ -1534,5 +1588,29 @@ describe("editor", () => {
     expect(getCurrentContent()).toBe(contentBefore);
 
     hideEditor();
+  });
+
+  it("showEditor replaces the previous adapter when switching notes", async () => {
+    showEditor("first.md", "# First");
+    await new Promise((r) => setTimeout(r, 50));
+    showEditor("second.md", "# Second");
+    await new Promise((r) => setTimeout(r, 50));
+
+    const editors = document.querySelectorAll(".editor-content");
+    expect(editors).toHaveLength(1);
+    expect(getCurrentContent()).toBe("# Second");
+
+    hideEditor();
+  });
+
+  it("destroy tears down the editor shell state", async () => {
+    showEditor("destroy.md", "# Destroy");
+    await new Promise((r) => setTimeout(r, 50));
+
+    destroyEditor();
+
+    expect(document.querySelector(".editor-content")).toBeNull();
+    expect(document.querySelector(".editor-source")).toBeNull();
+    expect((document.querySelector("#empty-state") as HTMLElement).style.display).toBe("flex");
   });
 });

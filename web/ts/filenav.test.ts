@@ -27,6 +27,7 @@ function emit(
 describe("filenav", () => {
   let cleanup: () => void;
   let mock: ReturnType<typeof mockFetch>;
+  let disposeDialogHost: (() => void) | null = null;
   let openTab: (path: string) => Promise<unknown>;
   let closeTab: (i: number) => void;
   let getTabs: () => unknown[];
@@ -36,8 +37,6 @@ describe("filenav", () => {
     const { delegateEvents } = await import("solid-js/web");
     delegateEvents(["click", "input", "change", "keydown", "contextmenu", "auxclick"]);
     mock = mockFetch();
-    const inputDialogMod = await import("./input-dialog.tsx");
-    inputDialogMod.initInputDialog(document.querySelector("#input-dialog-overlay") as HTMLElement);
 
     mock.on("GET", "/api/note", { content: "# Test", mtime: 1000 });
     mock.on("GET", "/api/state", { tabs: [], active: -1 });
@@ -52,12 +51,14 @@ describe("filenav", () => {
     ({ openTab } = tabMod);
     ({ closeTab } = tabMod);
     ({ getTabs } = tabMod);
+    const dialogMod = await import("./input-dialog.tsx");
 
     while (getTabs().length > 0) {
       closeTab(0);
     }
 
     const root = document.querySelector("#app") as HTMLElement;
+    disposeDialogHost = render(() => dialogMod.InputDialogHost(), root);
     const sidebarHost = document.querySelector("#sidebar") as HTMLElement;
     sidebarHost.innerHTML = "";
     render(
@@ -70,6 +71,7 @@ describe("filenav", () => {
   });
 
   afterAll(() => {
+    disposeDialogHost?.();
     mock.restore();
     cleanup();
   });
@@ -143,7 +145,7 @@ describe("filenav", () => {
     expect(activeCount()).toBe(1);
   });
 
-  it("no duplicate .active when tab:change fires while files:changed render is in-flight", async () => {
+  it("no duplicate .active when active-tab state changes while files refresh is in-flight", async () => {
     while (getTabs().length > 0) {
       closeTab(0);
     }
@@ -153,8 +155,7 @@ describe("filenav", () => {
     // Emit files:changed to start an in-flight render (it will await network)
     serverStore.notifyFilesChanged();
 
-    // Immediately emit tab:change (simulates switching tab while render is in-flight)
-    // openTab triggers tab:change via notifyChange → onTabChange
+    // Immediately switch tabs while the refresh is in flight.
     await openTab("notes/beta.md");
 
     await drain();
@@ -162,17 +163,17 @@ describe("filenav", () => {
     expect(activeCount()).toBe(1);
   });
 
-  it("no duplicate under rapid files:changed + tab:change interleave", async () => {
+  it("no duplicate under rapid files:changed + active-tab interleave", async () => {
     while (getTabs().length > 0) {
       closeTab(0);
     }
     await openTab("notes/alpha.md");
     await tick();
 
-    // Fire many events in rapid succession: save + SSE + tab switch all at once
+    // Fire many updates in rapid succession: save + SSE + tab switch all at once.
     serverStore.notifyFilesChanged();
     serverStore.notifyFilesChanged();
-    await openTab("notes/beta.md"); // tab switch triggers tab:change
+    await openTab("notes/beta.md");
     serverStore.notifyFilesChanged();
 
     await drain();
@@ -189,9 +190,7 @@ describe("filenav", () => {
     await openTab("notes/alpha.md");
     await tick();
 
-    // Simulate network lag on the SECOND files:changed by overriding /api/recentfiles to be slow.
-    // The first emit completes fast; the second (SSE) triggers a slow refresh.
-    // Meanwhile, tab:change also fires. Check for no duplicates.
+    // Simulate network lag on the second files refresh while the active tab changes.
     mock.onDelayed(
       "GET",
       "/api/recentfiles",
@@ -205,7 +204,6 @@ describe("filenav", () => {
     serverStore.notifyFilesChanged();
     serverStore.notifyFilesChanged();
 
-    // tab:change fires synchronously when switching tabs
     await openTab("notes/beta.md");
 
     await new Promise<void>((r) => setTimeout(r, 100));

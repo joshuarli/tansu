@@ -66,16 +66,11 @@ const TANSU_HTML = `<!doctype html>
     <div id="notification" class="notification hidden"></div>
     <div id="tab-bar"></div>
     <div id="server-status" class="server-status hidden" aria-live="polite"></div>
-    <div id="editor-area">
+  <div id="editor-area">
       <div id="empty-state">empty</div>
     </div>
   <div id="search-root"></div>
   <div id="settings-root"></div>
-  <div id="input-dialog-overlay" class="hidden">
-    <div class="input-dialog">
-      <input id="input-dialog-input" type="text">
-    </div>
-  </div>
   <div id="palette-root"></div>
 </div>
 </body></html>`;

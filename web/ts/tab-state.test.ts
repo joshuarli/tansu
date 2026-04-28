@@ -1,11 +1,11 @@
-/// Tests for tab-state.ts — pure data logic, but needs DOM because
-/// tabs.ts registers a render listener on the shared event bus.
+/// Tests for tab-state.ts state transitions and persistence behavior.
 
 import { stemFromPath } from "@joshuarli98/md-wysiwyg";
 
-import { on } from "./events.ts";
+import { createNewNote } from "./tab-actions.ts";
 import type { Tab } from "./tab-state.ts";
 import { setupDOM, mockFetch } from "./test-helper.ts";
+import { uiStore } from "./ui-store.ts";
 
 describe("tab-state", () => {
   let cleanup: () => void;
@@ -23,15 +23,12 @@ describe("tab-state", () => {
   let updateTabPath: (oldPath: string, newPath: string) => void;
   let closeActiveTab: () => void;
   let closeTabByPath: (path: string) => void;
-  let createNewNote: (name: string) => Promise<void>;
   let restoreSession: () => Promise<void>;
   let switchTab: (index: number) => Promise<void>;
   let syncToServer: () => Promise<void>;
   let setCursor: (path: string, offset: number) => void;
   let getCursor: (path: string) => number | undefined;
   let reopenClosedTab: () => Promise<void>;
-  let offChange: () => void;
-
   beforeAll(async () => {
     cleanup = setupDOM();
     mock = mockFetch();
@@ -56,19 +53,15 @@ describe("tab-state", () => {
     ({ updateTabPath } = mod);
     ({ closeActiveTab } = mod);
     ({ closeTabByPath } = mod);
-    ({ createNewNote } = mod);
     ({ restoreSession } = mod);
     ({ syncToServer } = mod);
     ({ setCursor } = mod);
     ({ getCursor } = mod);
     ({ reopenClosedTab } = mod);
-
-    offChange = on("tab:change", () => {});
   });
 
   afterAll(() => {
     mock.restore();
-    offChange();
     cleanup();
   });
 
@@ -84,10 +77,6 @@ describe("tab-state", () => {
       closeTab(0);
     }
     mock.on("GET", "/api/note", { content: "# Test", mtime: 1000 });
-    let changeCount = 0;
-    const offC = on("tab:change", () => {
-      changeCount++;
-    });
 
     // Initially empty
     expect(getActiveTab()).toBeNull();
@@ -102,7 +91,6 @@ describe("tab-state", () => {
     expect(tab1.dirty).toBeFalsy();
     expect(getTabs()).toHaveLength(1);
     expect(getActiveIndex()).toBe(0);
-    expect(changeCount).toBeGreaterThan(0);
 
     // Reopen same tab — no duplicate
     await openTab("notes/hello.md");
@@ -142,8 +130,6 @@ describe("tab-state", () => {
     // closeActiveTab
     closeActiveTab();
     expect(getTabs()).toHaveLength(0);
-
-    offC();
   });
 
   it("createNewNote creates and opens tab for the given name", async () => {
@@ -288,27 +274,20 @@ describe("tab-state", () => {
     while (getTabs().length > 0) {
       closeTab(0);
     }
-
-    const origPrompt = globalThis.prompt;
-    (globalThis as unknown as Record<string, unknown>)["prompt"] = () => "Failing Note";
+    uiStore.hideNotification();
 
     // Make createNote (POST /api/note) fail
     mock.on("POST", "/api/note", "server error", 500);
 
-    let errorNotified = false;
-    const offNotif = on("notification", (data) => {
-      if (data.type === "error") errorNotified = true;
-    });
-
     await createNewNote("Failing Note");
 
-    offNotif();
-
-    expect(errorNotified).toBeTruthy();
+    expect(uiStore.notification().hidden).toBeFalsy();
+    expect(uiStore.notification().type).toBe("error");
+    expect(uiStore.notification().msg).toContain("Failed to create note Failing Note.md");
+    expect(uiStore.notification().msg).toContain("create failed");
     // No tab should have been created since createNote threw
     expect(getTabs()).toHaveLength(0);
 
-    (globalThis as unknown as Record<string, unknown>)["prompt"] = origPrompt;
     mock.on("POST", "/api/note", { mtime: 2000 });
   });
 

@@ -12,6 +12,11 @@ release: release-rs release-ts
 build-rs:
 	cargo build
 
+check: types
+	tsgo --noEmit --pretty false
+	tsgo -p packages/md-wysiwyg/tsconfig.json --noEmit --pretty false
+	cargo check -q
+
 release-rs:
 	cargo clean -p $(NAME) --release --target $(TARGET)
 	RUSTFLAGS="-Zlocation-detail=none -Zunstable-options -Cpanic=immediate-abort" \
@@ -77,4 +82,3 @@ setup:
 
 pc:
 	prek run --all-files
-

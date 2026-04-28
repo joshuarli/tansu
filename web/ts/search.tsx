@@ -1,10 +1,11 @@
-import { For, Show, createEffect, createSignal } from "solid-js";
+import { For, Show, createSignal } from "solid-js";
 
 import { createNote, getSettings, searchNotes, type SearchResult } from "./api.ts";
 import { SEARCH_MIN_QUERY_LENGTH, SEARCH_SCORE_PRECISION } from "./constants.ts";
 import { scrollSelectedIndexIntoView, wrapSelectionIndex } from "./listbox.ts";
 import { reportActionError } from "./notify.ts";
-import { createFocusRestorer, OverlayFrame } from "./overlay.tsx";
+import { createOverlayLifecycle } from "./overlay-lifecycle.ts";
+import { OverlayFrame } from "./overlay.tsx";
 import { uiStore } from "./ui-store.ts";
 
 type SearchModalProps = {
@@ -60,7 +61,6 @@ export function SearchModal(props: Readonly<SearchModalProps>) {
   let resultsEl: HTMLDivElement | null = null;
   let searchRequestId = 0;
   let settingsRequestId = 0;
-  const focus = createFocusRestorer();
 
   const [query, setQuery] = createSignal("");
   const [results, setResults] = createSignal<SearchResult[]>([]);
@@ -163,7 +163,6 @@ export function SearchModal(props: Readonly<SearchModalProps>) {
   }
 
   function open() {
-    focus.remember();
     searchRequestId++;
     setResults([]);
     setSelectedIndex(0);
@@ -184,17 +183,16 @@ export function SearchModal(props: Readonly<SearchModalProps>) {
       inputEl.blur();
     }
     uiStore.closeSearch();
-    focus.restore();
   }
 
-  createEffect(() => {
-    if (uiStore.searchOpen()) {
-      open();
-    }
+  const overlay = createOverlayLifecycle({
+    isOpen: uiStore.searchOpen,
+    onOpen: open,
+    onClose: close,
   });
 
   return (
-    <OverlayFrame id="search-overlay" isOpen={uiStore.searchOpen()} onClose={close}>
+    <OverlayFrame id="search-overlay" isOpen={uiStore.searchOpen()} onClose={overlay.close}>
       <div class="search-modal" role="dialog" aria-modal="true" aria-label="Search notes">
         <input
           id="search-input"

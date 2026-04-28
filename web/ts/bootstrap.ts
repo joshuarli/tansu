@@ -1,6 +1,3 @@
-import { createEffect, createSignal } from "solid-js";
-import { render } from "solid-js/web";
-
 import type { AppStatus } from "./api.ts";
 
 export type BrowserSupportProbe = {
@@ -46,89 +43,6 @@ export function showUnsupportedPage(
     <p>Please upgrade to <strong>Firefox ${minSupportedFirefoxVersion}</strong> or later.</p>
     <p style="color:#888;font-size:0.85em;word-break:break-all">Your browser: ${userAgent}</p>
   </div>`;
-}
-
-export function createNotificationController(
-  notifEl: HTMLElement,
-  autoDismissMs: number,
-): {
-  show(msg: string, type?: "error" | "info" | "success"): void;
-  hide(): void;
-  dispose(): void;
-} {
-  let notifTimer: ReturnType<typeof setTimeout> | null = null;
-  const [state, setState] = createSignal<{
-    hidden: boolean;
-    msg: string;
-    type: "error" | "info" | "success";
-  }>({
-    hidden: true,
-    msg: "",
-    type: "error",
-  });
-
-  const disposeView = render(() => {
-    createEffect(() => {
-      const current = state();
-      notifEl.className = current.hidden ? "notification hidden" : `notification ${current.type}`;
-      notifEl.textContent = current.msg;
-    });
-    return null;
-  }, notifEl);
-
-  function hide() {
-    if (notifTimer) {
-      clearTimeout(notifTimer);
-      notifTimer = null;
-    }
-    setState((current) => ({ ...current, hidden: true }));
-  }
-
-  function show(msg: string, type: "error" | "info" | "success" = "error") {
-    setState({ hidden: false, msg, type });
-    if (notifTimer) {
-      clearTimeout(notifTimer);
-    }
-    notifTimer = setTimeout(() => {
-      hide();
-    }, autoDismissMs);
-  }
-
-  notifEl.addEventListener("click", hide);
-
-  return {
-    show,
-    hide,
-    dispose() {
-      hide();
-      notifEl.removeEventListener("click", hide);
-      disposeView();
-    },
-  };
-}
-
-export function createServerStatusController(serverStatusEl: HTMLElement): {
-  show(msg: string): void;
-  hide(): void;
-} {
-  const [state, setState] = createSignal({ hidden: true, msg: "" });
-  render(() => {
-    createEffect(() => {
-      const current = state();
-      serverStatusEl.className = current.hidden ? "server-status hidden" : "server-status";
-      serverStatusEl.textContent = current.msg;
-    });
-    return null;
-  }, serverStatusEl);
-
-  return {
-    show(msg: string) {
-      setState({ hidden: false, msg });
-    },
-    hide() {
-      setState({ hidden: true, msg: "" });
-    },
-  };
 }
 
 export function createBackoff(delays: readonly number[]) {
