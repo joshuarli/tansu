@@ -1,6 +1,26 @@
 # Frontend Architecture
 
 This note describes the current intended ownership boundaries in `web/ts/`.
+The frontend is a Solid app around a framework-agnostic markdown editor package.
+The main design goal is to keep ownership explicit while preserving the local-first
+save/conflict/offline behavior.
+
+## API contract
+
+Rust owns the API DTOs.
+
+- Define frontend request/response structs in `src/api_types.rs`, or in the owning Rust module for shared types such as `Settings`.
+- Derive `Serialize`, `Deserialize`, and `TS` for DTOs sent to or received from the frontend.
+- Use `#[ts(optional)]` when a field can be omitted by serde, usually together with `#[serde(skip_serializing_if = "Option::is_none")]`.
+- Add new exported DTOs to `src/bin/gen-api-types.rs`.
+- Regenerate with `cargo run --quiet --bin gen-api-types`.
+- Verify drift with `cargo run --quiet --bin gen-api-types -- --check` or `make check`.
+
+`web/ts/api.generated.ts` is generated. Do not edit it manually.
+
+`web/ts/api.ts` is the handwritten API wrapper. It should provide ergonomic
+functions, request construction, response normalization, and error handling, but it
+must not redefine DTO shapes that already come from `api.generated.ts`.
 
 ## Layers
 
@@ -171,3 +191,14 @@ Prefer imperative DOM when:
 - body-level positioning or clipping escape is the primary reason the UI exists
 
 When in doubt, choose the simpler model that keeps ownership obvious. The default should be Solid components. Imperative DOM should be a deliberate exception with a concrete browser or host-bound reason.
+
+## Guardrails
+
+`web/ts/architecture.test.ts` enforces two important constraints:
+
+- `packages/md-wysiwyg/src` must not import from `web/ts`.
+- Production imports across `web/ts` and `packages/md-wysiwyg/src` must remain acyclic.
+
+`web/ts/renderer.test.ts` enforces renderer-specific DOM safety rules, including
+keeping markdown HTML rendering out of app source files and keeping fixed-root DOM
+queries out of converted Solid components.

@@ -85,7 +85,7 @@ The timeout is checked lazily: on each incoming API request, and in the SSE keep
 
 `GET /api/lock` triggers the same re-lock sequence immediately.
 
-**Client-side re-lock handling**: The SSE listener in `main.ts` watches for the `locked` event. On receipt, it clears the editor state and renders the unlock page into `#app`. No page reload needed. On re-unlock, UI restores from `state.json`.
+**Client-side re-lock handling**: `server-store.ts` watches for the `locked` SSE event. On receipt, it closes the EventSource, marks the connection locked, and asks the boot controller to show the unlock screen. No page reload is needed. On re-unlock, UI restores from `state.json`.
 
 ## Server Lifecycle
 
@@ -346,11 +346,12 @@ In settings panel: list registered credentials (name + created date), buttons to
 
 ### Re-lock handling
 
-SSE listener in `main.ts` handles `event: locked`:
+The SSE listener in `server-store.ts` handles `event: locked`:
 
-1. Clear editor state (hide editor, close tabs in memory)
-2. Render unlock page into `#app`
-3. On re-unlock, restore UI from `state.json`
+1. Close the current EventSource
+2. Mark the server connection as locked
+3. Show the unlock screen through the boot controller
+4. On re-unlock, restore UI from `state.json`
 
 ## Rust Dependencies
 

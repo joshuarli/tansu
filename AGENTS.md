@@ -2,24 +2,36 @@
 
 ## Project overview
 
-Tansu is a local-first note-taking app (Obsidian alternative). Notes are plain markdown files on disk. The backend is a single-threaded Rust HTTP server; the frontend is vanilla TypeScript with no framework. Notes use `[[wiki-links]]` for cross-referencing and `![[image.webp]]` for embedded images.
+Tansu is a local-first note-taking app (Obsidian alternative). Notes are plain markdown files on disk. The backend is a single-threaded Rust HTTP server; the frontend is a Solid app around a framework-agnostic markdown editor package. Notes use `[[wiki-links]]` for cross-referencing and `![[image.webp]]` for embedded images.
+
+## Documentation
+
+- [Frontend architecture](docs/frontend-architecture.md)
+- [md-wysiwyg architecture](docs/md-wysiwyg-architecture.md)
+- [Search model](docs/SEARCH.md)
+- [Offline resilience](docs/offline-resilience.md)
+- [Security and encryption design](docs/SECURITY.md)
+- [Package editor architecture](packages/md-wysiwyg/docs/architecture.md)
+- [Markdown extension API](packages/md-wysiwyg/docs/extensions.md)
 
 ## Architecture
 
 **Rust server** (no async runtime): raw TCP accept loop using `httparse` for HTTP parsing, `tantivy` for full-text search, `notify` for filesystem watching, `pulldown-cmark` for markdown stripping. All request/response types use `serde` JSON serialization.
 
-**Frontend**: vanilla TypeScript compiled and bundled with `esbuild`. WYSIWYG editing via `contenteditable` with a source-mode toggle. The `@joshuarli98/md-wysiwyg` internal package (in `packages/md-wysiwyg/`) owns the markdown renderer, DOM-to-markdown serializer, and block/inline transforms. `highlight.js` for code block syntax highlighting. No framework, no CSS framework.
+**Frontend**: Solid + TypeScript compiled and bundled with `esbuild`. WYSIWYG editing uses a `contenteditable` editor with a source-mode toggle. The `@joshuarli98/md-wysiwyg` internal package owns markdown rendering, DOM-to-markdown serialization, selection/cursor preservation, undo/redo, and block/inline transforms. No CSS framework.
 
 **`packages/md-wysiwyg`** — internal package aliased as `@joshuarli98/md-wysiwyg` in both the app bundle and tests (via `vitest.config.ts` alias). Source in `packages/md-wysiwyg/src/`:
 
 - **markdown.ts** — Markdown→HTML renderer. Block parsing (headings, paragraphs, fenced code, lists with task items, blockquotes, callouts, tables, HR) and inline rendering (bold, italic, strikethrough, code, highlights, wiki-links, wiki-images, standard links/images, escaped chars). Exports `renderMarkdown(src)`, `renderMarkdownWithCursor(src, offset)` (injects a sentinel character at the cursor position so the DOM render can place a marker span), and `renderMarkdownWithSelection(src, selStart, selEnd)` (injects two sentinels so the DOM render can restore a selection range after re-render via `[data-md-sel-start]` / `[data-md-sel-end]` spans).
 - **serialize.ts** — `domToMarkdown`: DOM→markdown serializer for the WYSIWYG editor. `getCursorMarkdownOffset(contentEl, range)`: computes the markdown offset of a DOM cursor by temporarily inserting a sentinel span, serializing, and finding the sentinel.
-- **transforms.ts** — Block-level DOM transforms fired on Enter: typing `## ` converts the block to H2, `- ` to UL, ` ``` ` to code block, `---` to HR, etc. Uses `execCommand("insertHTML")` to participate in the browser undo stack.
+- **editor.ts** — Imperative browser editor handle. Creates the contenteditable/source DOM, wires rendering, selection, undo/redo, keyboard handling, transforms, and image paste.
+- **editor-renderer.ts** / **editor-selection.ts** / **editor-undo.ts** / **editor-transactions.ts** — Internal controllers for HTML writes, cursor/selection restoration, undo history, and markdown-level transactions.
+- **transforms.ts** — Block-level DOM transforms fired on Enter: typing `## ` converts the block to H2, `- ` to UL, ` ``` ` to code block, `---` to HR, etc.
 - **inline-transforms.ts** — Inline transforms fired on input: closing backticks trigger code span wrapping, etc.
 - **highlight.ts** — `highlightCode`: wraps `highlight.js` for fenced code block syntax highlighting.
 - **diff.ts** — `computeDiff`/`renderDiff` for the revisions diff view.
 - **merge.ts** — Line-based 3-way merge (LCS diff). Returns merged string or null on conflict.
-- **util.ts** — `escapeHtml`, `stemFromPath`.
+- **util.ts** — `escapeHtml`, `stemFromPath`, cursor sentinels, and DOM helpers.
 
 **SSE live reload**: single EventSource connection at `/events`. Server holds one SSE client at a time. File watcher events trigger `changed`/`deleted` SSE messages to the browser, which reloads or merges content.
 
@@ -51,7 +63,7 @@ Dual-target crate: `src/lib.rs` exports all modules, `src/main.rs` is the server
 
 - **lib.rs** -- Re-exports all modules as a library crate (enables criterion benchmarks and the bench binary to import directly).
 - **main.rs** -- `Server` struct, CLI arg parsing, TCP accept loop, request dispatch, all API handler methods, session management, encryption lifecycle. Defines serde request/response types inline.
-- **crypto.rs** -- AES-256-GCM encryption, key wrapping, recovery keys, vault I/O. See `SECURITY.md` for design doc.
+- **crypto.rs** -- AES-256-GCM encryption, key wrapping, recovery keys, vault I/O. See [docs/SECURITY.md](docs/SECURITY.md) for design doc.
 - **http.rs** -- HTTP primitives: `percent_decode`, `query_param`, `mime`, `write_headers`/`write_error`/`write_body`/`write_json`/`respond_json`, `serve_file` (uses `sendfile(2)` on macOS/Linux), `read_body`/`parse_body`, `normalize_into` (path traversal prevention), `mtime_secs`.
 - **index.rs** -- `Index` (tantivy wrapper). Schema: `path` (STRING), `title` (TEXT), `content` (TEXT), `headings` (TEXT), `tags` (TEXT), `mtime` (u64), `links_to` (TEXT). Methods: `index_note`, `remove_note`, `search` (two-phase: exact/prefix/phrase first, fuzzy fallback), `get_backlinks`, `get_all_notes`, `full_reindex`. Uses lazy commits (`ensure_committed` before reads) and a `notes_cache` (`Mutex<Option<Vec<...>>>`) invalidated on writes/commits.
 - **scanner.rs** -- Single-pass extraction of `#headings` and `[[wiki-links]]` from raw markdown. Returns `ScanResult { title, headings, links }`. Normalizes link targets (lowercase, strip path/extension).
@@ -64,32 +76,21 @@ Dual-target crate: `src/lib.rs` exports all modules, `src/main.rs` is the server
 
 ## Frontend structure
 
-All source in `web/ts/`, bundled to `web/static/app.js`:
+All app source is in `web/ts/`, bundled to `web/static/app.js`:
 
-- **main.ts** -- Entry point. Wires up editor, tabs, search, SSE, keyboard shortcuts, wiki-link click handler, rename handler.
-- **editor.ts** -- WYSIWYG editor. `contenteditable` div + hidden textarea for source mode. All format operations work on the markdown source string (not the DOM) via `format-ops.ts`; the DOM is only ever written by `renderer.ts`. Custom undo/redo stack (`undoStack: { md, selStart, selEnd }[]`) independent of browser DOM undo — Cmd+Z / Cmd+Shift+Z intercept and replay markdown snapshots. Autosaves 1.5 s after last keystroke (silent: skips conflict banner); ^S saves immediately. Handles conflict detection (mtime-based), reload-from-disk (3-way merge for dirty tabs), image paste (converts to WebP via OffscreenCanvas, uploads), backlinks display.
-- **renderer.ts** -- The **only** file permitted to write to `contentEl.innerHTML`. Exports `setContent(el, md)`, `setContentWithCursor(el, md, offset)`, `setContentWithSelection(el, md, selStart, selEnd)`, and `restoreSelectionFromRenderedMarkers(el)` (finds `[data-md-sel-start]` / `[data-md-sel-end]` spans emitted by `renderMarkdownWithSelection`, builds a DOM Range, applies it, removes the spans). An enforcement test in `renderer.test.ts` verifies no other `web/ts/` file imports the render functions directly.
-- **format-ops.ts** -- Pure functions (no DOM) for all formatting operations on markdown strings. Each returns `{ md, selStart, selEnd }`. Exports: `toggleBold`, `toggleItalic`, `toggleStrikethrough`, `toggleHighlight`, `clearInlineFormats`, `toggleHeading`, `toggleCodeFence`, `shiftIndent`. Toggle logic detects existing markers by checking `md.slice(start-n, start)` / `md.slice(end, end+n)` before adding or removing.
-- **format-toolbar.ts** -- Floating selection toolbar (appears above non-collapsed selections) and the permanent format toolbar embedded in the editor toolbar. `populateFormatButtons(container, opts)` builds the button set into any container element; `initFormatToolbar(opts)` creates the floating div, positions it above the selection's focus point, and wires selection-change / mouse / escape listeners. All button actions go through `applySourceFormat` callback provided by `editor.ts`.
-- **tab-state.ts** -- Pure tab state logic (no DOM). Open/close/switch tabs, closed-tab stack (bounded LIFO, max 20), session persistence (dual-write to IDB + server), offline note fetching via `fetchNote()` (try server → cache to IDB → fall back to IDB). Exports `reopenClosedTab()`, `syncToServer()`, `clearClosedTabs()`.
-- **tabs.ts** -- Tab bar DOM rendering. Re-exports all tab-state functions. Context menu (right-click) for rename/delete/close.
-- **local-store.ts** -- IndexedDB wrapper for offline resilience. Database `"tansu"` with three stores: `kv` (session state), `notes` (cached content), `queue` (reserved for future write queue). All ops gracefully no-op when store isn't opened. See `docs/offline-resilience.md`.
-- **search.ts** -- Search modal (Cmd+K). Arrow key navigation, fires on every keystroke. Supports scoped search (Cmd+F searches within current note). "Create note" option at bottom of results.
-- **api.ts** -- Typed fetch wrappers for all API endpoints.
-- **autocomplete.ts** -- Wiki-link autocomplete dropdown. Triggered by `[[` in the editor. Caches note list, filters as you type, completes on Enter/Tab.
-- **revisions.ts** -- Revisions side panel. Lists timestamps, preview on click, restore with confirmation.
-- **palette.ts** -- Command palette modal (Cmd+P). Filterable list of all commands with shortcut hints. `registerCommands()` called from main.ts.
-- **settings.ts** -- Settings modal (Cmd+Shift+S). Sliders for search weights, dropdowns for fuzzy distance and recency boost, checkbox for score breakdown, text input for excluded folders. Security section for PRF credential management and lock. Saves to server via PUT `/api/settings`.
-- **webauthn.ts** -- WebAuthn PRF extension for biometric unlock (Face ID / Touch ID).
-- **editor-events.ts** -- `EditorEvent` union type + `dispatchEditorAction` hook (no-op by default, used for telemetry/analytics integration).
-- **events.ts** -- Tiny typed event bus (`on`, `emit`) used for cross-module communication (e.g. `files:changed`, `revision:restore`).
-- **context-menu.ts** -- Shared context menu component used by editor toolbar and tabs.
-- **link-hover.ts** -- Hover popover for `[[wiki-links]]` rendered in the editor.
-- **image-paste.ts** / **image-resize.ts** -- Image paste (WebP conversion + upload) and drag-to-resize for embedded images.
-- **filenav.ts** -- File navigator sidebar.
-- **conflict.ts** -- Conflict banner UI (mtime-based conflict detection on save).
-- **input-dialog.ts** -- Generic modal input dialog (used for rename, create note, etc.).
-- **util.ts** (web) -- `escapeHtml`, `relativeTime`, `stemFromPath`.
+- **main.tsx** -- Mounts the Solid app.
+- **app.tsx** -- Composes the visible shell and top-level overlays.
+- **app-boot.ts** / **bootstrap.ts** -- Browser capability checks, locked-vault unlock flow, local-store/session startup, and SSE lifecycle primitives.
+- **app-runtime.ts** -- Runtime wiring between top-level services, including wiki-link navigation and `serverStore` configuration.
+- **ui-store.ts**, **tab-state.ts**, **server-store.ts** -- App state owners for transient UI state, tab/session state, and server/SSE lifecycle. Prefer explicit factory functions and runtime wiring over hidden cross-store imports.
+- **api.generated.ts** -- Generated Rust-owned DTOs. Do not edit manually.
+- **api.ts** -- Handwritten API wrapper for request construction, response normalization, and errors.
+- **editor-adapter.ts** -- Narrow app-facing wrapper around `@joshuarli98/md-wysiwyg`.
+- **editor.ts** -- Integration layer connecting the editor engine to active tabs, save/autosave, reload/conflicts, tags/frontmatter, backlinks, revisions, autocomplete, image resize, and app-level prefs.
+- **features/editor/** -- Solid/editor shell pieces that keep the app tree reactive while the editor engine remains imperative.
+- **search.tsx**, **settings.tsx**, **palette.tsx**, **input-dialog.tsx**, **overlay.tsx** -- App-owned overlays under the main Solid tree.
+- **context-menu.tsx**, **revisions.tsx**, **backlinks.tsx** -- Specialized imperative or host-bound UI surfaces; keep them small and move them into the app tree if they grow into broader workflows.
+- **local-store.ts** / **tab-state-storage.ts** -- IndexedDB and session/offline persistence. See [docs/offline-resilience.md](docs/offline-resilience.md).
 
 ## Key conventions
 
@@ -104,66 +105,48 @@ All source in `web/ts/`, bundled to `web/static/app.js`:
 - **Wiki-link resolution**: links are matched by filename stem (case-insensitive). Backlinks are indexed in tantivy via the `links_to` field. Rename updates all referencing notes.
 - **Image handling**: paste triggers WebP conversion client-side, uploads raw blob to `/api/image`, server stores in `z-images/` with dedup naming.
 - **Custom snippet generator**: tantivy's `SnippetGenerator` cannot highlight fuzzy-matched terms because `FuzzyTermQuery` doesn't implement `query_terms()` (the expanded terms exist inside `AutomatonWeight` but aren't publicly exposed). Our `make_snippet` in `index.rs` tokenizes stored content, prefers exact quoted-phrase anchors when present, highlights exact/prefix matches, and only highlights edit-distance-1 fuzzy matches for non-quoted searches. Do not replace this with tantivy's built-in snippet generator.
-- **Source-text formatting**: all format operations (bold, italic, strikethrough, highlight, headings, code fence, indent/dedent, clear formatting) operate on the markdown string via pure functions in `format-ops.ts`. The DOM is never mutated during formatting — `renderer.ts` re-renders the entire content element after each operation and `restoreSelectionFromRenderedMarkers` restores the selection from sentinel spans. `document.execCommand` is not used for formatting.
-- **renderer.ts is the only innerHTML writer**: nothing in `web/ts/` other than `renderer.ts` may assign to `contentEl.innerHTML`. Enforced by a test in `renderer.test.ts` that greps the source tree. Button elements and other non-content elements can still use innerHTML for icon SVGs.
-- **Custom undo/redo**: `editor.ts` maintains an explicit `undoStack: { md, selStart, selEnd }[]` capped at 200 entries. Format ops call `pushUndo` before applying. A 1 s typing debounce also snapshots state. Cmd+Z / Cmd+Shift+Z replay snapshots through the renderer. Browser DOM undo is suppressed via `e.preventDefault()`.
+- **Source-text formatting**: all format operations (bold, italic, strikethrough, highlight, headings, code fence, indent/dedent, clear formatting) operate on markdown strings via pure functions in `packages/md-wysiwyg/src/format-ops.ts`. App code applies them through the editor handle rather than mutating DOM.
+- **Markdown HTML boundary**: markdown rendering and contenteditable HTML writes belong in `packages/md-wysiwyg`. `web/ts` must not call render functions directly or assign markdown HTML into app-owned DOM. Enforced by `web/ts/renderer.test.ts`.
+- **Custom undo/redo**: `packages/md-wysiwyg` maintains explicit markdown snapshots and restores selections through sentinel spans. Browser DOM undo is suppressed for editor-controlled operations.
+
+## Coding style
+
+- Keep complexity only when it protects concrete behavior: local-first saves, conflict handling, cursor restoration, offline resilience, or security. Do not add abstraction for shape alone.
+- Keep ownership boundaries explicit. Solid owns ordinary app UI and reactive state; `packages/md-wysiwyg` owns imperative contenteditable behavior.
+- Prefer props, narrow service interfaces, and factory functions over hidden cross-module imports. Avoid adding new module-level singletons unless ownership is obvious.
+- Use imperative DOM only for browser integration that is inherently imperative: contenteditable, selection/range handling, clipboard/image paste, WebAuthn, SSE lifecycle, or host-bound positioned UI.
+- Treat `web/ts/editor.ts` as a coordinator, not a second editor engine. If it grows, extract app-integration responsibilities without moving editor internals out of `packages/md-wysiwyg`.
+- Preserve architecture guardrails and update docs/tests when changing boundaries.
 
 ## Search model
 
-See [docs/SEARCH.md](/Users/josh/d/tansu/docs/SEARCH.md) for the full search model.
+See [docs/SEARCH.md](docs/SEARCH.md) for the full search model.
 Rich tag query syntax such as `tag:foo` is intentionally not supported.
 
 ## Save flow
 
 ```
 User types in editor
-       │
-       ├─► markDirty(path) ──► emit("tab:render") ──► dirty dot appears in tab
-       │
-       └─► scheduleAutosave()  [resets 1.5 s debounce timer]
-                │
-                │ 1.5 s idle          ^S pressed
-                ▼                         │
-        autosave fires            clearTimer (if pending)
-                │                         │
-                └──────────┬──────────────┘
-                           ▼
-                   saveCurrentNote()
-                    silent=true          silent=false (^S)
-                           │
-                           ▼
-                       _doSave()
-                           │
-                  GET getCurrentContent()
-                  PUT /api/note  { expected_mtime }
-                           │
-                           ▼
-                  classifySaveResult()
-                           │
-             ┌─────────────┼──────────────────┐
-             ▼             ▼                  ▼
-          "clean"   "false-conflict"    "real-conflict"
-             │             │                  │
-        markClean()   PUT mtime=0        silent? skip
-        emit(            markClean()     : showConflictBanner()
-         "files:changed") emit(
-             │            "files:changed")
-             ▼
-    filenav re-renders
-    server reindexes note
+  -> packages/md-wysiwyg onChange
+  -> web/ts/editor.ts onEditorTabMutation()
+  -> updateTabDraft(path, { content, tags })
+  -> scheduleAutosave()
 
+Autosave idle or Cmd+S
+  -> saveController.saveCurrentNote()
+  -> saveNote(path, content, tab.mtime)
+  -> classifySaveResult()
+       clean          -> markClean(); serverStore.notifyFilesChanged(path)
+       false-conflict -> forceSaveNote(); markClean(); notifyFilesChanged(path)
+       real-conflict  -> silent autosave skips banner; explicit save shows conflict banner
 
-SSE live-reload path (external edit):
-
-  Disk change ──► watcher thread ──► SSE "changed" / "deleted"
-                                              │
-                                    frontend SSE handler
-                                              │
-                                   tab dirty? ─────────────┐
-                                      │ no                 │ yes
-                                      ▼                    ▼
-                               loadContent()     showConflictBanner()
-                               markClean()       "Keep mine" / "Take theirs"
+SSE live-reload path (external edit)
+  -> server-store.ts receives "changed" / "deleted"
+  -> notifyFilesChanged(path) invalidates file views
+  -> if changed path is active, getNote(path)
+  -> editor.reloadFromDisk(content, mtime)
+       clean tab -> loadContent(); markClean()
+       dirty tab -> handleReloadConflict()
 ```
 
 ## API surface
@@ -189,7 +172,7 @@ SSE live-reload path (external edit):
 | GET    | `/events`                 | SSE stream (events: `connected`, `changed`, `deleted`)     |
 | GET    | `/api/status`             | App status (locked state, PRF credentials)                 |
 | POST   | `/api/unlock`             | Unlock with recovery key or PRF output                     |
-| POST   | `/api/lock`               | Lock the app (clears session)                              |
+| GET    | `/api/lock`               | Lock the app (clears session)                              |
 | POST   | `/api/prf/register`       | Register a WebAuthn PRF credential                         |
 | DELETE | `/api/prf`                | Remove a PRF credential                                    |
 
@@ -239,10 +222,11 @@ The server binary expects `web/index.html` and `web/static/` to be next to the e
 - **util.rs**: truncate_bytes/truncate_chars with multibyte edge cases
 - **crypto.rs**: encryption/decryption round-trip, key wrapping, recovery key parsing, PRF unlock, tampered ciphertext rejection
 
-`vitest run` runs `web/ts/*.test.ts` with `happy-dom` as the DOM environment. Coverage thresholds: 90% lines and functions across `web/ts/**/*.ts` (excluding `webauthn.ts`, `main.ts`, test files). Notable test files:
+`vitest run` runs `web/ts/*.test.ts` and `web/ts/*.test.tsx` with `happy-dom` as the DOM environment. Coverage thresholds are configured in `vitest.config.ts`. Notable test files:
 
 - **format-ops.test.ts** — pure unit tests for all markdown format operations (no DOM)
-- **renderer.test.ts** — enforcement test: asserts no `web/ts/` source file other than `renderer.ts` imports the render functions
+- **architecture.test.ts** — enforcement test for frontend/editor package boundaries and acyclic production imports
+- **renderer.test.ts** — enforcement test for markdown-rendering, `innerHTML`, fixed-root query, and Solid listener guardrails
 - **format-toolbar.test.ts** — floating toolbar visibility, button actions, positioning
 - **editor.test.ts** — save flow, conflict classification, reload logic
 
