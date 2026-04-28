@@ -3,6 +3,9 @@ import { render } from "solid-js/web";
 
 import { createNote, getSettings, searchNotes, type SearchResult } from "./api.ts";
 import { SEARCH_MIN_QUERY_LENGTH, SEARCH_SCORE_PRECISION } from "./constants.ts";
+import { scrollSelectedIndexIntoView, wrapSelectionIndex } from "./listbox.ts";
+import { reportActionError } from "./notify.ts";
+import { createFocusRestorer, OverlayFrame } from "./overlay.tsx";
 
 export type Search = {
   toggle(): void;
@@ -12,6 +15,7 @@ export type Search = {
 };
 
 type SearchDeps = {
+  root: HTMLElement;
   openTab: (path: string) => Promise<unknown>;
   invalidateNoteCache: () => void;
 };
@@ -61,6 +65,7 @@ function Score(props: Readonly<{ result: SearchResult }>) {
 
 type SearchViewProps = {
   inputRef: (el: HTMLInputElement) => void;
+  resultsRef: (el: HTMLDivElement) => void;
   scopePath: () => string | null;
   results: () => SearchResult[];
   selectedIndex: () => number;
@@ -86,7 +91,7 @@ function SearchView(props: Readonly<SearchViewProps>) {
         on:input={props.onInput}
         on:keydown={props.onKeyDown}
       />
-      <div id="search-results">
+      <div id="search-results" ref={props.resultsRef}>
         <For each={props.results()}>
           {(result, i) => (
             <button
@@ -123,13 +128,11 @@ function SearchView(props: Readonly<SearchViewProps>) {
 }
 
 export function initSearch(deps: SearchDeps): Search {
-  const container = document.querySelector("#search-root");
-  if (!(container instanceof HTMLElement)) throw new Error("missing #search-root");
-
   let inputEl: HTMLInputElement | null = null;
-  let savedFocus: Element | null = null;
+  let resultsEl: HTMLDivElement | null = null;
   let searchRequestId = 0;
   let settingsRequestId = 0;
+  const focus = createFocusRestorer();
 
   const [isOpen, setIsOpen] = createSignal(false);
   const [scopePath, setScopePath] = createSignal<string | null>(null);
@@ -139,10 +142,7 @@ export function initSearch(deps: SearchDeps): Search {
   const [showScoreBreakdown, setShowScoreBreakdown] = createSignal(true);
 
   function updateScroll() {
-    queueMicrotask(() => {
-      const resultsEl = document.querySelector("#search-results");
-      resultsEl?.children[selectedIndex()]?.scrollIntoView({ block: "nearest" });
-    });
+    scrollSelectedIndexIntoView(resultsEl, selectedIndex());
   }
 
   async function refreshSettings() {
@@ -200,8 +200,8 @@ export function initSearch(deps: SearchDeps): Search {
       await createNote(path);
       deps.invalidateNoteCache();
       await deps.openTab(path);
-    } catch {
-      /* ignore */
+    } catch (error) {
+      reportActionError(`Failed to create ${path}`, error);
     }
   }
 
@@ -209,11 +209,11 @@ export function initSearch(deps: SearchDeps): Search {
     const totalItems = results().length + ((inputEl?.value.trim().length ?? 0) > 0 ? 1 : 0);
     if (e.key === "ArrowDown") {
       e.preventDefault();
-      setSelectedIndex((i) => (i + 1) % Math.max(totalItems, 1));
+      setSelectedIndex((i) => wrapSelectionIndex(i, 1, totalItems));
       updateScroll();
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
-      setSelectedIndex((i) => (i - 1 + Math.max(totalItems, 1)) % Math.max(totalItems, 1));
+      setSelectedIndex((i) => wrapSelectionIndex(i, -1, totalItems));
       updateScroll();
     } else if (e.key === "Enter") {
       e.preventDefault();
@@ -225,7 +225,7 @@ export function initSearch(deps: SearchDeps): Search {
   }
 
   function open(filterPath?: string) {
-    savedFocus = document.activeElement;
+    focus.remember();
     searchRequestId++;
     setIsOpen(true);
     setScopePath(filterPath ?? null);
@@ -244,22 +244,18 @@ export function initSearch(deps: SearchDeps): Search {
     setIsOpen(false);
     setQuery("");
     if (inputEl) inputEl.blur();
-    if (savedFocus instanceof HTMLElement) savedFocus.focus();
-    savedFocus = null;
+    focus.restore();
   }
 
   render(
     () => (
-      <div
-        id="search-overlay"
-        class={isOpen() ? "" : "hidden"}
-        onClick={(e) => {
-          if (e.target === e.currentTarget) close();
-        }}
-      >
+      <OverlayFrame id="search-overlay" isOpen={isOpen()} onClose={close}>
         <SearchView
           inputRef={(el) => {
             inputEl = el;
+          }}
+          resultsRef={(el) => {
+            resultsEl = el;
           }}
           scopePath={scopePath}
           results={results}
@@ -277,9 +273,9 @@ export function initSearch(deps: SearchDeps): Search {
             void selectItem(results().length);
           }}
         />
-      </div>
+      </OverlayFrame>
     ),
-    container,
+    deps.root,
   );
 
   return {

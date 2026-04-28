@@ -14,7 +14,7 @@ describe("palette", () => {
     cleanup = setupDOM();
 
     const { createPalette } = await import("./palette.tsx");
-    const p = createPalette();
+    const p = createPalette(document.querySelector("#palette-root") as HTMLElement);
     togglePalette = p.toggle;
     openPalette = p.open;
     closePalette = p.close;

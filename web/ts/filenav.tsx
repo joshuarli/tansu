@@ -26,6 +26,13 @@ type NavRow = {
   onContextMenu: (e: MouseEvent) => void;
 };
 
+type FileNavElements = {
+  container: HTMLElement;
+  collapseBtn: HTMLButtonElement;
+  appEl: HTMLElement;
+  searchInput: HTMLInputElement;
+};
+
 function showNavContextMenu(
   e: MouseEvent,
   path: string,
@@ -45,10 +52,6 @@ function showNavContextMenu(
     e.clientX,
     e.clientY,
   );
-}
-
-function getContainer(): HTMLElement | null {
-  return document.querySelector("#sidebar-tree");
 }
 
 function FileRow(props: Readonly<NavRow>) {
@@ -85,7 +88,7 @@ function FileRow(props: Readonly<NavRow>) {
   );
 }
 
-export async function initFileNav(): Promise<() => void> {
+export async function initFileNav(elements: FileNavElements): Promise<() => void> {
   const [currentMode, setCurrentMode] = createSignal<"recent" | "search">("recent");
   const [pinnedFiles, setPinnedFiles] = createSignal<PinnedFileEntry[]>([]);
   const [pinnedPaths, setPinnedPaths] = createSignal(new Set<string>());
@@ -247,33 +250,19 @@ export async function initFileNav(): Promise<() => void> {
   await renderNav();
 
   // Mount the nav view once; signals drive all subsequent updates.
-  const container = getContainer();
   let dispose: (() => void) | null = null;
-  if (container instanceof HTMLElement) {
-    dispose = render(() => <NavView />, container);
-  }
-
-  const collapseBtn = document.querySelector("#sidebar-collapse");
-  const app = document.querySelector("#app");
-  const searchInput = document.querySelector("#sidebar-search");
-  if (
-    !(collapseBtn instanceof HTMLButtonElement) ||
-    !(app instanceof HTMLElement) ||
-    !(searchInput instanceof HTMLInputElement)
-  ) {
-    return () => dispose?.();
-  }
+  dispose = render(() => <NavView />, elements.container);
 
   const onCollapse = () => {
-    const collapsed = app.classList.toggle("sidebar-collapsed");
-    collapseBtn.innerHTML = collapsed ? "&#x203A;" : "&#x2039;";
+    const collapsed = elements.appEl.classList.toggle("sidebar-collapsed");
+    elements.collapseBtn.textContent = collapsed ? "\u203A" : "\u2039";
     const label = collapsed ? "Expand sidebar" : "Collapse sidebar";
-    collapseBtn.title = label;
-    collapseBtn.setAttribute("aria-label", label);
+    elements.collapseBtn.title = label;
+    elements.collapseBtn.setAttribute("aria-label", label);
   };
 
   const onInput = () => {
-    const q = searchInput.value;
+    const q = elements.searchInput.value;
     setCurrentQuery(q);
     if (q.trim()) {
       setCurrentMode("search");
@@ -285,16 +274,16 @@ export async function initFileNav(): Promise<() => void> {
 
   const onKeydown = (e: KeyboardEvent) => {
     if (e.key === "Escape" && currentMode() === "search") {
-      searchInput.value = "";
+      elements.searchInput.value = "";
       setCurrentQuery("");
       setCurrentMode("recent");
       void renderNav();
     }
   };
 
-  collapseBtn.addEventListener("click", onCollapse);
-  searchInput.addEventListener("input", onInput);
-  searchInput.addEventListener("keydown", onKeydown);
+  elements.collapseBtn.addEventListener("click", onCollapse);
+  elements.searchInput.addEventListener("input", onInput);
+  elements.searchInput.addEventListener("keydown", onKeydown);
 
   const offFilesChanged = on("files:changed", async (data) => {
     if (data?.savedPath) {
@@ -327,9 +316,9 @@ export async function initFileNav(): Promise<() => void> {
   });
 
   return () => {
-    collapseBtn.removeEventListener("click", onCollapse);
-    searchInput.removeEventListener("input", onInput);
-    searchInput.removeEventListener("keydown", onKeydown);
+    elements.collapseBtn.removeEventListener("click", onCollapse);
+    elements.searchInput.removeEventListener("input", onInput);
+    elements.searchInput.removeEventListener("keydown", onKeydown);
     offFilesChanged();
     offPinnedChanged();
     offVaultSwitched();

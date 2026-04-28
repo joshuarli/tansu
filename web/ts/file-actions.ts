@@ -2,6 +2,7 @@ import { deleteNote, pinFile, unpinFile } from "./api.ts";
 import type { MenuItem } from "./context-menu.tsx";
 import { emit } from "./events.ts";
 import { showInputDialog } from "./input-dialog.tsx";
+import { reportActionError } from "./notify.ts";
 
 type FileActionsOptions = {
   path: string;
@@ -50,20 +51,29 @@ export function buildFileContextMenuItems(opts: FileActionsOptions): MenuItem[] 
     {
       label: "Rename...",
       onclick: () => {
-        void requestRename(opts.path, opts.title).catch(() => void 0);
+        void requestRename(opts.path, opts.title).catch((error) => {
+          reportActionError(`Failed to rename ${opts.title}`, error);
+        });
       },
     },
     {
       label: opts.isPinned ? "Unpin" : "Pin",
       onclick: () => {
-        void togglePinned(opts.path, opts.isPinned, opts.onPinChanged).catch(() => void 0);
+        const action = opts.isPinned
+          ? `Failed to unpin ${opts.title}`
+          : `Failed to pin ${opts.title}`;
+        void togglePinned(opts.path, opts.isPinned, opts.onPinChanged).catch((error) => {
+          reportActionError(action, error);
+        });
       },
     },
     {
       label: "Delete",
       danger: true,
       onclick: () => {
-        void confirmDelete(opts.path, opts.title, opts.onDeleted).catch(() => void 0);
+        void confirmDelete(opts.path, opts.title, opts.onDeleted).catch((error) => {
+          reportActionError(`Failed to delete ${opts.title}`, error);
+        });
       },
     },
   ];

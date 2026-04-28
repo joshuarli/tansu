@@ -41,6 +41,7 @@ describe("search", () => {
 
     const { initSearch } = await import("./search.tsx");
     const s = initSearch({
+      root: document.querySelector("#search-root") as HTMLElement,
       openTab: async (path: string) => {
         openTabCalled = true;
         openTabPath = path;
@@ -56,6 +57,12 @@ describe("search", () => {
   afterAll(() => {
     mock.restore();
     cleanup();
+  });
+
+  beforeEach(() => {
+    close();
+    openTabCalled = false;
+    openTabPath = "";
   });
 
   it("search basic lifecycle", () => {

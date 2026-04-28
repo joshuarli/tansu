@@ -7,4 +7,4 @@ if (!(root instanceof HTMLElement)) {
   throw new Error("missing #app root");
 }
 
-render(App, root);
+render(() => <App appEl={root} />, root);

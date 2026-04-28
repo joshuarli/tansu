@@ -20,7 +20,7 @@ describe("vault-switcher", () => {
     ({ initVaultSwitcher, refreshVaultSwitcher } = mod);
     // Mount the component now so tests don't depend on "renders nothing" running first.
     mock.on("GET", "/api/vaults", []);
-    await initVaultSwitcher();
+    await initVaultSwitcher(document.querySelector("#vault-switcher") as HTMLElement);
   });
 
   afterAll(() => {
@@ -37,7 +37,7 @@ describe("vault-switcher", () => {
       { index: 0, name: "personal", active: true, encrypted: false, locked: false },
     ]);
 
-    await initVaultSwitcher();
+    await initVaultSwitcher(document.querySelector("#vault-switcher") as HTMLElement);
 
     expect(getContainer().textContent).toBe("");
     expect(document.querySelector(".vault-select")).toBeNull();

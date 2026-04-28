@@ -5,6 +5,8 @@ import { setupDOM, mockFetch } from "./test-helper.ts";
 const tick = () => new Promise<void>((r) => setTimeout(r, 0));
 
 describe("tabs", () => {
+  type NotificationEvent = { msg: string; type: "error" | "info" | "success" };
+
   let cleanup: () => void;
   let mock: ReturnType<typeof mockFetch>;
   let openTab: (path: string) => Promise<Tab>;
@@ -17,6 +19,8 @@ describe("tabs", () => {
   beforeAll(async () => {
     cleanup = setupDOM();
     mock = mockFetch();
+    const inputDialogMod = await import("./input-dialog.tsx");
+    inputDialogMod.initInputDialog(document.querySelector("#input-dialog-overlay") as HTMLElement);
 
     mock.on("GET", "/api/note", { content: "# Test", mtime: 1000 });
     mock.on("PUT", "/api/state", {});
@@ -407,6 +411,45 @@ describe("tabs", () => {
     await tick();
     await new Promise((r) => setTimeout(r, 50));
 
+    while (getTabs().length > 0) {
+      closeTab(0);
+    }
+  });
+
+  it("context menu Pin failure emits a notification", async () => {
+    while (getTabs().length > 0) {
+      closeTab(0);
+    }
+    await openTab("notes/to-pin.md");
+    await tick();
+    const tabBar = document.querySelector("#tab-bar")!;
+    const tabEl = tabBar.querySelectorAll(".tab:not(.tab-new)")[0]!;
+
+    const notifications: NotificationEvent[] = [];
+    const offNotification = on("notification", (data) => {
+      notifications.push(data);
+    });
+
+    mock.on("GET", "/api/pinned", []);
+    mock.on("POST", "/api/pin", { error: "pin failed" }, 500);
+
+    (tabEl as HTMLElement).dispatchEvent(
+      new MouseEvent("contextmenu", { bubbles: true, cancelable: true }),
+    );
+    await tick();
+    const items = document.body.querySelectorAll(".context-menu-item");
+    (items[1] as HTMLElement).click();
+    await new Promise((r) => setTimeout(r, 50));
+
+    const notification = notifications.at(-1);
+    if (!notification) {
+      throw new Error("expected notification");
+    }
+    expect(notification.type).toBe("error");
+    expect(notification.msg).toContain("Failed to pin to-pin");
+    expect(notification.msg).toContain("pin failed");
+
+    offNotification();
     while (getTabs().length > 0) {
       closeTab(0);
     }

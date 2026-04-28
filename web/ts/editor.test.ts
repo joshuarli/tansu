@@ -90,7 +90,10 @@ describe("editor", () => {
     mock.on("GET", "/api/tags", { tags: [] });
 
     const mod = await import("./editor.ts");
-    const instance = mod.initEditor();
+    const instance = mod.initEditor({
+      editorArea: document.querySelector("#editor-area") as HTMLElement,
+      emptyState: document.querySelector("#empty-state") as HTMLElement,
+    });
     ({ showEditor, hideEditor, getCurrentContent, saveCurrentNote, reloadFromDisk } = instance);
   });
 

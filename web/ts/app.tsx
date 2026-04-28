@@ -28,7 +28,9 @@ import {
 import { initEditor, invalidateNoteCache, type EditorInstance } from "./editor.ts";
 import { emit, on } from "./events.ts";
 import { initFileNav } from "./filenav.tsx";
+import { initInputDialog } from "./input-dialog.tsx";
 import { openStore } from "./local-store.ts";
+import { reportActionError } from "./notify.ts";
 import { createPalette, matchesKey } from "./palette.tsx";
 import { initSearch } from "./search.tsx";
 import { createSettings } from "./settings.tsx";
@@ -50,12 +52,25 @@ import { initVaultSwitcher, refreshVaultSwitcher } from "./vault-switcher.tsx";
 import { isPrfLikelySupported, getPrfKey } from "./webauthn.ts";
 import { registerWikiLinkClickHandler } from "./wikilinks.ts";
 
-export function App() {
+type AppProps = {
+  appEl: HTMLElement;
+};
+
+export function App(props: Readonly<AppProps>) {
   let notifRef!: HTMLDivElement;
   let statusRef!: HTMLDivElement;
+  let sidebarCollapseRef!: HTMLButtonElement;
+  let vaultSwitcherRef!: HTMLDivElement;
+  let sidebarTreeRef!: HTMLDivElement;
+  let sidebarSearchRef!: HTMLInputElement;
+  let editorAreaRef!: HTMLDivElement;
+  let emptyStateRef!: HTMLDivElement;
+  let searchRootRef!: HTMLDivElement;
+  let settingsRootRef!: HTMLDivElement;
+  let inputDialogOverlayRef!: HTMLDivElement;
+  let paletteRootRef!: HTMLDivElement;
 
   onMount(() => {
-    const appEl = document.querySelector("#app") as HTMLElement;
     let appInitialized = false;
     let editor: EditorInstance | null = null;
     let palette: ReturnType<typeof createPalette> | null = null;
@@ -64,7 +79,7 @@ export function App() {
 
     function showUnlockScreen(status?: AppStatus) {
       renderUnlockScreen({
-        appEl,
+        appEl: props.appEl,
         ...(status ? { status } : {}),
         isPrfLikelySupported,
         getPrfKey,
@@ -87,12 +102,18 @@ export function App() {
     }
 
     function initApp() {
-      editor = initEditor();
-      initFileNav();
-      void initVaultSwitcher();
-      palette = createPalette();
-      settings = createSettings();
-      search = initSearch({ openTab, invalidateNoteCache });
+      initInputDialog(inputDialogOverlayRef);
+      editor = initEditor({ editorArea: editorAreaRef, emptyState: emptyStateRef });
+      void initFileNav({
+        container: sidebarTreeRef,
+        collapseBtn: sidebarCollapseRef,
+        appEl: props.appEl,
+        searchInput: sidebarSearchRef,
+      });
+      void initVaultSwitcher(vaultSwitcherRef);
+      palette = createPalette(paletteRootRef);
+      settings = createSettings(settingsRootRef);
+      search = initSearch({ root: searchRootRef, openTab, invalidateNoteCache });
 
       registerWikiLinkClickHandler(async (target: string) => {
         const notes = await listNotes();
@@ -213,8 +234,8 @@ export function App() {
           if (active && active.path === newPath) {
             editor?.showEditor(active.path, active.content, active.tags);
           }
-        } catch {
-          /* rename failed silently */
+        } catch (error) {
+          reportActionError(`Failed to rename ${stemFromPath(oldPath)}`, error);
         }
       });
     }
@@ -406,13 +427,19 @@ export function App() {
             aria-label="Filter files"
             autocomplete="off"
             spellcheck={false}
+            ref={sidebarSearchRef}
           />
-          <button id="sidebar-collapse" title="Collapse sidebar" aria-label="Collapse sidebar">
+          <button
+            id="sidebar-collapse"
+            title="Collapse sidebar"
+            aria-label="Collapse sidebar"
+            ref={sidebarCollapseRef}
+          >
             &#x2039;
           </button>
         </div>
-        <div id="vault-switcher"></div>
-        <div id="sidebar-tree"></div>
+        <div id="vault-switcher" ref={vaultSwitcherRef}></div>
+        <div id="sidebar-tree" ref={sidebarTreeRef}></div>
       </div>
       <div class="app-main">
         <div
@@ -425,16 +452,16 @@ export function App() {
           <TabBarShell />
         </div>
         <div class="server-status hidden" aria-live="polite" ref={statusRef}></div>
-        <div id="editor-area">
-          <div id="empty-state">
+        <div id="editor-area" ref={editorAreaRef}>
+          <div id="empty-state" ref={emptyStateRef}>
             Press <kbd>Cmd+K</kbd> to search &middot; <kbd>Cmd+P</kbd> for commands
           </div>
         </div>
       </div>
-      <div id="search-root"></div>
-      <div id="settings-root"></div>
-      <div id="input-dialog-overlay" class="hidden"></div>
-      <div id="palette-root"></div>
+      <div id="search-root" ref={searchRootRef}></div>
+      <div id="settings-root" ref={settingsRootRef}></div>
+      <div id="input-dialog-overlay" class="hidden" ref={inputDialogOverlayRef}></div>
+      <div id="palette-root" ref={paletteRootRef}></div>
     </ErrorBoundary>
   );
 }

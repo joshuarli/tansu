@@ -31,6 +31,8 @@ import {
 } from "./constants.ts";
 import { getEditorHandle, getEditorPrefs, saveEditorPrefs, type EditorPrefs } from "./editor.ts";
 import { showInputDialog } from "./input-dialog.tsx";
+import { reportActionError } from "./notify.ts";
+import { createFocusRestorer, OverlayFrame } from "./overlay.tsx";
 import { createPrfCredential, isPrfLikelySupported } from "./webauthn.ts";
 
 type SettingsPanel = {
@@ -51,6 +53,10 @@ const defaultSettings = (): Settings => ({
   show_score_breakdown: SETTINGS_SHOW_SCORE_BREAKDOWN_DEFAULT,
   excluded_folders: [],
 });
+
+function normalizeExcludedFolders(values: readonly string[]): string[] {
+  return values.map((value) => value.trim()).filter((value) => value.length > 0);
+}
 
 function recencyLabel(value: number): string {
   if (value === 0) {
@@ -303,12 +309,8 @@ function SettingsView(props: Readonly<SettingsViewProps>) {
   );
 }
 
-export function createSettings(): SettingsPanel {
-  const container = document.querySelector("#settings-root");
-  if (!(container instanceof HTMLElement)) throw new Error("missing #settings-root");
-
-  let panelEl: HTMLElement | null = null;
-  let savedFocus: Element | null = null;
+export function createSettings(container: HTMLElement): SettingsPanel {
+  const focus = createFocusRestorer();
   const [isOpen, setIsOpen] = createSignal(false);
   const [current, setCurrent] = createSignal<Settings | null>(null);
   const [editorPrefs, setEditorPrefs] = createSignal<EditorPrefs>(getEditorPrefs());
@@ -317,14 +319,11 @@ export function createSettings(): SettingsPanel {
 
   function close() {
     setIsOpen(false);
-    if (savedFocus instanceof HTMLElement) {
-      savedFocus.focus();
-    }
-    savedFocus = null;
+    focus.restore();
   }
 
   async function open() {
-    savedFocus = document.activeElement;
+    focus.remember();
     setIsOpen(true);
     setSecurityStatus("");
     setEditorPrefs(getEditorPrefs());
@@ -350,38 +349,13 @@ export function createSettings(): SettingsPanel {
 
   async function save() {
     const snapshot = current();
-    if (!snapshot || !panelEl) {
+    if (!snapshot) {
       return;
     }
-    const updated = { ...snapshot };
-    const validKeys = new Set<string>(Object.keys(updated));
-
-    function isSettingKey(k: string): k is keyof Settings {
-      return validKeys.has(k);
-    }
-
-    for (const el of panelEl.querySelectorAll<HTMLInputElement | HTMLSelectElement>("[data-key]")) {
-      const raw = el.dataset["key"] ?? "";
-      if (!isSettingKey(raw)) {
-        continue;
-      }
-      const key = raw;
-
-      if (el instanceof HTMLInputElement && el.type === "checkbox") {
-        Object.assign(updated, { [key]: el.checked });
-      } else if (el instanceof HTMLInputElement && el.type === "range") {
-        Object.assign(updated, { [key]: Number.parseFloat(el.value) });
-      } else if (el instanceof HTMLInputElement && el.type === "number") {
-        Object.assign(updated, { [key]: Number.parseInt(el.value, 10) });
-      } else if (el instanceof HTMLSelectElement) {
-        Object.assign(updated, { [key]: Number.parseInt(el.value, 10) });
-      } else if (key === "excluded_folders") {
-        updated.excluded_folders = (el as HTMLInputElement).value
-          .split(",")
-          .map((s) => s.trim())
-          .filter((s) => s.length > 0);
-      }
-    }
+    const updated: Settings = {
+      ...snapshot,
+      excluded_folders: normalizeExcludedFolders(snapshot.excluded_folders),
+    };
 
     try {
       await saveSettings(updated);
@@ -389,8 +363,8 @@ export function createSettings(): SettingsPanel {
       getEditorHandle()?.setConfig({ undoStackMax: editorPrefs().undoStackMax });
       setCurrent(updated);
       close();
-    } catch {
-      /* ignore */
+    } catch (error) {
+      reportActionError("Failed to save settings", error);
     }
   }
 
@@ -432,22 +406,8 @@ export function createSettings(): SettingsPanel {
 
   render(
     () => (
-      <div
-        id="settings-overlay"
-        class={isOpen() ? "" : "hidden"}
-        onClick={(e) => {
-          if (e.target === e.currentTarget) close();
-        }}
-      >
-        <div
-          id="settings-panel"
-          role="dialog"
-          aria-modal="true"
-          aria-label="Settings"
-          ref={(el) => {
-            panelEl = el;
-          }}
-        >
+      <OverlayFrame id="settings-overlay" isOpen={isOpen()} onClose={close}>
+        <div id="settings-panel" role="dialog" aria-modal="true" aria-label="Settings">
           <SettingsView
             current={current}
             status={status}
@@ -469,10 +429,7 @@ export function createSettings(): SettingsPanel {
                 prev
                   ? {
                       ...prev,
-                      excluded_folders: value
-                        .split(",")
-                        .map((s) => s.trim())
-                        .filter((s) => s.length > 0),
+                      excluded_folders: normalizeExcludedFolders(value.split(",")),
                     }
                   : prev,
               );
@@ -503,7 +460,7 @@ export function createSettings(): SettingsPanel {
             }}
           />
         </div>
-      </div>
+      </OverlayFrame>
     ),
     container,
   );

@@ -1,4 +1,5 @@
 import type { Settings } from "./api.ts";
+import { on } from "./events.ts";
 import { setupDOM, mockFetch } from "./test-helper.ts";
 
 vi.mock("./webauthn.ts", () => ({
@@ -7,6 +8,8 @@ vi.mock("./webauthn.ts", () => ({
 }));
 
 describe("settings", () => {
+  type NotificationEvent = { msg: string; type: "error" | "info" | "success" };
+
   let cleanup: () => void;
   let mock: ReturnType<typeof mockFetch>;
   let toggleSettings: () => void;
@@ -14,9 +17,26 @@ describe("settings", () => {
   let closeSettings: () => void;
   let isSettingsOpen: () => boolean;
 
+  function setInputValue(el: HTMLInputElement, value: string) {
+    el.value = value;
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+
+  function setCheckboxValue(el: HTMLInputElement, checked: boolean) {
+    el.checked = checked;
+    el.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+
+  function setSelectValue(el: HTMLSelectElement, value: string) {
+    el.value = value;
+    el.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+
   beforeAll(async () => {
     cleanup = setupDOM();
     mock = mockFetch();
+    const inputDialogMod = await import("./input-dialog.tsx");
+    inputDialogMod.initInputDialog(document.querySelector("#input-dialog-overlay") as HTMLElement);
 
     mock.on("GET", "/api/settings", {
       weight_title: 10,
@@ -32,7 +52,7 @@ describe("settings", () => {
     mock.on("PUT", "/api/settings", {});
 
     const { createSettings } = await import("./settings.tsx");
-    const s = createSettings();
+    const s = createSettings(document.querySelector("#settings-root") as HTMLElement);
     toggleSettings = s.toggle;
     openSettings = s.open;
     closeSettings = s.close;
@@ -50,15 +70,15 @@ describe("settings", () => {
 
     // Modify some form values
     const titleSlider = panel.querySelector('input[data-key="weight_title"]') as HTMLInputElement;
-    titleSlider.value = "8";
+    setInputValue(titleSlider, "8");
     const scoreCheckbox = panel.querySelector(
       'input[data-key="show_score_breakdown"]',
     ) as HTMLInputElement;
-    scoreCheckbox.checked = false;
+    setCheckboxValue(scoreCheckbox, false);
     const excludedInput = panel.querySelector(
       'input[data-key="excluded_folders"]',
     ) as HTMLInputElement;
-    excludedInput.value = "archive, drafts";
+    setInputValue(excludedInput, "archive, drafts");
 
     // Click save
     const saveBtn = panel.querySelector("#settings-save") as HTMLButtonElement;
@@ -87,17 +107,30 @@ describe("settings", () => {
     mock.clearRequests();
     const panel = document.querySelector("#settings-panel")!;
 
-    (panel.querySelector('input[data-key="weight_title"]') as HTMLInputElement).value = "8";
-    (panel.querySelector('input[data-key="weight_headings"]') as HTMLInputElement).value = "4";
-    (panel.querySelector('input[data-key="weight_tags"]') as HTMLInputElement).value = "3";
-    (panel.querySelector('input[data-key="weight_content"]') as HTMLInputElement).value = "2";
-    (panel.querySelector('select[data-key="fuzzy_distance"]') as HTMLSelectElement).value = "2";
-    (panel.querySelector('select[data-key="recency_boost"]') as HTMLSelectElement).value = "3";
-    (panel.querySelector('input[data-key="result_limit"]') as HTMLInputElement).value = "37";
-    (panel.querySelector('input[data-key="show_score_breakdown"]') as HTMLInputElement).checked =
-      false;
-    (panel.querySelector('input[data-key="excluded_folders"]') as HTMLInputElement).value =
-      "archive, drafts, , private ";
+    setInputValue(panel.querySelector('input[data-key="weight_title"]') as HTMLInputElement, "8");
+    setInputValue(
+      panel.querySelector('input[data-key="weight_headings"]') as HTMLInputElement,
+      "4",
+    );
+    setInputValue(panel.querySelector('input[data-key="weight_tags"]') as HTMLInputElement, "3");
+    setInputValue(panel.querySelector('input[data-key="weight_content"]') as HTMLInputElement, "2");
+    setSelectValue(
+      panel.querySelector('select[data-key="fuzzy_distance"]') as HTMLSelectElement,
+      "2",
+    );
+    setSelectValue(
+      panel.querySelector('select[data-key="recency_boost"]') as HTMLSelectElement,
+      "3",
+    );
+    setInputValue(panel.querySelector('input[data-key="result_limit"]') as HTMLInputElement, "37");
+    setCheckboxValue(
+      panel.querySelector('input[data-key="show_score_breakdown"]') as HTMLInputElement,
+      false,
+    );
+    setInputValue(
+      panel.querySelector('input[data-key="excluded_folders"]') as HTMLInputElement,
+      "archive, drafts, , private ",
+    );
 
     (panel.querySelector("#settings-save") as HTMLButtonElement).click();
     await new Promise((r) => setTimeout(r, 20));
@@ -123,7 +156,7 @@ describe("settings", () => {
     await openSettings();
     mock.clearRequests();
     const panel = document.querySelector("#settings-panel")!;
-    (panel.querySelector('input[data-key="weight_title"]') as HTMLInputElement).value = "1";
+    setInputValue(panel.querySelector('input[data-key="weight_title"]') as HTMLInputElement, "1");
 
     (panel.querySelector("#settings-cancel") as HTMLButtonElement).click();
     await new Promise((r) => setTimeout(r, 10));
@@ -231,7 +264,7 @@ describe("settings", () => {
     const foldersInput = panel.querySelector<HTMLInputElement>(
       'input[data-key="excluded_folders"]',
     )!;
-    foldersInput.value = "archive, private";
+    setInputValue(foldersInput, "archive, private");
 
     mock.on("PUT", "/api/settings", {});
     foldersInput.dispatchEvent(
@@ -247,6 +280,11 @@ describe("settings", () => {
     await openSettings();
     mock.on("PUT", "/api/settings", { error: "server error" }, 500);
 
+    const notifications: NotificationEvent[] = [];
+    const offNotification = on("notification", (data) => {
+      notifications.push(data);
+    });
+
     const panel = document.querySelector("#settings-panel")!;
     const saveBtn = panel.querySelector("#settings-save") as HTMLButtonElement;
     saveBtn.click();
@@ -254,6 +292,14 @@ describe("settings", () => {
 
     // Panel stays open on save error
     expect(isSettingsOpen()).toBeTruthy();
+    const notification = notifications.at(-1);
+    if (!notification) {
+      throw new Error("expected notification");
+    }
+    expect(notification.type).toBe("error");
+    expect(notification.msg).toContain("Failed to save settings");
+    expect(notification.msg).toContain("500");
+    offNotification();
     closeSettings();
 
     // Restore working mock

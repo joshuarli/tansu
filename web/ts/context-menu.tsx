@@ -1,4 +1,4 @@
-import { For } from "solid-js";
+import { For, onMount } from "solid-js";
 import { render } from "solid-js/web";
 
 export type MenuItem = {
@@ -21,6 +21,10 @@ let dismissHandler: (() => void) | null = null;
 
 function ContextMenu(props: Readonly<ContextMenuProps>) {
   const buttonRefs: HTMLButtonElement[] = [];
+
+  onMount(() => {
+    buttonRefs[0]?.focus();
+  });
 
   function handleKeyDown(e: KeyboardEvent) {
     const focused = buttonRefs.indexOf(document.activeElement as HTMLButtonElement);
@@ -86,8 +90,6 @@ export function showContextMenu(items: MenuItem[], x: number, y: number): void {
     ),
     host,
   );
-
-  host.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
 
   const handler = () => hide();
   dismissHandler = handler;

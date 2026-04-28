@@ -49,7 +49,7 @@ describe("app shell", () => {
     }
 
     root.innerHTML = "";
-    const dispose = render(App, root);
+    const dispose = render(() => App({ appEl: root }), root);
 
     expect(root.querySelector("#sidebar")).toBeTruthy();
     expect(root.querySelector(".app-main")).toBeTruthy();

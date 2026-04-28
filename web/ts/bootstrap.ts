@@ -166,6 +166,137 @@ type UnlockScreenOptions = {
   onUnlocked: () => void;
 };
 
+type UnlockScreenViewProps = {
+  hasPrf: boolean;
+  credentialIds: string[];
+  isPrfLikelySupported: () => boolean;
+  getPrfKey: (credentialIds: string[]) => Promise<string>;
+  unlockWithPrf: (prfKeyB64: string) => Promise<boolean>;
+  unlockWithRecoveryKey: (key: string) => Promise<boolean>;
+  onUnlockSuccess: () => void;
+};
+
+let disposeUnlockScreen: (() => void) | null = null;
+
+function mountUnlockScreen(
+  screen: HTMLElement,
+  props: Readonly<UnlockScreenViewProps>,
+): () => void {
+  screen.textContent = "";
+
+  const titleEl = document.createElement("h1");
+  titleEl.textContent = "tansu";
+  screen.append(titleEl);
+
+  const descEl = document.createElement("p");
+  descEl.textContent = "This vault is locked.";
+  screen.append(descEl);
+
+  const form = document.createElement("form");
+  form.id = "unlock-form";
+
+  const inputEl = document.createElement("input");
+  inputEl.id = "unlock-key";
+  inputEl.type = "text";
+  inputEl.placeholder = "Recovery key";
+  inputEl.autocomplete = "off";
+  inputEl.spellcheck = false;
+
+  const submitBtn = document.createElement("button");
+  submitBtn.type = "submit";
+  submitBtn.textContent = "Unlock with recovery key";
+
+  const errorEl = document.createElement("div");
+  errorEl.id = "unlock-error";
+
+  const statusEl = document.createElement("div");
+  statusEl.id = "unlock-status";
+
+  let bioBtn: HTMLButtonElement | null = null;
+  if (props.hasPrf) {
+    bioBtn = document.createElement("button");
+    bioBtn.id = "unlock-biometric";
+    bioBtn.type = "button";
+    bioBtn.textContent = "Unlock with biometrics";
+    screen.append(bioBtn);
+  }
+
+  form.append(inputEl, submitBtn, errorEl, statusEl);
+  screen.append(form);
+
+  async function runBiometricUnlock() {
+    errorEl.textContent = "";
+    statusEl.textContent = "Waiting for biometrics...";
+    try {
+      const prfKeyB64 = await props.getPrfKey(props.credentialIds);
+      statusEl.textContent = "Unlocking...";
+      const ok = await props.unlockWithPrf(prfKeyB64);
+      if (ok) {
+        props.onUnlockSuccess();
+      } else {
+        errorEl.textContent = "Biometric unlock failed.";
+        statusEl.textContent = "";
+      }
+    } catch (error) {
+      errorEl.textContent = error instanceof Error ? error.message : "Biometric unlock failed.";
+      statusEl.textContent = "";
+    }
+  }
+
+  const onSubmit = (e: Event) => {
+    e.preventDefault();
+    const key = inputEl.value.trim();
+    if (!key) {
+      return;
+    }
+
+    errorEl.textContent = "";
+    statusEl.textContent = "Unlocking...";
+    submitBtn.disabled = true;
+
+    void props
+      .unlockWithRecoveryKey(key)
+      .then((ok) => {
+        if (ok) {
+          props.onUnlockSuccess();
+          return;
+        }
+        errorEl.textContent = "Unlock failed. Check your recovery key.";
+        statusEl.textContent = "";
+        submitBtn.disabled = false;
+        inputEl.focus();
+        inputEl.select();
+      })
+      .catch(() => {
+        errorEl.textContent = "Unlock failed. Check your recovery key.";
+        statusEl.textContent = "";
+        submitBtn.disabled = false;
+        inputEl.focus();
+        inputEl.select();
+      });
+  };
+
+  form.addEventListener("submit", onSubmit);
+  const onBiometricClick = () => {
+    void runBiometricUnlock();
+  };
+
+  bioBtn?.addEventListener("click", onBiometricClick);
+
+  if (props.hasPrf && props.isPrfLikelySupported()) {
+    queueMicrotask(() => {
+      void runBiometricUnlock();
+    });
+  } else {
+    inputEl.focus();
+  }
+
+  return () => {
+    form.removeEventListener("submit", onSubmit);
+    bioBtn?.removeEventListener("click", onBiometricClick);
+  };
+}
+
 export function showUnlockScreen(opts: UnlockScreenOptions): HTMLElement {
   const doc = opts.document ?? document;
   opts.appEl.style.display = "none";
@@ -182,83 +313,23 @@ export function showUnlockScreen(opts: UnlockScreenOptions): HTMLElement {
 
   const hasPrf = (opts.status?.prf_credential_ids.length ?? 0) > 0 && opts.isPrfLikelySupported();
 
-  screen.innerHTML = `
-    <h1>tansu</h1>
-    <p>This vault is locked.</p>
-    ${hasPrf ? '<button id="unlock-biometric" type="button">Unlock with biometrics</button>' : ""}
-    <form id="unlock-form">
-      <input id="unlock-key" type="text" placeholder="Recovery key" autocomplete="off" spellcheck="false" />
-      <button type="submit">Unlock with recovery key</button>
-      <div id="unlock-error"></div>
-      <div id="unlock-status"></div>
-    </form>
-  `;
-
-  const form = screen.querySelector("#unlock-form") as HTMLFormElement;
-  const input = screen.querySelector("#unlock-key") as HTMLInputElement;
-  const errorEl = screen.querySelector("#unlock-error") as HTMLElement;
-  const statusEl = screen.querySelector("#unlock-status") as HTMLElement;
-
   function onUnlockSuccess() {
-    statusEl.textContent = "Unlocked. Loading...";
+    disposeUnlockScreen?.();
+    disposeUnlockScreen = null;
     screen.remove();
     opts.appEl.style.display = "";
     opts.onUnlocked();
   }
 
-  if (hasPrf && opts.status) {
-    const bioBtn = screen.querySelector("#unlock-biometric") as HTMLButtonElement | null;
-    if (bioBtn) {
-      bioBtn.addEventListener("click", async () => {
-        errorEl.textContent = "";
-        statusEl.textContent = "Waiting for biometrics...";
-        try {
-          const prfKeyB64 = await opts.getPrfKey(opts.status!.prf_credential_ids);
-          statusEl.textContent = "Unlocking...";
-          const ok = await opts.unlockWithPrf(prfKeyB64);
-          if (ok) {
-            onUnlockSuccess();
-          } else {
-            errorEl.textContent = "Biometric unlock failed.";
-            statusEl.textContent = "";
-          }
-        } catch (error) {
-          errorEl.textContent = error instanceof Error ? error.message : "Biometric unlock failed.";
-          statusEl.textContent = "";
-        }
-      });
-      bioBtn.click();
-    }
-  } else {
-    input.focus();
-  }
-
-  form.addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const key = input.value.trim();
-    if (!key) {
-      return;
-    }
-
-    errorEl.textContent = "";
-    statusEl.textContent = "Unlocking...";
-    const btn = form.querySelector("button[type=submit]") as HTMLButtonElement;
-    btn.disabled = true;
-
-    try {
-      const ok = await opts.unlockWithRecoveryKey(key);
-      if (ok) {
-        onUnlockSuccess();
-        return;
-      }
-    } catch {
-      // Network error or server crash
-    }
-    errorEl.textContent = "Unlock failed. Check your recovery key.";
-    statusEl.textContent = "";
-    btn.disabled = false;
-    input.focus();
-    input.select();
+  disposeUnlockScreen?.();
+  disposeUnlockScreen = mountUnlockScreen(screen, {
+    hasPrf,
+    credentialIds: opts.status?.prf_credential_ids ?? [],
+    isPrfLikelySupported: opts.isPrfLikelySupported,
+    getPrfKey: opts.getPrfKey,
+    unlockWithPrf: opts.unlockWithPrf,
+    unlockWithRecoveryKey: opts.unlockWithRecoveryKey,
+    onUnlockSuccess,
   });
 
   return screen;

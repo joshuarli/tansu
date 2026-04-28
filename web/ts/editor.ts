@@ -106,8 +106,13 @@ export type EditorInstance = {
   reloadFromDisk(content: string, mtime: number): void;
 };
 
-export function initEditor(): EditorInstance {
-  const editorArea = document.querySelector("#editor-area")!;
+type EditorElements = {
+  editorArea: HTMLElement;
+  emptyState: HTMLElement;
+};
+
+export function initEditor(elements: EditorElements): EditorInstance {
+  const { editorArea, emptyState } = elements;
   registerLinkHover();
 
   let formatToolbarCleanup: (() => void) | null = null;
@@ -439,10 +444,7 @@ export function initEditor(): EditorInstance {
     hideTagAutocomplete();
     currentTags = [...tags];
 
-    const emptyState = document.querySelector<HTMLElement>("#empty-state");
-    if (emptyState) {
-      emptyState.style.display = "none";
-    }
+    emptyState.style.display = "none";
 
     handle?.destroy();
     handle = null;
@@ -611,10 +613,7 @@ export function initEditor(): EditorInstance {
     tagInputEl = null;
     revisionsEl = null;
 
-    const emptyState = document.querySelector("#empty-state") as HTMLElement | null;
-    if (emptyState) {
-      emptyState.style.display = "flex";
-    }
+    emptyState.style.display = "flex";
   }
 
   return { showEditor, hideEditor, getCurrentContent, saveCurrentNote, reloadFromDisk };

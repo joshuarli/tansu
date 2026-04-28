@@ -9,6 +9,7 @@ describe("input-dialog", () => {
   beforeAll(async () => {
     cleanup = setupDOM();
     const mod = await import("./input-dialog.tsx");
+    mod.initInputDialog(document.querySelector("#input-dialog-overlay") as HTMLElement);
     ({ showInputDialog } = mod);
   });
 

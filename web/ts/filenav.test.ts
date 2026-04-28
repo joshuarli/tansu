@@ -6,6 +6,8 @@ const drain = () => new Promise<void>((r) => setTimeout(r, 50));
 const activeCount = () => document.querySelectorAll(".nav-file.active").length;
 
 describe("filenav", () => {
+  type NotificationEvent = { msg: string; type: "error" | "info" | "success" };
+
   let cleanup: () => void;
   let navCleanup: () => void;
   let mock: ReturnType<typeof mockFetch>;
@@ -16,6 +18,8 @@ describe("filenav", () => {
   beforeAll(async () => {
     cleanup = setupDOM();
     mock = mockFetch();
+    const inputDialogMod = await import("./input-dialog.tsx");
+    inputDialogMod.initInputDialog(document.querySelector("#input-dialog-overlay") as HTMLElement);
 
     mock.on("GET", "/api/note", { content: "# Test", mtime: 1000 });
     mock.on("GET", "/api/state", { tabs: [], active: -1 });
@@ -36,7 +40,12 @@ describe("filenav", () => {
     }
 
     const navMod = await import("./filenav.tsx");
-    navCleanup = await navMod.initFileNav();
+    navCleanup = await navMod.initFileNav({
+      container: document.querySelector("#sidebar-tree") as HTMLElement,
+      collapseBtn: document.querySelector("#sidebar-collapse") as HTMLButtonElement,
+      appEl: document.querySelector("#app") as HTMLElement,
+      searchInput: document.querySelector("#sidebar-search") as HTMLInputElement,
+    });
   });
 
   afterAll(() => {
@@ -544,6 +553,44 @@ describe("filenav", () => {
     // confirm returns true (mocked by setupDOM), so deletion proceeds
   });
 
+  it("delete action failure emits a notification", async () => {
+    while (getTabs().length > 0) {
+      closeTab(0);
+    }
+    mock.on("GET", "/api/recentfiles", [{ path: "notes/alpha.md", title: "alpha", mtime: 2000 }]);
+    mock.on("GET", "/api/pinned", []);
+    mock.on("DELETE", "/api/note", { error: "delete failed" }, 500);
+
+    const notifications: NotificationEvent[] = [];
+    const offNotification = on("notification", (data) => {
+      notifications.push(data);
+    });
+
+    emit("files:changed");
+    await drain();
+
+    const container = document.querySelector("#sidebar-tree")!;
+    const navFile = container.querySelector(".nav-file") as HTMLElement;
+    navFile.dispatchEvent(
+      new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 50, clientY: 50 }),
+    );
+    await tick();
+
+    const items = document.body.querySelectorAll(".context-menu-item");
+    (items[2] as HTMLElement).click();
+    await drain();
+
+    const notification = notifications.at(-1);
+    if (!notification) {
+      throw new Error("expected notification");
+    }
+    expect(notification.type).toBe("error");
+    expect(notification.msg).toContain("Failed to delete alpha");
+    expect(notification.msg).toContain("delete failed");
+
+    offNotification();
+  });
+
   it("active element is the correct one (not stale) after save", async () => {
     while (getTabs().length > 0) {
       closeTab(0);
@@ -625,9 +672,17 @@ describe("filenav", () => {
     while (getTabs().length > 0) {
       closeTab(0);
     }
+    mock.on("GET", "/api/recentfiles", [
+      { path: "notes/alpha.md", title: "alpha", mtime: 2000 },
+      { path: "notes/beta.md", title: "beta", mtime: 1000 },
+    ]);
+    mock.on("GET", "/api/pinned", []);
+    emit("files:changed");
+    await drain();
+
     // Both alpha and beta are in the initial recent files mock.
     await openTab("notes/alpha.md");
-    await tick();
+    await drain();
 
     expect(activeCount()).toBe(1);
     expect((document.querySelector(".nav-file.active") as HTMLElement)?.title).toBe(
@@ -636,7 +691,7 @@ describe("filenav", () => {
 
     // Switch to beta without emitting files:changed — reactive getActiveTab() should update nav.
     await openTab("notes/beta.md");
-    await tick();
+    await drain();
 
     expect(activeCount()).toBe(1);
     const activeEl = document.querySelector(".nav-file.active") as HTMLElement;

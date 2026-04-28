@@ -1,6 +1,8 @@
 import { createEffect, createSignal, Show } from "solid-js";
 import { render } from "solid-js/web";
 
+import { createFocusRestorer } from "./overlay.tsx";
+
 type DialogState = {
   placeholder: string;
   defaultValue: string;
@@ -9,16 +11,14 @@ type DialogState = {
 let pendingResolve: ((val: string | null) => void) | null = null;
 let setState: ((value: DialogState | null) => void) | null = null;
 let overlayEl: HTMLElement | null = null;
-let savedFocus: Element | null = null;
+let inputEl: HTMLInputElement | null = null;
+const focus = createFocusRestorer();
 
 function closeActive(value: string | null) {
   const resolve = pendingResolve;
   pendingResolve = null;
   setState?.(null);
-  if (savedFocus instanceof HTMLElement) {
-    savedFocus.focus();
-  }
-  savedFocus = null;
+  focus.restore();
   resolve?.(value);
 }
 
@@ -31,8 +31,7 @@ function InputDialog() {
     if (overlayEl) {
       overlayEl.classList.toggle("hidden", current === null);
     }
-    const inputEl = overlayEl?.querySelector("#input-dialog-input");
-    if (!current || !(inputEl instanceof HTMLInputElement)) {
+    if (!current || !inputEl) {
       return;
     }
     inputEl.value = current.defaultValue;
@@ -51,6 +50,9 @@ function InputDialog() {
         {(current) => (
           <input
             id="input-dialog-input"
+            ref={(el) => {
+              inputEl = el;
+            }}
             type="text"
             placeholder={current().placeholder}
             autocomplete="off"
@@ -71,13 +73,9 @@ function InputDialog() {
   );
 }
 
-function ensureMounted() {
+export function initInputDialog(overlay: HTMLElement) {
   if (setState) {
     return;
-  }
-  const overlay = document.querySelector("#input-dialog-overlay");
-  if (!(overlay instanceof HTMLElement)) {
-    throw new Error("missing #input-dialog-overlay");
   }
   overlayEl = overlay;
   overlay.textContent = "";
@@ -90,9 +88,11 @@ function ensureMounted() {
 }
 
 export function showInputDialog(placeholder: string, defaultValue = ""): Promise<string | null> {
-  ensureMounted();
+  if (!overlayEl) {
+    throw new Error("input dialog not initialized");
+  }
 
-  savedFocus = document.activeElement;
+  focus.remember();
 
   if (pendingResolve) {
     pendingResolve(null);

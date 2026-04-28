@@ -7,10 +7,7 @@ import { closeAllTabs, getTabs, restoreSession } from "./tab-state.ts";
 
 const [vaults, setVaults] = createSignal<VaultEntry[]>([]);
 let mounted = false;
-
-function getContainer(): HTMLElement | null {
-  return document.querySelector("#vault-switcher");
-}
+let rootEl: HTMLElement | null = null;
 
 function VaultSwitcher() {
   return (
@@ -73,13 +70,11 @@ async function handleVaultSwitch(index: number): Promise<void> {
   emit("files:changed", {});
 }
 
-export async function initVaultSwitcher(): Promise<void> {
+export async function initVaultSwitcher(container: HTMLElement): Promise<void> {
+  rootEl = container;
   if (!mounted) {
-    const container = getContainer();
-    if (container instanceof HTMLElement) {
-      render(() => <VaultSwitcher />, container);
-      mounted = true;
-    }
+    render(() => <VaultSwitcher />, container);
+    mounted = true;
   }
   try {
     setVaults(await getVaults());
@@ -89,6 +84,9 @@ export async function initVaultSwitcher(): Promise<void> {
 }
 
 export async function refreshVaultSwitcher(): Promise<void> {
+  if (!rootEl) {
+    return;
+  }
   try {
     setVaults(await getVaults());
   } catch {

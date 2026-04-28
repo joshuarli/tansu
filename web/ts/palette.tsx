@@ -1,6 +1,9 @@
 import { For, createSignal } from "solid-js";
 import { render } from "solid-js/web";
 
+import { scrollSelectedIndexIntoView, wrapSelectionIndex } from "./listbox.ts";
+import { createFocusRestorer, OverlayFrame } from "./overlay.tsx";
+
 type KeyBinding = {
   key: string;
   meta?: boolean;
@@ -44,6 +47,7 @@ type PaletteViewProps = {
   filtered: () => readonly Command[];
   onSelect: (cmd: Command) => void;
   inputRef: (el: HTMLInputElement) => void;
+  listRef: (el: HTMLDivElement) => void;
   onInput: () => void;
   onKeyDown: (e: KeyboardEvent) => void;
 };
@@ -62,7 +66,7 @@ function PaletteView(props: Readonly<PaletteViewProps>) {
         on:input={props.onInput}
         on:keydown={props.onKeyDown}
       />
-      <div id="palette-list">
+      <div id="palette-list" ref={props.listRef}>
         <For each={props.filtered()}>
           {(cmd, i) => (
             <button
@@ -80,13 +84,11 @@ function PaletteView(props: Readonly<PaletteViewProps>) {
   );
 }
 
-export function createPalette(): Palette {
-  const container = document.querySelector("#palette-root");
-  if (!(container instanceof HTMLElement)) throw new Error("missing #palette-root");
-
+export function createPalette(container: HTMLElement): Palette {
   let commands: Command[] = [];
   let inputEl: HTMLInputElement | null = null;
-  let savedFocus: Element | null = null;
+  let listEl: HTMLDivElement | null = null;
+  const focus = createFocusRestorer();
   const [state, setState] = createSignal<PaletteState>({
     isOpen: false,
     query: "",
@@ -100,7 +102,7 @@ export function createPalette(): Palette {
   }
 
   function open() {
-    savedFocus = document.activeElement;
+    focus.remember();
     setState({ isOpen: true, query: "", selectedIndex: 0 });
     queueMicrotask(() => {
       if (inputEl) inputEl.value = "";
@@ -111,8 +113,7 @@ export function createPalette(): Palette {
   function close() {
     setState((prev) => ({ ...prev, isOpen: false }));
     inputEl?.blur();
-    if (savedFocus instanceof HTMLElement) savedFocus.focus();
-    savedFocus = null;
+    focus.restore();
   }
 
   function toggle() {
@@ -122,15 +123,11 @@ export function createPalette(): Palette {
 
   function updateSelection(delta: number) {
     const filtered = getFiltered();
-    const len = Math.max(filtered.length, 1);
     setState((prev) => ({
       ...prev,
-      selectedIndex: (prev.selectedIndex + delta + len) % len,
+      selectedIndex: wrapSelectionIndex(prev.selectedIndex, delta, filtered.length),
     }));
-    queueMicrotask(() => {
-      const items = document.querySelector("#palette-list")?.children;
-      items?.[state().selectedIndex]?.scrollIntoView({ block: "nearest" });
-    });
+    scrollSelectedIndexIntoView(listEl, state().selectedIndex);
   }
 
   function selectCommand(cmd: Command) {
@@ -158,19 +155,16 @@ export function createPalette(): Palette {
 
   render(
     () => (
-      <div
-        id="palette-overlay"
-        class={state().isOpen ? "" : "hidden"}
-        onClick={(e) => {
-          if (e.target === e.currentTarget) close();
-        }}
-      >
+      <OverlayFrame id="palette-overlay" isOpen={state().isOpen} onClose={close}>
         <PaletteView
           state={state}
           filtered={getFiltered}
           onSelect={selectCommand}
           inputRef={(el) => {
             inputEl = el;
+          }}
+          listRef={(el) => {
+            listEl = el;
           }}
           onInput={() => {
             setState((prev) => ({
@@ -181,7 +175,7 @@ export function createPalette(): Palette {
           }}
           onKeyDown={handleKeyDown}
         />
-      </div>
+      </OverlayFrame>
     ),
     container,
   );
