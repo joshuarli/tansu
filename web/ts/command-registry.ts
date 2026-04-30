@@ -4,6 +4,7 @@ type AppCommandRegistryOptions = {
   getActiveSearchPath: () => string | undefined;
   openSearch: (scopePath?: string) => void;
   openNewNote: () => Promise<void>;
+  openHtmlImport: () => void;
   reopenClosedTab: () => Promise<void>;
   saveCurrentNote: () => Promise<void> | undefined;
   closeActiveTab: () => void;
@@ -41,6 +42,12 @@ export function createAppCommandRegistry(
       action: () => {
         void opts.openNewNote();
       },
+    },
+    {
+      label: "Import HTML file",
+      shortcut: "⌘I",
+      keys: { key: "i", meta: true },
+      action: () => opts.openHtmlImport(),
     },
     {
       label: "Reopen closed tab",

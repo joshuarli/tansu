@@ -83,6 +83,12 @@ describe("api", () => {
     expect(created.mtime).toBe(4000);
   });
 
+  it("createNote sends content when provided", async () => {
+    mock.on("POST", "/api/note", { mtime: 4000 });
+    await createNote("new.md", "# Imported");
+    expect(mock.requests.at(-1)?.body).toContain('"content":"# Imported"');
+  });
+
   it("deleteNote", async () => {
     mock.on("DELETE", "/api/note", {});
     await deleteNote("old.md"); // should not throw

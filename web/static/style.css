@@ -1213,6 +1213,52 @@ body {
   outline: none;
 }
 
+#alert-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.3);
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding-top: 20vh;
+  z-index: 200;
+}
+
+#alert-dialog-overlay.hidden {
+  display: none;
+}
+
+.alert-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 18px;
+  box-sizing: border-box;
+}
+
+.alert-dialog-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.alert-dialog-message {
+  color: var(--muted);
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
+.alert-dialog-button {
+  align-self: flex-end;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--fg);
+  border-radius: 8px;
+  padding: 8px 14px;
+  font: inherit;
+  cursor: pointer;
+}
+
 #settings-overlay {
   position: fixed;
   inset: 0;

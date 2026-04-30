@@ -31,7 +31,6 @@ static EMBED_STYLE_CSS: &[u8] = include_bytes!("../web/static/style.css");
 static EMBED_INDEX_HTML: &[u8] = include_bytes!("../web/index.html");
 
 const SESSION_TIMEOUT_SECS: u64 = 24 * 60 * 60; // 24 hours
-
 struct SessionState {
     token: [u8; 32],
     last_activity: Instant,

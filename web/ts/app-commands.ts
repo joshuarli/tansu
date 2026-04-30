@@ -2,6 +2,7 @@ import type { Accessor } from "solid-js";
 
 import { createAppCommandRegistry } from "./command-registry.ts";
 import { matchesKey, type Command } from "./commands.ts";
+import { promptHtmlImport } from "./import-html.ts";
 import { closeActiveTab, getActiveTab, nextTab, prevTab, reopenClosedTab } from "./tab-state.ts";
 import { promptNewNote } from "./tabs.tsx";
 import { uiStore } from "./ui-store.ts";
@@ -15,6 +16,7 @@ export function createAppCommands(opts: Readonly<AppCommandsOptions>): readonly 
     getActiveSearchPath: () => getActiveTab()?.path,
     openSearch: (scopePath) => uiStore.openSearch(scopePath),
     openNewNote: promptNewNote,
+    openHtmlImport: promptHtmlImport,
     reopenClosedTab,
     saveCurrentNote: () => opts.getEditor()?.saveCurrentNote(),
     closeActiveTab,

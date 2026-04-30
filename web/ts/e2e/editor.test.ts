@@ -102,10 +102,10 @@ describe("e2e: editor", () => {
     const bHtml = await page.$eval(".editor-content", (el) => el.innerHTML);
     expect(bHtml).toContain("<strong>");
 
-    // Cmd+I toggles italic
+    // Cmd+Shift+I toggles italic
     await resetEditor("plain text");
     await page.keyboard.press("Meta+a");
-    await page.keyboard.press("Meta+i");
+    await page.keyboard.press("Meta+Shift+i");
     const iHtml = await page.$eval(".editor-content", (el) => el.innerHTML);
     expect(iHtml).toContain("<em>");
 

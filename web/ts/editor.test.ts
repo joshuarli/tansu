@@ -1003,13 +1003,19 @@ describe("editor", () => {
     hideEditor();
   });
 
-  it("Cmd+I in WYSIWYG mode triggers italic", async () => {
+  it("Cmd+Shift+I in WYSIWYG mode triggers italic", async () => {
     showEditor("cmdi-test.md", "hello");
     await new Promise((r) => setTimeout(r, 50));
 
     const contentEl = latestEditorContent();
     contentEl.dispatchEvent(
-      new KeyboardEvent("keydown", { key: "i", ctrlKey: true, bubbles: true, cancelable: true }),
+      new KeyboardEvent("keydown", {
+        key: "I",
+        ctrlKey: true,
+        shiftKey: true,
+        bubbles: true,
+        cancelable: true,
+      }),
     );
 
     hideEditor();

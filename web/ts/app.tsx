@@ -1,5 +1,6 @@
 import { ErrorBoundary, createSignal, onCleanup, onMount } from "solid-js";
 
+import { AlertDialogHost } from "./alert-dialog.tsx";
 import { createAppBootController } from "./app-boot.ts";
 import { createAppCommands, handleGlobalAppKeydown } from "./app-commands.ts";
 import { configureServerRuntime, registerWikiLinkNavigation } from "./app-runtime.ts";
@@ -105,6 +106,7 @@ export function App(props: Readonly<AppProps>) {
           editor?.applyPrefs(prefs);
         }}
       />
+      <AlertDialogHost />
       <InputDialogHost />
       <PaletteModal commands={commands} />
     </ErrorBoundary>

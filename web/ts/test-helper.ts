@@ -91,9 +91,12 @@ export function setupDOM(): () => void {
   const globals = [
     "window",
     "document",
+    "DOMParser",
     "HTMLElement",
+    "HTMLButtonElement",
     "Node",
     "EventSource",
+    "File",
     "HTMLInputElement",
     "HTMLTextAreaElement",
     "HTMLSelectElement",
