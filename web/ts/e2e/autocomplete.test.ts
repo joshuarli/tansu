@@ -4,12 +4,13 @@ import { setup, teardown } from "./setup.ts";
 
 describe("e2e: autocomplete", () => {
   let page: Page;
+  let baseUrl: string;
 
-  beforeAll(async () => {
+  beforeEach(async () => {
     const ctx = await setup();
     ({ page } = ctx);
-
-    await page.goto(ctx.baseUrl);
+    ({ baseUrl } = ctx);
+    await page.goto(baseUrl);
     await page.waitForSelector("#tab-bar", { timeout: 5000 });
 
     // Open a note to get an editor
@@ -21,7 +22,7 @@ describe("e2e: autocomplete", () => {
     await page.waitForSelector(".editor-content", { timeout: 3000 });
   }, 30_000);
 
-  afterAll(async () => {
+  afterEach(async () => {
     await teardown();
   });
 

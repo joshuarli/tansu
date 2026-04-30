@@ -10,14 +10,14 @@ describe("e2e: new file save regression", () => {
   let notesDir: string;
   let baseUrl: string;
 
-  beforeAll(async () => {
+  beforeEach(async () => {
     const ctx = await setup();
     ({ page, notesDir, baseUrl } = ctx);
     await page.goto(baseUrl);
     await page.waitForSelector("#tab-bar", { timeout: 5000 });
   }, 30_000);
 
-  afterAll(async () => {
+  afterEach(async () => {
     await teardown();
   });
 

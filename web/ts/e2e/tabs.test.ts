@@ -6,7 +6,7 @@ describe("e2e: tabs", () => {
   let page: Page;
   let baseUrl: string;
 
-  beforeAll(async () => {
+  beforeEach(async () => {
     const ctx = await setup();
     ({ page } = ctx);
     ({ baseUrl } = ctx);
@@ -15,7 +15,7 @@ describe("e2e: tabs", () => {
     await page.waitForSelector("#tab-bar", { timeout: 5000 });
   }, 30_000);
 
-  afterAll(async () => {
+  afterEach(async () => {
     await teardown();
   });
 

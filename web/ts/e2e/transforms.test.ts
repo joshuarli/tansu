@@ -5,7 +5,7 @@ import { setup, teardown } from "./setup.ts";
 describe("e2e: block transforms", () => {
   let page: Page;
 
-  beforeAll(async () => {
+  beforeEach(async () => {
     const ctx = await setup();
     ({ page } = ctx);
 
@@ -20,7 +20,7 @@ describe("e2e: block transforms", () => {
     await page.waitForSelector(".editor-content", { timeout: 3000 });
   }, 30_000);
 
-  afterAll(async () => {
+  afterEach(async () => {
     await teardown();
   });
 

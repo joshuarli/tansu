@@ -29,7 +29,7 @@ const FUZZ_SEED = Number.parseInt(process.env["FUZZ_SEED"] ?? "42", 10);
 describe(`e2e: fuzz editor source toggle (seed=${FUZZ_SEED}, iterations=${FUZZ_ITERATIONS})`, () => {
   let page: Page;
 
-  beforeAll(async () => {
+  beforeEach(async () => {
     const ctx = await setup();
     ({ page } = ctx);
     await page.goto(ctx.baseUrl);
@@ -42,7 +42,7 @@ describe(`e2e: fuzz editor source toggle (seed=${FUZZ_SEED}, iterations=${FUZZ_I
     await page.waitForSelector(".editor-content", { timeout: 3000 });
   }, 30_000);
 
-  afterAll(async () => {
+  afterEach(async () => {
     await teardown();
   });
 

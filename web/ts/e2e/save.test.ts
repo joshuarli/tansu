@@ -7,7 +7,7 @@ describe("e2e: save deduplication", () => {
   let baseUrl: string;
   let pageErrors: Error[] = [];
 
-  beforeAll(async () => {
+  beforeEach(async () => {
     const ctx = await setup();
     ({ page } = ctx);
     ({ baseUrl } = ctx);
@@ -27,13 +27,10 @@ describe("e2e: save deduplication", () => {
     await page.waitForSelector(".editor-content", { timeout: 3000 });
   }, 30_000);
 
-  afterAll(async () => {
-    await teardown();
-  });
-
-  afterEach(() => {
+  afterEach(async () => {
     expect(pageErrors).toStrictEqual([]);
     pageErrors = [];
+    await teardown();
   });
 
   // Collect /api/note requests by method during a callback, then wait for cascading

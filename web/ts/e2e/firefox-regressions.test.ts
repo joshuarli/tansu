@@ -6,13 +6,13 @@ describe("e2e: firefox regressions", () => {
   let page: Page;
   let baseUrl: string;
 
-  beforeAll(async () => {
+  beforeEach(async () => {
     const ctx = await setup({ browserName: "firefox" });
     ({ page } = ctx);
     ({ baseUrl } = ctx);
   }, 30_000);
 
-  afterAll(async () => {
+  afterEach(async () => {
     await teardown();
   });
 

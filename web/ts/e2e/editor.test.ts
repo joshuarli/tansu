@@ -11,28 +11,26 @@ describe("e2e: editor", () => {
   let notesDir: string;
   const defaultNote = "# Hello\n\nThis is a test note.";
 
-  beforeAll(async () => {
+  beforeEach(async () => {
     const ctx = await setup();
     ({ page } = ctx);
     ({ baseUrl } = ctx);
     ({ notesDir } = ctx);
-  }, 30_000);
-
-  afterAll(async () => {
-    await teardown();
+    writeFileSync(join(notesDir, "test.md"), defaultNote);
+    const stateRes = await fetch(`${baseUrl}/api/state`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tabs: ["test.md"], active: 0, closed: [], cursors: {} }),
+    });
+    if (!stateRes.ok) {
+      throw new Error(`failed to seed editor test state: ${stateRes.status}`);
+    }
+    await page.goto(baseUrl);
+    await page.waitForSelector(".editor-content", { timeout: 3000 });
   });
 
-  async function openTestNote() {
-    await page.goto(baseUrl);
-    await page.waitForSelector("#tab-bar", { timeout: 5000 });
-    await page.waitForSelector('.nav-file[title="test.md"]', { timeout: 3000 });
-    await page.click('.nav-file[title="test.md"]');
-    await page.waitForSelector(".editor-content", { timeout: 3000 });
-  }
-
-  beforeEach(async () => {
-    writeFileSync(join(notesDir, "test.md"), defaultNote);
-    await openTestNote();
+  afterEach(async () => {
+    await teardown();
   });
 
   async function resetEditor(content: string) {
