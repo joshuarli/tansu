@@ -1,7 +1,5 @@
 import { performance } from "node:perf_hooks";
 
-
-
 import { createEditor } from "../src/editor.ts";
 import { renderMarkdown } from "../src/markdown.ts";
 import { domToMarkdown } from "../src/serialize.ts";

@@ -5,7 +5,7 @@ import { SettingsModal } from "./settings.tsx";
 import { setupDOM, mockFetch } from "./test-helper.ts";
 import { uiStore } from "./ui-store.ts";
 
-vi.mock(import('./webauthn.ts'), () => ({
+vi.mock(import("./webauthn.ts"), () => ({
   createPrfCredential: vi.fn(),
   isPrfLikelySupported: vi.fn(() => true),
 }));

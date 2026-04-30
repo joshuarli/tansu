@@ -50,7 +50,12 @@ async function importSelectedFile(file: File): Promise<void> {
 
 function importStemFromFilename(filename: string): string {
   const stem = filename.replace(/\.[^.]+$/u, "");
-  const sanitized = stem.trim().replaceAll(/[/:\\\0]/gu, "-");
+  const sanitized = stem
+    .trim()
+    .replaceAll("/", "-")
+    .replaceAll(":", "-")
+    .replaceAll("\\", "-")
+    .replaceAll("\0", "-");
   return sanitized || "import";
 }
 

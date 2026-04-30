@@ -123,14 +123,14 @@ export function initEditor(elements: Readonly<EditorElements>): EditorInstance {
   });
 
   function toggleSourceMode() {
-    const handle = getHandle();
-    if (!handle) {
+    const editorHandle = getHandle();
+    if (!editorHandle) {
       return;
     }
     hideRevisions();
     hideTagAutocomplete();
     toggleEditorSourceMode({
-      handle,
+      handle: editorHandle,
       tags: tagState.tags(),
       setTags: tagState.setTags,
       setDisplayState: displayState.setType,
@@ -138,13 +138,13 @@ export function initEditor(elements: Readonly<EditorElements>): EditorInstance {
   }
 
   function onEditorTabMutation() {
-    const handle = getHandle();
+    const editorHandle = getHandle();
     if (currentPath) {
       updateTabDraft(currentPath, { content: getCurrentContent(), tags: tagState.tags() });
     }
     saveController.scheduleAutosave();
-    if (handle && !handle.isSourceMode) {
-      checkWikiLinkTrigger(handle.contentEl, currentPath);
+    if (editorHandle && !editorHandle.isSourceMode) {
+      checkWikiLinkTrigger(editorHandle.contentEl, currentPath);
     }
   }
 

@@ -43,6 +43,7 @@ export default defineConfig({
     // Project uses named exports throughout; these conflict with each other
     "import/no-named-export": "off",
     "import/prefer-default-export": "off",
+    "import/no-default-export": "off",
 
     // Disabled: conflicts with no-import-type-side-effects; use import type { X } for type-only imports
     "import/consistent-type-specifier-style": "off",
@@ -112,6 +113,7 @@ export default defineConfig({
 
     // Explicit timeout per test is too prescriptive
     "vitest/require-test-timeout": "off",
+    "vitest/require-mock-type-parameters": "off",
 
     // describe() title format preference
     "vitest/prefer-describe-function-title": "off",
@@ -142,6 +144,10 @@ export default defineConfig({
 
     // Project returns null as a sentinel value (e.g. merge3 on conflict)
     "unicorn/no-null": "off",
+    "unicorn/no-useless-spread": "off",
+    "unicorn/no-useless-undefined": "off",
+    "unicorn/prefer-at": "off",
+    "unicorn/prefer-dom-node-remove": "off",
 
     // Non-null assertions are an intentional pattern for post-bounds-checked array indexing
     "typescript/no-non-null-assertion": "off",
@@ -234,6 +240,12 @@ export default defineConfig({
     {
       // vitest/vite config files must use default export — that's how the tool discovers them
       files: ["vitest.config.ts", "vitest.*.config.ts", "vite.config.ts", "vite.*.config.ts"],
+      rules: {
+        "import/no-default-export": "off",
+      },
+    },
+    {
+      files: ["web/ts/e2e/global-setup.ts"],
       rules: {
         "import/no-default-export": "off",
       },

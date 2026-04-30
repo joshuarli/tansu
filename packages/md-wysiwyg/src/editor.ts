@@ -91,7 +91,7 @@ function sanitizePastedTree(root: ParentNode): void {
       current = walker.nextNode();
       continue;
     }
-    for (const attr of [...el.attributes]) {
+    for (const attr of el.attributes) {
       const name = attr.name.toLowerCase();
       if (name.startsWith("on")) {
         el.removeAttribute(attr.name);
@@ -122,15 +122,15 @@ function htmlToSanitizedContainer(html: string): HTMLElement {
   }
   const doc = new DOMParser().parseFromString(html, "text/html");
   sanitizePastedTree(doc.body);
-  for (const child of [...doc.body.childNodes]) {
+  for (const child of doc.body.childNodes) {
     container.append(child.cloneNode(true));
   }
   return container;
 }
 
-function lineStart(md: string, offset: number): number {
-  const idx = md.lastIndexOf("\n", offset - 1);
-  return idx === -1 ? 0 : idx + 1;
+function findLineStart(md: string, offset: number): number {
+  const lineStartIdx = md.lastIndexOf("\n", offset - 1);
+  return lineStartIdx === -1 ? 0 : lineStartIdx + 1;
 }
 
 export type EditorConfig = {
@@ -373,7 +373,7 @@ export function createEditor(container: HTMLElement, config: EditorConfig = {}):
     if (!offsets) {
       return undefined;
     }
-    const start = lineStart(getValue(), offsets.start);
+    const start = findLineStart(getValue(), offsets.start);
     return { start, end: start };
   }
 
@@ -426,15 +426,15 @@ export function createEditor(container: HTMLElement, config: EditorConfig = {}):
       return;
     }
 
-    const lineStart = value.lastIndexOf("\n", Math.max(0, start - 1)) + 1;
+    const lineStartIdx = value.lastIndexOf("\n", Math.max(0, start - 1)) + 1;
     const adjustedEnd = end > start && value[end - 1] === "\n" ? end - 1 : end;
     const nextNewline = value.indexOf("\n", adjustedEnd);
     const lineEnd = nextNewline === -1 ? value.length : nextNewline;
-    const lines = value.slice(lineStart, lineEnd).split("\n");
+    const lines = value.slice(lineStartIdx, lineEnd).split("\n");
     const transformed = e.shiftKey ? lines.map(dedentLine) : lines.map((l) => indentUnit + l);
-    sourceEl.setRangeText(transformed.join("\n"), lineStart, lineEnd, "select");
-    sourceEl.selectionStart = lineStart;
-    sourceEl.selectionEnd = lineStart + transformed.join("\n").length;
+    sourceEl.setRangeText(transformed.join("\n"), lineStartIdx, lineEnd, "select");
+    sourceEl.selectionStart = lineStartIdx;
+    sourceEl.selectionEnd = lineStartIdx + transformed.join("\n").length;
     cfg.onChange?.();
   }
 
@@ -619,8 +619,8 @@ export function createEditor(container: HTMLElement, config: EditorConfig = {}):
     contentEl.removeEventListener("click", onCheckboxEvent);
     sourceEl.removeEventListener("input", onSourceInput);
     sourceEl.removeEventListener("keydown", onSourceKeyDown);
-    container.removeChild(contentEl);
-    container.removeChild(sourceEl);
+    contentEl.remove();
+    sourceEl.remove();
   }
 
   return {

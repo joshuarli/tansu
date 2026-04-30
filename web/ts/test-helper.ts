@@ -108,6 +108,8 @@ export function setupDOM(): () => void {
     "OffscreenCanvas",
     "Range",
     "NodeFilter",
+    "localStorage",
+    "sessionStorage",
   ] as const;
 
   for (const key of globals) {

@@ -6,12 +6,21 @@ import { setupDOM } from "./test-helper.ts";
 const showAlertDialog = vi.fn(async () => {});
 const createNote = vi.fn(async () => ({ mtime: 1 }));
 const listNotes = vi.fn(async () => []);
-const openTab = vi.fn(async () => {});
+const openTab = vi.fn(async () => ({
+  path: "",
+  title: "",
+  dirty: false,
+  content: "",
+  tags: [],
+  mtime: 0,
+  lastSavedMd: "",
+  lastSavedTags: [],
+}));
 const notifyFilesChanged = vi.fn(() => {});
 const showNotification = vi.fn(() => {});
 const reportActionError = vi.fn(() => {});
 
-vi.mock(import('./alert-dialog.tsx'), async () => {
+vi.mock(import("./alert-dialog.tsx"), async () => {
   const mod = await vi.importActual<typeof import("./alert-dialog.tsx")>("./alert-dialog.tsx");
   return {
     ...mod,
@@ -19,7 +28,7 @@ vi.mock(import('./alert-dialog.tsx'), async () => {
   };
 });
 
-vi.mock(import('./api.ts'), () => ({
+vi.mock(import("./api.ts"), () => ({
   ApiError: class ApiError extends Error {
     status: number;
     context: string;
@@ -35,23 +44,37 @@ vi.mock(import('./api.ts'), () => ({
   listNotes,
 }));
 
-vi.mock(import('./tab-state.ts'), () => ({
-  openTab,
-}));
+vi.mock(import("./tab-state.ts"), async () => {
+  const mod = await vi.importActual<typeof import("./tab-state.ts")>("./tab-state.ts");
+  return {
+    ...mod,
+    openTab,
+  };
+});
 
-vi.mock(import('./server-store.ts'), () => ({
-  serverStore: {
-    notifyFilesChanged,
-  },
-}));
+vi.mock(import("./server-store.ts"), async () => {
+  const mod = await vi.importActual<typeof import("./server-store.ts")>("./server-store.ts");
+  return {
+    ...mod,
+    serverStore: {
+      ...mod.serverStore,
+      notifyFilesChanged,
+    },
+  };
+});
 
-vi.mock(import('./ui-store.ts'), () => ({
-  uiStore: {
-    showNotification,
-  },
-}));
+vi.mock(import("./ui-store.ts"), async () => {
+  const mod = await vi.importActual<typeof import("./ui-store.ts")>("./ui-store.ts");
+  return {
+    ...mod,
+    uiStore: {
+      ...mod.uiStore,
+      showNotification,
+    },
+  };
+});
 
-vi.mock(import('./notify.ts'), () => ({
+vi.mock(import("./notify.ts"), () => ({
   reportActionError,
 }));
 

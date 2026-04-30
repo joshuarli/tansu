@@ -30,7 +30,7 @@ export function createTagState(opts: Readonly<TagStateOptions>): TagState {
   let currentTags: string[] = [];
   let tagInputEl: HTMLInputElement | null = null;
 
-  function tags() {
+  function getTags() {
     return [...currentTags];
   }
 
@@ -79,8 +79,8 @@ export function createTagState(opts: Readonly<TagStateOptions>): TagState {
     };
   }
 
-  function setTags(tags: readonly string[]) {
-    currentTags = [...tags];
+  function setTags(nextTags: readonly string[]) {
+    currentTags = [...nextTags];
     renderTagRow();
   }
 
@@ -127,7 +127,7 @@ export function createTagState(opts: Readonly<TagStateOptions>): TagState {
   }
 
   return {
-    tags,
+    tags: getTags,
     setTags,
     getCurrentContent,
     syncSourceFromTags,

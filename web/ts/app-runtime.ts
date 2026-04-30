@@ -43,7 +43,7 @@ export function configureServerRuntime(opts: Readonly<ConfigureServerRuntimeOpti
     },
     closeActiveTab,
     syncSessionToServer: syncToServer,
-    refreshVaultSwitcher: async () => {},
+    refreshVaultSwitcher: async () => void 0,
     showUnlockScreen: opts.showUnlockScreen,
     clearServerStatus: () => uiStore.clearServerStatus(),
     setServerStatus: (msg) => uiStore.setServerStatus(msg),

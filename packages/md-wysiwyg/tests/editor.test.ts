@@ -1,7 +1,5 @@
 /// Tests for createEditor() wiring layer.
 
-
-
 import { createEditor } from "../src/editor.ts";
 import { toggleBold } from "../src/format-ops.ts";
 import { createWikiLinkExtension } from "../src/wiki-link.ts";
@@ -385,7 +383,7 @@ describe("createEditor", () => {
 
   it("HTML paste uses setHTML when available", async () => {
     const originalSetHtml = Element.prototype.setHTML;
-    const setHtml = vi.fn(function  setHtml(this: Element, html: string) {
+    const setHtml = vi.fn(function setHtml(this: Element, html: string) {
       expect(html).toContain("<strong>bold</strong>");
       this.innerHTML = "<p><strong>bold</strong></p>";
     });
