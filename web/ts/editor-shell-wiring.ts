@@ -1,6 +1,6 @@
 import { shiftIndent } from "@joshuarli98/md-wysiwyg";
 
-import { showContextMenu } from "./context-menu.tsx";
+import { showContextMenu } from "./context-menu.ts";
 import type { EditorAdapter } from "./editor-adapter.ts";
 import type { EditorShellRefs } from "./editor-shell.tsx";
 import { initFormatToolbar, populateFormatButtons } from "./format-toolbar.ts";

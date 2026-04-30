@@ -9,7 +9,7 @@ import {
   type PinnedFileEntry,
   type RecentFileEntry,
 } from "./api.ts";
-import { showContextMenu } from "./context-menu.tsx";
+import { showContextMenu } from "./context-menu.ts";
 import { buildFileContextMenuItems } from "./file-actions.ts";
 import { serverStore } from "./server-store.ts";
 import { closeTabByPath, getActiveTab, openTab } from "./tab-state.ts";

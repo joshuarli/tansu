@@ -1,5 +1,5 @@
 import { forceSaveNote, saveNote } from "./api.ts";
-import { showConflictBanner, handleReloadConflict } from "./conflict.tsx";
+import { showConflictBanner, handleReloadConflict } from "./conflict.ts";
 import { AUTOSAVE_DELAY_MS, AUTOSAVE_RETRY_DELAY_MS } from "./constants.ts";
 import { serverStore } from "./server-store.ts";
 import { getActiveTab, getTabs, markClean, setCursor } from "./tab-state.ts";

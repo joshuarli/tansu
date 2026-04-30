@@ -1,4 +1,4 @@
-import type { showContextMenu as ShowContextMenu } from "./context-menu.tsx";
+import type { showContextMenu as ShowContextMenu } from "./context-menu.ts";
 import { setupDOM } from "./test-helper.ts";
 
 const tick = () => new Promise<void>((r) => setTimeout(r, 0));
@@ -9,7 +9,7 @@ describe("context-menu", () => {
 
   beforeAll(async () => {
     cleanup = setupDOM();
-    ({ showContextMenu } = await import("./context-menu.tsx"));
+    ({ showContextMenu } = await import("./context-menu.ts"));
   });
 
   afterAll(() => {

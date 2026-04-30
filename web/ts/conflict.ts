@@ -1,45 +1,9 @@
 import { merge3 } from "@joshuarli98/md-wysiwyg";
+import { createComponent } from "solid-js";
 import { render } from "solid-js/web";
 
-import { forceSaveNote } from "./api.ts";
-import { markClean, type Tab } from "./tab-state.ts";
-
-type ConflictBannerProps = {
-  currentPath: string;
-  diskContent: string;
-  diskMtime: number;
-  loadContent: (md: string) => void;
-  getCurrentContent: () => string;
-  onClose: () => void;
-};
-
-function ConflictBanner(props: Readonly<ConflictBannerProps>) {
-  return (
-    <div class="conflict-banner">
-      <span>File changed externally - conflicts detected.</span>
-      <button
-        onClick={() => {
-          props.onClose();
-          const content = props.getCurrentContent();
-          void forceSaveNote(props.currentPath, content)
-            .then((r) => markClean(props.currentPath, content, r.mtime))
-            .catch(() => void 0);
-        }}
-      >
-        Keep mine
-      </button>
-      <button
-        onClick={() => {
-          props.onClose();
-          props.loadContent(props.diskContent);
-          markClean(props.currentPath, props.diskContent, props.diskMtime);
-        }}
-      >
-        Take theirs
-      </button>
-    </div>
-  );
-}
+import { ConflictBanner } from "./conflict-banner-view.tsx";
+import type { Tab } from "./tab-state.ts";
 
 function removeConflictBanner(container: HTMLElement) {
   container.querySelector(".conflict-banner-host")?.remove();
@@ -66,20 +30,19 @@ export function showConflictBanner(
   container.prepend(host);
 
   const dispose = render(
-    () => (
-      <ConflictBanner
-        currentPath={currentPath}
-        diskContent={diskContent}
-        diskMtime={diskMtime}
-        loadContent={loadContent}
-        getCurrentContent={getCurrentContent}
-        onClose={() => {
+    () =>
+      createComponent(ConflictBanner, {
+        currentPath,
+        diskContent,
+        diskMtime,
+        loadContent,
+        getCurrentContent,
+        onClose: () => {
           dispose();
           host.remove();
           onClose?.();
-        }}
-      />
-    ),
+        },
+      }),
     host,
   );
 }

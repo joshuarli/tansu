@@ -1,5 +1,5 @@
 import { deleteNote, pinFile, unpinFile } from "./api.ts";
-import type { MenuItem } from "./context-menu.tsx";
+import type { MenuItem } from "./context-menu.ts";
 import { showInputDialog } from "./input-dialog.tsx";
 import { renameNoteAndRefresh } from "./note-actions.ts";
 import { reportActionError } from "./notify.ts";

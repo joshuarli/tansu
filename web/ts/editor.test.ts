@@ -107,7 +107,7 @@ describe("editor", () => {
     cleanup = setupDOM();
     mock = mockFetch();
 
-    // conflict.tsx's compiled output calls delegateEvents(["click"]) at module level,
+    // conflict.ts's compiled output calls delegateEvents(["click"]) at module level,
     // which runs before setupDOM() replaces globalThis.document. Re-register on the
     // new document so SolidJS click delegation works for conflict banner buttons.
     const { delegateEvents } = await import("solid-js/web");

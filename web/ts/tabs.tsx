@@ -1,7 +1,7 @@
-import { For, createEffect, createSignal, onCleanup, onMount } from "solid-js";
+import { For, createEffect, createSignal, onMount } from "solid-js";
 
 import { getPinnedFiles } from "./api.ts";
-import { showContextMenu } from "./context-menu.tsx";
+import { showContextMenu } from "./context-menu.ts";
 import { buildFileContextMenuItems } from "./file-actions.ts";
 import { showInputDialog } from "./input-dialog.tsx";
 import { createNewNote as _createNewNote } from "./tab-actions.ts";
@@ -17,31 +17,18 @@ export async function promptNewNote(): Promise<void> {
 
 export function TabBar() {
   const [hoveredIndex, setHoveredIndex] = createSignal(-1);
+  const [tooltip, setTooltip] = createSignal<{
+    label: string;
+    top: number;
+    left: number;
+  } | null>(null);
   let rootEl: HTMLDivElement | null = null;
-
-  // Tooltip lives in document.body for viewport-relative positioning.
-  const tooltipEl = document.createElement("div");
-  tooltipEl.className = "tab-tooltip";
-  document.body.append(tooltipEl);
-  onCleanup(() => tooltipEl.remove());
-
-  function showTooltip(tabEl: HTMLElement, label: string) {
-    const rect = tabEl.getBoundingClientRect();
-    tooltipEl.textContent = label;
-    tooltipEl.style.top = `${rect.bottom + 6}px`;
-    tooltipEl.style.left = `${rect.left + rect.width / 2}px`;
-    tooltipEl.style.display = "block";
-  }
-
-  function hideTooltip() {
-    tooltipEl.style.display = "none";
-  }
 
   // Reset hover state when the hovered tab is removed by any means.
   createEffect(() => {
     if (hoveredIndex() !== -1 && hoveredIndex() >= getTabs().length) {
       setHoveredIndex(-1);
-      hideTooltip();
+      setTooltip(null);
     }
   });
 
@@ -57,11 +44,11 @@ export function TabBar() {
       e.preventDefault();
       const idx = hoveredIndex();
       setHoveredIndex(-1);
-      hideTooltip();
+      setTooltip(null);
       closeTab(idx);
     };
     document.addEventListener("keydown", handler);
-    onCleanup(() => document.removeEventListener("keydown", handler));
+    return () => document.removeEventListener("keydown", handler);
   });
 
   // Scroll the active tab into view whenever the active index changes.
@@ -76,52 +63,69 @@ export function TabBar() {
   });
 
   return (
-    <div
-      ref={(el) => {
-        rootEl = el;
-      }}
-      style={{ display: "contents" }}
-    >
-      <For each={getTabs()}>
-        {(tab, i) => (
-          <div
-            class={`tab${i() === getActiveIndex() ? " active" : ""}`}
-            onMouseEnter={(e) => {
-              setHoveredIndex(i());
-              showTooltip(e.currentTarget, `${tab.title} (space to close)`);
-            }}
-            onMouseLeave={() => {
-              setHoveredIndex(-1);
-              hideTooltip();
-            }}
-            onClick={() => switchTab(i())}
-            onContextMenu={(e) => void showTabContextMenu(e, i())}
-            onAuxClick={(e) => {
-              if (e.button === 1) {
-                e.preventDefault();
-                closeTab(i());
-              }
-            }}
-          >
-            {tab.dirty ? <span class="dirty">●</span> : null}
-            <span class="tab-label">
-              <span class="tab-label-text">{tab.title}</span>
-            </span>
-            <button
-              type="button"
-              class="close"
-              aria-label={`Close ${tab.title}`}
-              onClick={(e) => {
-                e.stopPropagation();
-                closeTab(i());
+    <>
+      <div
+        ref={(el) => {
+          rootEl = el;
+        }}
+        style={{ display: "contents" }}
+      >
+        <For each={getTabs()}>
+          {(tab, i) => (
+            <div
+              class={`tab${i() === getActiveIndex() ? " active" : ""}`}
+              onMouseEnter={(e) => {
+                const rect = e.currentTarget.getBoundingClientRect();
+                setHoveredIndex(i());
+                setTooltip({
+                  label: `${tab.title} (space to close)`,
+                  top: rect.bottom + 6,
+                  left: rect.left + rect.width / 2,
+                });
+              }}
+              onMouseLeave={() => {
+                setHoveredIndex(-1);
+                setTooltip(null);
+              }}
+              onClick={() => switchTab(i())}
+              onContextMenu={(e) => void showTabContextMenu(e, i())}
+              onAuxClick={(e) => {
+                if (e.button === 1) {
+                  e.preventDefault();
+                  closeTab(i());
+                }
               }}
             >
-              ×
-            </button>
-          </div>
-        )}
-      </For>
-    </div>
+              {tab.dirty ? <span class="dirty">●</span> : null}
+              <span class="tab-label">
+                <span class="tab-label-text">{tab.title}</span>
+              </span>
+              <button
+                type="button"
+                class="close"
+                aria-label={`Close ${tab.title}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  closeTab(i());
+                }}
+              >
+                ×
+              </button>
+            </div>
+          )}
+        </For>
+      </div>
+      <div
+        class="tab-tooltip"
+        style={{
+          display: tooltip() ? "block" : "none",
+          top: tooltip() ? `${tooltip()!.top}px` : "0px",
+          left: tooltip() ? `${tooltip()!.left}px` : "0px",
+        }}
+      >
+        {tooltip()?.label ?? ""}
+      </div>
+    </>
   );
 }
 

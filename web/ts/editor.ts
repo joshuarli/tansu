@@ -5,7 +5,7 @@ export { invalidateNoteCache } from "./autocomplete.ts";
 import { hideTagAutocomplete } from "./tag-autocomplete.ts";
 export { invalidateTagCache } from "./tag-autocomplete.ts";
 import { loadBacklinks } from "./backlinks.tsx";
-import { clearConflictBanner } from "./conflict.tsx";
+import { clearConflictBanner } from "./conflict.ts";
 import { createEditorAdapter, type EditorAdapter } from "./editor-adapter.ts";
 import { getEditorPrefs, saveEditorPrefs, type EditorPrefs } from "./editor-prefs.ts";
 import {

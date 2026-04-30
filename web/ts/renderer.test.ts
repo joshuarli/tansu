@@ -124,4 +124,22 @@ describe("renderer invariants", () => {
 
     expect(violations).toStrictEqual([]);
   });
+
+  it("production .tsx files do not create DOM nodes directly", () => {
+    const tsxFiles = sourceFiles().filter(
+      (f) => f.endsWith(".tsx") && f !== "main.tsx" && f !== "component-test-helper.tsx",
+    );
+    const pattern =
+      /\bdocument\.(?:createElement|createTextNode|createRange)\b|\bdocument\.body\.(?:append|appendChild|prepend)\b/;
+
+    const violations: string[] = [];
+    for (const file of tsxFiles) {
+      const content = readFileSync(join(webTsDir, file), "utf8");
+      if (pattern.test(content)) {
+        violations.push(file);
+      }
+    }
+
+    expect(violations).toStrictEqual([]);
+  });
 });

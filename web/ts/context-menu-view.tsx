@@ -1,5 +1,4 @@
 import { For, onMount } from "solid-js";
-import { render } from "solid-js/web";
 
 export type MenuItem = {
   label: string;
@@ -15,11 +14,7 @@ type ContextMenuProps = {
   onClose: () => void;
 };
 
-let activeHost: HTMLDivElement | null = null;
-let disposeRoot: (() => void) | null = null;
-let dismissHandler: (() => void) | null = null;
-
-function ContextMenu(props: Readonly<ContextMenuProps>) {
+export function ContextMenu(props: Readonly<ContextMenuProps>) {
   const buttonRefs: HTMLButtonElement[] = [];
 
   onMount(() => {
@@ -65,52 +60,4 @@ function ContextMenu(props: Readonly<ContextMenuProps>) {
       </For>
     </div>
   );
-}
-
-export function showContextMenu(items: MenuItem[], x: number, y: number): void {
-  hide();
-
-  const host = document.createElement("div");
-  document.body.append(host);
-  activeHost = host;
-  disposeRoot = render(
-    () => (
-      <ContextMenu
-        items={items}
-        x={x}
-        y={y}
-        onSelect={(onclick) => {
-          hide();
-          // Defer so the click event finishes propagating before any DOM mutations
-          // triggered by the action (e.g. tab re-renders, nested dispatchEvent).
-          setTimeout(() => onclick(), 0);
-        }}
-        onClose={hide}
-      />
-    ),
-    host,
-  );
-
-  const handler = () => hide();
-  dismissHandler = handler;
-  setTimeout(() => {
-    if (dismissHandler === handler) {
-      document.addEventListener("click", handler);
-    }
-  }, 0);
-}
-
-function hide(): void {
-  if (dismissHandler) {
-    document.removeEventListener("click", dismissHandler);
-    dismissHandler = null;
-  }
-  if (disposeRoot) {
-    disposeRoot();
-    disposeRoot = null;
-  }
-  if (activeHost) {
-    activeHost.remove();
-    activeHost = null;
-  }
 }
