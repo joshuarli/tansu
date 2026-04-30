@@ -1,7 +1,11 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
+import type * as AlertDialogModule from "./alert-dialog.tsx";
+import type * as ServerStoreModule from "./server-store.ts";
+import type * as TabStateModule from "./tab-state.ts";
 import { setupDOM } from "./test-helper.ts";
+import type * as UiStoreModule from "./ui-store.ts";
 
 const showAlertDialog = vi.fn(async () => {});
 const createNote = vi.fn(async () => ({ mtime: 1 }));
@@ -21,7 +25,7 @@ const showNotification = vi.fn(() => {});
 const reportActionError = vi.fn(() => {});
 
 vi.mock(import("./alert-dialog.tsx"), async () => {
-  const mod = await vi.importActual<typeof import("./alert-dialog.tsx")>("./alert-dialog.tsx");
+  const mod = await vi.importActual<typeof AlertDialogModule>("./alert-dialog.tsx");
   return {
     ...mod,
     showAlertDialog,
@@ -35,6 +39,7 @@ vi.mock(import("./api.ts"), () => ({
     body: string | undefined;
     constructor(context: string, status: number, body?: string) {
       super(`${context} failed: ${status}`);
+      this.name = "ApiError";
       this.context = context;
       this.status = status;
       this.body = body;
@@ -45,7 +50,7 @@ vi.mock(import("./api.ts"), () => ({
 }));
 
 vi.mock(import("./tab-state.ts"), async () => {
-  const mod = await vi.importActual<typeof import("./tab-state.ts")>("./tab-state.ts");
+  const mod = await vi.importActual<typeof TabStateModule>("./tab-state.ts");
   return {
     ...mod,
     openTab,
@@ -53,7 +58,7 @@ vi.mock(import("./tab-state.ts"), async () => {
 });
 
 vi.mock(import("./server-store.ts"), async () => {
-  const mod = await vi.importActual<typeof import("./server-store.ts")>("./server-store.ts");
+  const mod = await vi.importActual<typeof ServerStoreModule>("./server-store.ts");
   return {
     ...mod,
     serverStore: {
@@ -64,7 +69,7 @@ vi.mock(import("./server-store.ts"), async () => {
 });
 
 vi.mock(import("./ui-store.ts"), async () => {
-  const mod = await vi.importActual<typeof import("./ui-store.ts")>("./ui-store.ts");
+  const mod = await vi.importActual<typeof UiStoreModule>("./ui-store.ts");
   return {
     ...mod,
     uiStore: {
@@ -115,7 +120,7 @@ describe("import html real fixture", () => {
     await new Promise((resolve) => setTimeout(resolve, 50));
 
     expect(showAlertDialog).not.toHaveBeenCalled();
-    expect(createNote).toHaveBeenCalledOnce();
+    expect(createNote).toHaveBeenCalledTimes(1);
     const calls = createNote.mock.calls as unknown as [string, string][];
     expect(calls[0]).toBeDefined();
     const [path, content] = calls[0]!;

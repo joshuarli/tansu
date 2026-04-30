@@ -1,6 +1,9 @@
+import { createEditorShellRefs, type EditorShellRefs } from "./editor-shell.tsx";
 import {
   classifySaveResult,
   classifyReload,
+  type EditorDisplayState,
+  type EditorInstance,
   type ReloadAction,
   type SaveAction,
 } from "./editor.ts";
@@ -74,12 +77,19 @@ describe("classifyReload", () => {
 describe("editor", () => {
   let cleanup: () => void;
   let mock: ReturnType<typeof mockFetch>;
-  let initEditor: typeof import("./editor.ts").initEditor;
-  let createEditorShellRefs: typeof import("./editor-shell.tsx").createEditorShellRefs;
+  type EditorElements = {
+    emptyState: HTMLElement;
+    shellRefs: EditorShellRefs;
+    setTags: (tags: readonly string[]) => void;
+    setSourceMode: (value: boolean) => void;
+    setVisible: (value: boolean) => void;
+    setDisplayState?: (state: EditorDisplayState) => void;
+  };
+  let initEditor: (elements: Readonly<EditorElements>) => EditorInstance;
   let shellHost: HTMLDivElement;
   let showEditor: (path: string, content: string, tags?: string[]) => void;
   let hideEditor: () => void;
-  let getDisplayState: () => import("./editor.ts").EditorDisplayState;
+  let getDisplayState: () => EditorDisplayState;
   let getCurrentContent: () => string;
   let saveCurrentNote: () => Promise<void>;
   let reloadFromDisk: (content: string, mtime: number) => void;
@@ -88,7 +98,7 @@ describe("editor", () => {
 
   function latest<T extends Element>(selector: string): T {
     const matches = document.querySelectorAll<T>(selector);
-    const el = Array.from(matches).at(-1);
+    const el = [...matches].at(-1);
     if (!el) {
       throw new Error(`expected element for selector: ${selector}`);
     }
@@ -123,7 +133,6 @@ describe("editor", () => {
     mock.on("GET", "/api/tags", { tags: [] });
 
     ({ initEditor } = await import("./editor.ts"));
-    ({ createEditorShellRefs } = await import("./editor-shell.tsx"));
   });
 
   beforeEach(async () => {

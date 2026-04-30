@@ -98,8 +98,10 @@ describe("createWikiLinkExtension — roundtrip", () => {
 
   beforeAll(async () => {
     cleanup = setupDOM();
-    render = (await import("../src/markdown.ts")).renderMarkdown;
-    serialize = (await import("../src/serialize.ts")).domToMarkdown;
+    const markdownMod = await import("../src/markdown.ts");
+    const serializeMod = await import("../src/serialize.ts");
+    render = markdownMod.renderMarkdown;
+    serialize = serializeMod.domToMarkdown;
   });
 
   afterAll(() => {
@@ -196,8 +198,10 @@ describe("createWikiImageExtension — roundtrip", () => {
 
   beforeAll(async () => {
     cleanup = setupDOM();
-    render = (await import("../src/markdown.ts")).renderMarkdown;
-    serialize = (await import("../src/serialize.ts")).domToMarkdown;
+    const markdownMod = await import("../src/markdown.ts");
+    const serializeMod = await import("../src/serialize.ts");
+    render = markdownMod.renderMarkdown;
+    serialize = serializeMod.domToMarkdown;
   });
 
   afterAll(() => {
@@ -304,8 +308,10 @@ describe("createCalloutExtension — roundtrip", () => {
 
   beforeAll(async () => {
     cleanup = setupDOM();
-    render = (await import("../src/markdown.ts")).renderMarkdown;
-    serialize = (await import("../src/serialize.ts")).domToMarkdown;
+    const markdownMod = await import("../src/markdown.ts");
+    const serializeMod = await import("../src/serialize.ts");
+    render = markdownMod.renderMarkdown;
+    serialize = serializeMod.domToMarkdown;
   });
 
   afterAll(() => {
@@ -341,8 +347,10 @@ describe("all extensions together", () => {
 
   beforeAll(async () => {
     cleanup = setupDOM();
-    render = (await import("../src/markdown.ts")).renderMarkdown;
-    serialize = (await import("../src/serialize.ts")).domToMarkdown;
+    const markdownMod = await import("../src/markdown.ts");
+    const serializeMod = await import("../src/serialize.ts");
+    render = markdownMod.renderMarkdown;
+    serialize = serializeMod.domToMarkdown;
   });
 
   afterAll(() => {

@@ -28,10 +28,9 @@ export function App(props: Readonly<AppProps>) {
   const tabs = useTabs();
 
   onMount(() => {
-    let boot: ReturnType<typeof createAppBootController>;
     let disposeWikiLinkNavigation: (() => void) | null = null;
 
-    function initApp() {
+    const initApp = () => {
       disposeWikiLinkNavigation = registerWikiLinkNavigation();
       configureServerRuntime({
         getEditor: () => editor,
@@ -40,9 +39,9 @@ export function App(props: Readonly<AppProps>) {
 
       setCommands(createAppCommands({ getEditor: () => editor }));
       setEditorEnabled(true);
-    }
+    };
 
-    boot = createAppBootController({
+    const boot = createAppBootController({
       appEl: props.appEl,
       initApp,
     });

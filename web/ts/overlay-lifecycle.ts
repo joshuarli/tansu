@@ -1,5 +1,4 @@
-import type { Accessor } from "solid-js";
-import { createEffect } from "solid-js";
+import { createEffect, type Accessor } from "solid-js";
 
 import { createFocusRestorer } from "./overlay.tsx";
 

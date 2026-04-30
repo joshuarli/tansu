@@ -14,7 +14,7 @@ export default defineConfig({
     suspicious: "error",
     perf: "error",
     pedantic: "error",
-    style: "warn",
+    style: "error",
     restriction: "error",
     nursery: "error",
   },
@@ -44,6 +44,7 @@ export default defineConfig({
     "import/no-named-export": "off",
     "import/prefer-default-export": "off",
     "import/no-default-export": "off",
+    "import/no-namespace": "off",
 
     // Disabled: conflicts with no-import-type-side-effects; use import type { X } for type-only imports
     "import/consistent-type-specifier-style": "off",
@@ -148,6 +149,12 @@ export default defineConfig({
     "unicorn/no-useless-undefined": "off",
     "unicorn/prefer-at": "off",
     "unicorn/prefer-dom-node-remove": "off",
+    "unicorn/filename-case": "off",
+    "unicorn/no-array-for-each": "off",
+    "unicorn/no-await-expression-member": "off",
+    "unicorn/no-nested-ternary": "off",
+    "unicorn/prefer-spread": "off",
+    "new-cap": "off",
 
     // Non-null assertions are an intentional pattern for post-bounds-checked array indexing
     "typescript/no-non-null-assertion": "off",
@@ -255,6 +262,13 @@ export default defineConfig({
       files: ["**/*.tsx"],
       rules: {
         "no-unassigned-vars": "off",
+      },
+    },
+    {
+      // Prefer explicit counts over once-specific matchers for consistency.
+      files: ["**/*.test.ts", "**/*.test.tsx"],
+      rules: {
+        "vitest/prefer-called-once": "off",
       },
     },
   ],

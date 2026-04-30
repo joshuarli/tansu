@@ -9,7 +9,12 @@ import { uiStore } from "./ui-store.ts";
 
 let pickerEl: HTMLInputElement | null = null;
 
-class HtmlImportError extends Error {}
+class HtmlImportError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "HtmlImportError";
+  }
+}
 
 function ensurePicker(): HTMLInputElement {
   if (pickerEl) {
@@ -123,7 +128,8 @@ async function createImportedNote(file: File): Promise<string> {
     }).parse();
     const contentMarkdown = requireMarkdownContent(file.name, result);
     const content = buildImportedMarkdown({ ...result, contentMarkdown });
-    const existingPaths = new Set((await listNotes()).map((note) => note.path));
+    const notes = await listNotes();
+    const existingPaths = new Set(notes.map((note) => note.path));
     const stem = importStemFromFilename(file.name);
     let path = nextImportPath(stem, existingPaths);
 

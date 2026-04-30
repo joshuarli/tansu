@@ -111,7 +111,8 @@ async function requestJson<T>(
   init?: RequestInit,
   okStatuses: readonly number[] = [],
 ): Promise<T> {
-  return (await requestJsonWithStatus<T>(url, ctx, init, okStatuses)).data;
+  const result = await requestJsonWithStatus<T>(url, ctx, init, okStatuses);
+  return result.data;
 }
 
 async function requestJsonWithStatus<T>(

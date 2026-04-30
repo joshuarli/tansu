@@ -405,7 +405,7 @@ describe("createEditor", () => {
       handle.contentEl.dispatchEvent(pasteEvent);
 
       await Promise.resolve();
-      expect(setHtml).toHaveBeenCalledOnce();
+      expect(setHtml).toHaveBeenCalledTimes(1);
       expect(handle.getValue()).toBe("**bold**");
       handle.destroy();
     } finally {

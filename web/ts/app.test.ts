@@ -1,12 +1,13 @@
 import { render } from "solid-js/web";
 
 import { App } from "./app.tsx";
+import type * as BootstrapModule from "./bootstrap.ts";
 import { mockFetch, setupDOM } from "./test-helper.ts";
 
 // Prevent the onMount boot sequence from running side-effectful browser APIs
 // (checkBrowserSupport, getStatus, etc.) during this structural render test.
 vi.mock(import("./bootstrap.ts"), async () => {
-  const mod = await vi.importActual<typeof import("./bootstrap.ts")>("./bootstrap.ts");
+  const mod = await vi.importActual<typeof BootstrapModule>("./bootstrap.ts");
   return {
     ...mod,
     bootApp: vi.fn().mockResolvedValue(undefined),

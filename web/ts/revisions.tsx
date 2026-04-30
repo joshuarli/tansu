@@ -1,10 +1,9 @@
-import { computeDiff } from "@joshuarli98/md-wysiwyg";
-import type { DiffHunk } from "@joshuarli98/md-wysiwyg";
+import { computeDiff, type DiffHunk } from "@joshuarli98/md-wysiwyg";
 import { For, Match, Show, Switch, createSignal } from "solid-js";
 import { render } from "solid-js/web";
 
 import { getRevision, listRevisions, restoreRevision } from "./api.ts";
-import { DiffView } from "./DiffView.tsx";
+import { DiffView } from "./diff-view.tsx";
 import { relativeTime } from "./util.ts";
 
 let hostEl: HTMLElement | null = null;

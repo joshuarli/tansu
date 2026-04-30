@@ -56,9 +56,9 @@ export type MockRequest = {
 function normalizeHeaders(headersInit?: HeadersInit): Record<string, string> {
   const headers = new Headers(headersInit);
   const out: Record<string, string> = {};
-  headers.forEach((value, key) => {
+  for (const [key, value] of headers.entries()) {
     out[key] = value;
-  });
+  }
   return out;
 }
 

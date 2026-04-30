@@ -11,8 +11,13 @@ import {
 import { createSelectionTransactionController } from "./editor-transactions.js";
 import { createEditorUndoController } from "./editor-undo.js";
 import type { MarkdownExtension } from "./extension.js";
-import { shiftIndent, toggleBold, toggleHighlight, toggleItalic } from "./format-ops.js";
-import type { FormatResult } from "./format-ops.js";
+import {
+  shiftIndent,
+  toggleBold,
+  toggleHighlight,
+  toggleItalic,
+  type FormatResult,
+} from "./format-ops.js";
 import { checkInlineTransform } from "./inline-transforms.js";
 import { domToMarkdown } from "./serialize.js";
 import { checkBlockInputTransform, handleBlockTransform } from "./transforms.js";
