@@ -1,7 +1,7 @@
 /// E2E test setup: launches Tansu server + a headless browser.
 /// Shares a single browser instance across all e2e tests in a file.
 
-import { spawn, spawnSync, type ChildProcess } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { mkdirSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
@@ -37,11 +37,6 @@ export async function setup(opts?: {
   browserName?: BrowserName;
 }): Promise<{ page: Page; baseUrl: string; notesDir: string }> {
   const activePort = await getFreePort();
-  // Build frontend
-  const build = spawnSync("pnpm", ["run", "bundle"], { stdio: "inherit" });
-  if (build.status !== 0) {
-    throw new Error("Frontend build failed");
-  }
 
   // Create temp notes dir with test notes
   notesDir = mkdtempSync(join(tmpdir(), "tansu-e2e-"));

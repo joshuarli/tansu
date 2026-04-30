@@ -1,5 +1,5 @@
 import { stemFromPath } from "@joshuarli98/md-wysiwyg";
-import { For, Match, Show, Switch, createEffect, createMemo, createSignal } from "solid-js";
+import { For, Match, Show, Switch, createEffect, createMemo, createSignal, on } from "solid-js";
 
 import {
   getPinnedFiles,
@@ -151,28 +151,31 @@ export function Sidebar(props: Readonly<{ appEl: HTMLElement }>) {
     await refreshRecent();
   }
 
-  createEffect(() => {
-    const change = serverStore.fileChange();
-    if (change.version === 0) {
+  createEffect(
+    on(serverStore.fileChange, (change) => {
+      if (change.version === 0) {
+        void refreshNav();
+        return;
+      }
+      if (change.savedPath) {
+        updateRecentOnSave(change.savedPath);
+        return;
+      }
       void refreshNav();
-      return;
-    }
-    if (change.savedPath) {
-      updateRecentOnSave(change.savedPath);
-      return;
-    }
-    void refreshNav();
-  });
+    }),
+  );
 
-  createEffect(() => {
-    serverStore.pinnedVersion();
-    void refreshPinned();
-  });
+  createEffect(
+    on(serverStore.pinnedVersion, () => {
+      void refreshPinned();
+    }),
+  );
 
-  createEffect(() => {
-    serverStore.vaultVersion();
-    void refreshNav();
-  });
+  createEffect(
+    on(serverStore.vaultVersion, () => {
+      void refreshNav();
+    }),
+  );
 
   const recentNonPinned = createMemo(() =>
     recentFiles().filter((file) => !pinnedPaths().has(file.path)),

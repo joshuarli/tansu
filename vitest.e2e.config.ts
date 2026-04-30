@@ -12,6 +12,7 @@ export default defineConfig({
     globals: true,
     environment: "node",
     include: ["web/ts/e2e/*.test.ts"],
+    globalSetup: ["web/ts/e2e/global-setup.ts"],
     reporters: ["agent"],
     silent: "passed-only",
     sequence: { shuffle: true },

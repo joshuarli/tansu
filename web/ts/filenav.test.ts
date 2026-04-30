@@ -130,6 +130,21 @@ describe("filenav", () => {
     expect(activeCount()).toBe(1);
   });
 
+  it("savedPath update promotes the saved file once without looping", async () => {
+    mock.on("GET", "/api/recentfiles", [
+      { path: "notes/alpha.md", title: "alpha", mtime: 2000 },
+      { path: "notes/beta.md", title: "beta", mtime: 1000 },
+    ]);
+
+    serverStore.notifyFilesChanged("notes/beta.md");
+    await drain();
+
+    const rows = [...document.querySelectorAll<HTMLElement>(".nav-file")];
+    const betaRows = rows.filter((row) => row.title === "notes/beta.md");
+    expect(betaRows).toHaveLength(1);
+    expect(betaRows[0]?.querySelector(".nav-file-name")?.textContent).toBe("beta");
+  });
+
   it("no duplicate .active after two rapid files:changed (recent mode)", async () => {
     while (getTabs().length > 0) {
       closeTab(0);

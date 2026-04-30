@@ -5,11 +5,16 @@ import { setup, teardown } from "./setup.ts";
 describe("e2e: save deduplication", () => {
   let page: Page;
   let baseUrl: string;
+  let pageErrors: Error[] = [];
 
   beforeAll(async () => {
     const ctx = await setup();
     ({ page } = ctx);
     ({ baseUrl } = ctx);
+    pageErrors = [];
+    page.on("pageerror", (error) => {
+      pageErrors.push(error);
+    });
 
     // Open test.md
     await page.goto(baseUrl);
@@ -24,6 +29,11 @@ describe("e2e: save deduplication", () => {
 
   afterAll(async () => {
     await teardown();
+  });
+
+  afterEach(() => {
+    expect(pageErrors).toStrictEqual([]);
+    pageErrors = [];
   });
 
   // Collect /api/note requests by method during a callback, then wait for cascading

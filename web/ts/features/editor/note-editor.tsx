@@ -12,6 +12,7 @@ type NoteEditorProps = {
 
 export function NoteEditor(props: Readonly<NoteEditorProps>) {
   let emptyStateRef!: HTMLDivElement;
+  let shownTab: { path: string; content: string; tags: readonly string[] } | null = null;
 
   const shellRefs = createEditorShellRefs();
   const [editor, setEditor] = createSignal<EditorInstance | null>(null);
@@ -19,6 +20,10 @@ export function NoteEditor(props: Readonly<NoteEditorProps>) {
   const [editorTags, setEditorTags] = createSignal<readonly string[]>([]);
   const [editorSourceMode, setEditorSourceMode] = createSignal(false);
   const [displayState, setDisplayState] = createSignal<EditorDisplayState>({ type: "empty" });
+
+  function sameTags(left: readonly string[], right: readonly string[]) {
+    return left.length === right.length && left.every((tag, index) => tag === right[index]);
+  }
 
   createEffect(() => {
     if (!props.enabled() || editor()) {
@@ -44,13 +49,29 @@ export function NoteEditor(props: Readonly<NoteEditorProps>) {
       return;
     }
     if (tab) {
+      const nextShownTab = { path: tab.path, content: tab.content, tags: [...tab.tags] };
+      if (
+        shownTab &&
+        shownTab.path === tab.path &&
+        shownTab.content === tab.content &&
+        sameTags(shownTab.tags, tab.tags)
+      ) {
+        return;
+      }
+      if (shownTab?.path === tab.path && tab.dirty) {
+        shownTab = nextShownTab;
+        return;
+      }
+      shownTab = nextShownTab;
       instance.showEditor(tab.path, tab.content, tab.tags);
     } else {
+      shownTab = null;
       instance.hideEditor();
     }
   });
 
   onCleanup(() => {
+    shownTab = null;
     editor()?.destroy();
     props.onEditorChange(null);
   });
