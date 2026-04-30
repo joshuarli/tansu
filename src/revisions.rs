@@ -15,6 +15,47 @@ fn revisions_dir(root: &Path, rel_path: &str) -> PathBuf {
     root.join(".tansu/revisions").join(stem)
 }
 
+pub fn migrate_revisions(root: &Path, old_rel_path: &str, new_rel_path: &str) {
+    let old_dir = revisions_dir(root, old_rel_path);
+    let new_dir = revisions_dir(root, new_rel_path);
+    if old_dir == new_dir || !old_dir.exists() {
+        return;
+    }
+    if let Some(parent) = new_dir.parent()
+        && fs::create_dir_all(parent).is_err()
+    {
+        return;
+    }
+    if !new_dir.exists() && fs::rename(&old_dir, &new_dir).is_ok() {
+        return;
+    }
+    if fs::create_dir_all(&new_dir).is_err() {
+        return;
+    }
+
+    let Ok(entries) = fs::read_dir(&old_dir) else {
+        return;
+    };
+    let mut counter = 0u64;
+    for entry in entries.filter_map(|e| e.ok()) {
+        if !entry.path().is_file() {
+            continue;
+        }
+        let mut dest = new_dir.join(entry.file_name());
+        while dest.exists() {
+            counter += 1;
+            let ts = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0)
+                + counter;
+            dest = new_dir.join(format!("{ts}.md"));
+        }
+        let _ = fs::rename(entry.path(), dest);
+    }
+    let _ = fs::remove_dir_all(old_dir);
+}
+
 /// Save the current content of a note as a revision.
 /// In encrypted mode, the file is already encrypted on disk, so we copy raw bytes
 /// (the revision file will be encrypted too).
@@ -131,6 +172,18 @@ mod tests {
         save_revision(&tmp, "sub/note.md", &note);
         let revs = list_revisions(&tmp, "sub/note.md");
         assert_eq!(revs.len(), 1);
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn migrate_revisions_moves_history() {
+        let tmp = temp_dir("migrate");
+        let note = tmp.join("old.md");
+        fs::write(&note, "content").unwrap();
+        save_revision(&tmp, "old.md", &note);
+        migrate_revisions(&tmp, "old.md", "new.md");
+        assert!(list_revisions(&tmp, "old.md").is_empty());
+        assert_eq!(list_revisions(&tmp, "new.md").len(), 1);
         let _ = fs::remove_dir_all(&tmp);
     }
 

@@ -6,6 +6,7 @@ import { scrollSelectedIndexIntoView, wrapSelectionIndex } from "./listbox.ts";
 import { reportActionError } from "./notify.ts";
 import { createOverlayLifecycle } from "./overlay-lifecycle.ts";
 import { OverlayFrame } from "./overlay.tsx";
+import { setCursor } from "./tab-state.ts";
 import { uiStore } from "./ui-store.ts";
 
 type SearchModalProps = {
@@ -134,9 +135,11 @@ export function SearchModal(props: Readonly<SearchModalProps>) {
     const path = trimmed.endsWith(".md") ? trimmed : `${trimmed}.md`;
     close();
     try {
-      await createNote(path);
+      const result = await createNote(path);
+      const savedPath = result.path ?? path;
+      setCursor(savedPath, `# ${result.title || trimmed}\n\n`.length);
       props.invalidateNoteCache();
-      await props.openTab(path);
+      await props.openTab(savedPath);
     } catch (error) {
       reportActionError(`Failed to create ${path}`, error);
     }

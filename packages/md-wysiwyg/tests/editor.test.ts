@@ -1,6 +1,6 @@
 /// Tests for createEditor() wiring layer.
 
-import { beforeAll, afterAll, afterEach, beforeEach, describe, it, expect, vi } from "vitest";
+
 
 import { createEditor } from "../src/editor.ts";
 import { toggleBold } from "../src/format-ops.ts";
@@ -32,8 +32,8 @@ describe("createEditor", () => {
 
   it("mounts contentEl and sourceEl inside container", () => {
     const handle = createEditor(container);
-    expect(container.contains(handle.contentEl)).toBe(true);
-    expect(container.contains(handle.sourceEl)).toBe(true);
+    expect(container.contains(handle.contentEl)).toBeTruthy();
+    expect(container.contains(handle.sourceEl)).toBeTruthy();
     handle.destroy();
   });
 
@@ -52,8 +52,8 @@ describe("createEditor", () => {
   it("destroy removes contentEl and sourceEl from container", () => {
     const handle = createEditor(container);
     handle.destroy();
-    expect(container.contains(handle.contentEl)).toBe(false);
-    expect(container.contains(handle.sourceEl)).toBe(false);
+    expect(container.contains(handle.contentEl)).toBeFalsy();
+    expect(container.contains(handle.sourceEl)).toBeFalsy();
   });
 
   // ── setValue / getValue ────────────────────────────────────────────────────
@@ -133,7 +133,7 @@ describe("createEditor", () => {
 
     onChange.mockClear();
     handle.applyFormat(toggleBold);
-    expect(onChange).toHaveBeenCalledOnce();
+    expect(onChange).toHaveBeenCalledTimes(1);
     handle.destroy();
   });
 
@@ -226,7 +226,7 @@ describe("createEditor", () => {
     const prevValue = handle.getValue();
     handle.undo();
     // undoIndex <= 1 after setValue + debounce push, undo goes back
-    expect(typeof handle.getValue()).toBe("string");
+    expectTypeOf(handle.getValue()).toBeString();
 
     vi.useRealTimers();
     handle.destroy();
@@ -238,7 +238,7 @@ describe("createEditor", () => {
     const handle = createEditor(container);
     handle.setValue("hello");
     handle.toggleSourceMode();
-    expect(handle.isSourceMode).toBe(true);
+    expect(handle.isSourceMode).toBeTruthy();
     expect(handle.contentEl.style.display).toBe("none");
     expect(handle.sourceEl.style.display).toBe("");
     handle.destroy();
@@ -249,7 +249,7 @@ describe("createEditor", () => {
     handle.setValue("hello");
     handle.toggleSourceMode();
     handle.toggleSourceMode();
-    expect(handle.isSourceMode).toBe(false);
+    expect(handle.isSourceMode).toBeFalsy();
     expect(handle.contentEl.style.display).toBe("");
     expect(handle.sourceEl.style.display).toBe("none");
     handle.destroy();
@@ -300,14 +300,14 @@ describe("createEditor", () => {
 
   it("isSourceMode starts false", () => {
     const handle = createEditor(container);
-    expect(handle.isSourceMode).toBe(false);
+    expect(handle.isSourceMode).toBeFalsy();
     handle.destroy();
   });
 
   it("isSourceMode is true after toggleSourceMode", () => {
     const handle = createEditor(container);
     handle.toggleSourceMode();
-    expect(handle.isSourceMode).toBe(true);
+    expect(handle.isSourceMode).toBeTruthy();
     handle.destroy();
   });
 
@@ -385,7 +385,7 @@ describe("createEditor", () => {
 
   it("HTML paste uses setHTML when available", async () => {
     const originalSetHtml = Element.prototype.setHTML;
-    const setHtml = vi.fn(function (this: Element, html: string) {
+    const setHtml = vi.fn(function  setHtml(this: Element, html: string) {
       expect(html).toContain("<strong>bold</strong>");
       this.innerHTML = "<p><strong>bold</strong></p>";
     });
@@ -407,7 +407,7 @@ describe("createEditor", () => {
       handle.contentEl.dispatchEvent(pasteEvent);
 
       await Promise.resolve();
-      expect(setHtml).toHaveBeenCalledTimes(1);
+      expect(setHtml).toHaveBeenCalledOnce();
       expect(handle.getValue()).toBe("**bold**");
       handle.destroy();
     } finally {

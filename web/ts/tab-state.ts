@@ -25,6 +25,10 @@ export type Tab = {
   lastSavedTags: string[];
 };
 
+function contentTitle(title: string | undefined, path: string): string {
+  return title && title.trim().length > 0 ? title : stemFromPath(path);
+}
+
 export function createTabsStore() {
   const tabs: Tab[] = [];
   let activeIndex = -1;
@@ -88,10 +92,11 @@ export function createTabsStore() {
         return tabs[existing]!;
       }
 
-      const { content, mtime, tags } = await fetchNoteWithOfflineFallback(path);
+      const note = await fetchNoteWithOfflineFallback(path);
+      const { content, mtime, tags } = note;
       const tab: Tab = {
         path,
-        title: stemFromPath(path),
+        title: contentTitle(note.title, path),
         dirty: false,
         content,
         tags,
@@ -124,6 +129,7 @@ export function createTabsStore() {
             mtime: note.mtime,
             lastSavedMd: note.content,
             lastSavedTags: [...note.tags],
+            title: contentTitle(note.title, tab.path),
           };
         } catch {
           console.warn(`Could not load ${tab.path} offline`);
@@ -204,7 +210,7 @@ export function createTabsStore() {
         syncSignals();
       }
     },
-    markClean(path: string, content: string, mtime: number) {
+    markClean(path: string, content: string, mtime: number, title?: string) {
       const idx = tabs.findIndex((tab) => tab.path === path);
       if (idx !== -1) {
         const tab = tabs[idx]!;
@@ -213,7 +219,7 @@ export function createTabsStore() {
           content,
           mtime,
           lastSavedMd: content,
-          title: stemFromPath(path),
+          title: contentTitle(title, path),
           dirty: false,
         };
         cacheNoteSnapshot(path, content, mtime, tab.tags);
@@ -251,7 +257,13 @@ export function createTabsStore() {
         syncSignals();
       }
     },
-    updateTabContent(path: string, content: string, mtime: number, tags: string[] = []) {
+    updateTabContent(
+      path: string,
+      content: string,
+      mtime: number,
+      tags: string[] = [],
+      title?: string,
+    ) {
       const idx = tabs.findIndex((tab) => tab.path === path);
       if (idx === -1) {
         return;
@@ -264,14 +276,14 @@ export function createTabsStore() {
         lastSavedMd: content,
         lastSavedTags: [...tags],
         dirty: false,
-        title: stemFromPath(path),
+        title: contentTitle(title, path),
       };
       syncSignals();
     },
-    updateTabPath(oldPath: string, newPath: string) {
+    updateTabPath(oldPath: string, newPath: string, title?: string) {
       const idx = tabs.findIndex((tab) => tab.path === oldPath);
       if (idx !== -1) {
-        tabs[idx] = { ...tabs[idx]!, path: newPath, title: stemFromPath(newPath) };
+        tabs[idx] = { ...tabs[idx]!, path: newPath, title: contentTitle(title, newPath) };
         notifyChange();
       }
     },
@@ -301,17 +313,19 @@ export function createTabsStore() {
           let content = "";
           let mtime = 0;
           let tags: string[] = [];
+          let title = stemFromPath(path);
           try {
             const note = await fetchNoteWithOfflineFallback(path);
             ({ content } = note);
             ({ mtime } = note);
             ({ tags } = note);
+            title = contentTitle(note.title, path);
           } catch {
             console.warn(`Could not load ${path} for session restore`);
           }
           tabs.push({
             path,
-            title: stemFromPath(path),
+            title,
             dirty: false,
             content,
             tags,

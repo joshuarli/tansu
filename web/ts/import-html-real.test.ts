@@ -3,15 +3,15 @@ import { join } from "node:path";
 
 import { setupDOM } from "./test-helper.ts";
 
-const showAlertDialog = vi.fn(async () => undefined);
+const showAlertDialog = vi.fn(async () => {});
 const createNote = vi.fn(async () => ({ mtime: 1 }));
 const listNotes = vi.fn(async () => []);
-const openTab = vi.fn(async () => undefined);
-const notifyFilesChanged = vi.fn(() => undefined);
-const showNotification = vi.fn(() => undefined);
-const reportActionError = vi.fn(() => undefined);
+const openTab = vi.fn(async () => {});
+const notifyFilesChanged = vi.fn(() => {});
+const showNotification = vi.fn(() => {});
+const reportActionError = vi.fn(() => {});
 
-vi.mock("./alert-dialog.tsx", async () => {
+vi.mock(import('./alert-dialog.tsx'), async () => {
   const mod = await vi.importActual<typeof import("./alert-dialog.tsx")>("./alert-dialog.tsx");
   return {
     ...mod,
@@ -19,7 +19,7 @@ vi.mock("./alert-dialog.tsx", async () => {
   };
 });
 
-vi.mock("./api.ts", () => ({
+vi.mock(import('./api.ts'), () => ({
   ApiError: class ApiError extends Error {
     status: number;
     context: string;
@@ -35,23 +35,23 @@ vi.mock("./api.ts", () => ({
   listNotes,
 }));
 
-vi.mock("./tab-state.ts", () => ({
+vi.mock(import('./tab-state.ts'), () => ({
   openTab,
 }));
 
-vi.mock("./server-store.ts", () => ({
+vi.mock(import('./server-store.ts'), () => ({
   serverStore: {
     notifyFilesChanged,
   },
 }));
 
-vi.mock("./ui-store.ts", () => ({
+vi.mock(import('./ui-store.ts'), () => ({
   uiStore: {
     showNotification,
   },
 }));
 
-vi.mock("./notify.ts", () => ({
+vi.mock(import('./notify.ts'), () => ({
   reportActionError,
 }));
 
@@ -92,8 +92,8 @@ describe("import html real fixture", () => {
     await new Promise((resolve) => setTimeout(resolve, 50));
 
     expect(showAlertDialog).not.toHaveBeenCalled();
-    expect(createNote).toHaveBeenCalledTimes(1);
-    const calls = createNote.mock.calls as unknown as Array<[string, string]>;
+    expect(createNote).toHaveBeenCalledOnce();
+    const calls = createNote.mock.calls as unknown as [string, string][];
     expect(calls[0]).toBeDefined();
     const [path, content] = calls[0]!;
     expect(path).toBe("import-article.md");

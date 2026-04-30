@@ -1,22 +1,22 @@
 import { setupDOM } from "./test-helper.ts";
 
-const showAlertDialog = vi.fn(async () => undefined);
+const showAlertDialog = vi.fn(async () => {});
 const createNote = vi.fn(async () => ({ mtime: 1 }));
 const listNotes = vi.fn(async () => []);
-const openTab = vi.fn(async () => undefined);
-const notifyFilesChanged = vi.fn(() => undefined);
-const showNotification = vi.fn(() => undefined);
-const reportActionError = vi.fn(() => undefined);
+const openTab = vi.fn(async () => {});
+const notifyFilesChanged = vi.fn(() => {});
+const showNotification = vi.fn(() => {});
+const reportActionError = vi.fn(() => {});
 
-vi.mock("defuddle/full", () => ({
+vi.mock(import('defuddle/full'), () => ({
   default: vi.fn(),
 }));
 
-vi.mock("./alert-dialog.tsx", () => ({
+vi.mock(import('./alert-dialog.tsx'), () => ({
   showAlertDialog,
 }));
 
-vi.mock("./api.ts", () => ({
+vi.mock(import('./api.ts'), () => ({
   ApiError: class ApiError extends Error {
     status: number;
     context: string;
@@ -32,23 +32,23 @@ vi.mock("./api.ts", () => ({
   listNotes,
 }));
 
-vi.mock("./tab-state.ts", () => ({
+vi.mock(import('./tab-state.ts'), () => ({
   openTab,
 }));
 
-vi.mock("./server-store.ts", () => ({
+vi.mock(import('./server-store.ts'), () => ({
   serverStore: {
     notifyFilesChanged,
   },
 }));
 
-vi.mock("./ui-store.ts", () => ({
+vi.mock(import('./ui-store.ts'), () => ({
   uiStore: {
     showNotification,
   },
 }));
 
-vi.mock("./notify.ts", () => ({
+vi.mock(import('./notify.ts'), () => ({
   reportActionError,
 }));
 

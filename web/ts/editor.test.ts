@@ -88,7 +88,7 @@ describe("editor", () => {
 
   function latest<T extends Element>(selector: string): T {
     const matches = document.querySelectorAll<T>(selector);
-    const el = matches[matches.length - 1];
+    const el = matches.at(-1);
     if (!el) {
       throw new Error(`expected element for selector: ${selector}`);
     }
@@ -1399,7 +1399,7 @@ describe("editor", () => {
     // Register a success response for the force save
     mock.on("PUT", "/api/note", { mtime: 3000 });
 
-    const keepBtn = Array.from(banner!.querySelectorAll("button")).find(
+    const keepBtn = [...banner!.querySelectorAll('button')].find(
       (b) => b.textContent?.trim() === "Keep mine",
     ) as HTMLButtonElement | undefined;
     expect(keepBtn).toBeDefined();
@@ -1434,7 +1434,7 @@ describe("editor", () => {
     const banner = document.querySelector(".conflict-banner");
     expect(banner).not.toBeNull();
 
-    const theirsBtn = Array.from(banner!.querySelectorAll("button")).find(
+    const theirsBtn = [...banner!.querySelectorAll('button')].find(
       (b) => b.textContent?.trim() === "Take theirs",
     ) as HTMLButtonElement | undefined;
     expect(theirsBtn).toBeDefined();

@@ -35,7 +35,7 @@ export function createServerStore() {
   });
 
   let deps: ServerStoreDeps | null = null;
-  let backoff = createBackoff([...SSE_BACKOFF_DELAYS_MS]);
+  const backoff = createBackoff([...SSE_BACKOFF_DELAYS_MS]);
   let lifecycle: ReturnType<typeof createSseLifecycle> | null = null;
   let started = false;
 

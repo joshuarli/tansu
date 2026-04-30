@@ -96,6 +96,12 @@ export function initEditor(elements: Readonly<EditorElements>): EditorInstance {
     getContainer: () => container,
     loadContent,
     onDisplayState: displayState.setType,
+    onPathChanged: (path) => {
+      currentPath = path;
+      if (backlinksEl) {
+        loadBacklinks(backlinksEl, path);
+      }
+    },
   });
 
   const shellWiring = wireEditorShell({

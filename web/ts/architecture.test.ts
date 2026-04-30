@@ -26,7 +26,7 @@ function walkSourceFiles(dir: string): string[] {
       files.push(path);
     }
   }
-  return files.sort();
+  return files.toSorted();
 }
 
 function importSpecs(src: string): string[] {

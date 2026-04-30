@@ -90,7 +90,7 @@ describe("NoteEditor", () => {
       lastSavedTags: ["alpha"],
     });
     const harness = renderComponent(() => (
-      <NoteEditor enabled={enabled} activeTab={activeTab} onEditorChange={() => undefined} />
+      <NoteEditor enabled={enabled} activeTab={activeTab} onEditorChange={() => {}} />
     ));
 
     await new Promise((resolve) => setTimeout(resolve, 40));

@@ -1,21 +1,49 @@
-import { forceSaveNote, saveNote } from "./api.ts";
+import { forceSaveNote, getNote, saveNote } from "./api.ts";
 import { showConflictBanner, handleReloadConflict } from "./conflict.ts";
 import { AUTOSAVE_DELAY_MS, AUTOSAVE_RETRY_DELAY_MS } from "./constants.ts";
 import { serverStore } from "./server-store.ts";
-import { getActiveTab, getTabs, markClean, setCursor } from "./tab-state.ts";
+import {
+  getActiveTab,
+  getTabs,
+  markClean,
+  setCursor,
+  updateTabContent,
+  updateTabPath,
+} from "./tab-state.ts";
 
 export type SaveAction =
-  | { type: "clean"; content: string; mtime: number }
+  | {
+      type: "clean";
+      content: string;
+      mtime: number;
+      path?: string;
+      title?: string;
+      updated?: string[];
+    }
   | { type: "false-conflict"; content: string }
   | { type: "real-conflict"; diskContent: string; diskMtime: number };
 
 export function classifySaveResult(
-  result: { conflict?: boolean; content?: string; mtime: number },
+  result: {
+    conflict?: boolean;
+    content?: string;
+    mtime: number;
+    path?: string;
+    title?: string;
+    updated?: string[];
+  },
   editorContent: string,
   tabContent: string,
 ): SaveAction {
   if (!result.conflict) {
-    return { type: "clean", content: editorContent, mtime: result.mtime };
+    return {
+      type: "clean",
+      content: editorContent,
+      mtime: result.mtime,
+      ...(result.path !== undefined ? { path: result.path } : {}),
+      ...(result.title !== undefined ? { title: result.title } : {}),
+      ...(result.updated !== undefined ? { updated: result.updated } : {}),
+    };
   }
   const diskContent = result.content ?? "";
   if (diskContent === editorContent || diskContent === tabContent) {
@@ -45,6 +73,7 @@ type SaveControllerOptions = {
   getContainer: () => HTMLElement | null;
   loadContent: (markdown: string, explicitOffset?: number) => void;
   onDisplayState: (state: "editing" | "conflict") => void;
+  onPathChanged?: (path: string) => void;
 };
 
 export function createSaveController(opts: Readonly<SaveControllerOptions>) {
@@ -119,15 +148,30 @@ export function createSaveController(opts: Readonly<SaveControllerOptions>) {
     const action = classifySaveResult(result, content, tab.lastSavedMd);
 
     switch (action.type) {
-      case "clean":
-        markClean(currentPath, action.content, action.mtime);
-        serverStore.notifyFilesChanged(currentPath);
+      case "clean": {
+        const savedPath = action.path ?? currentPath;
+        const pathChanged = savedPath !== currentPath;
+        if (pathChanged) {
+          updateTabPath(currentPath, savedPath, action.title);
+          opts.onPathChanged?.(savedPath);
+        }
+        markClean(savedPath, action.content, action.mtime, action.title);
+        await reloadUpdatedNotes(action.updated ?? [], savedPath);
+        serverStore.notifyFilesChanged(pathChanged ? undefined : savedPath);
         opts.onDisplayState("editing");
         break;
+      }
       case "false-conflict": {
         const retry = await forceSaveNote(currentPath, content);
-        markClean(currentPath, content, retry.mtime);
-        serverStore.notifyFilesChanged(currentPath);
+        const savedPath = retry.path ?? currentPath;
+        const pathChanged = savedPath !== currentPath;
+        if (pathChanged) {
+          updateTabPath(currentPath, savedPath, retry.title);
+          opts.onPathChanged?.(savedPath);
+        }
+        markClean(savedPath, content, retry.mtime, retry.title);
+        await reloadUpdatedNotes(retry.updated ?? [], savedPath);
+        serverStore.notifyFilesChanged(pathChanged ? undefined : savedPath);
         opts.onDisplayState("editing");
         break;
       }
@@ -147,13 +191,29 @@ export function createSaveController(opts: Readonly<SaveControllerOptions>) {
         }
         return;
       }
-      default:
+      default: {
         assertNever(action);
+      }
     }
 
     if (cursorOffset >= 0) {
-      setCursor(currentPath, cursorOffset);
+      setCursor(opts.getCurrentPath() ?? currentPath, cursorOffset);
     }
+  }
+
+  async function reloadUpdatedNotes(updated: readonly string[], activePath: string) {
+    await Promise.all(
+      updated
+        .filter((path) => path !== activePath)
+        .map(async (path) => {
+          try {
+            const note = await getNote(path);
+            updateTabContent(path, note.content, note.mtime, note.tags, note.title);
+          } catch {
+            /* ignore reload failures */
+          }
+        }),
+    );
   }
 
   function reloadFromDisk(content: string, mtime: number) {

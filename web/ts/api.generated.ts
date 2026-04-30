@@ -2,9 +2,16 @@
 
 export type FieldScores = { title: number; headings: number; tags: number; content: number };
 
-export type NoteResponse = { content: string; mtime: number; tags: Array<string> };
+export type NoteResponse = { content: string; mtime: number; tags: Array<string>; title: string };
 
-export type SaveResult = { mtime: number; conflict?: boolean; content?: string };
+export type SaveResult = {
+  mtime: number;
+  path?: string;
+  title?: string;
+  updated?: Array<string>;
+  conflict?: boolean;
+  content?: string;
+};
 
 export type SearchHit = {
   path: string;
@@ -25,7 +32,7 @@ export type RecentFileEntry = { path: string; title: string; mtime: number };
 
 export type PinnedFileEntry = { path: string; title: string };
 
-export type RenameResponse = { updated: Array<string> };
+export type RenameResponse = { path: string; title: string; updated: Array<string> };
 
 export type FilenameResponse = { filename: string };
 

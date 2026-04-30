@@ -14,7 +14,7 @@ use tantivy::{
     schema::*,
 };
 
-use crate::{http, util};
+use crate::{http, scanner, util};
 
 pub struct NameEntry {
     pub path: String,
@@ -74,21 +74,15 @@ impl FileNameIndex {
     }
 
     #[allow(clippy::readonly_write_lock)]
-    fn add_doc(&self, rel_path: &str, mtime: u64) {
+    fn add_doc(&self, rel_path: &str, title: &str, mtime: u64) {
         let f = &self.inner.fields;
-        let stem = Path::new(rel_path)
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or(rel_path)
-            .to_string();
-
         let writer = self.inner.writer.write().unwrap();
         let path_term = tantivy::Term::from_field_text(f.path, rel_path);
         writer.delete_term(path_term);
 
         let mut doc = TantivyDocument::new();
         doc.add_text(f.path, rel_path);
-        doc.add_text(f.stem, &stem);
+        doc.add_text(f.stem, title);
         doc.add_u64(f.mtime, mtime);
         let _ = writer.add_document(doc);
     }
@@ -114,8 +108,8 @@ impl FileNameIndex {
         }
     }
 
-    pub fn index_file(&self, rel_path: &str, mtime: u64) {
-        self.add_doc(rel_path, mtime);
+    pub fn index_file(&self, rel_path: &str, title: &str, mtime: u64) {
+        self.add_doc(rel_path, title, mtime);
         self.inner.uncommitted.store(true, Ordering::Release);
     }
 
@@ -246,7 +240,9 @@ impl FileNameIndex {
                 let rel = path.strip_prefix(root).unwrap_or(&path);
                 let rel_str = rel.to_string_lossy();
                 let mtime = http::mtime_secs(&path);
-                idx.add_doc(&rel_str, mtime);
+                let content = fs::read_to_string(&path).unwrap_or_default();
+                let title = scanner::official_title(&rel_str, &content);
+                idx.add_doc(&rel_str, &title, mtime);
             }
         }
     }
@@ -268,8 +264,8 @@ mod tests {
     #[test]
     fn search_exact_match() {
         let (idx, dir) = make_idx("exact");
-        idx.index_file("projects/my-rust-notes.md", 1000);
-        idx.index_file("random.md", 2000);
+        idx.index_file("projects/my-rust-notes.md", "my-rust-notes", 1000);
+        idx.index_file("random.md", "random", 2000);
         let results = idx.search_names("rust", 10);
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].path, "projects/my-rust-notes.md");
@@ -279,7 +275,7 @@ mod tests {
     #[test]
     fn search_fuzzy_match() {
         let (idx, dir) = make_idx("fuzzy");
-        idx.index_file("launchctl-notes.md", 1000);
+        idx.index_file("launchctl-notes.md", "launchctl-notes", 1000);
         // "lunchctl" is edit-distance 1 from "launchctl"
         let results = idx.search_names("lunchctl", 10);
         assert!(!results.is_empty(), "fuzzy should match launchctl");
@@ -290,7 +286,7 @@ mod tests {
     #[test]
     fn search_case_insensitive() {
         let (idx, dir) = make_idx("case");
-        idx.index_file("Rust-Notes.md", 1000);
+        idx.index_file("Rust-Notes.md", "Rust-Notes", 1000);
         let results = idx.search_names("rust", 10);
         assert!(!results.is_empty());
         let _ = fs::remove_dir_all(&dir);
@@ -299,8 +295,8 @@ mod tests {
     #[test]
     fn search_multi_token_and() {
         let (idx, dir) = make_idx("multi");
-        idx.index_file("rust-tokio-notes.md", 1000);
-        idx.index_file("rust-stdlib-notes.md", 2000);
+        idx.index_file("rust-tokio-notes.md", "rust-tokio-notes", 1000);
+        idx.index_file("rust-stdlib-notes.md", "rust-stdlib-notes", 2000);
         // Both tokens required — only rust-tokio-notes has "tokio"
         let results = idx.search_names("rust tokio", 10);
         assert_eq!(results.len(), 1);
@@ -311,7 +307,7 @@ mod tests {
     #[test]
     fn search_empty_query_returns_nothing() {
         let (idx, dir) = make_idx("empty");
-        idx.index_file("note.md", 1000);
+        idx.index_file("note.md", "note", 1000);
         assert!(idx.search_names("", 10).is_empty());
         let _ = fs::remove_dir_all(&dir);
     }
@@ -319,19 +315,19 @@ mod tests {
     #[test]
     fn title_is_stem_not_extension() {
         let (idx, dir) = make_idx("title");
-        idx.index_file("my-great-note.md", 1000);
+        idx.index_file("my-great-note.md", "My Great Note", 1000);
         let results = idx.search_names("great", 10);
         assert_eq!(results.len(), 1);
-        assert_eq!(results[0].title, "my-great-note");
+        assert_eq!(results[0].title, "My Great Note");
         let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn recent_sorted_descending() {
         let (idx, dir) = make_idx("recent_sort");
-        idx.index_file("old.md", 1000);
-        idx.index_file("new.md", 9000);
-        idx.index_file("middle.md", 5000);
+        idx.index_file("old.md", "old", 1000);
+        idx.index_file("new.md", "new", 9000);
+        idx.index_file("middle.md", "middle", 5000);
         let results = idx.recent(10);
         assert_eq!(results.len(), 3);
         assert_eq!(results[0].path, "new.md");
@@ -344,7 +340,7 @@ mod tests {
     fn recent_respects_limit() {
         let (idx, dir) = make_idx("recent_limit");
         for i in 0..10u64 {
-            idx.index_file(&format!("note{i}.md"), i * 1000);
+            idx.index_file(&format!("note{i}.md"), &format!("note{i}"), i * 1000);
         }
         let results = idx.recent(3);
         assert_eq!(results.len(), 3);
@@ -355,8 +351,8 @@ mod tests {
     #[test]
     fn remove_file_disappears_from_results() {
         let (idx, dir) = make_idx("remove");
-        idx.index_file("keep.md", 1000);
-        idx.index_file("delete-me.md", 2000);
+        idx.index_file("keep.md", "keep", 1000);
+        idx.index_file("delete-me.md", "delete-me", 2000);
         // Commit so delete_term in the next batch affects committed docs
         idx.commit();
         idx.remove_file("delete-me.md");
@@ -370,11 +366,11 @@ mod tests {
     #[test]
     fn index_file_updates_mtime() {
         let (idx, dir) = make_idx("update_mtime");
-        idx.index_file("note.md", 1000);
-        idx.index_file("other.md", 500);
+        idx.index_file("note.md", "note", 1000);
+        idx.index_file("other.md", "other", 500);
         // Commit so the subsequent delete_term removes the committed "note.md"
         idx.commit();
-        idx.index_file("note.md", 9000);
+        idx.index_file("note.md", "note", 9000);
         let results = idx.recent(10);
         assert_eq!(results.len(), 2);
         assert_eq!(results[0].path, "note.md");

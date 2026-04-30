@@ -20,9 +20,9 @@ describe("renderComponent", () => {
 
   it("removes container from document on dispose", () => {
     const { container, dispose } = renderComponent(() => <span>x</span>);
-    expect(document.body.contains(container)).toBe(true);
+    expect(document.body.contains(container)).toBeTruthy();
     dispose();
-    expect(document.body.contains(container)).toBe(false);
+    expect(document.body.contains(container)).toBeFalsy();
   });
 
   it("reflects reactive signal updates", async () => {

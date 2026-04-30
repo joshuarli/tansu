@@ -3,7 +3,7 @@ import { stemFromPath } from "@joshuarli98/md-wysiwyg";
 import { createNote, listNotes } from "./api.ts";
 import { invalidateNoteCache, type EditorInstance } from "./editor.ts";
 import { serverStore } from "./server-store.ts";
-import { closeActiveTab, getActiveTab, openTab, syncToServer } from "./tab-state.ts";
+import { closeActiveTab, getActiveTab, openTab, setCursor, syncToServer } from "./tab-state.ts";
 import { uiStore } from "./ui-store.ts";
 import { registerWikiLinkClickHandler } from "./wikilinks.ts";
 
@@ -22,9 +22,10 @@ export function registerWikiLinkNavigation(): () => void {
     }
 
     const path = `${target}.md`;
-    await createNote(path);
+    const result = await createNote(path);
+    setCursor(result.path ?? path, `# ${result.title || target}\n\n`.length);
     invalidateNoteCache();
-    await openTab(path);
+    await openTab(result.path ?? path);
   });
 }
 
@@ -42,7 +43,7 @@ export function configureServerRuntime(opts: Readonly<ConfigureServerRuntimeOpti
     },
     closeActiveTab,
     syncSessionToServer: syncToServer,
-    refreshVaultSwitcher: async () => undefined,
+    refreshVaultSwitcher: async () => {},
     showUnlockScreen: opts.showUnlockScreen,
     clearServerStatus: () => uiStore.clearServerStatus(),
     setServerStatus: (msg) => uiStore.setServerStatus(msg),

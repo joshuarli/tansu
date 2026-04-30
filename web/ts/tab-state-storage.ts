@@ -5,6 +5,7 @@ export type StoredNote = {
   content: string;
   mtime: number;
   tags: string[];
+  title?: string;
 };
 
 export function persistSessionState(state: SessionState): void {

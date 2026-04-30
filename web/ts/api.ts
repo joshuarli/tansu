@@ -134,7 +134,7 @@ export async function searchNotes(q: string, path?: string): Promise<SearchResul
 
 export async function getNote(path: string): Promise<Note> {
   const note = await requestJson<Note>(apiPath("/api/note", { path }), "get note");
-  return { ...note, tags: note.tags ?? [] };
+  return { ...note, tags: note.tags ?? [], title: note.title ?? "" };
 }
 
 export async function saveNote(
@@ -181,11 +181,17 @@ export async function deleteNote(path: string): Promise<void> {
 }
 
 export async function renameNote(oldPath: string, newPath: string): Promise<RenameResponse> {
-  return requestJson<RenameResponse>("/api/rename", "rename", {
+  const result = await requestJson<RenameResponse>("/api/rename", "rename", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ old_path: oldPath, new_path: newPath } satisfies RenameRequest),
   });
+  return {
+    ...result,
+    path: result.path ?? newPath,
+    title: result.title ?? "",
+    updated: result.updated ?? [],
+  };
 }
 
 export async function listNotes(): Promise<NoteEntry[]> {

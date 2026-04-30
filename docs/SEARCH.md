@@ -2,7 +2,7 @@
 
 ## Model
 
-- Indexed fields: `title`, `headings`, metadata `tags`, and stripped `content`. `path` is only an exact filter for scoped in-note search.
+- Indexed fields: `title`, `headings`, metadata `tags`, and stripped `content`. `title` is the first markdown heading in the note, falling back to the filename stem when no heading exists. `path` is only an exact filter for scoped in-note search.
 - Field weights: `weight_title`, `weight_headings`, `weight_tags`, and `weight_content` are multiplicative boosts at query-build time. Defaults are title `10.0`, headings `5.0`, tags `25.0`, content `1.0`.
 - Tokenization: query text is split on non-alphanumeric characters to mirror Tantivy's default tokenizer, so `jpeg-xl` searches as `jpeg` + `xl` and `some_function` as `some` + `function`.
 - Quoted queries: double-quoted text adds a literal phrase constraint. `"oat groats"` still contributes `oat` and `groats` as normal terms, but also requires those tokens to appear adjacent and in order.

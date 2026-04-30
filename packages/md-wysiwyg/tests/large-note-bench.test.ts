@@ -1,6 +1,6 @@
 import { performance } from "node:perf_hooks";
 
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+
 
 import { createEditor } from "../src/editor.ts";
 import { renderMarkdown } from "../src/markdown.ts";

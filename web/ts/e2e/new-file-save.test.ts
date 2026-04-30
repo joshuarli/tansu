@@ -31,9 +31,11 @@ describe("e2e: new file save regression", () => {
     await page.waitForSelector(".editor-content", { timeout: 3000 });
     await page.waitForTimeout(200);
 
-    // Type "foo"
-    await page.click(".editor-content");
-    await page.keyboard.type("foo");
+    await page.click(".editor-toolbar-btn--source");
+    await page.waitForSelector(".editor-source", { state: "visible", timeout: 3000 });
+
+    // Type "foo" in the body after the generated H1.
+    await page.fill(".editor-source", "# regression-test-note\n\nfoo");
     await page.waitForSelector(".tab.active .dirty", { timeout: 2000 });
 
     // First save
@@ -42,14 +44,13 @@ describe("e2e: new file save regression", () => {
     // Dirty indicator should be gone
     await expect(page.isVisible(".tab.active .dirty")).resolves.toBeFalsy();
 
-    // Verify file has "foo"
+    // Verify file has the generated title and "foo"
     const filePath = join(notesDir, "regression-test-note.md");
     const after1 = readFileSync(filePath, "utf8");
-    expect(after1).toBe("foo");
+    expect(after1).toBe("# regression-test-note\n\nfoo");
 
-    // Press Enter, type "bar"
-    await page.keyboard.press("Enter");
-    await page.keyboard.type("bar");
+    // Add "bar" on the next line.
+    await page.fill(".editor-source", "# regression-test-note\n\nfoo\nbar");
     await page.waitForSelector(".tab.active .dirty", { timeout: 2000 });
 
     // Second save
@@ -57,8 +58,8 @@ describe("e2e: new file save regression", () => {
     await page.waitForTimeout(500);
     await expect(page.isVisible(".tab.active .dirty")).resolves.toBeFalsy();
 
-    // Verify file has "foo\nbar"
+    // Verify file has the generated title and "foo\nbar"
     const after2 = readFileSync(filePath, "utf8");
-    expect(after2).toBe("foo\nbar");
+    expect(after2).toBe("# regression-test-note\n\nfoo\nbar");
   }, 30_000);
 });

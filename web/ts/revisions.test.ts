@@ -15,7 +15,7 @@ describe("revisions", () => {
       path,
       host,
       getCurrentContent: () => "current content",
-      onRestoreRevision: () => undefined,
+      onRestoreRevision: () => {},
       onHide: () => {
         hideCalled = true;
       },

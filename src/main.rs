@@ -5,7 +5,7 @@ use std::{
     net::{TcpListener, TcpStream},
     path::{Path, PathBuf},
     sync::{Arc, Mutex, mpsc},
-    time::Instant,
+    time::{Instant, SystemTime, UNIX_EPOCH},
 };
 
 use tansu::api_types::{
@@ -20,6 +20,7 @@ use tansu::frontmatter;
 use tansu::http::*;
 use tansu::index::Index;
 use tansu::revisions;
+use tansu::scanner;
 use tansu::settings::Settings;
 use tansu::watcher::{self, WatchEvent};
 
@@ -132,10 +133,7 @@ impl Server {
                             .strip_prefix(&self.vaults[self.active].dir)
                             .unwrap_or(&path);
                         let rel_str = rel.to_string_lossy().into_owned();
-                        self.reindex_note(&rel_str, &content, &path);
-                        self.vaults[self.active]
-                            .file_index
-                            .index_file(&rel_str, mtime_secs(&path));
+                        self.reindex_note_and_file(&rel_str, &content, &path);
                         self.broadcast_sse("changed", &rel_str);
                     }
                 }
@@ -197,6 +195,29 @@ impl Server {
         }
     }
 
+    fn create_content_new(&self, path: &Path, content: &[u8]) -> io::Result<()> {
+        self.mark_self_write(path);
+        let data = if let Some(ref vault) = self.vaults[self.active].vault {
+            vault.encrypt(content)
+        } else {
+            content.to_vec()
+        };
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(path)?;
+        if let Err(err) = file.write_all(&data) {
+            let _ = fs::remove_file(path);
+            return Err(err);
+        }
+        Ok(())
+    }
+
+    fn remove_content_file(&self, path: &Path) -> io::Result<()> {
+        self.mark_self_write(path);
+        fs::remove_file(path)
+    }
+
     /// Plain write for non-content files (images upload, etc.)
     fn write_content_raw(&self, path: &Path, content: &[u8]) -> io::Result<()> {
         if let Some(ref vault) = self.vaults[self.active].vault {
@@ -213,6 +234,124 @@ impl Server {
             .index_note(rel_path, content, full_path);
     }
 
+    fn reindex_note_and_file(&self, rel_path: &str, content: &str, full_path: &Path) {
+        self.reindex_note(rel_path, content, full_path);
+        let title = scanner::official_title(rel_path, content);
+        self.vaults[self.active]
+            .file_index
+            .index_file(rel_path, &title, mtime_secs(full_path));
+    }
+
+    fn rel_for_title(base_rel: &str, title: &str) -> String {
+        let dir = base_rel
+            .rfind('/')
+            .map(|idx| &base_rel[..=idx])
+            .unwrap_or("");
+        let stem = scanner::sanitize_filename_stem(title);
+        format!("{dir}{stem}.md")
+    }
+
+    fn rel_with_suffix(base_rel: &str, title: &str, suffix: &str) -> String {
+        let dir = base_rel
+            .rfind('/')
+            .map(|idx| &base_rel[..=idx])
+            .unwrap_or("");
+        let stem = scanner::sanitize_filename_stem(title);
+        format!("{dir}{stem}-{suffix}.md")
+    }
+
+    fn suffix(attempt: u32) -> String {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos() as u64)
+            .unwrap_or(0);
+        let id = nanos ^ ((std::process::id() as u64) << 16) ^ attempt as u64;
+        format!("{:06x}", id & 0x00ff_ffff)
+    }
+
+    fn create_at_available_path(
+        &self,
+        desired_rel: &str,
+        title: &str,
+        content: &str,
+    ) -> io::Result<(String, PathBuf)> {
+        for attempt in 0..100u32 {
+            let rel = if attempt == 0 {
+                desired_rel.to_string()
+            } else {
+                Self::rel_with_suffix(desired_rel, title, &Self::suffix(attempt))
+            };
+            let full = self.vaults[self.active].dir.join(&rel);
+            if !full.starts_with(&self.vaults[self.active].dir) {
+                return Err(io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    "path escapes notes directory",
+                ));
+            }
+            if let Some(parent) = full.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            match self.create_content_new(&full, content.as_bytes()) {
+                Ok(()) => return Ok((rel, full)),
+                Err(err) if err.kind() == io::ErrorKind::AlreadyExists => continue,
+                Err(err) => return Err(err),
+            }
+        }
+        Err(io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            "could not allocate a unique filename",
+        ))
+    }
+
+    fn note_stem(rel_path: &str) -> String {
+        Path::new(rel_path)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or(rel_path)
+            .to_string()
+    }
+
+    fn update_backlinks(&mut self, old_path: &str, new_path: &str) -> Vec<String> {
+        let old_stem = Self::note_stem(old_path);
+        let new_stem = Self::note_stem(new_path);
+        if old_stem == new_stem {
+            return Vec::new();
+        }
+
+        self.vaults[self.active].index.commit();
+        let mut updated = Vec::new();
+        let referencing = self.vaults[self.active].index.get_backlinks(&old_stem);
+        for note_path in &referencing {
+            let note_full = self.vaults[self.active].dir.join(note_path);
+            if let Ok(content) = self.read_content(&note_full) {
+                let new_content =
+                    content.replace(&format!("[[{old_stem}]]"), &format!("[[{new_stem}]]"));
+                if new_content != content {
+                    revisions::save_revision(&self.vaults[self.active].dir, note_path, &note_full);
+                    if let Err(e) = self.write_content(&note_full, new_content.as_bytes()) {
+                        eprintln!("rename: failed to update {}: {e}", note_full.display());
+                        continue;
+                    }
+                    self.reindex_note_and_file(note_path, &new_content, &note_full);
+                    updated.push(note_path.clone());
+                }
+            }
+        }
+        if !updated.is_empty() {
+            self.vaults[self.active].index.commit();
+            self.vaults[self.active].file_index.commit();
+        }
+        updated
+    }
+
+    fn update_pinned_path(&self, old_path: &str, new_path: &str) {
+        let mut pinned = self.load_pinned();
+        if let Some(slot) = pinned.iter_mut().find(|p| *p == old_path) {
+            *slot = new_path.to_string();
+            let _ = self.save_pinned(&pinned);
+        }
+    }
+
     /// Reindex all markdown files using the vault for decryption.
     fn reindex_with_vault(&self) {
         let vault = match &self.vaults[self.active].vault {
@@ -227,14 +366,12 @@ impl Server {
                 let rel = path
                     .strip_prefix(&self.vaults[self.active].dir)
                     .unwrap_or(path);
-                self.reindex_note(&rel.to_string_lossy(), &content, path);
+                let rel_str = rel.to_string_lossy();
+                self.reindex_note_and_file(&rel_str, &content, path);
             }
         }
         self.vaults[self.active].index.commit();
-        self.vaults[self.active].file_index.full_reindex(
-            &self.vaults[self.active].dir,
-            &self.vaults[self.active].settings.excluded_folders,
-        );
+        self.vaults[self.active].file_index.commit();
     }
 
     fn handle(&mut self, mut stream: TcpStream) -> io::Result<()> {
@@ -714,12 +851,14 @@ impl Server {
         let content = self.read_content(&full)?;
         let mtime = mtime_secs(&full);
         let tags = frontmatter::split_tags(&content).tags;
+        let title = scanner::official_title(&rel, &content);
         respond_json(
             sock,
             &NoteResponse {
                 content,
                 mtime,
                 tags,
+                title,
             },
         )
     }
@@ -772,19 +911,31 @@ impl Server {
                 "Conflict",
                 &SaveResult {
                     mtime: current_mtime,
+                    path: None,
+                    title: None,
+                    updated: None,
                     conflict: Some(true),
                     content: Some(current_content),
                 },
             );
         }
 
-        // Skip revision + write if content hasn't changed
         let current_content = self.read_content(&full).unwrap_or_default();
-        if current_content == req.content {
+        let title = scanner::official_title(&rel, &req.content);
+        let desired_rel = if scanner::scan(&req.content).title.is_empty() {
+            rel.clone()
+        } else {
+            Self::rel_for_title(&rel, &title)
+        };
+
+        if current_content == req.content && desired_rel == rel {
             return respond_json(
                 stream,
                 &SaveResult {
                     mtime: current_mtime,
+                    path: Some(rel.clone()),
+                    title: Some(title),
+                    updated: Some(Vec::new()),
                     conflict: None,
                     content: None,
                 },
@@ -792,16 +943,34 @@ impl Server {
         }
 
         revisions::save_revision(&self.vaults[self.active].dir, &rel, &full);
-        self.write_content(&full, req.content.as_bytes())?;
-        self.reindex_note(&rel, &req.content, &full);
-        self.vaults[self.active]
-            .file_index
-            .index_file(&rel, mtime_secs(&full));
+        let (saved_rel, saved_full) = if desired_rel == rel {
+            self.write_content(&full, req.content.as_bytes())?;
+            (rel.clone(), full.clone())
+        } else {
+            let (saved_rel, saved_full) =
+                self.create_at_available_path(&desired_rel, &title, &req.content)?;
+            self.remove_content_file(&full)?;
+            self.vaults[self.active].index.remove_note(&rel);
+            self.vaults[self.active].file_index.remove_file(&rel);
+            revisions::migrate_revisions(&self.vaults[self.active].dir, &rel, &saved_rel);
+            self.update_pinned_path(&rel, &saved_rel);
+            (saved_rel, saved_full)
+        };
+
+        self.reindex_note_and_file(&saved_rel, &req.content, &saved_full);
+        let updated = if saved_rel == rel {
+            Vec::new()
+        } else {
+            self.update_backlinks(&rel, &saved_rel)
+        };
 
         respond_json(
             stream,
             &SaveResult {
-                mtime: mtime_secs(&full),
+                mtime: mtime_secs(&saved_full),
+                path: Some(saved_rel),
+                title: Some(title),
+                updated: Some(updated),
                 conflict: None,
                 content: None,
             },
@@ -819,39 +988,36 @@ impl Server {
         let Some(rel) = query_param(path_raw, "path") else {
             return write_error(stream, 400, "missing path param");
         };
-        let full = self.vaults[self.active].dir.join(&rel);
-        if !full.starts_with(&self.vaults[self.active].dir) {
+        let requested_full = self.vaults[self.active].dir.join(&rel);
+        if !requested_full.starts_with(&self.vaults[self.active].dir) {
             return write_error(stream, 403, "Forbidden");
-        }
-        if full.exists() {
-            return write_error(stream, 409, "file already exists");
-        }
-
-        if let Some(parent) = full.parent() {
-            fs::create_dir_all(parent)?;
         }
 
         let body = read_body(stream, headers, raw_buf, header_len)?;
-        let content = if body.is_empty() {
+        let raw_content = if body.is_empty() {
             String::new()
         } else {
             let req: CreateNoteRequest =
                 serde_json::from_slice(&body).map_err(|e| io::Error::other(e.to_string()))?;
             req.content
         };
+        let title = scanner::title_from_path(&rel);
+        let content = scanner::upsert_title_h1(&raw_content, &title);
+        let desired_rel = Self::rel_for_title(&rel, &title);
+        let (saved_rel, saved_full) =
+            self.create_at_available_path(&desired_rel, &title, &content)?;
 
-        self.write_content(&full, content.as_bytes())?;
-        self.reindex_note(&rel, &content, &full);
-        self.vaults[self.active]
-            .file_index
-            .index_file(&rel, mtime_secs(&full));
+        self.reindex_note_and_file(&saved_rel, &content, &saved_full);
 
         respond_json_status(
             stream,
             201,
             "Created",
             &SaveResult {
-                mtime: mtime_secs(&full),
+                mtime: mtime_secs(&saved_full),
+                path: Some(saved_rel),
+                title: Some(scanner::official_title(&desired_rel, &content)),
+                updated: Some(Vec::new()),
                 conflict: None,
                 content: None,
             },
@@ -894,7 +1060,9 @@ impl Server {
         let req: RenameRequest = parse_body(stream, headers, raw_buf, header_len)?;
 
         let old_full = self.vaults[self.active].dir.join(&req.old_path);
-        let new_full = self.vaults[self.active].dir.join(&req.new_path);
+        let requested_title = scanner::title_from_path(&req.new_path);
+        let desired_rel = Self::rel_for_title(&req.new_path, &requested_title);
+        let new_full = self.vaults[self.active].dir.join(&desired_rel);
         if !old_full.starts_with(&self.vaults[self.active].dir)
             || !new_full.starts_with(&self.vaults[self.active].dir)
         {
@@ -903,74 +1071,41 @@ impl Server {
         if !old_full.exists() {
             return write_error(stream, 404, "source not found");
         }
-        if new_full.exists() {
-            return write_error(stream, 409, "target already exists");
-        }
 
         revisions::save_revision(&self.vaults[self.active].dir, &req.old_path, &old_full);
+        let old_content = self.read_content(&old_full)?;
+        let new_content = scanner::upsert_title_h1(&old_content, &requested_title);
 
-        if let Some(parent) = new_full.parent() {
-            fs::create_dir_all(parent)?;
-        }
-
-        self.mark_self_write(&old_full);
-        self.mark_self_write(&new_full);
-        fs::rename(&old_full, &new_full)?;
+        let (saved_rel, saved_full) = if desired_rel == req.old_path {
+            self.write_content(&old_full, new_content.as_bytes())?;
+            (req.old_path.clone(), old_full.clone())
+        } else {
+            let (saved_rel, saved_full) =
+                self.create_at_available_path(&desired_rel, &requested_title, &new_content)?;
+            self.remove_content_file(&old_full)?;
+            (saved_rel, saved_full)
+        };
 
         self.vaults[self.active].index.remove_note(&req.old_path);
         self.vaults[self.active]
             .file_index
             .remove_file(&req.old_path);
-        if let Ok(content) = self.read_content(&new_full) {
-            self.reindex_note(&req.new_path, &content, &new_full);
-            self.vaults[self.active]
-                .file_index
-                .index_file(&req.new_path, mtime_secs(&new_full));
+        self.reindex_note_and_file(&saved_rel, &new_content, &saved_full);
+        if saved_rel != req.old_path {
+            revisions::migrate_revisions(&self.vaults[self.active].dir, &req.old_path, &saved_rel);
+            self.update_pinned_path(&req.old_path, &saved_rel);
         }
+        let updated = self.update_backlinks(&req.old_path, &saved_rel);
+        let title = scanner::official_title(&saved_rel, &new_content);
 
-        let old_stem = Path::new(&req.old_path)
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or(&req.old_path);
-        let new_stem = Path::new(&req.new_path)
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or(&req.new_path);
-
-        // Commit now so get_backlinks sees the updated index
-        self.vaults[self.active].index.commit();
-
-        let mut updated = Vec::new();
-        let referencing = self.vaults[self.active].index.get_backlinks(old_stem);
-        for note_path in &referencing {
-            let note_full = self.vaults[self.active].dir.join(note_path);
-            if let Ok(content) = self.read_content(&note_full) {
-                let new_content =
-                    content.replace(&format!("[[{old_stem}]]"), &format!("[[{new_stem}]]"));
-                if new_content != content {
-                    revisions::save_revision(&self.vaults[self.active].dir, note_path, &note_full);
-                    if let Err(e) = self.write_content(&note_full, new_content.as_bytes()) {
-                        eprintln!("rename: failed to update {}: {e}", note_full.display());
-                        continue;
-                    }
-                    self.reindex_note(note_path, &new_content, &note_full);
-                    updated.push(note_path.clone());
-                }
-            }
-        }
-        // Single commit for all backlink updates
-        if !updated.is_empty() {
-            self.vaults[self.active].index.commit();
-        }
-
-        // Update pinned paths if the renamed file was pinned
-        let mut pinned = self.load_pinned();
-        if let Some(slot) = pinned.iter_mut().find(|p| *p == &req.old_path) {
-            *slot = req.new_path.clone();
-            let _ = self.save_pinned(&pinned);
-        }
-
-        respond_json(stream, &RenameResponse { updated })
+        respond_json(
+            stream,
+            &RenameResponse {
+                path: saved_rel,
+                title,
+                updated,
+            },
+        )
     }
 
     fn api_list_notes(&self, sock: &TcpStream) -> io::Result<()> {
@@ -1159,15 +1294,16 @@ impl Server {
 
         revisions::save_revision(&self.vaults[self.active].dir, &rel, &full);
         self.write_content(&full, rev_content.as_bytes())?;
-        self.reindex_note(&rel, &rev_content, &full);
-        self.vaults[self.active]
-            .file_index
-            .index_file(&rel, mtime_secs(&full));
+        self.reindex_note_and_file(&rel, &rev_content, &full);
+        let title = scanner::official_title(&rel, &rev_content);
 
         respond_json(
             sock,
             &SaveResult {
                 mtime: mtime_secs(&full),
+                path: Some(rel),
+                title: Some(title),
+                updated: Some(Vec::new()),
                 conflict: None,
                 content: None,
             },

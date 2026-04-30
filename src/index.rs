@@ -142,11 +142,11 @@ impl Index {
         let stripped = strip::strip_markdown(body.body);
         let mtime = http::mtime_secs(full_path);
 
-        let title = Path::new(rel_path)
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or(rel_path)
-            .to_string();
+        let title = if scan.title.is_empty() {
+            scanner::title_from_path(rel_path)
+        } else {
+            scan.title
+        };
 
         let writer = self.inner.writer.write().unwrap();
         let path_term = tantivy::Term::from_field_text(f.path, rel_path);

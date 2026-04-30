@@ -1,5 +1,6 @@
 /// Single-pass extraction of headings and [[wiki-links]] from raw markdown.
 use crate::frontmatter;
+use std::path::Path;
 
 pub struct ScanResult {
     pub title: String,
@@ -9,24 +10,22 @@ pub struct ScanResult {
 
 pub fn scan(content: &str) -> ScanResult {
     let body = frontmatter::split_tags(content).body;
-    let mut title = String::new();
+    let title = leading_heading_line(body)
+        .map(|heading| heading.text.to_string())
+        .unwrap_or_default();
     let mut headings = Vec::new();
     let mut links = Vec::new();
 
     for line in body.lines() {
         let trimmed = line.trim();
 
-        // Headings: lines starting with # followed by space
-        if let Some(rest) = trimmed.strip_prefix('#') {
-            let (level, text) = count_heading(rest);
-            if level > 0 && !text.is_empty() {
-                if title.is_empty() && level == 1 {
-                    title = text.to_string();
-                }
-                headings.push(text.to_string());
-                extract_wiki_links(trimmed, &mut links);
-                continue;
-            }
+        if let Some((level, text)) = parse_heading(trimmed)
+            && level > 0
+            && !text.is_empty()
+        {
+            headings.push(text.to_string());
+            extract_wiki_links(trimmed, &mut links);
+            continue;
         }
 
         extract_wiki_links(trimmed, &mut links);
@@ -39,20 +38,135 @@ pub fn scan(content: &str) -> ScanResult {
     }
 }
 
-/// Returns (heading_level, text_after_hashes). Level 0 means not a heading continuation.
-fn count_heading(after_first_hash: &str) -> (usize, &str) {
+pub fn title_from_path(rel_path: &str) -> String {
+    Path::new(rel_path)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or(rel_path)
+        .to_string()
+}
+
+pub fn official_title(rel_path: &str, content: &str) -> String {
+    let title = scan(content).title;
+    if title.is_empty() {
+        title_from_path(rel_path)
+    } else {
+        title
+    }
+}
+
+pub fn sanitize_filename_stem(title: &str) -> String {
+    let mut out = String::new();
+    let mut last_dash = false;
+    for ch in title.trim().chars() {
+        let invalid = matches!(
+            ch,
+            '\0'..='\u{1f}' | '\u{7f}' | '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|'
+        );
+        if invalid {
+            if !last_dash {
+                out.push('-');
+                last_dash = true;
+            }
+        } else {
+            out.push(ch);
+            last_dash = ch == '-';
+        }
+    }
+
+    let trimmed = out.trim_matches(|ch: char| ch == '.' || ch == '-' || ch.is_whitespace());
+    if trimmed.is_empty() || trimmed == "." || trimmed == ".." {
+        "untitled".to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+pub fn upsert_title_h1(content: &str, title: &str) -> String {
+    let fm = frontmatter::split_tags(content);
+    let body_start = content.len() - fm.body.len();
+    let prefix = &content[..body_start];
+    let body = fm.body;
+    let line = format!("# {}\n", title.trim());
+
+    if let Some(first) = leading_heading_line(body)
+        && first.level == 1
+    {
+        let mut out = String::with_capacity(content.len() + line.len());
+        out.push_str(prefix);
+        out.push_str(&body[..first.start]);
+        out.push_str(line.trim_end_matches('\n'));
+        out.push_str(&body[first.end..]);
+        return out;
+    }
+
+    let mut out = String::with_capacity(content.len() + line.len() + 1);
+    out.push_str(prefix);
+    out.push_str(&line);
+    out.push('\n');
+    if body.is_empty() {
+        return out;
+    }
+    out.push_str(body);
+    out
+}
+
+struct HeadingLine {
+    start: usize,
+    end: usize,
+    level: usize,
+    text: String,
+}
+
+fn leading_heading_line(body: &str) -> Option<HeadingLine> {
+    let start = body
+        .char_indices()
+        .find_map(|(idx, ch)| (!ch.is_whitespace()).then_some(idx))?;
+    let line_end = body[start..]
+        .find('\n')
+        .map(|idx| start + idx)
+        .unwrap_or(body.len());
+    let line = body[start..line_end].trim_end_matches('\r');
+    let (level, text) = parse_heading(line)?;
+    if text.is_empty() {
+        return None;
+    }
+    Some(HeadingLine {
+        start,
+        end: start + line.len(),
+        level,
+        text: text.to_string(),
+    })
+}
+
+fn parse_heading(line: &str) -> Option<(usize, &str)> {
+    let trimmed = line.trim();
+    let rest = trimmed.strip_prefix('#')?;
     let mut level = 1usize;
-    let bytes = after_first_hash.as_bytes();
+    let bytes = rest.as_bytes();
     let mut i = 0;
     while i < bytes.len() && bytes[i] == b'#' {
         level += 1;
         i += 1;
     }
-    // Must be followed by a space
-    if i < bytes.len() && bytes[i] == b' ' {
-        (level, after_first_hash[i + 1..].trim())
+    if level > 6 || i >= bytes.len() || bytes[i] != b' ' {
+        return None;
+    }
+    Some((level, strip_closing_hashes(rest[i + 1..].trim())))
+}
+
+fn strip_closing_hashes(text: &str) -> &str {
+    let trimmed = text.trim_end();
+    let without_hashes = trimmed.trim_end_matches('#');
+    if without_hashes.len() != trimmed.len()
+        && without_hashes
+            .chars()
+            .last()
+            .is_some_and(char::is_whitespace)
+    {
+        without_hashes.trim_end()
     } else {
-        (0, "")
+        text
     }
 }
 
@@ -99,6 +213,25 @@ mod tests {
     }
 
     #[test]
+    fn scan_ignores_non_leading_heading_for_title() {
+        let r = scan("intro\n\n## First Heading\n\n# Later");
+        assert_eq!(r.title, "");
+        assert_eq!(r.headings, vec!["First Heading", "Later"]);
+    }
+
+    #[test]
+    fn scan_extracts_leading_heading_after_whitespace() {
+        let r = scan("\n\t  ## First Heading\n\nBody");
+        assert_eq!(r.title, "First Heading");
+    }
+
+    #[test]
+    fn scan_extracts_leading_heading_after_frontmatter() {
+        let r = scan("---\ntags: [x]\n---\n\n  ### First Heading\n\nBody");
+        assert_eq!(r.title, "First Heading");
+    }
+
+    #[test]
     fn scan_extracts_multiple_headings() {
         let r = scan("# Title\n## Section\n### Sub");
         assert_eq!(r.headings, vec!["Title", "Section", "Sub"]);
@@ -107,8 +240,54 @@ mod tests {
     #[test]
     fn scan_no_title_without_h1() {
         let r = scan("## Not a title\n\nJust text");
-        assert_eq!(r.title, "");
+        assert_eq!(r.title, "Not a title");
         assert_eq!(r.headings, vec!["Not a title"]);
+    }
+
+    #[test]
+    fn official_title_falls_back_to_path_stem() {
+        assert_eq!(official_title("dir/my-note.md", "plain text"), "my-note");
+    }
+
+    #[test]
+    fn sanitize_filename_replaces_unsafe_characters() {
+        assert_eq!(sanitize_filename_stem("  A/B:C*D?  "), "A-B-C-D");
+        assert_eq!(sanitize_filename_stem("..."), "untitled");
+    }
+
+    #[test]
+    fn upsert_title_h1_inserts_after_frontmatter() {
+        let src = "---\ntags: [x]\n---\n\nbody";
+        assert_eq!(
+            upsert_title_h1(src, "New Note"),
+            "---\ntags: [x]\n---\n\n# New Note\n\nbody"
+        );
+    }
+
+    #[test]
+    fn upsert_title_h1_updates_first_h1() {
+        assert_eq!(upsert_title_h1("# Old\n\nBody", "New"), "# New\n\nBody");
+    }
+
+    #[test]
+    fn upsert_title_h1_does_not_update_later_h1() {
+        assert_eq!(
+            upsert_title_h1("Intro\n\n# Old", "New"),
+            "# New\n\nIntro\n\n# Old"
+        );
+    }
+
+    #[test]
+    fn upsert_title_h1_inserts_before_non_h1_first_heading() {
+        assert_eq!(
+            upsert_title_h1("## Section", "Title"),
+            "# Title\n\n## Section"
+        );
+    }
+
+    #[test]
+    fn upsert_title_h1_creates_body_separator_for_empty_note() {
+        assert_eq!(upsert_title_h1("", "Title"), "# Title\n\n");
     }
 
     #[test]

@@ -114,7 +114,7 @@ async function waitForVaultReady(baseUrl: string, timeoutMs: number): Promise<vo
     try {
       const res = await fetch(`${baseUrl}/api/notes`);
       if (res.ok) {
-        const notes = (await res.json()) as Array<{ path: string }>;
+        const notes = (await res.json()) as { path: string }[];
         const notePaths = new Set(notes.map((note) => note.path));
         if ([...expected].every((path) => notePaths.has(path))) {
           return;

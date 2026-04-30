@@ -11,13 +11,13 @@ export async function renameNoteAndRefresh(oldPath: string, newPath: string): Pr
     const result = await renameNote(oldPath, newPath);
     invalidateNoteCache();
     serverStore.notifyFilesChanged();
-    updateTabPath(oldPath, newPath);
+    updateTabPath(oldPath, result.path, result.title);
 
     await Promise.all(
       result.updated.map(async (updated) => {
         try {
           const note = await getNote(updated);
-          updateTabContent(updated, note.content, note.mtime, note.tags);
+          updateTabContent(updated, note.content, note.mtime, note.tags, note.title);
         } catch {
           /* ignore reload failures */
         }
@@ -25,10 +25,10 @@ export async function renameNoteAndRefresh(oldPath: string, newPath: string): Pr
     );
 
     const active = getActiveTab();
-    if (active?.path === newPath) {
+    if (active?.path === result.path) {
       try {
-        const note = await getNote(newPath);
-        updateTabContent(newPath, note.content, note.mtime, note.tags);
+        const note = await getNote(result.path);
+        updateTabContent(result.path, note.content, note.mtime, note.tags, note.title);
       } catch {
         /* ignore reload failures */
       }

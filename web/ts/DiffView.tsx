@@ -18,7 +18,7 @@ export function DiffView(props: Readonly<Props>) {
               </div>
               <For each={hunk.lines}>
                 {(line) => {
-                  const prefix = line.type === "add" ? "+" : line.type === "del" ? "-" : " ";
+                  const prefix = line.type === "add" ? "+" : (line.type === "del" ? "-" : " ");
                   return (
                     <div class={`diff-line diff-${line.type}`}>
                       <span class="diff-prefix">{prefix}</span>

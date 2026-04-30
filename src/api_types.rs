@@ -6,11 +6,21 @@ pub struct NoteResponse {
     pub content: String,
     pub mtime: u64,
     pub tags: Vec<String>,
+    pub title: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, TS)]
 pub struct SaveResult {
     pub mtime: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub updated: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub conflict: Option<bool>,
@@ -70,6 +80,8 @@ pub struct PinnedFileEntry {
 
 #[derive(Clone, Debug, Serialize, Deserialize, TS)]
 pub struct RenameResponse {
+    pub path: String,
+    pub title: String,
     pub updated: Vec<String>,
 }
 
