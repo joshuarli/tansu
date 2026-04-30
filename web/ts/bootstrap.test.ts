@@ -14,18 +14,18 @@ describe("bootstrap", () => {
 
   it("checkBrowserSupport reports only missing features", async () => {
     const { checkBrowserSupport } = await import("./bootstrap.ts");
-    expect(
-      checkBrowserSupport({ hasIndexedDb: true, hasEventSource: false, hasSetHtml: false }),
-    ).toStrictEqual(["Server-Sent Events", "HTML Sanitizer API"]);
+    expect(checkBrowserSupport({ hasIndexedDb: true, hasEventSource: false })).toStrictEqual([
+      "Server-Sent Events",
+    ]);
   });
 
   it("showUnsupportedPage renders the unsupported browser message", async () => {
     const { showUnsupportedPage } = await import("./bootstrap.ts");
-    showUnsupportedPage(document.body, ["IndexedDB", "HTML Sanitizer API"], "UA/1.0", 139);
+    showUnsupportedPage(document.body, ["IndexedDB", "Server-Sent Events"], "UA/1.0", 139);
 
     expect(document.body.textContent).toContain("Browser not supported");
     expect(document.body.textContent).toContain("IndexedDB");
-    expect(document.body.textContent).toContain("HTML Sanitizer API");
+    expect(document.body.textContent).toContain("Server-Sent Events");
     expect(document.body.textContent).toContain("Firefox 139");
     expect(document.body.textContent).toContain("UA/1.0");
   });

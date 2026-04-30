@@ -3,14 +3,12 @@ import type { AppStatus } from "./api.ts";
 export type BrowserSupportProbe = {
   hasIndexedDb: boolean;
   hasEventSource: boolean;
-  hasSetHtml: boolean;
 };
 
 function getDefaultBrowserSupportProbe(): BrowserSupportProbe {
   return {
     hasIndexedDb: "indexedDB" in window,
     hasEventSource: "EventSource" in window,
-    hasSetHtml: "setHTML" in Element.prototype,
   };
 }
 
@@ -23,9 +21,6 @@ export function checkBrowserSupport(
   }
   if (!probe.hasEventSource) {
     missing.push("Server-Sent Events");
-  }
-  if (!probe.hasSetHtml) {
-    missing.push("HTML Sanitizer API");
   }
   return missing;
 }

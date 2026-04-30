@@ -14,6 +14,18 @@ import { domToMarkdown } from "./serialize.js";
 import { checkBlockInputTransform, handleBlockTransform } from "./transforms.js";
 
 const MAX_INDENT_SPACES = 4;
+const DISALLOWED_PASTE_TAGS = new Set([
+  "BASE",
+  "EMBED",
+  "FRAME",
+  "IFRAME",
+  "LINK",
+  "META",
+  "OBJECT",
+  "SCRIPT",
+  "STYLE",
+  "TEMPLATE",
+]);
 const INDENTABLE_BLOCKS = new Set([
   "P",
   "DIV",
@@ -28,6 +40,77 @@ const INDENTABLE_BLOCKS = new Set([
   "TH",
   "CODE",
 ]);
+
+function hasDataTransferType(dataTransfer: DataTransfer, type: string): boolean {
+  return [...dataTransfer.types].includes(type);
+}
+
+function isSafePastedUrl(url: string): boolean {
+  const trimmed = url.trim();
+  if (trimmed === "") {
+    return true;
+  }
+  const lower = trimmed.toLowerCase();
+  return (
+    lower.startsWith("#") ||
+    lower.startsWith("/") ||
+    lower.startsWith("./") ||
+    lower.startsWith("../") ||
+    lower.startsWith("http:") ||
+    lower.startsWith("https:") ||
+    lower.startsWith("mailto:") ||
+    lower.startsWith("tel:") ||
+    lower.startsWith("data:image/")
+  );
+}
+
+function sanitizePastedTree(root: ParentNode): void {
+  const toRemove: Element[] = [];
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
+  let current = walker.nextNode();
+  while (current) {
+    const el = current as Element;
+    if (DISALLOWED_PASTE_TAGS.has(el.tagName)) {
+      toRemove.push(el);
+      current = walker.nextNode();
+      continue;
+    }
+    for (const attr of [...el.attributes]) {
+      const name = attr.name.toLowerCase();
+      if (name.startsWith("on")) {
+        el.removeAttribute(attr.name);
+        continue;
+      }
+      if (
+        (name === "href" || name === "src" || name === "xlink:href") &&
+        !isSafePastedUrl(attr.value)
+      ) {
+        el.removeAttribute(attr.name);
+      }
+    }
+    current = walker.nextNode();
+  }
+  for (const el of toRemove) {
+    el.remove();
+  }
+}
+
+function htmlToSanitizedContainer(html: string): HTMLElement {
+  const container = document.createElement("div");
+  const sanitizerContainer = container as HTMLDivElement & {
+    setHTML?: (input: string, options?: { sanitizer?: unknown }) => void;
+  };
+  if (typeof sanitizerContainer.setHTML === "function") {
+    sanitizerContainer.setHTML(html);
+    return container;
+  }
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  sanitizePastedTree(doc.body);
+  for (const child of [...doc.body.childNodes]) {
+    container.append(child.cloneNode(true));
+  }
+  return container;
+}
 
 export type EditorConfig = {
   extensions?: MarkdownExtension[];
@@ -62,6 +145,7 @@ export type EditorHandle = {
 export function createEditor(container: HTMLElement, config: EditorConfig = {}): EditorHandle {
   let cfg = { ...config };
   const extensions = cfg.extensions ?? [];
+  let preferPlainTextPaste = false;
 
   const contentEl = document.createElement("div");
   contentEl.contentEditable = "true";
@@ -358,6 +442,8 @@ export function createEditor(container: HTMLElement, config: EditorConfig = {}):
   async function onPaste(e: ClipboardEvent): Promise<void> {
     e.preventDefault();
     const clipData = e.clipboardData;
+    const usePlainTextPaste = preferPlainTextPaste;
+    preferPlainTextPaste = false;
     if (!clipData) return;
 
     const imageItem = [...clipData.items].find((item) => item.type.startsWith("image/"));
@@ -384,9 +470,8 @@ export function createEditor(container: HTMLElement, config: EditorConfig = {}):
 
     const htmlData = clipData.getData("text/html");
     let pastedText: string;
-    if (htmlData) {
-      const div = document.createElement("div");
-      div.innerHTML = htmlData;
+    if (htmlData && !usePlainTextPaste) {
+      const div = htmlToSanitizedContainer(htmlData);
       pastedText = domToMarkdown(div, { extensions });
     } else {
       pastedText = clipData.getData("text/plain");
@@ -395,6 +480,18 @@ export function createEditor(container: HTMLElement, config: EditorConfig = {}):
     if (pastedText) {
       transactions.replaceSelection(pastedText);
     }
+  }
+
+  function onBeforeInput(e: InputEvent): void {
+    if (e.inputType !== "insertFromPaste" && e.inputType !== "insertFromPasteAsQuotation") {
+      preferPlainTextPaste = false;
+      return;
+    }
+    const dataTransfer = e.dataTransfer;
+    preferPlainTextPaste =
+      dataTransfer !== null &&
+      hasDataTransferType(dataTransfer, "text/plain") &&
+      !hasDataTransferType(dataTransfer, "text/html");
   }
 
   function onCheckboxEvent(e: Event): void {
@@ -425,6 +522,7 @@ export function createEditor(container: HTMLElement, config: EditorConfig = {}):
   }
 
   contentEl.addEventListener("keydown", onKeyDown);
+  contentEl.addEventListener("beforeinput", onBeforeInput);
   contentEl.addEventListener("input", onInput);
   contentEl.addEventListener("paste", onContentPaste);
   contentEl.addEventListener("change", onCheckboxEvent);
@@ -458,6 +556,7 @@ export function createEditor(container: HTMLElement, config: EditorConfig = {}):
   function destroy(): void {
     undoController.destroy();
     contentEl.removeEventListener("keydown", onKeyDown);
+    contentEl.removeEventListener("beforeinput", onBeforeInput);
     contentEl.removeEventListener("input", onInput);
     contentEl.removeEventListener("paste", onContentPaste);
     contentEl.removeEventListener("change", onCheckboxEvent);

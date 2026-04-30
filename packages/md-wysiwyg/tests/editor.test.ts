@@ -357,6 +357,103 @@ describe("createEditor", () => {
     handle.destroy();
   });
 
+  it("HTML paste uses setHTML when available", async () => {
+    const originalSetHtml = Element.prototype.setHTML;
+    const setHtml = vi.fn(function (this: Element, html: string) {
+      expect(html).toContain("<strong>bold</strong>");
+      this.innerHTML = "<p><strong>bold</strong></p>";
+    });
+    Element.prototype.setHTML = setHtml;
+
+    try {
+      const handle = createEditor(container);
+      handle.setValue("");
+
+      const clipboardData = {
+        items: [],
+        getData: (type: string) =>
+          type === "text/html" ? "<p><strong>bold</strong><script>bad()</script></p>" : "",
+      };
+      const pasteEvent = new ClipboardEvent("paste", {
+        bubbles: true,
+        clipboardData: clipboardData as unknown as DataTransfer,
+      });
+      handle.contentEl.dispatchEvent(pasteEvent);
+
+      await Promise.resolve();
+      expect(setHtml).toHaveBeenCalledTimes(1);
+      expect(handle.getValue()).toBe("**bold**");
+      handle.destroy();
+    } finally {
+      Element.prototype.setHTML = originalSetHtml;
+    }
+  });
+
+  it("HTML paste falls back to manual sanitization when setHTML is unavailable", async () => {
+    const originalSetHtml = Element.prototype.setHTML;
+    delete Element.prototype.setHTML;
+
+    try {
+      const handle = createEditor(container);
+      handle.setValue("");
+
+      const clipboardData = {
+        items: [],
+        getData: (type: string) =>
+          type === "text/html"
+            ? '<p><strong>bold</strong><script>bad()</script><a href="javascript:bad()">x</a></p>'
+            : "",
+      };
+      const pasteEvent = new ClipboardEvent("paste", {
+        bubbles: true,
+        clipboardData: clipboardData as unknown as DataTransfer,
+      });
+      handle.contentEl.dispatchEvent(pasteEvent);
+
+      await Promise.resolve();
+      expect(handle.getValue()).toBe("**bold**[x]()");
+      handle.destroy();
+    } finally {
+      Element.prototype.setHTML = originalSetHtml;
+    }
+  });
+
+  it("plain-text paste preference ignores HTML when beforeinput indicates no rich text", async () => {
+    const handle = createEditor(container);
+    handle.setValue("");
+
+    const beforeInputEvent = new InputEvent("beforeinput", {
+      bubbles: true,
+      cancelable: true,
+      inputType: "insertFromPaste",
+    });
+    Object.defineProperty(beforeInputEvent, "dataTransfer", {
+      value: {
+        types: ["text/plain"],
+      } satisfies Pick<DataTransfer, "types">,
+      configurable: true,
+    });
+    handle.contentEl.dispatchEvent(beforeInputEvent);
+
+    const clipboardData = {
+      items: [],
+      getData: (type: string) => {
+        if (type === "text/html") return "<p><strong>rich</strong></p>";
+        if (type === "text/plain") return "plain";
+        return "";
+      },
+    };
+    const pasteEvent = new ClipboardEvent("paste", {
+      bubbles: true,
+      clipboardData: clipboardData as unknown as DataTransfer,
+    });
+    handle.contentEl.dispatchEvent(pasteEvent);
+
+    await Promise.resolve();
+    expect(handle.getValue()).toBe("plain");
+    handle.destroy();
+  });
+
   // ── Keydown: undo/redo ────────────────────────────────────────────────────
 
   it("Ctrl+Z keydown triggers undo", () => {
