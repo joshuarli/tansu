@@ -25,6 +25,7 @@ import {
   getStatus,
   pinFile,
   unpinFile,
+  activateVault,
 } from "./api.ts";
 import { mockFetch } from "./test-helper.ts";
 
@@ -264,6 +265,16 @@ describe("api", () => {
     expect(status.encrypted).toBeTruthy();
     expect(status.locked).toBeFalsy();
     expect(status.prf_credential_ids).toHaveLength(1);
+  });
+
+  it("activateVault updates the per-tab active vault", async () => {
+    mock.on("POST", "/api/vaults/1/activate", {});
+    sessionStorage.setItem("tansu_vault", "0");
+
+    const ok = await activateVault(1);
+
+    expect(ok).toBeTruthy();
+    expect(sessionStorage.getItem("tansu_vault")).toBe("1");
   });
 
   it("pinFile succeeds on 200", async () => {

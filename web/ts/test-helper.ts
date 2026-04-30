@@ -50,7 +50,17 @@ export type MockRequest = {
   method: string;
   url: string;
   body: string | null;
+  headers: Record<string, string>;
 };
+
+function normalizeHeaders(headersInit?: HeadersInit): Record<string, string> {
+  const headers = new Headers(headersInit);
+  const out: Record<string, string> = {};
+  headers.forEach((value, key) => {
+    out[key] = value;
+  });
+  return out;
+}
 
 const TANSU_HTML = `<!doctype html>
 <html><head></head><body>
@@ -239,6 +249,7 @@ export function mockFetch(): MockFetch {
       method: (init?.method ?? "GET").toUpperCase(),
       url,
       body,
+      headers: normalizeHeaders(init?.headers),
     });
     // Later handlers take precedence (search in reverse)
     for (let i = handlers.length - 1; i >= 0; i--) {

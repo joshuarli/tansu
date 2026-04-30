@@ -65,23 +65,30 @@ AES-256-GCM, random 12-byte nonce per write. Birthday bound for nonce collision 
 
 ## Session Management
 
-Single-user. On unlock, server generates a random 256-bit session token, returned as a cookie:
+Vault selection is tab-scoped. Each browser tab keeps its selected vault index in `sessionStorage`, and every request sends it explicitly:
 
 ```
-Set-Cookie: tansu_session=<hex>; HttpOnly; SameSite=Strict; Path=/
+X-Tansu-Vault: <index>
+GET /events?vault=<index>
 ```
 
-No `Secure` flag (Tailscale, not TLS). Every API request checks this cookie — missing or wrong token returns 403.
+Encrypted auth is also vault-scoped. On unlock, server generates a random 256-bit session token for that vault and returns:
+
+```
+Set-Cookie: tansu_session_<vault-index>=<hex>; HttpOnly; SameSite=Strict; Path=/
+```
+
+No `Secure` flag (Tailscale, not TLS). Each encrypted-vault API request resolves the vault from `X-Tansu-Vault`, then checks the matching `tansu_session_<index>` cookie. Missing or wrong token returns 403.
 
 **Idle timeout**: Server tracks the timestamp of the last authenticated API request. SSE connections do not count as activity — only real user actions (save, load, search, etc.) reset the timer. After **24 hours of inactivity**, the server re-locks:
 
 1. Zeroize master key
 2. Drop tantivy `RamDirectory` index
-3. Clear session token
-4. Send `event: locked` on all open SSE connections, then close them
+3. Clear all session tokens for that vault
+4. Send `event: locked` on SSE connections for that vault, then close them
 5. Next request to any route gets 403 (API) or the unlock page (HTML)
 
-The timeout is checked lazily: on each incoming API request, and in the SSE keepalive loop (~30s interval).
+The timeout is checked lazily on each incoming API request.
 
 `GET /api/lock` triggers the same re-lock sequence immediately.
 
@@ -112,7 +119,7 @@ START ──────────────────────→ PLAI
 **Unlock flow**:
 
 1. Decrypt master key into memory
-2. Set session cookie
+2. Set the per-vault session cookie
 3. Return 200 immediately (client transitions to app)
 4. Background: rebuild tantivy index (decrypt + index all notes)
 5. Search returns empty results until index rebuild completes; client shows "Rebuilding search index..." on search attempts during this window
@@ -226,7 +233,7 @@ POST /api/prf/remove     { credential_id }                   → remove PRF cred
 GET  /api/lock                                               → zeroize key, clear session, close SSE
 ```
 
-All endpoints except `/api/status` and `/api/unlock` require a valid session cookie. `POST /api/setup` is not an API endpoint — setup is handled by `tansu encrypt` on the CLI.
+All endpoints for a locked encrypted vault reject requests except `/api/status`, `/api/unlock`, `/api/vaults`, and `POST /api/vaults/*/activate`. Unlocked encrypted-vault endpoints require both an explicit vault selection (`X-Tansu-Vault` or `/events?vault=`) and the matching per-vault session cookie. `POST /api/setup` is not an API endpoint — setup is handled by `tansu encrypt` on the CLI.
 
 ## Encryption Layer (Rust)
 
@@ -273,10 +280,11 @@ pub fn load_crypto_config(dir: &Path) -> Result<CryptoConfig>;
 pub fn save_crypto_config(dir: &Path, config: &CryptoConfig) -> Result<()>;
 ```
 
-`Server` holds `Option<Vault>` + `Option<SessionState>`:
+Each `VaultState` holds `Option<Vault>` + `Vec<SessionState>`:
 
-- Both `None` = locked (or plaintext mode if no `crypto.json`)
-- Both `Some` = unlocked
+- `vault = None` = locked (or plaintext mode if no `crypto.json`)
+- `vault = Some(...)` = unlocked
+- `sessions` holds active client sessions for that vault
 
 ```rust
 struct SessionState {
@@ -287,7 +295,7 @@ struct SessionState {
 
 In plaintext mode, `Server` holds no `Vault` and no `SessionState` — all routes are open, file I/O uses `fs` directly (current behavior).
 
-Session check: on every non-SSE request, compare cookie to `token`, update `last_activity`. The SSE keepalive loop (~30s) checks `last_activity` age and triggers re-lock if >24h.
+Session check: on every non-SSE request, resolve the vault from `X-Tansu-Vault`, compare against that vault's `tansu_session_<index>` cookies, and update the matching `last_activity`.
 
 ## CLI Commands
 

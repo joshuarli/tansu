@@ -2,6 +2,7 @@
 /// Caches session state and note content so the app survives server downtime.
 
 import { splitFrontmatter } from "./frontmatter.ts";
+import { vaultScopedKeyFor, vaultScopedNoteKeyFor } from "./vault-session.ts";
 
 const DB_NAME = "tansu";
 const DB_VERSION = 2;
@@ -71,12 +72,12 @@ function idbPut(store: string, key: string, value: unknown): Promise<void> {
   });
 }
 
-export function kvGet<T>(key: string): Promise<T | undefined> {
-  return idbGet<T>("kv", key);
+export function kvGet<T>(vaultIndex: number, key: string): Promise<T | undefined> {
+  return idbGet<T>("kv", vaultScopedKeyFor(vaultIndex, key));
 }
 
-export function kvPut(key: string, value: unknown): Promise<void> {
-  return idbPut("kv", key, value);
+export function kvPut(vaultIndex: number, key: string, value: unknown): Promise<void> {
+  return idbPut("kv", vaultScopedKeyFor(vaultIndex, key), value);
 }
 
 type CachedNote = {
@@ -85,8 +86,8 @@ type CachedNote = {
   tags: string[];
 };
 
-export async function noteGet(path: string): Promise<CachedNote | undefined> {
-  const note = await idbGet<Partial<CachedNote>>("notes", path);
+export async function noteGet(vaultIndex: number, path: string): Promise<CachedNote | undefined> {
+  const note = await idbGet<Partial<CachedNote>>("notes", vaultScopedNoteKeyFor(vaultIndex, path));
   if (!note) {
     return undefined;
   }
@@ -99,25 +100,26 @@ export async function noteGet(path: string): Promise<CachedNote | undefined> {
 }
 
 export function notePut(
+  vaultIndex: number,
   path: string,
   content: string,
   mtime: number,
   _tags: string[],
 ): Promise<void> {
   const parsed = splitFrontmatter(content);
-  return idbPut("notes", path, {
+  return idbPut("notes", vaultScopedNoteKeyFor(vaultIndex, path), {
     content,
     mtime,
     tags: parsed.tags,
   } satisfies CachedNote);
 }
 
-export function noteDel(path: string): Promise<void> {
+export function noteDel(vaultIndex: number, path: string): Promise<void> {
   if (!db) {
     return Promise.resolve();
   }
   return new Promise((resolve, reject) => {
-    const req = tx("notes", "readwrite").delete(path);
+    const req = tx("notes", "readwrite").delete(vaultScopedNoteKeyFor(vaultIndex, path));
     req.onsuccess = () => resolve();
     /* c8 ignore start */
     req.onerror = () => reject(req.error);

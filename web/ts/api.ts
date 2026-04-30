@@ -23,6 +23,7 @@ import type {
   UnlockRequest,
   VaultEntry,
 } from "./api.generated.ts";
+import { getActiveVaultIndex, setActiveVaultIndex } from "./vault-session.ts";
 
 export type {
   AppStatus,
@@ -65,6 +66,12 @@ export class ApiError extends Error {
     this.status = status;
     this.body = body;
   }
+}
+
+function withActiveVault(init?: RequestInit): RequestInit {
+  const headers = new Headers(init?.headers);
+  headers.set("X-Tansu-Vault", String(getActiveVaultIndex()));
+  return { ...init, headers };
 }
 
 function apiPath(path: string, params?: Record<string, string | number | undefined>): string {
@@ -113,7 +120,7 @@ async function requestJsonWithStatus<T>(
   init?: RequestInit,
   okStatuses: readonly number[] = [],
 ): Promise<{ data: T; status: number }> {
-  const res = await fetch(url, init);
+  const res = await fetch(url, withActiveVault(init));
   if (!res.ok && !okStatuses.includes(res.status)) {
     throw new ApiError(ctx, res.status, await readErrorBody(res));
   }
@@ -121,7 +128,7 @@ async function requestJsonWithStatus<T>(
 }
 
 async function requestVoid(url: string, ctx: string, init?: RequestInit): Promise<void> {
-  const res = await fetch(url, init);
+  const res = await fetch(url, withActiveVault(init));
   if (!res.ok) {
     throw new ApiError(ctx, res.status, await readErrorBody(res));
   }
@@ -275,25 +282,31 @@ export async function getStatus(): Promise<AppStatus> {
 }
 
 export async function unlockWithRecoveryKey(recoveryKey: string): Promise<boolean> {
-  const res = await fetch("/api/unlock", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ recovery_key: recoveryKey } satisfies UnlockRequest),
-  });
+  const res = await fetch(
+    "/api/unlock",
+    withActiveVault({
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ recovery_key: recoveryKey } satisfies UnlockRequest),
+    }),
+  );
   return res.ok;
 }
 
 export async function unlockWithPrf(prfKeyB64: string): Promise<boolean> {
-  const res = await fetch("/api/unlock", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ prf_key: prfKeyB64 } satisfies UnlockRequest),
-  });
+  const res = await fetch(
+    "/api/unlock",
+    withActiveVault({
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prf_key: prfKeyB64 } satisfies UnlockRequest),
+    }),
+  );
   return res.ok;
 }
 
 export async function lockApp(): Promise<void> {
-  await fetch("/api/lock");
+  await fetch("/api/lock", withActiveVault());
 }
 
 export async function registerPrf(
@@ -306,21 +319,27 @@ export async function registerPrf(
     prf_key: prfKeyB64,
     name,
   };
-  const res = await fetch("/api/prf/register", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
+  const res = await fetch(
+    "/api/prf/register",
+    withActiveVault({
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  );
   return res.ok;
 }
 
 export async function removePrf(credentialId: string): Promise<boolean> {
   const body: PrfRemoveRequest = { credential_id: credentialId };
-  const res = await fetch("/api/prf/remove", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
+  const res = await fetch(
+    "/api/prf/remove",
+    withActiveVault({
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  );
   return res.ok;
 }
 
@@ -341,6 +360,9 @@ export async function getVaults(): Promise<VaultEntry[]> {
 }
 
 export async function activateVault(index: number): Promise<boolean> {
-  const res = await fetch(`/api/vaults/${index}/activate`, { method: "POST" });
+  const res = await fetch(`/api/vaults/${index}/activate`, withActiveVault({ method: "POST" }));
+  if (res.ok) {
+    setActiveVaultIndex(index);
+  }
   return res.ok;
 }

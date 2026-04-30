@@ -7,6 +7,8 @@ import { openStore, closeStore, kvGet, kvPut, noteGet, notePut } from "./local-s
 import type { Tab } from "./tab-state.ts";
 import { setupDOM, mockFetch } from "./test-helper.ts";
 
+const DEFAULT_VAULT = 0;
+
 describe("offline resilience", () => {
   let cleanup: () => void;
   let mock: ReturnType<typeof mockFetch>;
@@ -59,7 +61,7 @@ describe("offline resilience", () => {
     await openTab("notes/cached.md");
     await new Promise((r) => setTimeout(r, 10));
 
-    const cached = await noteGet("notes/cached.md");
+    const cached = await noteGet(DEFAULT_VAULT, "notes/cached.md");
     expect(cached).toStrictEqual({ content: "# Cached", mtime: 3000, tags: [] });
 
     cleanState();
@@ -136,7 +138,7 @@ describe("offline resilience", () => {
     markClean("notes/saved.md", "# Edited", 2000);
     await new Promise((r) => setTimeout(r, 10));
 
-    const cached = await noteGet("notes/saved.md");
+    const cached = await noteGet(DEFAULT_VAULT, "notes/saved.md");
     expect(cached).toStrictEqual({ content: "# Edited", mtime: 2000, tags: [] });
 
     cleanState();
@@ -150,7 +152,7 @@ describe("offline resilience", () => {
     closeTab(0);
     await new Promise((r) => setTimeout(r, 10));
 
-    const cached = await noteGet("notes/closing.md");
+    const cached = await noteGet(DEFAULT_VAULT, "notes/closing.md");
     expect(cached).toStrictEqual({ content: "# Closing", mtime: 7000, tags: [] });
   });
 
@@ -163,7 +165,7 @@ describe("offline resilience", () => {
     closeTab(0); // close a — pushes to closed stack
     await new Promise((r) => setTimeout(r, 10));
 
-    const state = await kvGet<SessionState>("session");
+    const state = await kvGet<SessionState>(DEFAULT_VAULT, "session");
     expect(state).toBeDefined();
     expect(state!.tabs).toStrictEqual(["notes/b.md"]);
     expect(state!.active).toBe(0);
@@ -176,12 +178,12 @@ describe("offline resilience", () => {
     cleanState();
 
     // Seed IDB with session state and note cache
-    await kvPut("session", {
+    await kvPut(DEFAULT_VAULT, "session", {
       tabs: ["notes/offline-a.md"],
       active: 0,
       closed: ["notes/old.md"],
     } satisfies SessionState);
-    await notePut("notes/offline-a.md", "# Offline A", 9000, ["offline"]);
+    await notePut(DEFAULT_VAULT, "notes/offline-a.md", "# Offline A", 9000, ["offline"]);
 
     // Server is completely down
     mock.on("GET", "/api/state", "server error", 500);
@@ -206,7 +208,7 @@ describe("offline resilience", () => {
     await openTab("notes/x.md");
     await new Promise((r) => setTimeout(r, 10));
 
-    const cached = await kvGet<SessionState>("session");
+    const cached = await kvGet<SessionState>(DEFAULT_VAULT, "session");
     expect(cached).toBeDefined();
     expect(cached!.tabs).toContain("notes/x.md");
 
@@ -219,7 +221,7 @@ describe("offline resilience", () => {
   it("syncToServer is a no-op when IDB has no cached state", async () => {
     cleanState();
     // Clear IDB session state
-    await kvPut("session", null);
+    await kvPut(DEFAULT_VAULT, "session", null);
 
     // Should not throw
     await syncToServer();
@@ -325,7 +327,7 @@ describe("closed-tab stack", () => {
 
     // Server is down, note was never cached (clear it)
     const { noteDel } = await import("./local-store.ts");
-    await noteDel("notes/doomed.md");
+    await noteDel(DEFAULT_VAULT, "notes/doomed.md");
 
     mock.on("GET", "/api/note", "server error", 500);
 

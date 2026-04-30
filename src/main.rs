@@ -32,9 +32,15 @@ static EMBED_STYLE_CSS: &[u8] = include_bytes!("../web/static/style.css");
 static EMBED_INDEX_HTML: &[u8] = include_bytes!("../web/index.html");
 
 const SESSION_TIMEOUT_SECS: u64 = 24 * 60 * 60; // 24 hours
+
 struct SessionState {
     token: [u8; 32],
     last_activity: Instant,
+}
+
+struct SseClient {
+    stream: TcpStream,
+    vault_index: usize,
 }
 
 struct VaultState {
@@ -45,10 +51,11 @@ struct VaultState {
     crypto_config: Option<CryptoConfig>,
     /// None = plaintext mode or locked. Check `encrypted` to distinguish.
     vault: Option<Vault>,
-    session: Option<SessionState>,
+    sessions: Vec<SessionState>,
     index: Index,
     file_index: FileNameIndex,
     settings: Settings,
+    _watcher: notify::RecommendedWatcher,
     watch_rx: mpsc::Receiver<WatchEvent>,
     self_writes: Arc<Mutex<HashMap<PathBuf, Instant>>>,
 }
@@ -56,111 +63,197 @@ struct VaultState {
 struct Server {
     quiet: bool,
     vaults: Vec<VaultState>,
-    active: usize,
-    active_watcher: notify::RecommendedWatcher,
-    sse_clients: Arc<Mutex<Vec<TcpStream>>>,
+    sse_clients: Arc<Mutex<Vec<SseClient>>>,
+}
+
+fn resolve_path_under_root(root: &Path, raw: &str) -> Option<(String, PathBuf)> {
+    let mut full = PathBuf::new();
+    if !normalize_into(root, raw, &mut full) {
+        return None;
+    }
+    let rel = full.strip_prefix(root).ok()?.to_string_lossy().into_owned();
+    if rel.is_empty() {
+        return None;
+    }
+    Some((rel, full))
+}
+
+fn spawn_plaintext_reindex(
+    name: String,
+    dir: PathBuf,
+    index: Index,
+    file_index: FileNameIndex,
+    excluded: Vec<String>,
+) {
+    std::thread::spawn(move || {
+        let start = Instant::now();
+        index.full_reindex(&dir, &excluded);
+        file_index.full_reindex(&dir, &excluded);
+        let elapsed = start.elapsed();
+        eprintln!(
+            "\tindexed {} in {:.1}ms",
+            name,
+            elapsed.as_secs_f64() * 1000.0
+        );
+    });
+}
+
+fn cookie_value<'a>(headers: &[httparse::Header<'a>], name: &str) -> Option<&'a str> {
+    let cookie = find_header(headers, "cookie")?;
+    for part in cookie.split(';') {
+        let (key, value) = part.trim().split_once('=')?;
+        if key == name {
+            return Some(value);
+        }
+    }
+    None
+}
+
+fn session_cookie_name(vault_index: usize) -> String {
+    format!("tansu_session_{vault_index}")
+}
+
+fn requested_vault_index(
+    headers: &[httparse::Header<'_>],
+    path_raw: &str,
+    vault_count: usize,
+) -> usize {
+    find_header(headers, "x-tansu-vault")
+        .and_then(|value| value.parse::<usize>().ok())
+        .or_else(|| query_param(path_raw, "vault").and_then(|value| value.parse::<usize>().ok()))
+        .filter(|&index| index < vault_count)
+        .unwrap_or(0)
 }
 
 impl Server {
-    fn is_locked(&self) -> bool {
-        self.vaults[self.active].encrypted && self.vaults[self.active].vault.is_none()
+    fn request_vault_index(&self, headers: &[httparse::Header<'_>], path_raw: &str) -> usize {
+        requested_vault_index(headers, path_raw, self.vaults.len())
     }
 
-    fn check_session(&mut self, headers: &[httparse::Header<'_>]) -> bool {
-        if !self.vaults[self.active].encrypted {
+    fn is_locked(&self, vault_index: usize) -> bool {
+        self.vaults[vault_index].encrypted && self.vaults[vault_index].vault.is_none()
+    }
+
+    fn check_session(&mut self, vault_index: usize, headers: &[httparse::Header<'_>]) -> bool {
+        if !self.vaults[vault_index].encrypted {
             return true; // plaintext mode, no auth needed
         }
-        let session = match &mut self.vaults[self.active].session {
-            Some(s) => s,
-            None => return false,
-        };
-        // Check idle timeout
-        if session.last_activity.elapsed().as_secs() > SESSION_TIMEOUT_SECS {
-            self.lock_server();
+        let cookie_name = session_cookie_name(vault_index);
+        let Some(cookie_token) = cookie_value(headers, &cookie_name) else {
             return false;
-        }
-        // Validate cookie with constant-time comparison
-        let cookie = find_header(headers, "cookie").unwrap_or("");
-        let token_hex = hex_encode(&session.token);
-        let expected = format!("tansu_session={token_hex}");
-        let valid = cookie.split(';').any(|part| {
-            let part = part.trim();
-            if part.len() != expected.len() {
-                return false;
+        };
+
+        let mut valid = false;
+        {
+            let sessions = &mut self.vaults[vault_index].sessions;
+            sessions.retain(|session| {
+                session.last_activity.elapsed().as_secs() <= SESSION_TIMEOUT_SECS
+            });
+            for session in sessions.iter_mut() {
+                let token_hex = hex_encode(&session.token);
+                if token_hex.len() != cookie_token.len() {
+                    continue;
+                }
+                use subtle::ConstantTimeEq;
+                if bool::from(token_hex.as_bytes().ct_eq(cookie_token.as_bytes())) {
+                    session.last_activity = Instant::now();
+                    valid = true;
+                    break;
+                }
             }
-            use subtle::ConstantTimeEq;
-            part.as_bytes().ct_eq(expected.as_bytes()).into()
-        });
-        if valid {
-            self.vaults[self.active]
-                .session
-                .as_mut()
-                .unwrap()
-                .last_activity = Instant::now();
         }
-        valid
+
+        if valid {
+            return true;
+        }
+        if self.vaults[vault_index].sessions.is_empty() {
+            self.lock_vault(vault_index);
+        }
+        false
     }
 
-    fn create_session(&mut self) -> String {
+    fn create_session(&mut self, vault_index: usize) -> String {
         let mut token = [0u8; 32];
         use rand::RngCore;
         rand::rngs::OsRng.fill_bytes(&mut token);
         let hex = hex_encode(&token);
-        self.vaults[self.active].session = Some(SessionState {
+        self.vaults[vault_index].sessions.push(SessionState {
             token,
             last_activity: Instant::now(),
         });
         hex
     }
 
-    fn lock_server(&mut self) {
-        self.vaults[self.active].vault = None;
-        self.vaults[self.active].session = None;
-        self.broadcast_sse("locked", "");
-        self.sse_clients.lock().unwrap().clear();
+    fn lock_vault(&mut self, vault_index: usize) {
+        self.vaults[vault_index].vault = None;
+        self.vaults[vault_index].sessions.clear();
+        let msg = b"event: locked\ndata: \n\n";
+        let mut guard = self.sse_clients.lock().unwrap();
+        guard.retain_mut(|client| {
+            if client.vault_index != vault_index {
+                return true;
+            }
+            let _ = client.stream.write_all(msg);
+            false
+        });
     }
 
     fn drain_watch_events(&mut self) {
-        // Collect first to avoid holding a borrow on watch_rx across &mut self calls.
-        let events: Vec<WatchEvent> = self.vaults[self.active].watch_rx.try_iter().collect();
-        let mut had_events = false;
-        for event in events {
-            had_events = true;
-            match event {
-                WatchEvent::Modified(path) | WatchEvent::Created(path) => {
-                    if let Ok(content) = self.read_content(&path) {
+        for vault_index in 0..self.vaults.len() {
+            let events: Vec<WatchEvent> = self.vaults[vault_index].watch_rx.try_iter().collect();
+            if events.is_empty() {
+                continue;
+            }
+
+            let can_index =
+                !self.vaults[vault_index].encrypted || self.vaults[vault_index].vault.is_some();
+            let mut had_index_updates = false;
+
+            for event in events {
+                match event {
+                    WatchEvent::Modified(path) | WatchEvent::Created(path) => {
                         let rel = path
-                            .strip_prefix(&self.vaults[self.active].dir)
+                            .strip_prefix(&self.vaults[vault_index].dir)
                             .unwrap_or(&path);
                         let rel_str = rel.to_string_lossy().into_owned();
-                        self.reindex_note_and_file(&rel_str, &content, &path);
-                        self.broadcast_sse("changed", &rel_str);
+                        if can_index && let Ok(content) = self.read_content(vault_index, &path) {
+                            self.reindex_note_and_file_for(vault_index, &rel_str, &content, &path);
+                            had_index_updates = true;
+                        }
+                        self.broadcast_sse(vault_index, "changed", &rel_str);
+                    }
+                    WatchEvent::Removed(path) => {
+                        let rel = path
+                            .strip_prefix(&self.vaults[vault_index].dir)
+                            .unwrap_or(&path);
+                        let rel_str = rel.to_string_lossy().into_owned();
+                        if can_index {
+                            self.vaults[vault_index].index.remove_note(&rel_str);
+                            self.vaults[vault_index].file_index.remove_file(&rel_str);
+                            had_index_updates = true;
+                        }
+                        self.broadcast_sse(vault_index, "deleted", &rel_str);
                     }
                 }
-                WatchEvent::Removed(path) => {
-                    let rel = path
-                        .strip_prefix(&self.vaults[self.active].dir)
-                        .unwrap_or(&path);
-                    let rel_str = rel.to_string_lossy().into_owned();
-                    self.vaults[self.active].index.remove_note(&rel_str);
-                    self.vaults[self.active].file_index.remove_file(&rel_str);
-                    self.broadcast_sse("deleted", &rel_str);
-                }
+            }
+
+            if had_index_updates {
+                self.vaults[vault_index].index.commit();
+                self.vaults[vault_index].file_index.commit();
             }
         }
-        if had_events {
-            self.vaults[self.active].index.commit();
-        }
     }
 
-    fn broadcast_sse(&self, event_type: &str, path: &str) {
+    fn broadcast_sse(&self, vault_index: usize, event_type: &str, path: &str) {
         let msg = format!("event: {event_type}\ndata: {path}\n\n");
         let mut guard = self.sse_clients.lock().unwrap();
-        guard.retain_mut(|s| s.write_all(msg.as_bytes()).is_ok());
+        guard.retain_mut(|client| {
+            client.vault_index != vault_index || client.stream.write_all(msg.as_bytes()).is_ok()
+        });
     }
 
-    fn mark_self_write(&self, path: &Path) {
-        self.vaults[self.active]
+    fn mark_self_write(&self, vault_index: usize, path: &Path) {
+        self.vaults[vault_index]
             .self_writes
             .lock()
             .unwrap()
@@ -168,8 +261,8 @@ impl Server {
     }
 
     /// Read a user-content file as String (decrypts if vault is active).
-    fn read_content(&self, path: &Path) -> io::Result<String> {
-        if let Some(ref vault) = self.vaults[self.active].vault {
+    fn read_content(&self, vault_index: usize, path: &Path) -> io::Result<String> {
+        if let Some(ref vault) = self.vaults[vault_index].vault {
             vault.read_to_string(path)
         } else {
             fs::read_to_string(path)
@@ -177,8 +270,8 @@ impl Server {
     }
 
     /// Read a user-content file as raw bytes (decrypts if vault is active).
-    fn read_content_bytes(&self, path: &Path) -> io::Result<Vec<u8>> {
-        if let Some(ref vault) = self.vaults[self.active].vault {
+    fn read_content_bytes(&self, vault_index: usize, path: &Path) -> io::Result<Vec<u8>> {
+        if let Some(ref vault) = self.vaults[vault_index].vault {
             vault.read(path)
         } else {
             fs::read(path)
@@ -186,18 +279,23 @@ impl Server {
     }
 
     /// Atomic write of user content (encrypts if vault is active).
-    fn write_content(&self, path: &Path, content: &[u8]) -> io::Result<()> {
-        self.mark_self_write(path);
-        if let Some(ref vault) = self.vaults[self.active].vault {
+    fn write_content(&self, vault_index: usize, path: &Path, content: &[u8]) -> io::Result<()> {
+        self.mark_self_write(vault_index, path);
+        if let Some(ref vault) = self.vaults[vault_index].vault {
             vault.write(path, content)
         } else {
             crypto::atomic_write(path, content)
         }
     }
 
-    fn create_content_new(&self, path: &Path, content: &[u8]) -> io::Result<()> {
-        self.mark_self_write(path);
-        let data = if let Some(ref vault) = self.vaults[self.active].vault {
+    fn create_content_new(
+        &self,
+        vault_index: usize,
+        path: &Path,
+        content: &[u8],
+    ) -> io::Result<()> {
+        self.mark_self_write(vault_index, path);
+        let data = if let Some(ref vault) = self.vaults[vault_index].vault {
             vault.encrypt(content)
         } else {
             content.to_vec()
@@ -213,14 +311,14 @@ impl Server {
         Ok(())
     }
 
-    fn remove_content_file(&self, path: &Path) -> io::Result<()> {
-        self.mark_self_write(path);
+    fn remove_content_file(&self, vault_index: usize, path: &Path) -> io::Result<()> {
+        self.mark_self_write(vault_index, path);
         fs::remove_file(path)
     }
 
     /// Plain write for non-content files (images upload, etc.)
-    fn write_content_raw(&self, path: &Path, content: &[u8]) -> io::Result<()> {
-        if let Some(ref vault) = self.vaults[self.active].vault {
+    fn write_content_raw(&self, vault_index: usize, path: &Path, content: &[u8]) -> io::Result<()> {
+        if let Some(ref vault) = self.vaults[vault_index].vault {
             let encrypted = vault.encrypt(content);
             fs::write(path, encrypted)
         } else {
@@ -228,18 +326,38 @@ impl Server {
         }
     }
 
-    fn reindex_note(&self, rel_path: &str, content: &str, full_path: &Path) {
-        self.vaults[self.active]
+    fn reindex_note(&self, vault_index: usize, rel_path: &str, content: &str, full_path: &Path) {
+        self.vaults[vault_index]
             .index
             .index_note(rel_path, content, full_path);
     }
 
-    fn reindex_note_and_file(&self, rel_path: &str, content: &str, full_path: &Path) {
-        self.reindex_note(rel_path, content, full_path);
+    fn reindex_note_and_file(
+        &self,
+        vault_index: usize,
+        rel_path: &str,
+        content: &str,
+        full_path: &Path,
+    ) {
+        self.reindex_note(vault_index, rel_path, content, full_path);
         let title = scanner::official_title(rel_path, content);
-        self.vaults[self.active]
+        self.vaults[vault_index]
             .file_index
             .index_file(rel_path, &title, mtime_secs(full_path));
+    }
+
+    fn reindex_note_and_file_for(
+        &self,
+        vault_index: usize,
+        rel_path: &str,
+        content: &str,
+        full_path: &Path,
+    ) {
+        self.reindex_note_and_file(vault_index, rel_path, content, full_path);
+    }
+
+    fn resolve_vault_path(&self, vault_index: usize, raw: &str) -> Option<(String, PathBuf)> {
+        resolve_path_under_root(&self.vaults[vault_index].dir, raw)
     }
 
     fn rel_for_title(base_rel: &str, title: &str) -> String {
@@ -271,6 +389,7 @@ impl Server {
 
     fn create_at_available_path(
         &self,
+        vault_index: usize,
         desired_rel: &str,
         title: &str,
         content: &str,
@@ -281,17 +400,16 @@ impl Server {
             } else {
                 Self::rel_with_suffix(desired_rel, title, &Self::suffix(attempt))
             };
-            let full = self.vaults[self.active].dir.join(&rel);
-            if !full.starts_with(&self.vaults[self.active].dir) {
+            let Some((rel, full)) = self.resolve_vault_path(vault_index, &rel) else {
                 return Err(io::Error::new(
                     io::ErrorKind::PermissionDenied,
                     "path escapes notes directory",
                 ));
-            }
+            };
             if let Some(parent) = full.parent() {
                 fs::create_dir_all(parent)?;
             }
-            match self.create_content_new(&full, content.as_bytes()) {
+            match self.create_content_new(vault_index, &full, content.as_bytes()) {
                 Ok(()) => return Ok((rel, full)),
                 Err(err) if err.kind() == io::ErrorKind::AlreadyExists => continue,
                 Err(err) => return Err(err),
@@ -311,67 +429,81 @@ impl Server {
             .to_string()
     }
 
-    fn update_backlinks(&mut self, old_path: &str, new_path: &str) -> Vec<String> {
+    fn update_backlinks(
+        &mut self,
+        vault_index: usize,
+        old_path: &str,
+        new_path: &str,
+    ) -> Vec<String> {
         let old_stem = Self::note_stem(old_path);
         let new_stem = Self::note_stem(new_path);
         if old_stem == new_stem {
             return Vec::new();
         }
 
-        self.vaults[self.active].index.commit();
+        self.vaults[vault_index].index.commit();
         let mut updated = Vec::new();
-        let referencing = self.vaults[self.active].index.get_backlinks(&old_stem);
+        let referencing = self.vaults[vault_index].index.get_backlinks(&old_stem);
         for note_path in &referencing {
-            let note_full = self.vaults[self.active].dir.join(note_path);
-            if let Ok(content) = self.read_content(&note_full) {
+            let note_full = self.vaults[vault_index].dir.join(note_path);
+            if let Ok(content) = self.read_content(vault_index, &note_full) {
                 let new_content =
                     content.replace(&format!("[[{old_stem}]]"), &format!("[[{new_stem}]]"));
                 if new_content != content {
-                    revisions::save_revision(&self.vaults[self.active].dir, note_path, &note_full);
-                    if let Err(e) = self.write_content(&note_full, new_content.as_bytes()) {
+                    revisions::save_revision(&self.vaults[vault_index].dir, note_path, &note_full);
+                    if let Err(e) =
+                        self.write_content(vault_index, &note_full, new_content.as_bytes())
+                    {
                         eprintln!("rename: failed to update {}: {e}", note_full.display());
                         continue;
                     }
-                    self.reindex_note_and_file(note_path, &new_content, &note_full);
+                    self.reindex_note_and_file(vault_index, note_path, &new_content, &note_full);
                     updated.push(note_path.clone());
                 }
             }
         }
         if !updated.is_empty() {
-            self.vaults[self.active].index.commit();
-            self.vaults[self.active].file_index.commit();
+            self.vaults[vault_index].index.commit();
+            self.vaults[vault_index].file_index.commit();
         }
         updated
     }
 
-    fn update_pinned_path(&self, old_path: &str, new_path: &str) {
-        let mut pinned = self.load_pinned();
+    fn update_pinned_path(&self, vault_index: usize, old_path: &str, new_path: &str) {
+        let mut pinned = self.load_pinned(vault_index);
         if let Some(slot) = pinned.iter_mut().find(|p| *p == old_path) {
             *slot = new_path.to_string();
-            let _ = self.save_pinned(&pinned);
+            let _ = self.save_pinned(vault_index, &pinned);
         }
     }
 
     /// Reindex all markdown files using the vault for decryption.
-    fn reindex_with_vault(&self) {
-        let vault = match &self.vaults[self.active].vault {
+    fn reindex_with_vault(&self, vault_index: usize) {
+        let vault = match &self.vaults[vault_index].vault {
             Some(v) => v,
             None => return,
         };
-        let files = crypto::collect_content_files(&self.vaults[self.active].dir);
+        let start = Instant::now();
+        let files = crypto::collect_content_files(&self.vaults[vault_index].dir);
         for path in &files {
             if path.extension().is_some_and(|e| e == "md")
                 && let Ok(content) = vault.read_to_string(path)
             {
                 let rel = path
-                    .strip_prefix(&self.vaults[self.active].dir)
+                    .strip_prefix(&self.vaults[vault_index].dir)
                     .unwrap_or(path);
                 let rel_str = rel.to_string_lossy();
-                self.reindex_note_and_file(&rel_str, &content, path);
+                self.reindex_note_and_file(vault_index, &rel_str, &content, path);
             }
         }
-        self.vaults[self.active].index.commit();
-        self.vaults[self.active].file_index.commit();
+        self.vaults[vault_index].index.commit();
+        self.vaults[vault_index].file_index.commit();
+        let elapsed = start.elapsed();
+        eprintln!(
+            "\tindexed {} in {:.1}ms",
+            self.vaults[vault_index].name,
+            elapsed.as_secs_f64() * 1000.0
+        );
     }
 
     fn handle(&mut self, mut stream: TcpStream) -> io::Result<()> {
@@ -461,12 +593,17 @@ impl Server {
     ) -> io::Result<()> {
         let path = path_raw.split('?').next().unwrap_or("/");
         let mut fp = PathBuf::new();
+        let vault_index = self.request_vault_index(headers, path_raw);
+        let allow_without_unlock = path == "/api/vaults"
+            || (method == "POST"
+                && path.starts_with("/api/vaults/")
+                && path.ends_with("/activate"));
 
         // Always allow: status, unlock, static assets, index page
         match path {
-            "/api/status" => return self.api_status(stream),
+            "/api/status" => return self.api_status(vault_index, stream),
             "/api/unlock" if method == "POST" => {
-                return self.api_unlock(stream, headers, raw_buf, header_len);
+                return self.api_unlock(vault_index, stream, headers, raw_buf, header_len);
             }
             _ => {}
         }
@@ -499,15 +636,30 @@ impl Server {
         }
 
         // If locked, reject everything else
-        if self.is_locked() {
+        if self.is_locked(vault_index) {
             if path.starts_with("/api/") {
+                if allow_without_unlock {
+                    return self.dispatch_api(
+                        vault_index,
+                        stream,
+                        method,
+                        path,
+                        path_raw,
+                        headers,
+                        raw_buf,
+                        header_len,
+                    );
+                }
                 return write_error(stream, 403, "Locked");
             }
             return write_redirect(stream, "/");
         }
 
         // If encrypted, check session
-        if self.vaults[self.active].encrypted && !self.check_session(headers) {
+        if self.vaults[vault_index].encrypted
+            && !allow_without_unlock
+            && !self.check_session(vault_index, headers)
+        {
             if path.starts_with("/api/") {
                 return write_error(stream, 403, "Unauthorized");
             }
@@ -515,11 +667,20 @@ impl Server {
         }
 
         if path.starts_with("/api/") {
-            return self.dispatch_api(stream, method, path, path_raw, headers, raw_buf, header_len);
+            return self.dispatch_api(
+                vault_index,
+                stream,
+                method,
+                path,
+                path_raw,
+                headers,
+                raw_buf,
+                header_len,
+            );
         }
 
         if path == "/events" {
-            return self.handle_sse(stream);
+            return self.handle_sse(vault_index, stream);
         }
 
         if method != "GET" {
@@ -528,15 +689,15 @@ impl Server {
 
         if path.starts_with("/z-images/") {
             let decoded = percent_decode(path);
-            if !normalize_into(&self.vaults[self.active].dir, &decoded, &mut fp) {
+            if !normalize_into(&self.vaults[vault_index].dir, &decoded, &mut fp) {
                 return write_error(stream, 403, "Forbidden");
             }
             if !fp.is_file() {
                 return write_error(stream, 404, "Not Found");
             }
-            if self.vaults[self.active].vault.is_some() {
+            if self.vaults[vault_index].vault.is_some() {
                 // Encrypted mode: decrypt and serve bytes
-                let data = self.read_content_bytes(&fp)?;
+                let data = self.read_content_bytes(vault_index, &fp)?;
                 return write_body_cached(stream, mime(&fp), &data);
             } else {
                 let meta = fs::metadata(&fp)?;
@@ -550,6 +711,7 @@ impl Server {
     #[allow(clippy::too_many_arguments)]
     fn dispatch_api(
         &mut self,
+        vault_index: usize,
         stream: &mut TcpStream,
         method: &str,
         path: &str,
@@ -559,40 +721,50 @@ impl Server {
         header_len: usize,
     ) -> io::Result<()> {
         match (method, path) {
-            ("GET", "/api/search") => self.api_search(stream, path_raw),
-            ("GET", "/api/note") => self.api_get_note(stream, path_raw),
+            ("GET", "/api/search") => self.api_search(vault_index, stream, path_raw),
+            ("GET", "/api/note") => self.api_get_note(vault_index, stream, path_raw),
             ("PUT", "/api/note") => {
-                self.api_put_note(stream, path_raw, headers, raw_buf, header_len)
+                self.api_put_note(vault_index, stream, path_raw, headers, raw_buf, header_len)
             }
-            ("GET", "/api/tags") => self.api_get_tags(stream, path_raw),
+            ("GET", "/api/tags") => self.api_get_tags(vault_index, stream, path_raw),
             ("POST", "/api/note") => {
-                self.api_create_note(stream, path_raw, headers, raw_buf, header_len)
+                self.api_create_note(vault_index, stream, path_raw, headers, raw_buf, header_len)
             }
-            ("DELETE", "/api/note") => self.api_delete_note(stream, path_raw),
-            ("POST", "/api/rename") => self.api_rename(stream, headers, raw_buf, header_len),
-            ("GET", "/api/notes") => self.api_list_notes(stream),
-            ("GET", "/api/backlinks") => self.api_backlinks(stream, path_raw),
-            ("POST", "/api/image") => self.api_upload_image(stream, headers, raw_buf, header_len),
-            ("GET", "/api/revisions") => self.api_list_revisions(stream, path_raw),
-            ("GET", "/api/revision") => self.api_get_revision(stream, path_raw),
-            ("POST", "/api/restore") => self.api_restore_revision(stream, path_raw),
-            ("GET", "/api/state") => self.api_get_state(stream),
-            ("PUT", "/api/state") => self.api_put_state(stream, headers, raw_buf, header_len),
-            ("GET", "/api/settings") => self.api_get_settings(stream),
-            ("PUT", "/api/settings") => self.api_put_settings(stream, headers, raw_buf, header_len),
-            ("GET", "/api/filesearch") => self.api_filesearch(stream, path_raw),
-            ("GET", "/api/recentfiles") => self.api_recent_files(stream),
-            ("GET", "/api/pinned") => self.api_get_pinned(stream),
-            ("POST", "/api/pin") => self.api_pin(stream, headers, raw_buf, header_len),
-            ("DELETE", "/api/pin") => self.api_unpin(stream, headers, raw_buf, header_len),
-            ("GET", "/api/lock") => self.api_lock(stream),
+            ("DELETE", "/api/note") => self.api_delete_note(vault_index, stream, path_raw),
+            ("POST", "/api/rename") => {
+                self.api_rename(vault_index, stream, headers, raw_buf, header_len)
+            }
+            ("GET", "/api/notes") => self.api_list_notes(vault_index, stream),
+            ("GET", "/api/backlinks") => self.api_backlinks(vault_index, stream, path_raw),
+            ("POST", "/api/image") => {
+                self.api_upload_image(vault_index, stream, headers, raw_buf, header_len)
+            }
+            ("GET", "/api/revisions") => self.api_list_revisions(vault_index, stream, path_raw),
+            ("GET", "/api/revision") => self.api_get_revision(vault_index, stream, path_raw),
+            ("POST", "/api/restore") => self.api_restore_revision(vault_index, stream, path_raw),
+            ("GET", "/api/state") => self.api_get_state(vault_index, stream),
+            ("PUT", "/api/state") => {
+                self.api_put_state(vault_index, stream, headers, raw_buf, header_len)
+            }
+            ("GET", "/api/settings") => self.api_get_settings(vault_index, stream),
+            ("PUT", "/api/settings") => {
+                self.api_put_settings(vault_index, stream, headers, raw_buf, header_len)
+            }
+            ("GET", "/api/filesearch") => self.api_filesearch(vault_index, stream, path_raw),
+            ("GET", "/api/recentfiles") => self.api_recent_files(vault_index, stream),
+            ("GET", "/api/pinned") => self.api_get_pinned(vault_index, stream),
+            ("POST", "/api/pin") => self.api_pin(vault_index, stream, headers, raw_buf, header_len),
+            ("DELETE", "/api/pin") => {
+                self.api_unpin(vault_index, stream, headers, raw_buf, header_len)
+            }
+            ("GET", "/api/lock") => self.api_lock(vault_index, stream),
             ("POST", "/api/prf/register") => {
-                self.api_prf_register(stream, headers, raw_buf, header_len)
+                self.api_prf_register(vault_index, stream, headers, raw_buf, header_len)
             }
             ("POST", "/api/prf/remove") => {
-                self.api_prf_remove(stream, headers, raw_buf, header_len)
+                self.api_prf_remove(vault_index, stream, headers, raw_buf, header_len)
             }
-            ("GET", "/api/vaults") => self.api_get_vaults(stream),
+            ("GET", "/api/vaults") => self.api_get_vaults(vault_index, stream),
             _ if method == "POST"
                 && path.starts_with("/api/vaults/")
                 && path.ends_with("/activate") =>
@@ -639,7 +811,7 @@ impl Server {
         }
     }
 
-    fn handle_sse(&self, stream: &mut TcpStream) -> io::Result<()> {
+    fn handle_sse(&self, vault_index: usize, stream: &mut TcpStream) -> io::Result<()> {
         let header = "HTTP/1.1 200 OK\r\n\
                       Content-Type: text/event-stream\r\n\
                       Cache-Control: no-store\r\n\
@@ -647,23 +819,26 @@ impl Server {
                       \r\n";
         stream.write_all(header.as_bytes())?;
         stream.write_all(b"event: connected\ndata: ok\n\n")?;
-        self.sse_clients.lock().unwrap().push(stream.try_clone()?);
+        self.sse_clients.lock().unwrap().push(SseClient {
+            stream: stream.try_clone()?,
+            vault_index,
+        });
         Ok(())
     }
 
-    fn api_status(&self, sock: &TcpStream) -> io::Result<()> {
-        let locked = self.is_locked();
+    fn api_status(&self, vault_index: usize, sock: &TcpStream) -> io::Result<()> {
+        let locked = self.is_locked(vault_index);
         let needs_setup =
-            self.vaults[self.active].encrypted && self.vaults[self.active].crypto_config.is_none();
+            self.vaults[vault_index].encrypted && self.vaults[vault_index].crypto_config.is_none();
         // Credential IDs are needed for WebAuthn allowCredentials (must be public)
-        let prf_ids: Vec<String> = self.vaults[self.active]
+        let prf_ids: Vec<String> = self.vaults[vault_index]
             .crypto_config
             .as_ref()
             .map(|c| c.prf_credentials.iter().map(|p| p.id.clone()).collect())
             .unwrap_or_default();
         // Credential names leak device info — only send when unlocked
         let prf_names: Vec<String> = if !locked {
-            self.vaults[self.active]
+            self.vaults[vault_index]
                 .crypto_config
                 .as_ref()
                 .map(|c| c.prf_credentials.iter().map(|p| p.name.clone()).collect())
@@ -675,7 +850,7 @@ impl Server {
             sock,
             &AppStatus {
                 locked,
-                encrypted: self.vaults[self.active].encrypted,
+                encrypted: self.vaults[vault_index].encrypted,
                 needs_setup,
                 prf_credential_ids: prf_ids,
                 prf_credential_names: prf_names,
@@ -685,15 +860,16 @@ impl Server {
 
     fn api_unlock(
         &mut self,
+        vault_index: usize,
         sock: &mut TcpStream,
         headers: &[httparse::Header<'_>],
         raw_buf: &[u8],
         header_len: usize,
     ) -> io::Result<()> {
-        if !self.is_locked() {
+        if !self.is_locked(vault_index) {
             return write_error(sock, 400, "Not locked");
         }
-        let config = match &self.vaults[self.active].crypto_config {
+        let config = match &self.vaults[vault_index].crypto_config {
             Some(c) => c,
             None => return write_error(sock, 500, "No crypto config"),
         };
@@ -721,32 +897,35 @@ impl Server {
             return write_error(sock, 400, "Provide recovery_key or prf_key");
         };
 
-        self.vaults[self.active].vault = Some(Vault::new(master));
-        let token_hex = self.create_session();
-        let cookie = format!("tansu_session={token_hex}; HttpOnly; SameSite=Strict; Path=/");
-
-        self.reindex_with_vault();
+        self.vaults[vault_index].vault = Some(Vault::new(master));
+        let token_hex = self.create_session(vault_index);
+        let session_cookie = format!(
+            "{}={token_hex}; HttpOnly; SameSite=Strict; Path=/",
+            session_cookie_name(vault_index)
+        );
+        self.reindex_with_vault(vault_index);
 
         let json = serde_json::to_string(&OkResponse { ok: true })
             .map_err(|e| io::Error::other(e.to_string()))?;
-        write_json_with_cookie(sock, &json, &cookie)
+        write_json_with_cookies(sock, &json, &[&session_cookie])
     }
 
-    fn api_lock(&mut self, sock: &TcpStream) -> io::Result<()> {
-        if self.vaults[self.active].encrypted {
-            self.lock_server();
+    fn api_lock(&mut self, vault_index: usize, sock: &TcpStream) -> io::Result<()> {
+        if self.vaults[vault_index].encrypted {
+            self.lock_vault(vault_index);
         }
         respond_json(sock, &OkResponse { ok: true })
     }
 
     fn api_prf_register(
         &mut self,
+        vault_index: usize,
         sock: &mut TcpStream,
         headers: &[httparse::Header<'_>],
         raw_buf: &[u8],
         header_len: usize,
     ) -> io::Result<()> {
-        let vault = match &self.vaults[self.active].vault {
+        let vault = match &self.vaults[vault_index].vault {
             Some(v) => v,
             None => return write_error(sock, 403, "Locked"),
         };
@@ -760,8 +939,8 @@ impl Server {
         let kek = crypto::kek_from_prf(&prf_bytes);
         let wrapped = vault.wrap_master_key(&kek);
 
-        let dir = self.vaults[self.active].dir.clone();
-        let config = match &mut self.vaults[self.active].crypto_config {
+        let dir = self.vaults[vault_index].dir.clone();
+        let config = match &mut self.vaults[vault_index].crypto_config {
             Some(c) => c,
             None => return write_error(sock, 500, "No crypto config"),
         };
@@ -779,19 +958,20 @@ impl Server {
 
     fn api_prf_remove(
         &mut self,
+        vault_index: usize,
         sock: &mut TcpStream,
         headers: &[httparse::Header<'_>],
         raw_buf: &[u8],
         header_len: usize,
     ) -> io::Result<()> {
-        if self.vaults[self.active].vault.is_none() {
+        if self.vaults[vault_index].vault.is_none() {
             return write_error(sock, 403, "Locked");
         }
 
         let req: PrfRemoveRequest = parse_body(sock, headers, raw_buf, header_len)?;
 
-        let dir = self.vaults[self.active].dir.clone();
-        let config = match &mut self.vaults[self.active].crypto_config {
+        let dir = self.vaults[vault_index].dir.clone();
+        let config = match &mut self.vaults[vault_index].crypto_config {
             Some(c) => c,
             None => return write_error(sock, 500, "No crypto config"),
         };
@@ -802,14 +982,14 @@ impl Server {
         respond_json(sock, &OkResponse { ok: true })
     }
 
-    fn api_search(&self, sock: &TcpStream, path_raw: &str) -> io::Result<()> {
+    fn api_search(&self, vault_index: usize, sock: &TcpStream, path_raw: &str) -> io::Result<()> {
         let q = query_param(path_raw, "q").unwrap_or_default();
         if q.is_empty() {
             return write_json(sock, "[]");
         }
         let filter_path = query_param(path_raw, "path");
-        let s = &self.vaults[self.active].settings;
-        let results = self.vaults[self.active].index.search(
+        let s = &self.vaults[vault_index].settings;
+        let results = self.vaults[vault_index].index.search(
             &q,
             s.result_limit,
             filter_path.as_deref(),
@@ -837,18 +1017,17 @@ impl Server {
         respond_json(sock, &hits)
     }
 
-    fn api_get_note(&self, sock: &TcpStream, path_raw: &str) -> io::Result<()> {
+    fn api_get_note(&self, vault_index: usize, sock: &TcpStream, path_raw: &str) -> io::Result<()> {
         let Some(rel) = query_param(path_raw, "path") else {
             return write_error(sock, 400, "missing path param");
         };
-        let full = self.vaults[self.active].dir.join(&rel);
-        if !full.starts_with(&self.vaults[self.active].dir) {
+        let Some((rel, full)) = self.resolve_vault_path(vault_index, &rel) else {
             return write_error(sock, 403, "Forbidden");
-        }
+        };
         if !full.is_file() {
             return write_error(sock, 404, "Not Found");
         }
-        let content = self.read_content(&full)?;
+        let content = self.read_content(vault_index, &full)?;
         let mtime = mtime_secs(&full);
         let tags = frontmatter::split_tags(&content).tags;
         let title = scanner::official_title(&rel, &content);
@@ -863,20 +1042,19 @@ impl Server {
         )
     }
 
-    fn api_get_tags(&self, sock: &TcpStream, path_raw: &str) -> io::Result<()> {
+    fn api_get_tags(&self, vault_index: usize, sock: &TcpStream, path_raw: &str) -> io::Result<()> {
         let tags = if let Some(path) = query_param(path_raw, "path") {
-            let full = self.vaults[self.active].dir.join(&path);
-            if !full.starts_with(&self.vaults[self.active].dir) {
+            let Some((_, full)) = self.resolve_vault_path(vault_index, &path) else {
                 return write_error(sock, 403, "Forbidden");
-            }
+            };
             if !full.is_file() {
                 return write_error(sock, 404, "Not Found");
             }
-            let content = self.read_content(&full)?;
+            let content = self.read_content(vault_index, &full)?;
             frontmatter::split_tags(&content).tags
         } else {
             let mut set = std::collections::BTreeSet::new();
-            for note in self.vaults[self.active].index.get_all_notes() {
+            for note in self.vaults[vault_index].index.get_all_notes() {
                 set.extend(note.tags);
             }
             set.into_iter().collect()
@@ -886,6 +1064,7 @@ impl Server {
 
     fn api_put_note(
         &mut self,
+        vault_index: usize,
         stream: &mut TcpStream,
         path_raw: &str,
         headers: &[httparse::Header<'_>],
@@ -895,16 +1074,15 @@ impl Server {
         let Some(rel) = query_param(path_raw, "path") else {
             return write_error(stream, 400, "missing path param");
         };
-        let full = self.vaults[self.active].dir.join(&rel);
-        if !full.starts_with(&self.vaults[self.active].dir) {
+        let Some((rel, full)) = self.resolve_vault_path(vault_index, &rel) else {
             return write_error(stream, 403, "Forbidden");
-        }
+        };
 
         let req: PutNoteRequest = parse_body(stream, headers, raw_buf, header_len)?;
         let current_mtime = mtime_secs(&full);
 
         if req.expected_mtime != 0 && current_mtime != req.expected_mtime {
-            let current_content = self.read_content(&full).unwrap_or_default();
+            let current_content = self.read_content(vault_index, &full).unwrap_or_default();
             return respond_json_status(
                 stream,
                 409,
@@ -920,7 +1098,7 @@ impl Server {
             );
         }
 
-        let current_content = self.read_content(&full).unwrap_or_default();
+        let current_content = self.read_content(vault_index, &full).unwrap_or_default();
         let title = scanner::official_title(&rel, &req.content);
         let desired_rel = if scanner::scan(&req.content).title.is_empty() {
             rel.clone()
@@ -942,26 +1120,26 @@ impl Server {
             );
         }
 
-        revisions::save_revision(&self.vaults[self.active].dir, &rel, &full);
+        revisions::save_revision(&self.vaults[vault_index].dir, &rel, &full);
         let (saved_rel, saved_full) = if desired_rel == rel {
-            self.write_content(&full, req.content.as_bytes())?;
+            self.write_content(vault_index, &full, req.content.as_bytes())?;
             (rel.clone(), full.clone())
         } else {
             let (saved_rel, saved_full) =
-                self.create_at_available_path(&desired_rel, &title, &req.content)?;
-            self.remove_content_file(&full)?;
-            self.vaults[self.active].index.remove_note(&rel);
-            self.vaults[self.active].file_index.remove_file(&rel);
-            revisions::migrate_revisions(&self.vaults[self.active].dir, &rel, &saved_rel);
-            self.update_pinned_path(&rel, &saved_rel);
+                self.create_at_available_path(vault_index, &desired_rel, &title, &req.content)?;
+            self.remove_content_file(vault_index, &full)?;
+            self.vaults[vault_index].index.remove_note(&rel);
+            self.vaults[vault_index].file_index.remove_file(&rel);
+            revisions::migrate_revisions(&self.vaults[vault_index].dir, &rel, &saved_rel);
+            self.update_pinned_path(vault_index, &rel, &saved_rel);
             (saved_rel, saved_full)
         };
 
-        self.reindex_note_and_file(&saved_rel, &req.content, &saved_full);
+        self.reindex_note_and_file(vault_index, &saved_rel, &req.content, &saved_full);
         let updated = if saved_rel == rel {
             Vec::new()
         } else {
-            self.update_backlinks(&rel, &saved_rel)
+            self.update_backlinks(vault_index, &rel, &saved_rel)
         };
 
         respond_json(
@@ -979,6 +1157,7 @@ impl Server {
 
     fn api_create_note(
         &mut self,
+        vault_index: usize,
         stream: &mut TcpStream,
         path_raw: &str,
         headers: &[httparse::Header<'_>],
@@ -988,10 +1167,9 @@ impl Server {
         let Some(rel) = query_param(path_raw, "path") else {
             return write_error(stream, 400, "missing path param");
         };
-        let requested_full = self.vaults[self.active].dir.join(&rel);
-        if !requested_full.starts_with(&self.vaults[self.active].dir) {
+        let Some((rel, _requested_full)) = self.resolve_vault_path(vault_index, &rel) else {
             return write_error(stream, 403, "Forbidden");
-        }
+        };
 
         let body = read_body(stream, headers, raw_buf, header_len)?;
         let raw_content = if body.is_empty() {
@@ -1005,9 +1183,9 @@ impl Server {
         let content = scanner::upsert_title_h1(&raw_content, &title);
         let desired_rel = Self::rel_for_title(&rel, &title);
         let (saved_rel, saved_full) =
-            self.create_at_available_path(&desired_rel, &title, &content)?;
+            self.create_at_available_path(vault_index, &desired_rel, &title, &content)?;
 
-        self.reindex_note_and_file(&saved_rel, &content, &saved_full);
+        self.reindex_note_and_file(vault_index, &saved_rel, &content, &saved_full);
 
         respond_json_status(
             stream,
@@ -1024,27 +1202,31 @@ impl Server {
         )
     }
 
-    fn api_delete_note(&mut self, sock: &TcpStream, path_raw: &str) -> io::Result<()> {
+    fn api_delete_note(
+        &mut self,
+        vault_index: usize,
+        sock: &TcpStream,
+        path_raw: &str,
+    ) -> io::Result<()> {
         let Some(rel) = query_param(path_raw, "path") else {
             return write_error(sock, 400, "missing path param");
         };
-        let full = self.vaults[self.active].dir.join(&rel);
-        if !full.starts_with(&self.vaults[self.active].dir) {
+        let Some((rel, full)) = self.resolve_vault_path(vault_index, &rel) else {
             return write_error(sock, 403, "Forbidden");
-        }
+        };
 
-        revisions::save_revision(&self.vaults[self.active].dir, &rel, &full);
-        self.mark_self_write(&full);
+        revisions::save_revision(&self.vaults[vault_index].dir, &rel, &full);
+        self.mark_self_write(vault_index, &full);
         fs::remove_file(&full)?;
-        self.vaults[self.active].index.remove_note(&rel);
-        self.vaults[self.active].file_index.remove_file(&rel);
+        self.vaults[vault_index].index.remove_note(&rel);
+        self.vaults[vault_index].file_index.remove_file(&rel);
 
         // Remove from pinned list if present
-        let mut pinned = self.load_pinned();
+        let mut pinned = self.load_pinned(vault_index);
         let before = pinned.len();
         pinned.retain(|p| p != &rel);
         if pinned.len() != before {
-            let _ = self.save_pinned(&pinned);
+            let _ = self.save_pinned(vault_index, &pinned);
         }
 
         respond_json(sock, &OkResponse { ok: true })
@@ -1052,6 +1234,7 @@ impl Server {
 
     fn api_rename(
         &mut self,
+        vault_index: usize,
         stream: &mut TcpStream,
         headers: &[httparse::Header<'_>],
         raw_buf: &[u8],
@@ -1059,43 +1242,44 @@ impl Server {
     ) -> io::Result<()> {
         let req: RenameRequest = parse_body(stream, headers, raw_buf, header_len)?;
 
-        let old_full = self.vaults[self.active].dir.join(&req.old_path);
         let requested_title = scanner::title_from_path(&req.new_path);
-        let desired_rel = Self::rel_for_title(&req.new_path, &requested_title);
-        let new_full = self.vaults[self.active].dir.join(&desired_rel);
-        if !old_full.starts_with(&self.vaults[self.active].dir)
-            || !new_full.starts_with(&self.vaults[self.active].dir)
-        {
+        let Some((old_rel, old_full)) = self.resolve_vault_path(vault_index, &req.old_path) else {
             return write_error(stream, 403, "Forbidden");
-        }
+        };
+        let desired_rel = Self::rel_for_title(&req.new_path, &requested_title);
+        let Some((desired_rel, _)) = self.resolve_vault_path(vault_index, &desired_rel) else {
+            return write_error(stream, 403, "Forbidden");
+        };
         if !old_full.exists() {
             return write_error(stream, 404, "source not found");
         }
 
-        revisions::save_revision(&self.vaults[self.active].dir, &req.old_path, &old_full);
-        let old_content = self.read_content(&old_full)?;
+        revisions::save_revision(&self.vaults[vault_index].dir, &old_rel, &old_full);
+        let old_content = self.read_content(vault_index, &old_full)?;
         let new_content = scanner::upsert_title_h1(&old_content, &requested_title);
 
-        let (saved_rel, saved_full) = if desired_rel == req.old_path {
-            self.write_content(&old_full, new_content.as_bytes())?;
-            (req.old_path.clone(), old_full.clone())
+        let (saved_rel, saved_full) = if desired_rel == old_rel {
+            self.write_content(vault_index, &old_full, new_content.as_bytes())?;
+            (old_rel.clone(), old_full.clone())
         } else {
-            let (saved_rel, saved_full) =
-                self.create_at_available_path(&desired_rel, &requested_title, &new_content)?;
-            self.remove_content_file(&old_full)?;
+            let (saved_rel, saved_full) = self.create_at_available_path(
+                vault_index,
+                &desired_rel,
+                &requested_title,
+                &new_content,
+            )?;
+            self.remove_content_file(vault_index, &old_full)?;
             (saved_rel, saved_full)
         };
 
-        self.vaults[self.active].index.remove_note(&req.old_path);
-        self.vaults[self.active]
-            .file_index
-            .remove_file(&req.old_path);
-        self.reindex_note_and_file(&saved_rel, &new_content, &saved_full);
-        if saved_rel != req.old_path {
-            revisions::migrate_revisions(&self.vaults[self.active].dir, &req.old_path, &saved_rel);
-            self.update_pinned_path(&req.old_path, &saved_rel);
+        self.vaults[vault_index].index.remove_note(&old_rel);
+        self.vaults[vault_index].file_index.remove_file(&old_rel);
+        self.reindex_note_and_file(vault_index, &saved_rel, &new_content, &saved_full);
+        if saved_rel != old_rel {
+            revisions::migrate_revisions(&self.vaults[vault_index].dir, &old_rel, &saved_rel);
+            self.update_pinned_path(vault_index, &old_rel, &saved_rel);
         }
-        let updated = self.update_backlinks(&req.old_path, &saved_rel);
+        let updated = self.update_backlinks(vault_index, &old_rel, &saved_rel);
         let title = scanner::official_title(&saved_rel, &new_content);
 
         respond_json(
@@ -1108,8 +1292,8 @@ impl Server {
         )
     }
 
-    fn api_list_notes(&self, sock: &TcpStream) -> io::Result<()> {
-        let notes = self.vaults[self.active].index.get_all_notes();
+    fn api_list_notes(&self, vault_index: usize, sock: &TcpStream) -> io::Result<()> {
+        let notes = self.vaults[vault_index].index.get_all_notes();
         let entries: Vec<NoteEntry> = notes
             .iter()
             .map(|n| NoteEntry {
@@ -1121,7 +1305,12 @@ impl Server {
         respond_json(sock, &entries)
     }
 
-    fn api_backlinks(&self, sock: &TcpStream, path_raw: &str) -> io::Result<()> {
+    fn api_backlinks(
+        &self,
+        vault_index: usize,
+        sock: &TcpStream,
+        path_raw: &str,
+    ) -> io::Result<()> {
         let Some(rel) = query_param(path_raw, "path") else {
             return write_error(sock, 400, "missing path param");
         };
@@ -1129,12 +1318,13 @@ impl Server {
             .file_stem()
             .and_then(|s| s.to_str())
             .unwrap_or(&rel);
-        let links = self.vaults[self.active].index.get_backlinks(stem);
+        let links = self.vaults[vault_index].index.get_backlinks(stem);
         respond_json(sock, &links)
     }
 
     fn api_upload_image(
         &mut self,
+        vault_index: usize,
         stream: &mut TcpStream,
         headers: &[httparse::Header<'_>],
         raw_buf: &[u8],
@@ -1151,18 +1341,24 @@ impl Server {
             .and_then(|h| std::str::from_utf8(h.value).ok())
             .unwrap_or("image.webp");
 
-        let images_dir = self.vaults[self.active].dir.join("z-images");
+        let images_dir = self.vaults[vault_index].dir.join("z-images");
         fs::create_dir_all(&images_dir)?;
 
-        let mut filename = suggested.to_string();
+        let base_filename = Path::new(suggested)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .filter(|name| !name.is_empty())
+            .unwrap_or("image.webp")
+            .to_string();
+        let mut filename = base_filename.clone();
         let mut dest = images_dir.join(&filename);
         let mut counter = 1u32;
         while dest.exists() {
-            let stem = Path::new(suggested)
+            let stem = Path::new(&base_filename)
                 .file_stem()
                 .and_then(|s| s.to_str())
                 .unwrap_or("image");
-            let ext = Path::new(suggested)
+            let ext = Path::new(&base_filename)
                 .extension()
                 .and_then(|s| s.to_str())
                 .unwrap_or("webp");
@@ -1171,7 +1367,7 @@ impl Server {
             counter += 1;
         }
 
-        self.write_content_raw(&dest, &body)?;
+        self.write_content_raw(vault_index, &dest, &body)?;
 
         respond_json_status(
             stream,
@@ -1183,15 +1379,28 @@ impl Server {
         )
     }
 
-    fn api_list_revisions(&self, sock: &TcpStream, path_raw: &str) -> io::Result<()> {
+    fn api_list_revisions(
+        &self,
+        vault_index: usize,
+        sock: &TcpStream,
+        path_raw: &str,
+    ) -> io::Result<()> {
         let Some(rel) = query_param(path_raw, "path") else {
             return write_error(sock, 400, "missing path param");
         };
-        let revs = revisions::list_revisions(&self.vaults[self.active].dir, &rel);
+        let Some((rel, _)) = self.resolve_vault_path(vault_index, &rel) else {
+            return write_error(sock, 403, "Forbidden");
+        };
+        let revs = revisions::list_revisions(&self.vaults[vault_index].dir, &rel);
         respond_json(sock, &revs)
     }
 
-    fn api_get_revision(&self, sock: &TcpStream, path_raw: &str) -> io::Result<()> {
+    fn api_get_revision(
+        &self,
+        vault_index: usize,
+        sock: &TcpStream,
+        path_raw: &str,
+    ) -> io::Result<()> {
         let Some(rel) = query_param(path_raw, "path") else {
             return write_error(sock, 400, "missing path param");
         };
@@ -1199,20 +1408,23 @@ impl Server {
             return write_error(sock, 400, "missing ts param");
         };
         let ts: u64 = ts_str.parse().map_err(|_| io::Error::other("bad ts"))?;
+        let Some((rel, _)) = self.resolve_vault_path(vault_index, &rel) else {
+            return write_error(sock, 403, "Forbidden");
+        };
 
         match revisions::get_revision(
-            &self.vaults[self.active].dir,
+            &self.vaults[vault_index].dir,
             &rel,
             ts,
-            self.vaults[self.active].vault.as_ref(),
+            self.vaults[vault_index].vault.as_ref(),
         ) {
             Some(content) => respond_json(sock, &ContentResponse { content }),
             None => write_error(sock, 404, "revision not found"),
         }
     }
 
-    fn api_get_state(&self, sock: &TcpStream) -> io::Result<()> {
-        let path = self.vaults[self.active].dir.join(".tansu/state.json");
+    fn api_get_state(&self, vault_index: usize, sock: &TcpStream) -> io::Result<()> {
+        let path = self.vaults[vault_index].dir.join(".tansu/state.json");
         match fs::read_to_string(&path) {
             Ok(json) => write_body(sock, "application/json", json.as_bytes()),
             Err(_) => write_json(sock, "{}"),
@@ -1221,6 +1433,7 @@ impl Server {
 
     fn api_put_state(
         &self,
+        vault_index: usize,
         stream: &mut TcpStream,
         headers: &[httparse::Header<'_>],
         raw_buf: &[u8],
@@ -1230,17 +1443,18 @@ impl Server {
         // Validate it matches the session state shape we persist.
         let _: SessionStateJson =
             serde_json::from_slice(&body).map_err(|e| io::Error::other(e.to_string()))?;
-        let path = self.vaults[self.active].dir.join(".tansu/state.json");
+        let path = self.vaults[vault_index].dir.join(".tansu/state.json");
         fs::write(&path, &body)?;
         respond_json(stream, &OkResponse { ok: true })
     }
 
-    fn api_get_settings(&self, sock: &TcpStream) -> io::Result<()> {
-        respond_json(sock, &self.vaults[self.active].settings)
+    fn api_get_settings(&self, vault_index: usize, sock: &TcpStream) -> io::Result<()> {
+        respond_json(sock, &self.vaults[vault_index].settings)
     }
 
     fn api_put_settings(
         &mut self,
+        vault_index: usize,
         stream: &mut TcpStream,
         headers: &[httparse::Header<'_>],
         raw_buf: &[u8],
@@ -1248,28 +1462,32 @@ impl Server {
     ) -> io::Result<()> {
         let new_settings: Settings = parse_body(stream, headers, raw_buf, header_len)?;
         let needs_reindex =
-            new_settings.excluded_folders != self.vaults[self.active].settings.excluded_folders;
-        new_settings.save(&self.vaults[self.active].dir)?;
-        self.vaults[self.active].settings = new_settings;
+            new_settings.excluded_folders != self.vaults[vault_index].settings.excluded_folders;
+        new_settings.save(&self.vaults[vault_index].dir)?;
+        self.vaults[vault_index].settings = new_settings;
         if needs_reindex {
-            if self.vaults[self.active].vault.is_some() {
+            if self.vaults[vault_index].vault.is_some() {
                 // Encrypted mode: reindex synchronously using vault
-                self.reindex_with_vault();
+                self.reindex_with_vault(vault_index);
             } else {
-                let index = self.vaults[self.active].index.clone();
-                let file_index = self.vaults[self.active].file_index.clone();
-                let dir = self.vaults[self.active].dir.clone();
-                let excluded = self.vaults[self.active].settings.excluded_folders.clone();
-                std::thread::spawn(move || {
-                    index.full_reindex(&dir, &excluded);
-                    file_index.full_reindex(&dir, &excluded);
-                });
+                spawn_plaintext_reindex(
+                    self.vaults[vault_index].name.clone(),
+                    self.vaults[vault_index].dir.clone(),
+                    self.vaults[vault_index].index.clone(),
+                    self.vaults[vault_index].file_index.clone(),
+                    self.vaults[vault_index].settings.excluded_folders.clone(),
+                );
             }
         }
         respond_json(stream, &OkResponse { ok: true })
     }
 
-    fn api_restore_revision(&mut self, sock: &TcpStream, path_raw: &str) -> io::Result<()> {
+    fn api_restore_revision(
+        &mut self,
+        vault_index: usize,
+        sock: &TcpStream,
+        path_raw: &str,
+    ) -> io::Result<()> {
         let Some(rel) = query_param(path_raw, "path") else {
             return write_error(sock, 400, "missing path param");
         };
@@ -1278,23 +1496,22 @@ impl Server {
         };
         let ts: u64 = ts_str.parse().map_err(|_| io::Error::other("bad ts"))?;
 
-        let full = self.vaults[self.active].dir.join(&rel);
-        if !full.starts_with(&self.vaults[self.active].dir) {
+        let Some((rel, full)) = self.resolve_vault_path(vault_index, &rel) else {
             return write_error(sock, 403, "Forbidden");
-        }
+        };
 
         let Some(rev_content) = revisions::get_revision(
-            &self.vaults[self.active].dir,
+            &self.vaults[vault_index].dir,
             &rel,
             ts,
-            self.vaults[self.active].vault.as_ref(),
+            self.vaults[vault_index].vault.as_ref(),
         ) else {
             return write_error(sock, 404, "revision not found");
         };
 
-        revisions::save_revision(&self.vaults[self.active].dir, &rel, &full);
-        self.write_content(&full, rev_content.as_bytes())?;
-        self.reindex_note_and_file(&rel, &rev_content, &full);
+        revisions::save_revision(&self.vaults[vault_index].dir, &rel, &full);
+        self.write_content(vault_index, &full, rev_content.as_bytes())?;
+        self.reindex_note_and_file(vault_index, &rel, &rev_content, &full);
         let title = scanner::official_title(&rel, &rev_content);
 
         respond_json(
@@ -1310,12 +1527,17 @@ impl Server {
         )
     }
 
-    fn api_filesearch(&self, sock: &TcpStream, path_raw: &str) -> io::Result<()> {
+    fn api_filesearch(
+        &self,
+        vault_index: usize,
+        sock: &TcpStream,
+        path_raw: &str,
+    ) -> io::Result<()> {
         let q = query_param(path_raw, "q").unwrap_or_default();
         if q.is_empty() {
             return write_json(sock, "[]");
         }
-        let results = self.vaults[self.active].file_index.search_names(&q, 30);
+        let results = self.vaults[vault_index].file_index.search_names(&q, 30);
         let hits: Vec<FileSearchResult> = results
             .iter()
             .map(|r| FileSearchResult {
@@ -1326,8 +1548,8 @@ impl Server {
         respond_json(sock, &hits)
     }
 
-    fn api_recent_files(&self, sock: &TcpStream) -> io::Result<()> {
-        let results = self.vaults[self.active].file_index.recent(50);
+    fn api_recent_files(&self, vault_index: usize, sock: &TcpStream) -> io::Result<()> {
+        let results = self.vaults[vault_index].file_index.recent(50);
         let entries: Vec<RecentFileEntry> = results
             .iter()
             .map(|r| RecentFileEntry {
@@ -1339,28 +1561,28 @@ impl Server {
         respond_json(sock, &entries)
     }
 
-    fn pinned_path(&self) -> PathBuf {
-        self.vaults[self.active].dir.join(".tansu/pinned.json")
+    fn pinned_path(&self, vault_index: usize) -> PathBuf {
+        self.vaults[vault_index].dir.join(".tansu/pinned.json")
     }
 
-    fn load_pinned(&self) -> Vec<String> {
-        match fs::read_to_string(self.pinned_path()) {
+    fn load_pinned(&self, vault_index: usize) -> Vec<String> {
+        match fs::read_to_string(self.pinned_path(vault_index)) {
             Ok(json) => serde_json::from_str::<Vec<String>>(&json).unwrap_or_default(),
             Err(_) => Vec::new(),
         }
     }
 
-    fn save_pinned(&self, paths: &[String]) -> io::Result<()> {
+    fn save_pinned(&self, vault_index: usize, paths: &[String]) -> io::Result<()> {
         let json = serde_json::to_string(paths).map_err(|e| io::Error::other(e.to_string()))?;
-        fs::write(self.pinned_path(), json)
+        fs::write(self.pinned_path(vault_index), json)
     }
 
-    fn api_get_pinned(&self, sock: &TcpStream) -> io::Result<()> {
-        let paths = self.load_pinned();
+    fn api_get_pinned(&self, vault_index: usize, sock: &TcpStream) -> io::Result<()> {
+        let paths = self.load_pinned(vault_index);
         let entries: Vec<PinnedFileEntry> = paths
             .iter()
             .map(|p| {
-                let title = self.vaults[self.active]
+                let title = self.vaults[vault_index]
                     .file_index
                     .lookup_path(p)
                     .unwrap_or_else(|| {
@@ -1381,38 +1603,40 @@ impl Server {
 
     fn api_pin(
         &self,
+        vault_index: usize,
         stream: &mut TcpStream,
         headers: &[httparse::Header<'_>],
         raw_buf: &[u8],
         header_len: usize,
     ) -> io::Result<()> {
         let req: PinRequest = parse_body(stream, headers, raw_buf, header_len)?;
-        let mut paths = self.load_pinned();
+        let mut paths = self.load_pinned(vault_index);
         if !paths.contains(&req.path) {
             paths.push(req.path);
-            self.save_pinned(&paths)?;
+            self.save_pinned(vault_index, &paths)?;
         }
         respond_json(stream, &OkResponse { ok: true })
     }
 
     fn api_unpin(
         &self,
+        vault_index: usize,
         stream: &mut TcpStream,
         headers: &[httparse::Header<'_>],
         raw_buf: &[u8],
         header_len: usize,
     ) -> io::Result<()> {
         let req: PinRequest = parse_body(stream, headers, raw_buf, header_len)?;
-        let mut paths = self.load_pinned();
+        let mut paths = self.load_pinned(vault_index);
         let before = paths.len();
         paths.retain(|p| p != &req.path);
         if paths.len() != before {
-            self.save_pinned(&paths)?;
+            self.save_pinned(vault_index, &paths)?;
         }
         respond_json(stream, &OkResponse { ok: true })
     }
 
-    fn api_get_vaults(&self, sock: &TcpStream) -> io::Result<()> {
+    fn api_get_vaults(&self, active_vault_index: usize, sock: &TcpStream) -> io::Result<()> {
         let vaults: Vec<VaultEntry> = self
             .vaults
             .iter()
@@ -1420,7 +1644,7 @@ impl Server {
             .map(|(i, vs)| VaultEntry {
                 index: i,
                 name: vs.name.clone(),
-                active: i == self.active,
+                active: i == active_vault_index,
                 encrypted: vs.encrypted,
                 locked: vs.encrypted && vs.vault.is_none(),
             })
@@ -1432,38 +1656,6 @@ impl Server {
         if n >= self.vaults.len() {
             return write_error(sock, 400, "Bad vault index");
         }
-        if n == self.active {
-            return respond_json(sock, &OkResponse { ok: true });
-        }
-
-        self.active = n;
-
-        // Start new watcher for the newly active vault, replacing the old one.
-        let dir = self.vaults[n].dir.clone();
-        let self_writes = self.vaults[n].self_writes.clone();
-        let (watch_tx, watch_rx) = mpsc::channel();
-        match watcher::start_watcher(&dir, watch_tx, self_writes) {
-            Ok(w) => {
-                self.active_watcher = w;
-                self.vaults[n].watch_rx = watch_rx;
-            }
-            Err(e) => eprintln!("warning: start watcher for {}: {e}", dir.display()),
-        }
-
-        // Reindex to catch changes made while vault was inactive.
-        if self.vaults[n].vault.is_some() {
-            self.reindex_with_vault();
-        } else if !self.vaults[n].encrypted {
-            let index = self.vaults[n].index.clone();
-            let file_index = self.vaults[n].file_index.clone();
-            let excluded = self.vaults[n].settings.excluded_folders.clone();
-            std::thread::spawn(move || {
-                index.full_reindex(&dir, &excluded);
-                file_index.full_reindex(&dir, &excluded);
-            });
-        }
-
-        self.broadcast_sse("vault_switched", &n.to_string());
         respond_json(sock, &OkResponse { ok: true })
     }
 }
@@ -1824,9 +2016,8 @@ fn main() {
 
     // Initialize VaultState for each vault. Only the first vault gets a live watcher.
     let mut vaults: Vec<VaultState> = Vec::new();
-    let mut active_watcher_opt: Option<notify::RecommendedWatcher> = None;
 
-    for (i, (name, dir)) in vault_entries.into_iter().enumerate() {
+    for (name, dir) in vault_entries {
         let settings = Settings::load(&dir);
         let crypto_config = CryptoConfig::load_if_exists(&dir)
             .unwrap_or_else(|e| die(&format!("vault.{name}: load crypto.json: {e}")));
@@ -1846,29 +2037,19 @@ fn main() {
 
         let self_writes = Arc::new(Mutex::new(HashMap::<PathBuf, Instant>::new()));
 
-        // Only the first vault gets a live watcher at startup.
-        let watch_rx = if i == 0 {
-            let (watch_tx, watch_rx) = mpsc::channel();
-            let w = watcher::start_watcher(&dir, watch_tx, self_writes.clone())
-                .unwrap_or_else(|e| die(&format!("vault.{name}: start watcher: {e}")));
-            active_watcher_opt = Some(w);
-            watch_rx
-        } else {
-            // Disconnected receiver — inactive vaults have no live watcher.
-            let (_, rx) = mpsc::channel::<WatchEvent>();
-            rx
-        };
+        let (watch_tx, watch_rx) = mpsc::channel();
+        let watcher = watcher::start_watcher(&dir, watch_tx, self_writes.clone())
+            .unwrap_or_else(|e| die(&format!("vault.{name}: start watcher: {e}")));
 
         // Only reindex at startup in plaintext mode; encrypted mode rebuilds on unlock.
-        if i == 0 && !encrypted {
-            let index_clone = index.clone();
-            let file_index_clone = file_index.clone();
-            let dir_clone = dir.clone();
-            let excluded = settings.excluded_folders.clone();
-            std::thread::spawn(move || {
-                index_clone.full_reindex(&dir_clone, &excluded);
-                file_index_clone.full_reindex(&dir_clone, &excluded);
-            });
+        if !encrypted {
+            spawn_plaintext_reindex(
+                name.clone(),
+                dir.clone(),
+                index.clone(),
+                file_index.clone(),
+                settings.excluded_folders.clone(),
+            );
         }
 
         vaults.push(VaultState {
@@ -1877,16 +2058,15 @@ fn main() {
             encrypted,
             crypto_config,
             vault: None,
-            session: None,
+            sessions: Vec::new(),
             index,
             file_index,
             settings,
+            _watcher: watcher,
             watch_rx,
             self_writes,
         });
     }
-
-    let active_watcher = active_watcher_opt.expect("at least one vault");
 
     let addr = format!("{bind}:{port}");
     let listener =
@@ -1910,8 +2090,6 @@ fn main() {
     let mut srv = Server {
         quiet,
         vaults,
-        active: 0,
-        active_watcher,
         sse_clients: Arc::new(Mutex::new(Vec::new())),
     };
 
@@ -2012,5 +2190,42 @@ mod tests {
             "{err}"
         );
         fs::remove_dir_all(&outer).ok();
+    }
+
+    #[test]
+    fn resolve_path_under_root_normalizes_relative_segments() {
+        let root = PathBuf::from("/tmp/tansu-root");
+        let (rel, full) = resolve_path_under_root(&root, "notes/../daily/today.md").unwrap();
+        assert_eq!(rel, "daily/today.md");
+        assert_eq!(full, root.join("daily/today.md"));
+    }
+
+    #[test]
+    fn resolve_path_under_root_blocks_escape() {
+        let root = PathBuf::from("/tmp/tansu-root");
+        assert!(resolve_path_under_root(&root, "../outside.md").is_none());
+        assert!(resolve_path_under_root(&root, "notes/../../outside.md").is_none());
+    }
+
+    #[test]
+    fn cookie_value_reads_named_cookie() {
+        let headers = [httparse::Header {
+            name: "Cookie",
+            value: b"theme=light; tansu_vault=2; mode=test",
+        }];
+        assert_eq!(cookie_value(&headers, "tansu_vault"), Some("2"));
+        assert_eq!(cookie_value(&headers, "missing"), None);
+    }
+
+    #[test]
+    fn requested_vault_index_prefers_header_then_query() {
+        let headers = [httparse::Header {
+            name: "X-Tansu-Vault",
+            value: b"1",
+        }];
+        assert_eq!(requested_vault_index(&headers, "/api/notes?vault=2", 3), 1);
+        assert_eq!(requested_vault_index(&[], "/api/notes?vault=2", 3), 2);
+        assert_eq!(requested_vault_index(&[], "/api/notes?vault=9", 3), 0);
+        assert_eq!(requested_vault_index(&[], "/api/notes", 3), 0);
     }
 }

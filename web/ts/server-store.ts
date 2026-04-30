@@ -5,6 +5,7 @@ import { getNote } from "./api.ts";
 import { createBackoff, createSseLifecycle } from "./bootstrap.ts";
 import { SSE_BACKOFF_DELAYS_MS } from "./constants.ts";
 import type { ServerConnectionState } from "./features/sync/connection-state.ts";
+import { getActiveVaultIndex } from "./vault-session.ts";
 
 type FileChange = {
   version: number;
@@ -39,6 +40,14 @@ export function createServerStore() {
   let lifecycle: ReturnType<typeof createSseLifecycle> | null = null;
   let started = false;
 
+  function closeCurrentSse() {
+    const existing = lifecycle?.getSse();
+    if (existing) {
+      existing.close();
+      lifecycle?.setSse(null);
+    }
+  }
+
   function notifyFilesChanged(savedPath?: string) {
     setFileChange((current) => ({ version: current.version + 1, savedPath: savedPath ?? null }));
   }
@@ -47,11 +56,20 @@ export function createServerStore() {
     setPinnedVersion((version) => version + 1);
   }
 
-  async function handleVaultSwitched() {
+  async function handleVaultSwitched(locked = false) {
     deps?.invalidateNoteCache();
     setVaultVersion((version) => version + 1);
     notifyFilesChanged();
     await deps?.refreshVaultSwitcher();
+    closeCurrentSse();
+    if (locked) {
+      setConnectionState({ type: "locked" });
+      deps?.showUnlockScreen();
+      return;
+    }
+    if (started) {
+      connect();
+    }
   }
 
   function connect() {
@@ -59,11 +77,7 @@ export function createServerStore() {
       return;
     }
 
-    const existing = lifecycle.getSse();
-    if (existing) {
-      existing.close();
-      lifecycle.setSse(null);
-    }
+    closeCurrentSse();
     const timer = lifecycle.getReconnectTimer();
     if (timer) {
       clearTimeout(timer);
@@ -74,7 +88,9 @@ export function createServerStore() {
     }
 
     setConnectionState({ type: "connecting" });
-    const es = new EventSource("/events");
+    const es = new EventSource(
+      `/events?vault=${encodeURIComponent(String(getActiveVaultIndex()))}`,
+    );
     lifecycle.setSse(es);
 
     es.addEventListener("connected", () => {
@@ -127,13 +143,6 @@ export function createServerStore() {
       deps?.showUnlockScreen();
     });
 
-    es.addEventListener("vault_switched", () => {
-      if (lifecycle?.getSse() !== es) {
-        return;
-      }
-      void handleVaultSwitched();
-    });
-
     es.onerror = () => {
       if (lifecycle?.getSse() !== es) {
         return;
@@ -171,6 +180,9 @@ export function createServerStore() {
         throw new Error("server store not configured");
       }
       if (started) {
+        if (!lifecycle.getSse()) {
+          connect();
+        }
         return;
       }
       started = true;

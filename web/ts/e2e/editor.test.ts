@@ -16,10 +16,14 @@ describe("e2e: editor", () => {
     ({ page } = ctx);
     ({ baseUrl } = ctx);
     ({ notesDir } = ctx);
+    const { activeSlot } = ctx;
     writeFileSync(join(notesDir, "test.md"), defaultNote);
     const stateRes = await fetch(`${baseUrl}/api/state`, {
       method: "PUT",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "X-Tansu-Vault": String(activeSlot),
+      },
       body: JSON.stringify({ tabs: ["test.md"], active: 0, closed: [], cursors: {} }),
     });
     if (!stateRes.ok) {

@@ -92,10 +92,11 @@ describe("store factories", () => {
       const uiStore = createUiStore();
       const store = createServerStore();
       configureServerStore(store, uiStore);
+      sessionStorage.setItem("tansu_vault", "0");
 
       store.start();
       expect(store.connectionState()).toStrictEqual({ type: "connecting" });
-      expect(MockEventSource.instances[0]!.url).toBe("/events");
+      expect(MockEventSource.instances[0]!.url).toBe("/events?vault=0");
 
       MockEventSource.instances[0]!.dispatchEvent(new Event("connected"));
       expect(store.connectionState()).toStrictEqual({ type: "connected" });
@@ -121,12 +122,40 @@ describe("store factories", () => {
     try {
       const store = createServerStore();
       configureServerStore(store, createUiStore());
+      sessionStorage.setItem("tansu_vault", "0");
 
       store.start();
       MockEventSource.instances[0]!.dispatchEvent(new Event("locked"));
 
       expect(store.connectionState()).toStrictEqual({ type: "locked" });
       expect(MockEventSource.instances[0]!.closed).toBeTruthy();
+    } finally {
+      globalThis.EventSource = originalEventSource;
+      cleanup();
+    }
+  });
+
+  it("reconnects SSE after a vault switch while started", async () => {
+    const cleanup = setupDOM();
+    const originalEventSource = globalThis.EventSource;
+    MockEventSource.instances = [];
+    globalThis.EventSource = MockEventSource as unknown as typeof EventSource;
+
+    try {
+      const store = createServerStore();
+      configureServerStore(store, createUiStore());
+      sessionStorage.setItem("tansu_vault", "0");
+
+      store.start();
+      MockEventSource.instances[0]!.dispatchEvent(new Event("connected"));
+      sessionStorage.setItem("tansu_vault", "1");
+
+      await store.handleVaultSwitched();
+
+      expect(MockEventSource.instances[0]!.closed).toBeTruthy();
+      expect(MockEventSource.instances).toHaveLength(2);
+      expect(MockEventSource.instances[1]!.url).toBe("/events?vault=1");
+      expect(store.connectionState()).toStrictEqual({ type: "connecting" });
     } finally {
       globalThis.EventSource = originalEventSource;
       cleanup();

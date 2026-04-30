@@ -6,15 +6,15 @@ Tansu uses IndexedDB as a local cache so the frontend can survive hours-long ser
 
 ### IndexedDB local store (`local-store.ts`)
 
-Database `"tansu"`, version 1. Three object stores:
+Database `"tansu"`, version 2. Three object stores:
 
-| Store     | Key            | Value                | Purpose                         |
-| --------- | -------------- | -------------------- | ------------------------------- |
-| **kv**    | string         | any                  | Session state (key `"session"`) |
-| **notes** | path (string)  | `{ content, mtime }` | Cached note content             |
-| **queue** | auto-increment | _(reserved)_         | Future: offline write queue     |
+| Store     | Key            | Value                | Purpose                                |
+| --------- | -------------- | -------------------- | -------------------------------------- |
+| **kv**    | string         | any                  | Session state (vault-scoped key)       |
+| **notes** | path (string)  | `{ content, mtime }` | Cached note content (vault-scoped key) |
+| **queue** | auto-increment | _(reserved)_         | Future: offline write queue            |
 
-All public functions (`kvGet`, `kvPut`, `noteGet`, `notePut`, `noteDel`) gracefully no-op when the store hasn't been opened (i.e. `openStore()` was never called or `closeStore()` was called). This means the rest of the app doesn't need to know or care whether IDB is available.
+All public functions (`kvGet`, `kvPut`, `noteGet`, `notePut`, `noteDel`) gracefully no-op when the store hasn't been opened (i.e. `openStore()` was never called or `closeStore()` was called). Keys are prefixed by the active vault index from tab-scoped `sessionStorage`, so offline session state and cached notes do not bleed across vaults that reuse the same relative note paths.
 
 ### Note fetching (`fetchNote` in `tab-state.ts`)
 
@@ -39,7 +39,7 @@ Note content is written to IDB on four occasions:
 `persistState()` writes to both IDB and the server on every state change. Both are fire-and-forget:
 
 ```
-persistState() → kvPut("session", state)   // always succeeds locally
+persistState() → kvPut("session", state)   // always succeeds locally, scoped to active vault
                → saveState(state)           // best-effort, may fail silently
 ```
 
@@ -48,7 +48,7 @@ persistState() → kvPut("session", state)   // always succeeds locally
 ```
 restoreSession() → getState()               // try server
                    → success: cache to IDB, use it
-                   → failure: kvGet("session"), use cached state
+                   → failure: kvGet("session"), use cached state for the active vault
 ```
 
 On SSE reconnect, `syncToServer()` reads the latest state from IDB and pushes it to the server. This ensures any state changes made while offline (tab opens/closes, closed-tab stack changes) are eventually persisted server-side.

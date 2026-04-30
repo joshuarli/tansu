@@ -372,16 +372,18 @@ pub fn hex_encode(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
-/// Write a JSON response with a Set-Cookie header.
-pub fn write_json_with_cookie(sock: &TcpStream, json: &str, cookie: &str) -> io::Result<()> {
-    let hdr = format!(
+/// Write a JSON response with one or more Set-Cookie headers.
+pub fn write_json_with_cookies(sock: &TcpStream, json: &str, cookies: &[&str]) -> io::Result<()> {
+    let mut hdr = format!(
         "HTTP/1.1 200 OK\r\n\
          Content-Type: application/json\r\n\
-         Content-Length: {}\r\n\
-         Set-Cookie: {cookie}\r\n\
-         \r\n",
+         Content-Length: {}\r\n",
         json.len()
     );
+    for cookie in cookies {
+        hdr.push_str(&format!("Set-Cookie: {cookie}\r\n"));
+    }
+    hdr.push_str("\r\n");
     let mut w: &TcpStream = sock;
     w.write_all(hdr.as_bytes())?;
     w.write_all(json.as_bytes())

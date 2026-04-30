@@ -10,8 +10,11 @@ type BrowserName = "chromium" | "firefox";
 
 type SetupContext = {
   page: Page;
+  context: BrowserContext;
   baseUrl: string;
   notesDir: string;
+  activeSlot: number;
+  vaultDirs: string[];
 };
 
 type ActiveRun = {
@@ -40,6 +43,10 @@ const DEFAULT_NOTES = [
   ["second.md", "# Second\n\nAnother note."],
   ["linked.md", "# Linked\n\nHas a [[test]] link."],
 ] as const;
+
+function vaultHeaders(index: number): HeadersInit {
+  return { "X-Tansu-Vault": String(index) };
+}
 
 function getSharedState(): SharedState | null {
   return (globalThis as Record<string, unknown>)[STATE_KEY] as SharedState | null;
@@ -107,12 +114,16 @@ async function waitForServer(url: string, timeoutMs: number) {
   throw new Error(`Server at ${url} did not start within ${timeoutMs}ms`);
 }
 
-async function waitForVaultReady(baseUrl: string, timeoutMs: number): Promise<void> {
+async function waitForVaultReady(
+  baseUrl: string,
+  vaultIndex: number,
+  timeoutMs: number,
+): Promise<void> {
   const expected = new Set(DEFAULT_NOTES.map(([name]) => name));
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     try {
-      const res = await fetch(`${baseUrl}/api/notes`);
+      const res = await fetch(`${baseUrl}/api/notes`, { headers: vaultHeaders(vaultIndex) });
       if (res.ok) {
         const notes = (await res.json()) as { path: string }[];
         const notePaths = new Set(notes.map((note) => note.path));
@@ -129,7 +140,10 @@ async function waitForVaultReady(baseUrl: string, timeoutMs: number): Promise<vo
 }
 
 async function activateVault(baseUrl: string, index: number): Promise<void> {
-  const res = await fetch(`${baseUrl}/api/vaults/${index}/activate`, { method: "POST" });
+  const res = await fetch(`${baseUrl}/api/vaults/${index}/activate`, {
+    method: "POST",
+    headers: vaultHeaders(index),
+  });
   if (!res.ok) {
     throw new Error(`Activating vault ${index} failed with ${res.status}`);
   }
@@ -177,7 +191,7 @@ async function ensureSharedState(): Promise<SharedState> {
 
   const baseUrl = `http://localhost:${port}`;
   await waitForServer(baseUrl, 10_000);
-  await waitForVaultReady(baseUrl, 10_000);
+  await waitForVaultReady(baseUrl, 0, 10_000);
 
   const state: SharedState = {
     baseUrl,
@@ -205,7 +219,7 @@ async function prepareVaultForNextRun(state: SharedState): Promise<string> {
   const targetDir = state.slotDirs[targetSlot]!;
   resetVaultContents(targetDir);
   await activateVault(state.baseUrl, targetSlot);
-  await waitForVaultReady(state.baseUrl, 10_000);
+  await waitForVaultReady(state.baseUrl, targetSlot, 10_000);
   state.activeSlot = targetSlot;
   state.nextSlot = (targetSlot + 1) % state.slotDirs.length;
   return targetDir;
@@ -232,8 +246,11 @@ export async function setup(opts?: { browserName?: BrowserName }): Promise<Setup
 
   return {
     page,
+    context,
     baseUrl: state.baseUrl,
     notesDir,
+    activeSlot: state.activeSlot,
+    vaultDirs: [...state.slotDirs],
   };
 }
 

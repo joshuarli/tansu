@@ -1,6 +1,6 @@
 import { For, Show, createEffect, createSignal } from "solid-js";
 
-import { activateVault, getVaults, type VaultEntry } from "./api.ts";
+import { activateVault, getStatus, getVaults, type VaultEntry } from "./api.ts";
 import { serverStore } from "./server-store.ts";
 import { closeAllTabs, getTabs, restoreSession } from "./tab-state.ts";
 
@@ -32,9 +32,11 @@ export function VaultSwitcher() {
     }
 
     closeAllTabs();
-    await restoreSession();
-    await refresh();
-    await serverStore.handleVaultSwitched();
+    const status = await getStatus().catch(() => null);
+    if (!status?.locked) {
+      await restoreSession();
+    }
+    await serverStore.handleVaultSwitched(status?.locked ?? false);
   }
 
   createEffect(() => {

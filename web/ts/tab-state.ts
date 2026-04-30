@@ -13,6 +13,7 @@ import {
   persistSessionState,
   syncCachedSessionToServer,
 } from "./tab-state-storage.ts";
+import { getActiveVaultIndex } from "./vault-session.ts";
 
 export type Tab = {
   path: string;
@@ -151,7 +152,7 @@ export function createTabsStore() {
       if (closedTabs.length > MAX_CLOSED_TABS) {
         closedTabs.shift();
       }
-      cacheNoteSnapshot(tab.path, tab.content, tab.mtime, tab.tags);
+      cacheNoteSnapshot(getActiveVaultIndex(), tab.path, tab.content, tab.mtime, tab.tags);
 
       tabs.splice(index, 1);
 
@@ -222,7 +223,7 @@ export function createTabsStore() {
           title: contentTitle(title, path),
           dirty: false,
         };
-        cacheNoteSnapshot(path, content, mtime, tab.tags);
+        cacheNoteSnapshot(getActiveVaultIndex(), path, content, mtime, tab.tags);
         syncSignals();
       }
     },
@@ -237,7 +238,7 @@ export function createTabsStore() {
           lastSavedTags: newTags,
           dirty: tab.content !== tab.lastSavedMd,
         };
-        cacheNoteSnapshot(path, tab.content, tab.mtime, newTags);
+        cacheNoteSnapshot(getActiveVaultIndex(), path, tab.content, tab.mtime, newTags);
         syncSignals();
       }
     },

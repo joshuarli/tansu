@@ -856,7 +856,6 @@ fn escape_html_into(out: &mut String, s: &str) {
 impl Index {
     /// Full reindex: walk directory, index all .md files. Single commit at end.
     pub fn full_reindex(&self, root: &Path, excluded_folders: &[String]) {
-        let start = std::time::Instant::now();
         walk_and_index(root, root, self, excluded_folders);
         self.commit();
         fn walk_and_index(root: &Path, dir: &Path, idx: &Index, excluded: &[String]) {
@@ -893,8 +892,6 @@ impl Index {
                 }
             }
         }
-        let elapsed = start.elapsed();
-        eprintln!("\tindexed in {:.1}ms", elapsed.as_secs_f64() * 1000.0);
     }
 }
 
