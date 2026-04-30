@@ -357,6 +357,32 @@ describe("createEditor", () => {
     handle.destroy();
   });
 
+  it("multi-block paste at the start of a block keeps markdown block separation", async () => {
+    const handle = createEditor(container);
+    handle.setValue("# hi\n\nfoo");
+
+    const range = document.createRange();
+    const textNode = handle.contentEl.querySelector("h1")!.firstChild!;
+    range.setStart(textNode, 0);
+    range.setEnd(textNode, 0);
+    window.getSelection()!.removeAllRanges();
+    window.getSelection()!.addRange(range);
+
+    const clipboardData = {
+      items: [],
+      getData: (type: string) => (type === "text/plain" ? "# hi\n\nfoo" : ""),
+    };
+    const pasteEvent = new ClipboardEvent("paste", {
+      bubbles: true,
+      clipboardData: clipboardData as unknown as DataTransfer,
+    });
+    handle.contentEl.dispatchEvent(pasteEvent);
+
+    await Promise.resolve();
+    expect(handle.getValue()).toBe("# hi\n\nfoo\n\n# hi\n\nfoo");
+    handle.destroy();
+  });
+
   it("HTML paste uses setHTML when available", async () => {
     const originalSetHtml = Element.prototype.setHTML;
     const setHtml = vi.fn(function (this: Element, html: string) {

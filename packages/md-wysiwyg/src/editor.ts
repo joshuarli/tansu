@@ -3,7 +3,11 @@
 /// the render/serialize/transform modules; callers configure extensions and callbacks.
 
 import { createEditorRenderer } from "./editor-renderer.js";
-import { createEditorSelectionController, isRangeAtStartOfBlock } from "./editor-selection.js";
+import {
+  createEditorSelectionController,
+  isRangeAtStartOfBlock,
+  type SelectionOffsets,
+} from "./editor-selection.js";
 import { createSelectionTransactionController } from "./editor-transactions.js";
 import { createEditorUndoController } from "./editor-undo.js";
 import type { MarkdownExtension } from "./extension.js";
@@ -25,6 +29,18 @@ const DISALLOWED_PASTE_TAGS = new Set([
   "SCRIPT",
   "STYLE",
   "TEMPLATE",
+]);
+const STRUCTURAL_PASTE_BOUNDARY_TAGS = new Set([
+  "BLOCKQUOTE",
+  "DIV",
+  "H1",
+  "H2",
+  "H3",
+  "H4",
+  "H5",
+  "H6",
+  "LI",
+  "P",
 ]);
 const INDENTABLE_BLOCKS = new Set([
   "P",
@@ -110,6 +126,11 @@ function htmlToSanitizedContainer(html: string): HTMLElement {
     container.append(child.cloneNode(true));
   }
   return container;
+}
+
+function lineStart(md: string, offset: number): number {
+  const idx = md.lastIndexOf("\n", offset - 1);
+  return idx === -1 ? 0 : idx + 1;
 }
 
 export type EditorConfig = {
@@ -321,6 +342,41 @@ export function createEditor(container: HTMLElement, config: EditorConfig = {}):
     return block && isListItemBlock(block) ? block : null;
   }
 
+  function getStructuralPasteBoundaryBlock(node: Node): HTMLElement | null {
+    let cur: Node | null = node;
+    while (cur && cur !== contentEl) {
+      if (cur instanceof HTMLElement && STRUCTURAL_PASTE_BOUNDARY_TAGS.has(cur.tagName)) {
+        return cur;
+      }
+      cur = cur.parentNode;
+    }
+    return null;
+  }
+
+  function getBlockPasteSelectionOverride(text: string): SelectionOffsets | undefined {
+    if (!text.includes("\n\n")) {
+      return undefined;
+    }
+    const domSelection = window.getSelection();
+    if (!domSelection || domSelection.rangeCount === 0 || !domSelection.isCollapsed) {
+      return undefined;
+    }
+    const range = domSelection.getRangeAt(0);
+    if (!contentEl.contains(range.startContainer)) {
+      return undefined;
+    }
+    const block = getStructuralPasteBoundaryBlock(range.startContainer);
+    if (!block || !isRangeAtStartOfBlock(range, block)) {
+      return undefined;
+    }
+    const offsets = selection.getSelectionOffsets();
+    if (!offsets) {
+      return undefined;
+    }
+    const start = lineStart(getValue(), offsets.start);
+    return { start, end: start };
+  }
+
   function handleEmptyListItemBackspace(e: KeyboardEvent): boolean {
     const sel = window.getSelection();
     if (!sel || sel.rangeCount === 0 || !sel.isCollapsed) return false;
@@ -413,7 +469,7 @@ export function createEditor(container: HTMLElement, config: EditorConfig = {}):
       applyFormat(toggleBold);
       return;
     }
-    if (meta && e.key === "i") {
+    if (meta && e.shiftKey && e.key.toLowerCase() === "i") {
       e.preventDefault();
       applyFormat(toggleItalic);
       return;
@@ -478,7 +534,7 @@ export function createEditor(container: HTMLElement, config: EditorConfig = {}):
     }
 
     if (pastedText) {
-      transactions.replaceSelection(pastedText);
+      transactions.replaceSelection(pastedText, getBlockPasteSelectionOverride(pastedText));
     }
   }
 

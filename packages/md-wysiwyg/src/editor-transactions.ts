@@ -13,8 +13,47 @@ type SelectionTransactionOptions = {
 
 export type SelectionTransactionController = {
   applySelectionEdit(op: (md: string, selStart: number, selEnd: number) => FormatResult): boolean;
-  replaceSelection(text: string): boolean;
+  replaceSelection(text: string, selectionOverride?: SelectionOffsets): boolean;
 };
+
+function countLeadingNewlines(text: string): number {
+  let count = 0;
+  while (count < text.length && text[count] === "\n") {
+    count++;
+  }
+  return count;
+}
+
+function countTrailingNewlines(text: string): number {
+  let count = 0;
+  while (count < text.length && text[text.length - 1 - count] === "\n") {
+    count++;
+  }
+  return count;
+}
+
+function normalizeBlockPasteInsertion(before: string, text: string, after: string): string {
+  if (!text.includes("\n\n")) {
+    return text;
+  }
+
+  let normalized = text;
+  if (before !== "" && normalized !== "") {
+    const boundaryNewlines = countTrailingNewlines(before) + countLeadingNewlines(normalized);
+    if (boundaryNewlines < 2) {
+      normalized = `${"\n".repeat(2 - boundaryNewlines)}${normalized}`;
+    }
+  }
+
+  if (after !== "" && normalized !== "") {
+    const boundaryNewlines = countTrailingNewlines(normalized) + countLeadingNewlines(after);
+    if (boundaryNewlines < 2) {
+      normalized = `${normalized}${"\n".repeat(2 - boundaryNewlines)}`;
+    }
+  }
+
+  return normalized;
+}
 
 export function createSelectionTransactionController(
   opts: Readonly<SelectionTransactionOptions>,
@@ -36,16 +75,17 @@ export function createSelectionTransactionController(
     return true;
   }
 
-  function replaceSelection(text: string): boolean {
+  function replaceSelection(text: string, selectionOverride?: SelectionOffsets): boolean {
     const md = opts.getValue();
-    const selection = opts.getSelectionOffsets();
+    const selection = selectionOverride ?? opts.getSelectionOffsets();
     const start = selection?.start ?? md.length;
     const end = selection?.end ?? start;
+    const replacement = normalizeBlockPasteInsertion(md.slice(0, start), text, md.slice(end));
     opts.checkpoint();
     commit({
-      md: md.slice(0, start) + text + md.slice(end),
-      selStart: start + text.length,
-      selEnd: start + text.length,
+      md: md.slice(0, start) + replacement + md.slice(end),
+      selStart: start + replacement.length,
+      selEnd: start + replacement.length,
     });
     return true;
   }
