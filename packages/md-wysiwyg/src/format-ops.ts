@@ -219,6 +219,8 @@ export function toggleCodeFence(md: string, selStart: number, selEnd: number): F
   return { md: newMd, selStart: newSelStart, selEnd: newSelEnd };
 }
 
+import { LIST_INDENT_SPACES } from "./constants.js";
+
 export function shiftIndent(
   md: string,
   selStart: number,
@@ -252,7 +254,7 @@ export function shiftIndent(
         newLine = line.slice(1);
         delta = -1;
       } else {
-        const spaceMatch = line.match(/^ {1,4}/);
+        const spaceMatch = line.match(new RegExp(`^ {1,${LIST_INDENT_SPACES}}`));
         if (spaceMatch) {
           newLine = line.slice(spaceMatch[0].length);
           delta = -spaceMatch[0].length;

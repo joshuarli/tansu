@@ -83,6 +83,17 @@ describe("e2e: block transforms", () => {
     expect(markdown).toBe("# foo\nbar");
   });
 
+  it("typing # a Enter x does not create an extra blank paragraph in rich editor", async () => {
+    await resetEditor("");
+    await page.click(".editor-content");
+    await page.keyboard.type("# a");
+    await page.keyboard.press("Enter");
+    await page.keyboard.type("x");
+
+    const html = await page.$eval(".editor-content", (el) => el.innerHTML);
+    expect(html).toBe('<h1>a</h1><p class="md-heading-continuation">x</p>');
+  });
+
   it("unordered list: - + space creates UL", async () => {
     await resetEditor("");
     await page.keyboard.type("- ");

@@ -2,6 +2,8 @@
 /// events, and handles image paste. All markdown-specific behavior is delegated to
 /// the render/serialize/transform modules; callers configure extensions and callbacks.
 
+import { LIST_INDENT_SPACES } from "./constants.js";
+import { normalizeEditableContent } from "./editor-normalize.js";
 import { createEditorRenderer } from "./editor-renderer.js";
 import {
   createEditorSelectionController,
@@ -22,7 +24,6 @@ import { checkInlineTransform } from "./inline-transforms.js";
 import { domToMarkdown } from "./serialize.js";
 import { checkBlockInputTransform, handleBlockTransform } from "./transforms.js";
 
-const MAX_INDENT_SPACES = 4;
 const DISALLOWED_PASTE_TAGS = new Set([
   "BASE",
   "EMBED",
@@ -411,6 +412,7 @@ export function createEditor(container: HTMLElement, config: EditorConfig = {}):
     } else {
       removeEmptyTopLevelListItem(listItem);
     }
+    normalizeEditableContent(contentEl);
     cfg.onChange?.();
     return true;
   }
@@ -436,6 +438,7 @@ export function createEditor(container: HTMLElement, config: EditorConfig = {}):
     paragraph.className = "md-heading-continuation";
     paragraph.append(document.createElement("br"));
     heading.after(paragraph);
+    normalizeEditableContent(contentEl);
     placeCursorAtBlockStart(paragraph);
     cfg.onChange?.();
     return true;
@@ -459,7 +462,7 @@ export function createEditor(container: HTMLElement, config: EditorConfig = {}):
   function dedentLine(line: string): string {
     const indentUnit = cfg.indentUnit ?? "\t";
     if (line.startsWith(indentUnit)) return line.slice(indentUnit.length);
-    const match = line.match(new RegExp(`^[ ]{1,${MAX_INDENT_SPACES}}`));
+    const match = line.match(new RegExp(`^[ ]{1,${LIST_INDENT_SPACES}}`));
     return match ? line.slice(match[0].length) : line;
   }
 
@@ -547,6 +550,7 @@ export function createEditor(container: HTMLElement, config: EditorConfig = {}):
       return;
     }
     checkInlineTransform();
+    normalizeEditableContent(contentEl);
     undoController.scheduleTypingCheckpoint();
     cfg.onChange?.();
   }

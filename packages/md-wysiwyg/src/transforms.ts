@@ -7,6 +7,7 @@
 /// where execCommand is not implemented.
 
 import { CODE_FENCE_MARKER_LENGTH, MAX_HEADING_LEVEL } from "./constants.js";
+import { normalizeEditableContent } from "./editor-normalize.js";
 import { clampNodeOffset, escapeHtml, isBlockTag } from "./util.js";
 
 type TransformFn = (block: HTMLElement, text: string, contentEl: HTMLElement) => boolean;
@@ -187,6 +188,7 @@ function replaceBlock(block: HTMLElement, html: string, contentEl: HTMLElement):
     marker = found instanceof HTMLElement ? found : null;
   }
   if (marker) {
+    normalizeEditableContent(contentEl);
     marker.removeAttribute(CURSOR_ATTR);
     setCursorStart(marker);
     return true;

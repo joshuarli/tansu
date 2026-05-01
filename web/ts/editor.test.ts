@@ -662,6 +662,29 @@ describe("editor", () => {
     hideEditor();
   });
 
+  it("WYSIWYG: Shift+Tab on a deeply nested bullet only dedents one level", async () => {
+    showEditor("list-dedent-one-level.md", "- 1\n  - 2\n    - 3");
+    await new Promise((r) => setTimeout(r, 50));
+
+    const contentEl = latestEditorContent();
+    const items = contentEl.querySelectorAll("li");
+    const textNode = items[2]!.firstChild as Text;
+    const range = document.createRange();
+    range.setStart(textNode, 1);
+    range.collapse(true);
+    const sel = window.getSelection()!;
+    sel.removeAllRanges();
+    sel.addRange(range);
+
+    contentEl.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Tab", shiftKey: true, bubbles: true }),
+    );
+
+    expect(getCurrentContent()).toBe("- 1\n  - 2\n  - 3");
+
+    hideEditor();
+  });
+
   it("WYSIWYG: Backspace on empty nested bullet outdents instead of flattening the list", async () => {
     showEditor("nested-empty-backspace.md", "- one\n  - ");
     await new Promise((r) => setTimeout(r, 50));

@@ -50,6 +50,16 @@ describe("e2e: editor", () => {
     await page.click(".editor-content");
   }
 
+  async function replaceEditorMarkdownInSession(content: string) {
+    await page.click(".editor-toolbar-btn--source");
+    await page.waitForSelector(".editor-source", { state: "visible", timeout: 3000 });
+    await page.fill(".editor-source", content);
+    await page.click(".editor-toolbar-btn--source");
+    await page.waitForSelector(".editor-content", { state: "visible", timeout: 3000 });
+    await page.waitForSelector(".editor-source", { state: "hidden", timeout: 3000 });
+    await page.click(".editor-content");
+  }
+
   it("opens note, renders, source toggle, edit, save, transforms", async () => {
     // Renders markdown
     const html = await page.$eval(".editor-content", (el) => el.innerHTML);
@@ -217,6 +227,20 @@ describe("e2e: editor", () => {
     const src = await saveAndGetSource();
     expect(src).toBe("**bold**\nnext");
   }, 15_000);
+
+  it("same-session list indentation regressions", async () => {
+    await resetEditor("- 1\n  - 2\n    - 3");
+    await page.locator(".editor-content li").nth(2).click();
+    await page.keyboard.press("End");
+    await page.keyboard.press("Shift+Tab");
+    expect(await saveAndGetSource()).toBe("- 1\n  - 2\n  - 3");
+
+    await replaceEditorMarkdownInSession("- one\n- two");
+    await page.locator(".editor-content li").nth(1).click();
+    await page.keyboard.press("End");
+    await page.keyboard.press("Tab");
+    expect(await saveAndGetSource()).toBe("- one\n  - two");
+  }, 20_000);
 
   it("source edit with single-newline heading survives save and mode refresh", async () => {
     await page.click(".editor-toolbar-btn--source");

@@ -321,4 +321,11 @@ describe("shiftIndent", () => {
     const { selStart } = shiftIndent("\thello", 0, 6, true);
     expect(selStart).toBeGreaterThanOrEqual(0);
   });
+
+  it("dedents nested list items by one list level, not all leading spaces", () => {
+    const src = "- 1\n  - 2\n    - 3";
+    const thirdLineStart = src.lastIndexOf("    - 3");
+    const { md } = shiftIndent(src, thirdLineStart, src.length, true);
+    expect(md).toBe("- 1\n  - 2\n  - 3");
+  });
 });
