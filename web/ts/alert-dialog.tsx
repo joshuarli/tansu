@@ -11,7 +11,7 @@ type AlertDialogState = {
 };
 
 let buttonEl: HTMLButtonElement | null = null;
-const dialog = createPromiseModalController<AlertDialogState, void>("alert-dialog", undefined);
+const dialog = createPromiseModalController<AlertDialogState, undefined>("alert-dialog", undefined);
 
 export function AlertDialogHost() {
   createEffect(() => {

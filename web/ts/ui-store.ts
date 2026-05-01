@@ -1,6 +1,6 @@
 import { createSignal } from "solid-js";
 
-import { createModalManager, modalManager } from "./modal-manager.ts";
+import { modalManager, type createModalManager } from "./modal-manager.ts";
 import { getVaultSettings } from "./settings.ts";
 
 export type NotificationState = {

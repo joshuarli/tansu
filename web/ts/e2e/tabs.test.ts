@@ -62,7 +62,7 @@ describe("e2e: tabs", () => {
       await page
         .locator(TAB)
         .nth(initialTabs + 1)
-        .evaluate((el) => el.getAttribute("data-active") === "true"),
+        .evaluate((el) => (el as HTMLElement).dataset["active"] === "true"),
     ).toBeTruthy();
 
     // Click first tab to switch
@@ -72,7 +72,7 @@ describe("e2e: tabs", () => {
       await page
         .locator(TAB)
         .nth(initialTabs)
-        .evaluate((el) => el.getAttribute("data-active") === "true"),
+        .evaluate((el) => (el as HTMLElement).dataset["active"] === "true"),
     ).toBeTruthy();
 
     // Reopen same note — should not create duplicate tab

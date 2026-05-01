@@ -22,7 +22,7 @@ describe("settings", () => {
     "result_limit",
     "show_score_breakdown",
     "excluded_folders",
-  ] as const satisfies ReadonlyArray<keyof Settings>;
+  ] as const satisfies readonly (keyof Settings)[];
   const expectedVaultSettingKeys = [
     "undoStackMax",
     "searchMinQueryLength",
@@ -42,12 +42,12 @@ describe("settings", () => {
     "formatToolbarHeadingLevels",
     "sessionMaxClosedTabs",
     "notificationAutoDismissMs",
-  ] as const satisfies ReadonlyArray<keyof VaultSettings>;
+  ] as const satisfies readonly (keyof VaultSettings)[];
   const expectedAppSettingKeys = [
     "imageWebpQuality",
     "imageResizeMinWidthPx",
     "imageResizeWheelScale",
-  ] as const satisfies ReadonlyArray<keyof AppSettings>;
+  ] as const satisfies readonly (keyof AppSettings)[];
   let cleanup: () => void;
   let mock: ReturnType<typeof mockFetch>;
   let disposeDialogHost: (() => void) | null = null;
@@ -113,7 +113,7 @@ describe("settings", () => {
     )
       .map((el) => el.dataset["key"] ?? "")
       .filter((key) => key.length > 0)
-      .sort();
+      .toSorted();
   }
 
   beforeEach(() => {
@@ -186,14 +186,16 @@ describe("settings", () => {
 
   it("renders every server setting from the typed registry", async () => {
     await openSettings();
-    expect(getRenderedKeys("server-setting")).toStrictEqual([...expectedServerSettingKeys].sort());
+    expect(getRenderedKeys("server-setting")).toStrictEqual(
+      [...expectedServerSettingKeys].toSorted(),
+    );
     closeSettings();
   });
 
   it("renders every vault setting from the typed registry", async () => {
     await openVaultSettings();
     expect(getRenderedKeys("vault-setting", "#vault-settings-panel")).toStrictEqual(
-      [...expectedVaultSettingKeys].sort(),
+      [...expectedVaultSettingKeys].toSorted(),
     );
     closeVaultSettings();
   });
@@ -201,7 +203,7 @@ describe("settings", () => {
   it("renders every app setting from the typed registry", async () => {
     await openAppSettings();
     expect(getRenderedKeys("app-setting", "#app-settings-panel")).toStrictEqual(
-      [...expectedAppSettingKeys].sort(),
+      [...expectedAppSettingKeys].toSorted(),
     );
     closeAppSettings();
   });

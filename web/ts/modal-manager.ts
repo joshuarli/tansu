@@ -63,7 +63,7 @@ export function createModalManager() {
   function close(id: ModalId, opts: Readonly<CloseModalOptions> = {}) {
     const prev = stack();
     const index = prev.findLastIndex((entry) => entry.id === id);
-    if (index < 0) {
+    if (index === -1) {
       return;
     }
 

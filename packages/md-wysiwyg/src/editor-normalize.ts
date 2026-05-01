@@ -8,7 +8,7 @@ function isMarkerNode(node: Node): boolean {
     node.dataset["mdCursor"] === "true" ||
     node.dataset["mdSelStart"] === "true" ||
     node.dataset["mdSelEnd"] === "true" ||
-    node.hasAttribute("data-block-cursor")
+    Object.hasOwn(node.dataset, "blockCursor")
   );
 }
 
