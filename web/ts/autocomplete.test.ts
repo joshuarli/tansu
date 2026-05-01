@@ -5,6 +5,7 @@ import {
   invalidateNoteCache,
 } from "./autocomplete.ts";
 import { setupDOM, mockFetch } from "./test-helper.ts";
+import { TEST_IDS } from "./test-selectors.ts";
 
 const NOTES = [
   { path: "notes/alpha.md", title: "Alpha", tags: [] },
@@ -13,7 +14,7 @@ const NOTES = [
 ];
 
 function getDropdown() {
-  return document.querySelector(".autocomplete");
+  return document.querySelector(TEST_IDS.autocomplete);
 }
 
 describe("autocomplete", () => {
@@ -61,11 +62,11 @@ describe("autocomplete", () => {
   }
 
   function getItems() {
-    return [...(getDropdown()?.querySelectorAll(".autocomplete-item") ?? [])];
+    return [...(getDropdown()?.querySelectorAll(TEST_IDS.autocompleteItem) ?? [])];
   }
 
   function selectedIndex() {
-    return getItems().findIndex((el) => el.classList.contains("selected"));
+    return getItems().findIndex((el) => (el as HTMLElement).dataset["selected"] === "true");
   }
 
   it("no trigger when text has no [[", async () => {

@@ -107,6 +107,42 @@ body {
   margin: 0 4px;
 }
 
+/* Shared tag pills */
+
+.tag-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid #b6e3ff;
+  background: #ddf4ff;
+  color: #0969da;
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.tag-pill--editor {
+  font-size: 12px;
+  padding: 4px 10px;
+}
+
+.tag-pill-remove {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+}
+
+.tag-pill-remove:hover {
+  color: var(--fg);
+}
+
 /* Notification pill */
 
 .notification {

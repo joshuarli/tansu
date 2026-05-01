@@ -2,6 +2,9 @@ import type { Page } from "playwright";
 
 import { setup, teardown } from "./setup.ts";
 
+const AUTOCOMPLETE = '[data-ui="autocomplete"]';
+const AUTOCOMPLETE_ITEM = '[data-ui="autocomplete-item"]';
+
 describe("e2e: autocomplete", () => {
   let page: Page;
   let baseUrl: string;
@@ -42,21 +45,18 @@ describe("e2e: autocomplete", () => {
     await page.waitForTimeout(1000);
 
     // Check if dropdown appeared
-    const hasDropdown = await page.isVisible(".autocomplete-dropdown");
+    const hasDropdown = await page.isVisible(AUTOCOMPLETE);
 
     if (hasDropdown) {
       // Dropdown appeared — test the full flow
-      const items = await page.$$eval(
-        ".autocomplete-dropdown .autocomplete-item",
-        (els) => els.length,
-      );
+      const items = await page.$$eval(`${AUTOCOMPLETE} ${AUTOCOMPLETE_ITEM}`, (els) => els.length);
       expect(items).toBeGreaterThan(0);
 
       // Type to filter
       await page.keyboard.type("sec", { delay: 50 });
       await page.waitForTimeout(500);
 
-      const filtered = await page.$$eval(".autocomplete-dropdown .autocomplete-item", (els) =>
+      const filtered = await page.$$eval(`${AUTOCOMPLETE} ${AUTOCOMPLETE_ITEM}`, (els) =>
         els.map((e) => e.textContent),
       );
       const hasSecond = filtered.some((t) => t?.toLowerCase().includes("second"));
@@ -65,7 +65,7 @@ describe("e2e: autocomplete", () => {
       // Enter completes
       await page.keyboard.press("Enter");
       await page.waitForTimeout(300);
-      await expect(page.isHidden(".autocomplete-dropdown")).resolves.toBeTruthy();
+      await expect(page.isHidden(AUTOCOMPLETE)).resolves.toBeTruthy();
 
       const text = await page.$eval(".editor-content", (el) => el.textContent);
       expect(text).toContain("second");
@@ -75,10 +75,10 @@ describe("e2e: autocomplete", () => {
       await page.keyboard.type("[[", { delay: 50 });
       await page.waitForTimeout(1000);
 
-      if (await page.isVisible(".autocomplete-dropdown")) {
+      if (await page.isVisible(AUTOCOMPLETE)) {
         await page.keyboard.press("Escape");
         await page.waitForTimeout(300);
-        await expect(page.isVisible(".autocomplete-dropdown")).resolves.toBeFalsy();
+        await expect(page.isVisible(AUTOCOMPLETE)).resolves.toBeFalsy();
       }
     } else {
       // Autocomplete didn't trigger — likely contenteditable input events

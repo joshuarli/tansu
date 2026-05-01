@@ -157,9 +157,9 @@ describe("editor", () => {
           <input type="text" class="editor-tags-input">
         </div>
         <div class="editor-mount"></div>
-        <div class="revisions-container" style="display:none"></div>
+        <div data-ui="revisions-container" style="display:none"></div>
       </div>
-      <div class="backlinks" style="display:none"></div>
+      <div data-ui="backlinks" style="display:none"></div>
     `;
     editorArea.append(shellHost);
     refs.toolbarEl = shellHost.querySelector(".editor-toolbar") as HTMLDivElement;
@@ -169,8 +169,8 @@ describe("editor", () => {
     refs.containerEl = shellHost.querySelector(".editor-container") as HTMLDivElement;
     refs.tagRowEl = shellHost.querySelector(".editor-tags") as HTMLDivElement;
     refs.editorMountEl = shellHost.querySelector(".editor-mount") as HTMLDivElement;
-    refs.revisionsEl = shellHost.querySelector(".revisions-container") as HTMLDivElement;
-    refs.backlinksEl = shellHost.querySelector(".backlinks") as HTMLDivElement;
+    refs.revisionsEl = shellHost.querySelector(TEST_IDS.revisionsContainer) as HTMLDivElement;
+    refs.backlinksEl = shellHost.querySelector('[data-ui="backlinks"]') as HTMLDivElement;
     refs.getTagInputEl = () => shellHost.querySelector(".editor-tags-input") as HTMLInputElement;
     const renderTags = (tags: readonly string[]) => {
       refs.tagRowEl.textContent = "";
@@ -427,7 +427,7 @@ describe("editor", () => {
     contentEl.dispatchEvent(new Event("input", { bubbles: true }));
 
     await new Promise((r) => setTimeout(r, 50));
-    expect(document.querySelector(".autocomplete")).toBeNull();
+    expect(document.querySelector(TEST_IDS.autocomplete)).toBeNull();
 
     const sourceBtn = document.querySelector(".editor-toolbar-btn--source") as HTMLButtonElement;
     sourceBtn.click();
@@ -439,7 +439,7 @@ describe("editor", () => {
     sourceEl.dispatchEvent(new Event("input", { bubbles: true }));
 
     await new Promise((r) => setTimeout(r, 50));
-    expect(document.querySelector(".autocomplete")).toBeNull();
+    expect(document.querySelector(TEST_IDS.autocomplete)).toBeNull();
 
     hideEditor();
   });
@@ -767,7 +767,7 @@ describe("editor", () => {
 
     await saveCurrentNote();
 
-    const banner = document.querySelector(".conflict-banner");
+    const banner = document.querySelector(TEST_IDS.conflictBanner);
     expect(banner !== null).toBeTruthy();
     expect(banner!.textContent).toContain("conflict");
     expect(getDisplayState()).toStrictEqual({ type: "conflict" });
@@ -793,7 +793,7 @@ describe("editor", () => {
     expect(tab!.content).toBe("# New Disk Content");
     expect(tab!.mtime).toBe(5000);
     expect(tab!.dirty).toBeFalsy();
-    expect(document.querySelector(".conflict-banner")).toBeNull();
+    expect(document.querySelector(TEST_IDS.conflictBanner)).toBeNull();
 
     hideEditor();
     while (getTabs().length > 0) {
@@ -854,7 +854,7 @@ describe("editor", () => {
     // Disk content also totally different — 3-way merge will conflict
     reloadFromDisk("# Totally different theirs", 6000);
 
-    const banner = document.querySelector(".conflict-banner");
+    const banner = document.querySelector(TEST_IDS.conflictBanner);
     expect(banner !== null).toBeTruthy();
     expect(getDisplayState()).toStrictEqual({ type: "conflict" });
 
@@ -1371,10 +1371,10 @@ describe("editor", () => {
     tagInput!.dispatchEvent(new Event("input", { bubbles: true }));
     await new Promise((r) => setTimeout(r, 50));
 
-    const autocomplete = document.querySelector(".autocomplete");
+    const autocomplete = document.querySelector(TEST_IDS.autocomplete);
     expect(autocomplete).not.toBeNull();
 
-    const firstItem = autocomplete!.querySelector(".autocomplete-item") as HTMLElement | null;
+    const firstItem = autocomplete!.querySelector(TEST_IDS.autocompleteItem) as HTMLElement | null;
     expect(firstItem).not.toBeNull();
     firstItem!.click();
 
@@ -1404,7 +1404,7 @@ describe("editor", () => {
     mock.on("PUT", "/api/note", { mtime: 2000, conflict: true, content: "# Disk Edits" }, 409);
     await saveCurrentNote();
 
-    const banner = document.querySelector(".conflict-banner");
+    const banner = document.querySelector(TEST_IDS.conflictBanner);
     expect(banner).not.toBeNull();
 
     // Register a success response for the force save
@@ -1417,7 +1417,7 @@ describe("editor", () => {
     keepBtn!.click();
     await new Promise((r) => setTimeout(r, 80));
 
-    expect(document.querySelector(".conflict-banner")).toBeNull();
+    expect(document.querySelector(TEST_IDS.conflictBanner)).toBeNull();
     expect(getActiveTab()!.dirty).toBeFalsy();
 
     hideEditor();
@@ -1442,7 +1442,7 @@ describe("editor", () => {
     mock.on("PUT", "/api/note", { mtime: 2000, conflict: true, content: "# Disk Content" }, 409);
     await saveCurrentNote();
 
-    const banner = document.querySelector(".conflict-banner");
+    const banner = document.querySelector(TEST_IDS.conflictBanner);
     expect(banner).not.toBeNull();
 
     const theirsBtn = [...banner!.querySelectorAll("button")].find(
@@ -1452,7 +1452,7 @@ describe("editor", () => {
     theirsBtn!.click();
     await new Promise((r) => setTimeout(r, 20));
 
-    expect(document.querySelector(".conflict-banner")).toBeNull();
+    expect(document.querySelector(TEST_IDS.conflictBanner)).toBeNull();
 
     // Source mode textarea should contain disk content after reload
     const updatedSource = latestEditorSource();

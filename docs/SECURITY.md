@@ -113,7 +113,7 @@ START ──────────────────────→ PLAI
 - `GET /` → unlock page (biometric button + recovery key fallback)
 - `POST /api/unlock` → accepts recovery key or PRF-derived key
 - `GET /api/status` → `{ locked, needs_setup, prf_credential_ids, prf_credential_names }`
-- Static assets (`app.js`, `style.css`)
+- Static assets (`app.js`, `app.css`)
 - All other routes return 403
 
 **Unlock flow**:

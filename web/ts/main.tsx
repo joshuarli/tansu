@@ -1,5 +1,6 @@
 import { render } from "solid-js/web";
 
+import "../static/style.css";
 import { App } from "./app.tsx";
 
 const root = document.querySelector("#app");

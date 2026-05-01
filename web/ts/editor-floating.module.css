@@ -1,0 +1,85 @@
+.autocomplete {
+  position: absolute;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  max-height: 200px;
+  overflow-y: auto;
+  z-index: 200;
+  min-width: 200px;
+}
+
+.autocompleteItem {
+  padding: 6px 12px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.autocompleteItem:hover,
+.autocompleteItem[data-selected="true"] {
+  background: var(--bg-subtle);
+}
+
+.linkHoverTooltip {
+  position: absolute;
+  z-index: 200;
+  background: var(--fg);
+  color: var(--bg);
+  font-size: 11px;
+  padding: 2px 7px;
+  border-radius: 4px;
+  pointer-events: none;
+  white-space: nowrap;
+  opacity: 0.85;
+}
+
+.imageResizeOverlay {
+  position: fixed;
+  display: none;
+  pointer-events: none;
+  outline: 2px solid rgba(74, 158, 255, 0.6);
+  outline-offset: 1px;
+  border-radius: var(--radius);
+  z-index: 100;
+  box-sizing: border-box;
+}
+
+.imageResizeOverlay[data-visible="true"] {
+  display: block;
+}
+
+.imageResizeHandle {
+  position: absolute;
+  width: 9px;
+  height: 9px;
+  background: white;
+  border: 1.5px solid rgba(74, 158, 255, 0.85);
+  border-radius: 2px;
+  pointer-events: auto;
+  box-sizing: border-box;
+}
+
+.imageResizeHandle[data-dir="nw"] {
+  top: -5px;
+  left: -5px;
+  cursor: nw-resize;
+}
+
+.imageResizeHandle[data-dir="ne"] {
+  top: -5px;
+  right: -5px;
+  cursor: ne-resize;
+}
+
+.imageResizeHandle[data-dir="sw"] {
+  bottom: -5px;
+  left: -5px;
+  cursor: sw-resize;
+}
+
+.imageResizeHandle[data-dir="se"] {
+  bottom: -5px;
+  right: -5px;
+  cursor: se-resize;
+}

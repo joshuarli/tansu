@@ -1,11 +1,14 @@
 /// Hover tooltip and Ctrl/Cmd+click handler for external links in the editor.
 
+import styles from "./editor-floating.module.css";
+
 const isMac = navigator.platform.startsWith("Mac");
 const hint = isMac ? "⌘+click to open" : "Ctrl+click to open";
 
 export function registerLinkHover(): () => void {
   const tooltip = document.createElement("div");
-  tooltip.className = "link-hover-tooltip";
+  tooltip.className = styles["linkHoverTooltip"]!;
+  tooltip.dataset["ui"] = "link-hover-tooltip";
   tooltip.textContent = hint;
   tooltip.style.display = "none";
   document.body.append(tooltip);

@@ -6,6 +6,8 @@ import { listNotes, type NoteEntry } from "./api.ts";
 import { getVaultSettings } from "./settings.ts";
 import { markDirty } from "./tab-state.ts";
 
+import styles from "./editor-floating.module.css";
+
 let autocompleteEl: HTMLElement | null = null;
 let allNotes: NoteEntry[] | null = null;
 let activeKeyHandler: ((e: KeyboardEvent) => void) | null = null;
@@ -148,7 +150,8 @@ async function showAutocomplete({
 
   clearAutocomplete();
   autocompleteEl = document.createElement("div");
-  autocompleteEl.className = "autocomplete";
+  autocompleteEl.className = styles["autocomplete"]!;
+  autocompleteEl.dataset["ui"] = "autocomplete";
 
   const range = document.createRange();
   range.setStart(textNode, triggerIdx);
@@ -161,7 +164,9 @@ async function showAutocomplete({
 
   for (const [i, note] of filtered.entries()) {
     const item = document.createElement("div");
-    item.className = `autocomplete-item${i === 0 ? " selected" : ""}`;
+    item.className = styles["autocompleteItem"]!;
+    item.dataset["ui"] = "autocomplete-item";
+    item.dataset["selected"] = i === 0 ? "true" : "false";
     item.textContent = note.title || stemFromPath(note.path);
     item.onclick = () => completeWikiLink(textNode, triggerIdx, cursorPos, note, currentPath);
     autocompleteEl!.append(item);
@@ -212,7 +217,7 @@ function updateSelection(idx: number) {
   }
   const items = autocompleteEl.children;
   for (let i = 0; i < items.length; i++) {
-    items[i]!.classList.toggle("selected", i === idx);
+    (items[i] as HTMLElement).dataset["selected"] = i === idx ? "true" : "false";
   }
 }
 

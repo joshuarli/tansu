@@ -1,6 +1,8 @@
 import { listTags } from "./api.ts";
 import { getVaultSettings } from "./settings.ts";
 
+import styles from "./editor-floating.module.css";
+
 type TagSelection = (tag: string) => void;
 
 type InputTarget = {
@@ -107,7 +109,7 @@ function updateSelection(index: number) {
   }
   const items = autocompleteEl.children;
   for (let i = 0; i < items.length; i++) {
-    items[i]!.classList.toggle("selected", i === index);
+    (items[i] as HTMLElement).dataset["selected"] = i === index ? "true" : "false";
   }
   items[index]?.scrollIntoView({ block: "nearest" });
 }
@@ -149,7 +151,8 @@ async function showDropdown(target: InputTarget, query: string, currentRequestId
 
   clearDropdown();
   autocompleteEl = document.createElement("div");
-  autocompleteEl.className = "autocomplete";
+  autocompleteEl.className = styles["autocomplete"]!;
+  autocompleteEl.dataset["ui"] = "autocomplete";
   const rect = target.inputEl.getBoundingClientRect();
   autocompleteEl.style.left = `${rect.left}px`;
   autocompleteEl.style.top = `${rect.bottom + getVaultSettings().tagAutocompleteOffsetPx}px`;
@@ -158,7 +161,9 @@ async function showDropdown(target: InputTarget, query: string, currentRequestId
   let selectedIndex = 0;
   for (const [index, item] of items.entries()) {
     const el = document.createElement("div");
-    el.className = `autocomplete-item${index === 0 ? " selected" : ""}`;
+    el.className = styles["autocompleteItem"]!;
+    el.dataset["ui"] = "autocomplete-item";
+    el.dataset["selected"] = index === 0 ? "true" : "false";
     el.textContent = item.label;
     el.addEventListener("mousedown", (e) => {
       e.preventDefault();

@@ -1,5 +1,7 @@
 import { getAppSettings } from "./settings.ts";
 
+import styles from "./editor-floating.module.css";
+
 export function initImageResize(editorContent: HTMLElement, onResize: () => void): () => void {
   let hoveredImg: HTMLImageElement | null = null;
   let dragging = false;
@@ -31,10 +33,12 @@ export function initImageResize(editorContent: HTMLElement, onResize: () => void
   };
 
   const overlay = document.createElement("div");
-  overlay.className = "img-resize-overlay";
+  overlay.className = styles["imageResizeOverlay"]!;
+  overlay.dataset["ui"] = "image-resize-overlay";
   for (const dir of ["nw", "ne", "sw", "se"]) {
     const handle = document.createElement("div");
-    handle.className = `img-resize-handle img-resize-${dir}`;
+    handle.className = styles["imageResizeHandle"]!;
+    handle.dataset["ui"] = "image-resize-handle";
     handle.dataset["dir"] = dir;
     overlay.append(handle);
   }
@@ -51,13 +55,13 @@ export function initImageResize(editorContent: HTMLElement, onResize: () => void
   function showOverlay(img: HTMLImageElement) {
     hoveredImg = img;
     positionOverlay(img);
-    overlay.classList.add("visible");
+    overlay.dataset["visible"] = "true";
   }
 
   function maybeHideOverlay() {
     if (!dragging) {
       hoveredImg = null;
-      overlay.classList.remove("visible");
+      delete overlay.dataset["visible"];
     }
   }
 

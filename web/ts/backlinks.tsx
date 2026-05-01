@@ -5,6 +5,8 @@ import { render } from "solid-js/web";
 import { getBacklinks } from "./api.ts";
 import { openTab } from "./tab-state.ts";
 
+import styles from "./editor-adjacent.module.css";
+
 const disposers = new WeakMap<HTMLElement, () => void>();
 
 type BacklinksProps = {
@@ -14,13 +16,18 @@ type BacklinksProps = {
 function Backlinks(props: Readonly<BacklinksProps>) {
   return (
     <>
-      <div class="backlinks-header">
+      <div class={styles["backlinksHeader"]} data-ui="backlinks-header">
         {props.links.length} backlink{props.links.length > 1 ? "s" : ""}
       </div>
-      <div class="backlinks-list">
+      <div class={styles["backlinksList"]}>
         <For each={props.links}>
           {(linkPath) => (
-            <button type="button" class="backlink-item" onClick={() => openTab(linkPath)}>
+            <button
+              type="button"
+              class={styles["backlinkItem"]}
+              data-ui="backlink-item"
+              onClick={() => openTab(linkPath)}
+            >
               {stemFromPath(linkPath)}
             </button>
           )}

@@ -15,6 +15,8 @@ import {
 
 import { getVaultSettings } from "./settings.ts";
 
+import styles from "./editor-shell.module.css";
+
 type FormatToolbarOptions = {
   contentEl: HTMLElement;
   applyIndent: (dedent: boolean) => void;
@@ -44,7 +46,7 @@ export function populateFormatButtons(container: HTMLElement, opts: FormatButton
 
   function btn(innerHTML: string, title: string, action: () => void) {
     const el = document.createElement("button");
-    el.className = "format-toolbar-btn";
+    el.className = `${styles["formatToolbarBtn"]!} format-toolbar-btn`;
     el.title = title;
     el.innerHTML = innerHTML;
     el.addEventListener("mousedown", (e) => {
@@ -56,7 +58,7 @@ export function populateFormatButtons(container: HTMLElement, opts: FormatButton
 
   function sep() {
     const el = document.createElement("div");
-    el.className = "format-toolbar-sep";
+    el.className = `${styles["formatToolbarSep"]!} format-toolbar-sep`;
     container.append(el);
   }
 
@@ -70,12 +72,12 @@ export function populateFormatButtons(container: HTMLElement, opts: FormatButton
     afterInline();
   });
 
-  btn(`<span class="ftb-strike">S</span>`, "Strikethrough", () => {
+  btn(`<span class="${styles["ftbStrike"]!}">S</span>`, "Strikethrough", () => {
     applySourceFormat(toggleStrikethrough);
     afterInline();
   });
 
-  btn(`<span class="ftb-highlight">A</span>`, "Highlight", () => {
+  btn(`<span class="${styles["ftbHighlight"]!}">A</span>`, "Highlight", () => {
     applySourceFormat(toggleHighlight);
     afterInline();
   });
@@ -95,7 +97,7 @@ export function populateFormatButtons(container: HTMLElement, opts: FormatButton
     if (!isHeadingLevel(level)) {
       continue;
     }
-    btn(`<span class="ftb-heading">H${level}</span>`, `Heading ${level}`, () => {
+    btn(`<span class="${styles["ftbHeading"]!}">H${level}</span>`, `Heading ${level}`, () => {
       applySourceFormat((md, start) => toggleHeading(md, start, level));
       afterBlock();
     });
@@ -146,7 +148,7 @@ export function initFormatToolbar(opts: FormatToolbarOptions): () => void {
   const { contentEl, applyIndent, onMutation, applySourceFormat } = opts;
 
   const toolbar = document.createElement("div");
-  toolbar.className = "format-toolbar";
+  toolbar.className = `${styles["formatToolbar"]!} format-toolbar`;
   document.body.append(toolbar);
 
   let mouseIsDown = false;

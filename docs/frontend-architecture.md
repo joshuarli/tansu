@@ -156,6 +156,63 @@ The remaining imperative surfaces are deliberate:
 
 Those modules should stay small and specialized. If they grow into broader app-owned workflows, move them under the main tree instead of creating more free-floating roots.
 
+## CSS ownership
+
+The frontend now uses a hybrid CSS model:
+
+- `web/ts/*.module.css` for app-owned UI
+- `web/static/globals.css` for app-wide primitives and shared non-editor globals
+- `web/static/editor.css` for renderer/editor-owned styling
+- `web/static/style.css` as a source manifest imported by `web/ts/main.tsx`
+
+The browser should only load the bundled stylesheet emitted by esbuild:
+
+- `/static/app.css`
+
+Source CSS may be split across multiple files, but it should still bundle into that
+single emitted asset rather than creating extra browser requests.
+
+### Use CSS Modules when
+
+- the styling belongs to a specific app-owned component in `web/ts`
+- the markup is created by Solid components or small app-owned imperative views
+- local scoping makes deletion and refactoring safer
+
+Current examples include:
+
+- dialogs
+- tabs
+- file navigation
+- search/palette/settings overlays
+- editor-adjacent app surfaces such as backlinks, revisions, conflict banner, and floating UI
+
+### Keep styles global when
+
+- the selector targets markdown/editor DOM emitted by `packages/md-wysiwyg`
+- the styling is an app-wide primitive shared across multiple features
+- the class names are effectively part of the editor renderer contract
+
+In practice:
+
+- `globals.css` owns resets, tokens, layout primitives, and shared app styles such as tag pills
+- `editor.css` stays monolithic on purpose and owns the remaining renderer/editor surface:
+  - prose rendering
+  - task list rendering
+  - callouts
+  - syntax highlight classes
+  - editor-only inline helpers such as `.md-tab`
+
+### Practical rule
+
+Before adding or moving CSS, ask which subsystem owns the DOM:
+
+- app-owned DOM in `web/ts` -> prefer CSS Modules
+- renderer/editor-owned DOM from `packages/md-wysiwyg` -> keep it in `editor.css`
+- shared app-wide primitive used across multiple features -> keep it in `globals.css`
+
+Do not force CSS Modules onto renderer-emitted classes from outside the renderer.
+If renderer-owned styles need deeper cleanup, change the renderer contract first.
+
 ## Practical rule
 
 Use Solid components and signals for ordinary app UI.

@@ -1,0 +1,168 @@
+.editorContainer {
+  width: 100%;
+  max-width: 800px;
+  padding: 40px 20px;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.editorToolbar {
+  align-self: stretch;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 8px;
+  background: var(--bg-subtle);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  flex-shrink: 0;
+}
+
+.editorTags {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 10px 0 14px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 18px;
+}
+
+.editorTagsInput {
+  flex: 1 0 120px;
+  min-width: 120px;
+  border: none;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  font-size: 13px;
+  padding: 4px 0;
+}
+
+.editorTagsInput::placeholder {
+  color: var(--fg-muted);
+}
+
+.editorTagsInput:focus {
+  outline: none;
+}
+
+.editorToolbarBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  cursor: pointer;
+  color: var(--fg-muted);
+  padding: 0;
+}
+
+.editorToolbarBtn:hover {
+  background: rgba(0, 0, 0, 0.06);
+  border-color: var(--border);
+  color: var(--fg);
+}
+
+.editorToolbarBtnActive {
+  background: rgba(0, 0, 0, 0.06);
+  border-color: var(--border);
+  color: var(--fg);
+}
+
+.editorToolbarFmtGroup {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  flex-shrink: 0;
+}
+
+.editorSource {
+  width: 100%;
+  flex: 1;
+  min-height: 300px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px;
+  font-family: var(--mono);
+  font-size: 14px;
+  line-height: 1.6;
+  resize: none;
+  color: var(--fg);
+  background: var(--bg);
+}
+
+.editorSource:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.formatToolbar {
+  position: fixed;
+  z-index: 200;
+  display: none;
+  align-items: center;
+  gap: 1px;
+  padding: 3px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.12);
+  pointer-events: auto;
+}
+
+.formatToolbarBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 26px;
+  height: 26px;
+  padding: 0 4px;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  background: none;
+  color: var(--fg-muted);
+  font-size: 12px;
+  font-family: var(--font);
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.formatToolbarBtn:hover {
+  background: rgba(0, 0, 0, 0.06);
+  color: var(--fg);
+}
+
+.formatToolbarSep {
+  width: 1px;
+  height: 16px;
+  background: var(--border);
+  margin: 0 2px;
+  flex-shrink: 0;
+}
+
+.ftbStrike {
+  text-decoration: line-through;
+}
+
+.ftbHighlight {
+  background: #fbbf24;
+  color: #000;
+  border-radius: 2px;
+  padding: 0 2px;
+  font-size: 11px;
+}
+
+.ftbHeading {
+  font-size: 10px;
+  font-weight: 600;
+}

@@ -1,5 +1,6 @@
 import type { Tab } from "./tab-state.ts";
 import { setupDOM, mockFetch } from "./test-helper.ts";
+import { TEST_IDS } from "./test-selectors.ts";
 
 function makeContainer(): HTMLElement {
   const div = document.createElement("div");
@@ -57,7 +58,7 @@ describe("conflict", () => {
       () => {},
       () => "mine",
     );
-    const banner = container.querySelector(".conflict-banner");
+    const banner = container.querySelector(TEST_IDS.conflictBanner);
     expect(banner !== null).toBeTruthy();
   });
 
@@ -71,7 +72,7 @@ describe("conflict", () => {
       () => {},
       () => "mine",
     );
-    const span = container.querySelector(".conflict-banner")!.querySelector("span");
+    const span = container.querySelector(TEST_IDS.conflictBanner)!.querySelector("span");
     expect(span !== null).toBeTruthy();
     expect(span!.textContent!).toContain("File changed externally");
   });
@@ -86,7 +87,7 @@ describe("conflict", () => {
       () => {},
       () => "mine",
     );
-    const buttons = container.querySelector(".conflict-banner")!.querySelectorAll("button");
+    const buttons = container.querySelector(TEST_IDS.conflictBanner)!.querySelectorAll("button");
     expect(buttons).toHaveLength(2);
     expect(buttons[0]!.textContent).toBe("Keep mine");
     expect(buttons[1]!.textContent).toBe("Take theirs");
@@ -102,10 +103,10 @@ describe("conflict", () => {
       () => {},
       () => "my content",
     );
-    const banner = container.querySelector(".conflict-banner")!;
+    const banner = container.querySelector(TEST_IDS.conflictBanner)!;
     const keepBtn = banner.querySelectorAll("button")[0]! as HTMLButtonElement;
     keepBtn.click();
-    expect(container.querySelector(".conflict-banner")).toBeNull();
+    expect(container.querySelector(TEST_IDS.conflictBanner)).toBeNull();
     // saveNote is async; give it a tick to fire the fetch
     await new Promise((r) => setTimeout(r, 10));
   });
@@ -123,10 +124,10 @@ describe("conflict", () => {
       },
       () => "my content",
     );
-    const banner = container.querySelector(".conflict-banner")!;
+    const banner = container.querySelector(TEST_IDS.conflictBanner)!;
     const takeBtn = banner.querySelectorAll("button")[1]! as HTMLButtonElement;
     takeBtn.click();
-    expect(container.querySelector(".conflict-banner")).toBeNull();
+    expect(container.querySelector(TEST_IDS.conflictBanner)).toBeNull();
     expect(loadedWith).toBe("their content");
   });
 
@@ -148,7 +149,7 @@ describe("conflict", () => {
       () => {},
       () => "mine",
     );
-    const banners = container.querySelectorAll(".conflict-banner");
+    const banners = container.querySelectorAll(TEST_IDS.conflictBanner);
     expect(banners).toHaveLength(1);
   });
 
@@ -180,7 +181,7 @@ describe("conflict", () => {
       () => "a\nb\nc", // ours (editor)
     );
 
-    expect(container.querySelector(".conflict-banner")).toBeNull();
+    expect(container.querySelector(TEST_IDS.conflictBanner)).toBeNull();
     expect(loadedWith).toBe("x\na\nb\nc");
     expect(tab.mtime).toBe(2000);
   });
@@ -212,7 +213,7 @@ describe("conflict", () => {
       () => "a\nX", // ours: changed line 2 to X — conflict
     );
 
-    expect(container.querySelector(".conflict-banner") !== null).toBeTruthy();
+    expect(container.querySelector(TEST_IDS.conflictBanner) !== null).toBeTruthy();
     expect(loadedWith).toBe("");
   });
 });

@@ -1,5 +1,6 @@
 import { initImageResize } from "./image-resize.ts";
 import { setupDOM } from "./test-helper.ts";
+import { TEST_IDS } from "./test-selectors.ts";
 
 describe("image-resize", () => {
   let cleanup: () => void;
@@ -50,6 +51,7 @@ describe("image-resize", () => {
     initImageResize(contentEl, () => {
       resizeCalled = true;
     });
+    expect(document.querySelector(TEST_IDS.imageResizeOverlay)).not.toBeNull();
 
     // deltaY = -10 → scroll up → zoom in: newWidth = max(50, round(200 - (-10)*1.5)) = 215
     img.dispatchEvent(makeCtrlWheel(-10));

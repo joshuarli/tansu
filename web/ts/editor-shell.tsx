@@ -1,5 +1,8 @@
 import { For } from "solid-js";
 
+import styles from "./editor-adjacent.module.css";
+import shellStyles from "./editor-shell.module.css";
+
 const SOURCE_ICON =
   '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="5,4 1,8 5,12"/><polyline points="11,4 15,8 11,12"/><line x1="9.5" y1="2" x2="6.5" y2="14"/></svg>';
 const MENU_ICON =
@@ -42,9 +45,9 @@ export function EditorShell(
 ) {
   return (
     <>
-      <div class="editor-toolbar" ref={props.refs.toolbarEl}>
+      <div class={`${shellStyles["editorToolbar"]} editor-toolbar`} ref={props.refs.toolbarEl}>
         <div
-          class="editor-toolbar-fmt-group"
+          class={`${shellStyles["editorToolbarFmtGroup"]} editor-toolbar-fmt-group`}
           ref={props.refs.fmtGroupEl}
           style={{ display: props.isSourceMode() ? "none" : "flex" }}
         />
@@ -52,7 +55,9 @@ export function EditorShell(
         <button
           ref={props.refs.sourceBtnEl}
           type="button"
-          class={`editor-toolbar-btn editor-toolbar-btn--source${props.isSourceMode() ? " active" : ""}`}
+          class={`${shellStyles["editorToolbarBtn"]} editor-toolbar-btn editor-toolbar-btn--source${
+            props.isSourceMode() ? ` ${shellStyles["editorToolbarBtnActive"]} active` : ""
+          }`}
           title="Toggle source mode"
           aria-label="Toggle source mode"
           innerHTML={SOURCE_ICON}
@@ -60,14 +65,17 @@ export function EditorShell(
         <button
           ref={props.refs.menuBtnEl}
           type="button"
-          class="editor-toolbar-btn"
+          class={`${shellStyles["editorToolbarBtn"]} editor-toolbar-btn`}
           title="More"
           aria-label="More options"
           innerHTML={MENU_ICON}
         />
       </div>
-      <div class="editor-container" ref={props.refs.containerEl}>
-        <div class="editor-tags" ref={props.refs.tagRowEl}>
+      <div
+        class={`${shellStyles["editorContainer"]} editor-container`}
+        ref={props.refs.containerEl}
+      >
+        <div class={`${shellStyles["editorTags"]} editor-tags`} ref={props.refs.tagRowEl}>
           <For each={props.tags()}>
             {(tag) => (
               <span class="tag-pill tag-pill--editor">
@@ -88,7 +96,7 @@ export function EditorShell(
               props.refs.getTagInputEl = () => el;
             }}
             type="text"
-            class="editor-tags-input"
+            class={`${shellStyles["editorTagsInput"]} editor-tags-input`}
             placeholder={props.tags().length === 0 ? "Add tags" : "Add tag"}
             aria-label="Add tag"
             autocomplete="off"
@@ -97,9 +105,19 @@ export function EditorShell(
           />
         </div>
         <div ref={props.refs.editorMountEl} style={{ display: "contents" }} />
-        <div ref={props.refs.revisionsEl} class="revisions-container" style={{ display: "none" }} />
+        <div
+          ref={props.refs.revisionsEl}
+          class={styles["revisionsContainer"]}
+          data-ui="revisions-container"
+          style={{ display: "none" }}
+        />
       </div>
-      <div ref={props.refs.backlinksEl} class="backlinks" style={{ display: "none" }} />
+      <div
+        ref={props.refs.backlinksEl}
+        class={styles["backlinks"]}
+        data-ui="backlinks"
+        style={{ display: "none" }}
+      />
     </>
   );
 }

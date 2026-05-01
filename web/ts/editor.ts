@@ -160,7 +160,7 @@ export function initEditor(elements: Readonly<EditorElements>): EditorInstance {
     hideRevisions();
     hideAutocomplete();
     hideTagAutocomplete();
-    container?.querySelector(".conflict-banner-host")?.remove();
+    container?.querySelector('[data-ui="conflict-banner-host"]')?.remove();
     tagState.setTags(tags);
     displayState.setType("editing");
     elements.emptyState.style.display = "none";

@@ -1,4 +1,5 @@
 import { setupDOM } from "./test-helper.ts";
+import { TEST_IDS } from "./test-selectors.ts";
 
 describe("link-hover", () => {
   let cleanup: () => void;
@@ -33,7 +34,7 @@ describe("link-hover", () => {
     // Event must bubble from anchor; dispatch from the anchor itself
     a.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
 
-    const tooltip = document.body.querySelector(".link-hover-tooltip") as HTMLElement | null;
+    const tooltip = document.body.querySelector(TEST_IDS.linkHoverTooltip) as HTMLElement | null;
     expect(tooltip !== null).toBeTruthy();
     expect(tooltip!.style.display).toBe("block");
 
@@ -44,7 +45,7 @@ describe("link-hover", () => {
     const a = makeEditorLink("https://example.com");
 
     a.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
-    const tooltip = document.body.querySelector(".link-hover-tooltip") as HTMLElement;
+    const tooltip = document.body.querySelector(TEST_IDS.linkHoverTooltip) as HTMLElement;
     expect(tooltip.style.display).toBe("block");
 
     a.dispatchEvent(new MouseEvent("mouseout", { bubbles: true }));

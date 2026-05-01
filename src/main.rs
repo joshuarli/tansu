@@ -29,12 +29,6 @@ static EMBED_APP_JS: &[u8] = include_bytes!("../web/static/app.js");
 #[cfg(feature = "embed")]
 static EMBED_APP_CSS: &[u8] = include_bytes!("../web/static/app.css");
 #[cfg(feature = "embed")]
-static EMBED_GLOBALS_CSS: &[u8] = include_bytes!("../web/static/globals.css");
-#[cfg(feature = "embed")]
-static EMBED_EDITOR_CSS: &[u8] = include_bytes!("../web/static/editor.css");
-#[cfg(feature = "embed")]
-static EMBED_STYLE_CSS: &[u8] = include_bytes!("../web/static/style.css");
-#[cfg(feature = "embed")]
 static EMBED_INDEX_HTML: &[u8] = include_bytes!("../web/index.html");
 
 const SESSION_TIMEOUT_SECS: u64 = 24 * 60 * 60; // 24 hours
@@ -621,9 +615,6 @@ impl Server {
             return match decoded.strip_prefix("/static/").unwrap_or("") {
                 "app.js" => write_body_cached(stream, "application/javascript", EMBED_APP_JS),
                 "app.css" => write_body_cached(stream, "text/css", EMBED_APP_CSS),
-                "globals.css" => write_body_cached(stream, "text/css", EMBED_GLOBALS_CSS),
-                "editor.css" => write_body_cached(stream, "text/css", EMBED_EDITOR_CSS),
-                "style.css" => write_body_cached(stream, "text/css", EMBED_STYLE_CSS),
                 _ => write_error(stream, 404, "Not Found"),
             };
             #[cfg(not(feature = "embed"))]

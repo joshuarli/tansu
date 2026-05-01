@@ -1,4 +1,5 @@
 import { setupDOM, mockFetch } from "./test-helper.ts";
+import { TEST_IDS } from "./test-selectors.ts";
 
 function makeEl(): HTMLElement {
   const el = document.createElement("div");
@@ -31,7 +32,7 @@ describe("backlinks", () => {
     const el = makeEl();
     mock.on("GET", "/api/backlinks", ["notes/foo.md", "notes/bar.md"]);
     await loadBacklinks(el, "notes/current.md");
-    const header = el.querySelector(".backlinks-header");
+    const header = el.querySelector(TEST_IDS.backlinksHeader);
     expect(header !== null).toBeTruthy();
   });
 
@@ -39,7 +40,7 @@ describe("backlinks", () => {
     const el = makeEl();
     mock.on("GET", "/api/backlinks", ["notes/foo.md", "notes/bar.md"]);
     await loadBacklinks(el, "notes/current.md");
-    const header = el.querySelector(".backlinks-header");
+    const header = el.querySelector(TEST_IDS.backlinksHeader);
     expect(header!.textContent).toBe("2 backlinks");
   });
 
@@ -47,7 +48,7 @@ describe("backlinks", () => {
     const el = makeEl();
     mock.on("GET", "/api/backlinks", ["notes/foo.md", "notes/bar.md"]);
     await loadBacklinks(el, "notes/current.md");
-    const items = el.querySelectorAll(".backlink-item");
+    const items = el.querySelectorAll(TEST_IDS.backlinkItem);
     expect(items).toHaveLength(2);
   });
 
@@ -55,7 +56,7 @@ describe("backlinks", () => {
     const el = makeEl();
     mock.on("GET", "/api/backlinks", ["notes/only.md"]);
     await loadBacklinks(el, "notes/current.md");
-    const header = el.querySelector(".backlinks-header");
+    const header = el.querySelector(TEST_IDS.backlinksHeader);
     expect(header!.textContent).toBe("1 backlink");
   });
 
@@ -63,7 +64,7 @@ describe("backlinks", () => {
     const el = makeEl();
     mock.on("GET", "/api/backlinks", ["notes/foo.md", "bar/baz.md"]);
     await loadBacklinks(el, "notes/current.md");
-    const items = el.querySelectorAll(".backlink-item");
+    const items = el.querySelectorAll(TEST_IDS.backlinkItem);
     expect(items[0]!.textContent).toBe("foo");
   });
 
@@ -71,7 +72,7 @@ describe("backlinks", () => {
     const el = makeEl();
     mock.on("GET", "/api/backlinks", ["notes/foo.md", "bar/baz.md"]);
     await loadBacklinks(el, "notes/current.md");
-    const items = el.querySelectorAll(".backlink-item");
+    const items = el.querySelectorAll(TEST_IDS.backlinkItem);
     expect(items[1]!.textContent).toBe("baz");
   });
 
@@ -99,7 +100,7 @@ describe("backlinks", () => {
 
     const el = makeEl();
     await loadBacklinks(el, "notes/current.md");
-    const item = el.querySelector(".backlink-item") as HTMLElement;
+    const item = el.querySelector(TEST_IDS.backlinkItem) as HTMLElement;
     expect(item !== null).toBeTruthy();
 
     // Clicking should trigger openTab, which fetches the note

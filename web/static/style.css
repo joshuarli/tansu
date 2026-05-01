@@ -1,2 +1,2 @@
-@import url("/static/globals.css");
-@import url("/static/editor.css");
+@import "./globals.css";
+@import "./editor.css";

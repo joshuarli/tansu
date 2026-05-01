@@ -1,6 +1,8 @@
 import { forceSaveNote } from "./api.ts";
 import { markClean } from "./tab-state.ts";
 
+import styles from "./editor-adjacent.module.css";
+
 type ConflictBannerProps = {
   currentPath: string;
   diskContent: string;
@@ -12,9 +14,10 @@ type ConflictBannerProps = {
 
 export function ConflictBanner(props: Readonly<ConflictBannerProps>) {
   return (
-    <div class="conflict-banner">
+    <div class={styles["conflictBanner"]} data-ui="conflict-banner">
       <span>File changed externally - conflicts detected.</span>
       <button
+        class={styles["conflictButton"]}
         onClick={() => {
           props.onClose();
           const content = props.getCurrentContent();
@@ -26,6 +29,7 @@ export function ConflictBanner(props: Readonly<ConflictBannerProps>) {
         Keep mine
       </button>
       <button
+        class={styles["conflictButton"]}
         onClick={() => {
           props.onClose();
           props.loadContent(props.diskContent);

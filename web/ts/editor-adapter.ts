@@ -4,6 +4,8 @@ import { uploadImage } from "./api.ts";
 import { editorExtensions } from "./editor-config.ts";
 import { getAppSettings } from "./settings.ts";
 
+import shellStyles from "./editor-shell.module.css";
+
 export type EditorAdapter = {
   readonly contentEl: HTMLElement;
   readonly sourceEl: HTMLTextAreaElement;
@@ -56,7 +58,7 @@ export function createEditorAdapter(
     onChange: opts.onChange,
     onSave: opts.onSave,
     contentClassName: "editor-content",
-    sourceClassName: "editor-source",
+    sourceClassName: `${shellStyles["editorSource"]!} editor-source`,
     undoStackMax: opts.undoStackMax,
     imageWebpQuality: appSettings.imageWebpQuality,
     onImagePaste: async (blob) => {

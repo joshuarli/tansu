@@ -6,6 +6,7 @@ import {
   rankTags,
 } from "./tag-autocomplete.ts";
 import { setupDOM, mockFetch } from "./test-helper.ts";
+import { TEST_IDS } from "./test-selectors.ts";
 
 describe("tag-autocomplete", () => {
   let cleanup: () => void;
@@ -28,11 +29,11 @@ describe("tag-autocomplete", () => {
   });
 
   function getDropdown() {
-    return document.querySelector(".autocomplete");
+    return document.querySelector(TEST_IDS.autocomplete);
   }
 
   function getItems() {
-    return [...(getDropdown()?.querySelectorAll(".autocomplete-item") ?? [])];
+    return [...(getDropdown()?.querySelectorAll(TEST_IDS.autocompleteItem) ?? [])];
   }
 
   it("normalizes to lowercase tag-safe input", () => {

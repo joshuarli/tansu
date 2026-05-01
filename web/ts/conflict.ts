@@ -6,7 +6,7 @@ import { ConflictBanner } from "./conflict-banner-view.tsx";
 import type { Tab } from "./tab-state.ts";
 
 function removeConflictBanner(container: HTMLElement) {
-  container.querySelector(".conflict-banner-host")?.remove();
+  container.querySelector('[data-ui="conflict-banner-host"]')?.remove();
 }
 
 export function clearConflictBanner(container: HTMLElement): void {
@@ -26,7 +26,7 @@ export function showConflictBanner(
   removeConflictBanner(container);
 
   const host = document.createElement("div");
-  host.className = "conflict-banner-host";
+  host.dataset["ui"] = "conflict-banner-host";
   container.prepend(host);
 
   const dispose = render(

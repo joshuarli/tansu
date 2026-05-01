@@ -1,5 +1,6 @@
 import type { RevisionsOpts } from "./revisions.tsx";
 import { setupDOM, mockFetch } from "./test-helper.ts";
+import { TEST_IDS } from "./test-selectors.ts";
 
 describe("revisions", () => {
   let cleanup: () => void;
@@ -43,7 +44,7 @@ describe("revisions", () => {
     ({ isRevisionsOpen } = revMod);
 
     host = document.createElement("div");
-    host.className = "revisions-container";
+    host.dataset["ui"] = "revisions-container";
     document.body.append(host);
   });
 
@@ -60,16 +61,16 @@ describe("revisions", () => {
     await new Promise((r) => setTimeout(r, 200));
 
     // Header
-    const header = host.querySelector(".revisions-header");
+    const header = host.querySelector(TEST_IDS.revisionsHeader);
     expect(header !== null).toBeTruthy();
     expect(header!.textContent!).toContain("Revisions");
 
     // Revision items
-    const items = host.querySelectorAll(".revision-item");
+    const items = host.querySelectorAll(TEST_IDS.revisionItem);
     expect(items).toHaveLength(3);
 
     // Each item has a restore button
-    const restoreBtn = items[0]!.querySelector(".restore-btn");
+    const restoreBtn = items[0]!.querySelector(TEST_IDS.restoreButton);
     expect(restoreBtn !== null).toBeTruthy();
     expect(restoreBtn!.textContent).toBe("Restore");
 
@@ -108,7 +109,7 @@ describe("revisions", () => {
     toggleRevisions(opts);
     await new Promise((r) => setTimeout(r, 200));
 
-    const restoreBtn = host.querySelector(".restore-btn") as HTMLElement;
+    const restoreBtn = host.querySelector(TEST_IDS.restoreButton) as HTMLElement;
     expect(restoreBtn !== null).toBeTruthy();
 
     // confirm is already mocked to return true by setupDOM
@@ -134,7 +135,7 @@ describe("revisions", () => {
     await new Promise((r) => setTimeout(r, 200));
 
     expect(isRevisionsOpen()).toBeTruthy();
-    expect(host.querySelectorAll(".revision-item")).toHaveLength(0);
+    expect(host.querySelectorAll(TEST_IDS.revisionItem)).toHaveLength(0);
     expect(host.textContent).toContain("No revisions yet.");
 
     hideRevisions();
@@ -148,16 +149,16 @@ describe("revisions", () => {
     toggleRevisions(opts);
     await new Promise((r) => setTimeout(r, 200));
 
-    const items = host.querySelectorAll(".revision-item");
+    const items = host.querySelectorAll(TEST_IDS.revisionItem);
     expect(items).toHaveLength(3);
 
     // Click the first revision item (not the restore button)
     (items[0] as HTMLElement).click();
     await new Promise((r) => setTimeout(r, 200));
 
-    const preview = host.querySelector(".revision-preview");
+    const preview = host.querySelector(TEST_IDS.diffView);
     expect(preview !== null).toBeTruthy();
-    expect(preview!.classList.contains("diff-view")).toBeTruthy();
+    expect(preview!.matches(TEST_IDS.diffView)).toBeTruthy();
 
     hideRevisions();
   });

@@ -6,6 +6,8 @@ import { getRevision, listRevisions, restoreRevision } from "./api.ts";
 import { DiffView } from "./diff-view.tsx";
 import { relativeTime } from "./util.ts";
 
+import styles from "./editor-adjacent.module.css";
+
 let hostEl: HTMLElement | null = null;
 let currentPath: string | null = null;
 let getContent: (() => string) | null = null;
@@ -50,10 +52,15 @@ function RevisionsBody(props: Readonly<RevisionsPanelProps>) {
         <>
           <For each={props.state().timestamps ?? []}>
             {(ts) => (
-              <div class="revision-item" onClick={() => void props.onPreview(ts)}>
+              <div
+                class={styles["revisionItem"]}
+                data-ui="revision-item"
+                onClick={() => void props.onPreview(ts)}
+              >
                 <span>{relativeTime(ts)}</span>
                 <span
-                  class="restore-btn"
+                  class={styles["restoreButton"]}
+                  data-ui="restore-button"
                   onClick={(e) => {
                     e.stopPropagation();
                     void props.onRestore(ts);
@@ -64,9 +71,7 @@ function RevisionsBody(props: Readonly<RevisionsPanelProps>) {
               </div>
             )}
           </For>
-          <Show when={props.state().previewHunks}>
-            {(hunks) => <DiffView hunks={hunks()} class="revision-preview" />}
-          </Show>
+          <Show when={props.state().previewHunks}>{(hunks) => <DiffView hunks={hunks()} />}</Show>
         </>
       </Match>
     </Switch>
@@ -76,9 +81,9 @@ function RevisionsBody(props: Readonly<RevisionsPanelProps>) {
 function RevisionsPanel(props: Readonly<RevisionsPanelProps>) {
   return (
     <>
-      <div class="revisions-header">
+      <div class={styles["revisionsHeader"]} data-ui="revisions-header">
         <span>Revisions</span>
-        <span style={{ cursor: "pointer" }} onClick={props.onClose}>
+        <span class={styles["revisionsClose"]} onClick={props.onClose}>
           ×
         </span>
       </div>
