@@ -3,6 +3,8 @@ import { Show, createEffect } from "solid-js";
 import { OverlayFrame } from "./overlay.tsx";
 import { createPromiseModalController } from "./promise-modal.ts";
 
+import styles from "./dialog.module.css";
+
 type DialogState = {
   placeholder: string;
   defaultValue: string;
@@ -25,13 +27,14 @@ export function InputDialogHost() {
   return (
     <OverlayFrame
       id="input-dialog-overlay"
+      class={styles["overlay"]}
       isOpen={dialog.isOpen()}
       onClose={() => {
         dialog.cancel();
       }}
     >
       <div
-        class="input-dialog"
+        class={styles["panel"]}
         role="dialog"
         aria-modal="true"
         aria-label={dialog.current()?.placeholder ?? "Enter text"}
@@ -43,6 +46,7 @@ export function InputDialogHost() {
               ref={(el) => {
                 inputEl = el;
               }}
+              class={styles["input"]}
               type="text"
               placeholder={current().placeholder}
               autocomplete="off"

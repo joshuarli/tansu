@@ -2,6 +2,8 @@ import type { Page } from "playwright";
 
 import { setup, teardown } from "./setup.ts";
 
+const TAB = '[data-ui="tab"]';
+
 describe("e2e: keyboard shortcuts", () => {
   let page: Page;
   let baseUrl: string;
@@ -53,31 +55,31 @@ describe("e2e: keyboard shortcuts", () => {
 
   it("Cmd+K search, type, Enter opens note", async () => {
     await openTestNote();
-    const tabCount = await page.$$eval(".tab:not(.tab-new)", (els) => els.length);
+    const tabCount = await page.$$eval(TAB, (els) => els.length);
     expect(tabCount).toBeGreaterThanOrEqual(1);
   });
 
   it("Cmd+N creates new note", async () => {
-    const tabsBefore = await page.$$eval(".tab:not(.tab-new)", (els) => els.length);
+    const tabsBefore = await page.$$eval(TAB, (els) => els.length);
     await triggerAppShortcut("n");
     await page.waitForSelector("#input-dialog-input", { timeout: 2000 });
     await page.fill("#input-dialog-input", "shortcut-note");
     await page.keyboard.press("Enter");
     await page.waitForTimeout(500);
 
-    const tabsAfter = await page.$$eval(".tab:not(.tab-new)", (els) => els.length);
+    const tabsAfter = await page.$$eval(TAB, (els) => els.length);
     expect(tabsAfter).toBe(tabsBefore + 1);
   });
 
   it("Cmd+W closes active tab", async () => {
     await openTestNote();
-    const tabsBefore = await page.$$eval(".tab:not(.tab-new)", (els) => els.length);
+    const tabsBefore = await page.$$eval(TAB, (els) => els.length);
     expect(tabsBefore).toBeGreaterThanOrEqual(1);
 
     await triggerAppShortcut("w");
     await page.waitForTimeout(300);
 
-    const tabsAfter = await page.$$eval(".tab:not(.tab-new)", (els) => els.length);
+    const tabsAfter = await page.$$eval(TAB, (els) => els.length);
     expect(tabsAfter).toBe(tabsBefore - 1);
   });
 

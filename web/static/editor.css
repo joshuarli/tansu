@@ -1,0 +1,722 @@
+/* Editor shell */
+
+.editor-container {
+  width: 100%;
+  max-width: 800px;
+  padding: 40px 20px;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.editor-toolbar {
+  align-self: stretch;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 8px;
+  background: var(--bg-subtle);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  flex-shrink: 0;
+}
+
+.editor-tags {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 10px 0 14px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 18px;
+}
+
+.editor-tags-input {
+  flex: 1 0 120px;
+  min-width: 120px;
+  border: none;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  font-size: 13px;
+  padding: 4px 0;
+}
+
+.editor-tags-input::placeholder {
+  color: var(--fg-muted);
+}
+
+.editor-tags-input:focus {
+  outline: none;
+}
+
+.editor-toolbar-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  cursor: pointer;
+  color: var(--fg-muted);
+  padding: 0;
+}
+
+.editor-toolbar-btn:hover {
+  background: rgba(0, 0, 0, 0.06);
+  border-color: var(--border);
+  color: var(--fg);
+}
+
+.editor-toolbar-btn.active {
+  background: rgba(0, 0, 0, 0.06);
+  border-color: var(--border);
+  color: var(--fg);
+}
+
+.editor-toolbar-fmt-group {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  flex-shrink: 0;
+}
+
+.format-toolbar {
+  position: fixed;
+  z-index: 200;
+  display: none;
+  align-items: center;
+  gap: 1px;
+  padding: 3px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.12);
+  pointer-events: auto;
+}
+
+.format-toolbar-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 26px;
+  height: 26px;
+  padding: 0 4px;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  background: none;
+  color: var(--fg-muted);
+  font-size: 12px;
+  font-family: var(--font);
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.format-toolbar-btn:hover {
+  background: rgba(0, 0, 0, 0.06);
+  color: var(--fg);
+}
+
+.format-toolbar-sep {
+  width: 1px;
+  height: 16px;
+  background: var(--border);
+  margin: 0 2px;
+  flex-shrink: 0;
+}
+
+.ftb-strike {
+  text-decoration: line-through;
+}
+
+.ftb-highlight {
+  background: #fbbf24;
+  color: #000;
+  border-radius: 2px;
+  padding: 0 2px;
+  font-size: 11px;
+}
+
+.ftb-heading {
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.editor-content {
+  outline: none;
+  min-height: 300px;
+  line-height: 1.7;
+}
+
+.editor-content:focus {
+  outline: none;
+}
+
+.editor-source {
+  width: 100%;
+  flex: 1;
+  min-height: 300px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px;
+  font-family: var(--mono);
+  font-size: 14px;
+  line-height: 1.6;
+  resize: none;
+  color: var(--fg);
+  background: var(--bg);
+}
+
+.editor-source:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+/* Prose styles for WYSIWYG editor */
+
+.editor-content h1 {
+  font-size: 1.5em;
+  font-weight: 600;
+  margin: 0.67em 0;
+}
+
+.editor-content h2 {
+  font-size: 1.25em;
+  font-weight: 600;
+  margin: 1em 0 0.5em;
+}
+
+.editor-content h3 {
+  font-size: 1.1em;
+  font-weight: 600;
+  margin: 1em 0 0.5em;
+}
+
+.editor-content h4 {
+  font-size: 1em;
+  font-weight: 600;
+  margin: 1em 0 0.5em;
+}
+
+.editor-content p {
+  margin: 0;
+}
+
+.editor-content ul,
+.editor-content ol {
+  margin: 0.5em 0;
+  padding-left: 2em;
+}
+
+.editor-content ul.task-list {
+  list-style: none;
+}
+
+.editor-content li {
+  margin: 0.25em 0;
+}
+
+.editor-content blockquote {
+  margin: 0.5em 0;
+  padding: 0 1em;
+  color: var(--fg-muted);
+  border-left: 0.25em solid var(--border);
+}
+
+.editor-content code {
+  font-family: var(--mono);
+  background: rgba(175, 184, 193, 0.2);
+  padding: 0.2em 0.4em;
+  border-radius: var(--radius);
+  font-size: 0.85em;
+}
+
+.editor-content .md-tab {
+  white-space: pre;
+  tab-size: 4;
+}
+
+.editor-content pre {
+  background: var(--bg-subtle);
+  padding: 16px;
+  border-radius: var(--radius);
+  overflow: auto;
+  margin: 0.5em 0;
+}
+
+.editor-content pre code {
+  background: transparent;
+  padding: 0;
+  font-size: 0.85em;
+  color: #24292e;
+}
+
+.hl-kw {
+  color: #d73a49;
+}
+
+.hl-type {
+  color: #005cc5;
+}
+
+.hl-str {
+  color: #032f62;
+}
+
+.hl-cmt {
+  color: #6a737d;
+}
+
+.hl-num {
+  color: #005cc5;
+}
+
+.hl-brk {
+  color: #24292e;
+}
+
+.hl-op {
+  color: #d73a49;
+}
+
+.hl-fn {
+  color: #6f42c1;
+}
+
+.hl-const {
+  color: #005cc5;
+  font-weight: 600;
+}
+
+.hl-macro {
+  color: #6f42c1;
+  font-weight: 600;
+}
+
+.editor-content table {
+  border-collapse: collapse;
+  margin: 0.5em 0;
+}
+
+.editor-content th,
+.editor-content td {
+  border: 1px solid var(--border);
+  padding: 6px 13px;
+}
+
+.editor-content tr:nth-child(2n) {
+  background: var(--bg-subtle);
+}
+
+.editor-content hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 1.5em 0;
+}
+
+.editor-content a {
+  color: var(--link);
+  text-decoration: none;
+}
+
+.editor-content a:hover {
+  text-decoration: underline;
+}
+
+.editor-content img {
+  max-width: 100%;
+  border-radius: var(--radius);
+}
+
+.editor-content input[type="checkbox"] {
+  cursor: pointer;
+}
+
+.img-resize-overlay {
+  position: fixed;
+  display: none;
+  pointer-events: none;
+  outline: 2px solid rgba(74, 158, 255, 0.6);
+  outline-offset: 1px;
+  border-radius: var(--radius);
+  z-index: 100;
+  box-sizing: border-box;
+}
+
+.img-resize-overlay.visible {
+  display: block;
+}
+
+.img-resize-handle {
+  position: absolute;
+  width: 9px;
+  height: 9px;
+  background: white;
+  border: 1.5px solid rgba(74, 158, 255, 0.85);
+  border-radius: 2px;
+  pointer-events: auto;
+  box-sizing: border-box;
+}
+
+.img-resize-nw {
+  top: -5px;
+  left: -5px;
+  cursor: nw-resize;
+}
+
+.img-resize-ne {
+  top: -5px;
+  right: -5px;
+  cursor: ne-resize;
+}
+
+.img-resize-sw {
+  bottom: -5px;
+  left: -5px;
+  cursor: sw-resize;
+}
+
+.img-resize-se {
+  bottom: -5px;
+  right: -5px;
+  cursor: se-resize;
+}
+
+.editor-content mark {
+  background: rgba(255, 220, 0, 0.4);
+  border-radius: 2px;
+  padding: 0.1em 0.2em;
+}
+
+.editor-content del {
+  text-decoration: line-through;
+  color: var(--fg-muted);
+}
+
+.editor-content .callout {
+  margin: 0.5em 0;
+  padding: 12px 16px;
+  border-radius: var(--radius);
+  border-left: 4px solid var(--accent);
+  background: var(--bg-subtle);
+}
+
+.editor-content .callout-title {
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.editor-content .callout-body > *:first-child {
+  margin-top: 0;
+}
+
+.editor-content .callout-body > *:last-child {
+  margin-bottom: 0;
+}
+
+.editor-content .callout-warning,
+.editor-content .callout-caution {
+  border-left-color: #d4a72c;
+  background: #fff8c5;
+}
+
+.editor-content .callout-danger,
+.editor-content .callout-bug {
+  border-left-color: var(--danger);
+  background: #fff0f0;
+}
+
+.editor-content .callout-tip,
+.editor-content .callout-hint {
+  border-left-color: #1a7f37;
+  background: #dafbe1;
+}
+
+.editor-content .callout-success,
+.editor-content .callout-check,
+.editor-content .callout-done {
+  border-left-color: #1a7f37;
+  background: #dafbe1;
+}
+
+.editor-content .callout-failure,
+.editor-content .callout-fail,
+.editor-content .callout-missing {
+  border-left-color: var(--danger);
+  background: #fff0f0;
+}
+
+.editor-content .callout-question,
+.editor-content .callout-faq {
+  border-left-color: #8250df;
+  background: #fbefff;
+}
+
+.editor-content .callout-example,
+.editor-content .callout-abstract,
+.editor-content .callout-summary {
+  border-left-color: #6639ba;
+  background: #fbefff;
+}
+
+.editor-content .callout-quote {
+  border-left-color: var(--fg-muted);
+}
+
+.wiki-link {
+  color: var(--link);
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.wiki-link:hover {
+  text-decoration: underline;
+}
+
+.wiki-link.broken {
+  color: var(--danger);
+}
+
+/* Link hover tooltip */
+
+.link-hover-tooltip {
+  position: absolute;
+  z-index: 200;
+  background: var(--fg);
+  color: var(--bg);
+  font-size: 11px;
+  padding: 2px 7px;
+  border-radius: 4px;
+  pointer-events: none;
+  white-space: nowrap;
+  opacity: 0.85;
+}
+
+/* Tag pills */
+
+.tag-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid #b6e3ff;
+  background: #ddf4ff;
+  color: #0969da;
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.tag-pill--editor {
+  font-size: 12px;
+  padding: 4px 10px;
+}
+
+.tag-pill-remove {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+}
+
+.tag-pill-remove:hover {
+  color: var(--fg);
+}
+
+/* Backlinks */
+
+.backlinks {
+  max-width: 800px;
+  width: 100%;
+  padding: 0 20px 40px;
+  margin-top: 20px;
+  border-top: 1px solid var(--border);
+  padding-top: 16px;
+}
+
+.backlinks-header {
+  font-size: 13px;
+  color: var(--fg-muted);
+  cursor: pointer;
+  user-select: none;
+  margin-bottom: 8px;
+}
+
+.backlinks-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.backlink-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  font: inherit;
+  font-size: 13px;
+  color: var(--link);
+  cursor: pointer;
+  padding: 4px 0;
+}
+
+.backlink-item:hover {
+  text-decoration: underline;
+}
+
+/* Revisions (inline in editor-container) */
+
+.revisions-container {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.revisions-header {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.revision-item {
+  padding: 8px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--fg-muted);
+  margin-bottom: 4px;
+}
+
+.revision-item:hover {
+  background: var(--bg-subtle);
+}
+
+.revision-item .restore-btn {
+  font-size: 12px;
+  color: var(--accent);
+  cursor: pointer;
+  float: right;
+}
+
+/* Diff view */
+
+.diff-view {
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.5;
+  max-height: 400px;
+  overflow: auto;
+  margin-top: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.diff-hunk {
+  border-bottom: 1px solid var(--border);
+}
+
+.diff-hunk:last-child {
+  border-bottom: none;
+}
+
+.diff-hunk-header {
+  background: #ddf4ff;
+  color: #0550ae;
+  padding: 4px 8px;
+  font-size: 11px;
+}
+
+.diff-line {
+  padding: 0 8px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.diff-prefix {
+  display: inline-block;
+  width: 16px;
+  user-select: none;
+  color: var(--fg-muted);
+}
+
+.diff-add {
+  background: #dafbe1;
+  color: #1a7f37;
+}
+
+.diff-del {
+  background: #ffebe9;
+  color: #cf222e;
+}
+
+.diff-ctx {
+  color: var(--fg-muted);
+}
+
+/* Autocomplete dropdown for wiki-links */
+
+.autocomplete {
+  position: absolute;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  max-height: 200px;
+  overflow-y: auto;
+  z-index: 200;
+  min-width: 200px;
+}
+
+.autocomplete-item {
+  padding: 6px 12px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.autocomplete-item:hover,
+.autocomplete-item.selected {
+  background: var(--bg-subtle);
+}
+
+/* Conflict banner */
+
+.conflict-banner {
+  background: #fff8c5;
+  border: 1px solid #d4a72c;
+  border-radius: var(--radius);
+  padding: 12px 16px;
+  margin-bottom: 12px;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.conflict-banner button {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 4px 12px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+}
+
+.conflict-banner button:hover {
+  background: var(--bg-subtle);
+}

@@ -5,6 +5,9 @@ import type { Page } from "playwright";
 
 import { setup, teardown } from "./setup.ts";
 
+const ACTIVE_TAB = '[data-ui="tab"][data-active="true"]';
+const TAB_LABEL_TEXT = '[data-ui="tab-label-text"]';
+
 describe("e2e: import html", () => {
   let page: Page;
   let notesDir: string;
@@ -29,10 +32,10 @@ describe("e2e: import html", () => {
     const chooser = await chooserPromise;
     await chooser.setFiles(fixturePath);
 
-    await page.waitForSelector(".tab.active", { timeout: 5000 });
+    await page.waitForSelector(ACTIVE_TAB, { timeout: 5000 });
     await page.waitForTimeout(500);
     const activeTitle = await page.$eval(
-      ".tab.active .tab-label-text",
+      `${ACTIVE_TAB} ${TAB_LABEL_TEXT}`,
       (el) => el.textContent ?? "",
     );
     expect(activeTitle).toBe("import-article");

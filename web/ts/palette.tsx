@@ -7,6 +7,8 @@ import { createManagedModal } from "./modal-manager.ts";
 import { OverlayFrame } from "./overlay.tsx";
 import { uiStore } from "./ui-store.ts";
 
+import styles from "./palette.module.css";
+
 type PaletteProps = {
   commands: () => readonly Command[];
 };
@@ -81,10 +83,21 @@ export function PaletteModal(props: Readonly<PaletteProps>) {
 
   return (
     <Show when={modal.shouldRender()}>
-      <OverlayFrame id="palette-overlay" isOpen={modal.isOpen()} onClose={modal.close}>
-        <div class="palette-modal" role="dialog" aria-modal="true" aria-label="Command palette">
+      <OverlayFrame
+        id="palette-overlay"
+        class={styles["overlay"]}
+        isOpen={modal.isOpen()}
+        onClose={modal.close}
+      >
+        <div
+          class={`${styles["modal"]} palette-modal`}
+          role="dialog"
+          aria-modal="true"
+          aria-label="Command palette"
+        >
           <input
             id="palette-input"
+            class={styles["input"]}
             ref={(el) => {
               inputEl = el;
             }}
@@ -101,6 +114,7 @@ export function PaletteModal(props: Readonly<PaletteProps>) {
           />
           <div
             id="palette-list"
+            class={styles["list"]}
             ref={(el) => {
               listEl = el;
             }}
@@ -109,11 +123,13 @@ export function PaletteModal(props: Readonly<PaletteProps>) {
               {(command, index) => (
                 <button
                   type="button"
-                  class={`palette-item${index() === selectedIndex() ? " selected" : ""}`}
+                  class={`${styles["item"]} palette-item${
+                    index() === selectedIndex() ? ` ${styles["selected"]} selected` : ""
+                  }`}
                   onClick={() => selectCommand(command)}
                 >
                   <span class="palette-label">{command.label}</span>
-                  <span class="palette-shortcut">{command.shortcut}</span>
+                  <span class={`${styles["shortcut"]} palette-shortcut`}>{command.shortcut}</span>
                 </button>
               )}
             </For>

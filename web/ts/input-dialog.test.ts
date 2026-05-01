@@ -23,7 +23,7 @@ describe("input-dialog", () => {
   });
 
   function getOverlay() {
-    return document.querySelector("#input-dialog-overlay")!;
+    return document.querySelector("#input-dialog-overlay") as HTMLElement;
   }
 
   function getInput() {
@@ -34,7 +34,7 @@ describe("input-dialog", () => {
     const p = showInputDialog("Note name...", "starter");
     await tick();
 
-    expect(getOverlay().classList.contains("hidden")).toBeFalsy();
+    expect(getOverlay().hidden).toBeFalsy();
     expect(getInput().placeholder).toBe("Note name...");
     expect(getInput().value).toBe("starter");
     expect(document.activeElement).toBe(getInput());
@@ -51,7 +51,7 @@ describe("input-dialog", () => {
     const p = showInputDialog("Type something...");
     await tick();
 
-    expect(getOverlay().classList.contains("hidden")).toBeFalsy();
+    expect(getOverlay().hidden).toBeFalsy();
     getInput().value = "  hello  ";
     getInput().dispatchEvent(
       new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }),
@@ -59,14 +59,14 @@ describe("input-dialog", () => {
 
     const result = await p;
     expect(result).toBe("hello");
-    expect(getOverlay().classList.contains("hidden")).toBeTruthy();
+    expect(getOverlay().hidden).toBeTruthy();
   });
 
   it("Escape key cancels and resolves with null", async () => {
     const p = showInputDialog("Type something...", "default");
     await tick();
 
-    expect(getOverlay().classList.contains("hidden")).toBeFalsy();
+    expect(getOverlay().hidden).toBeFalsy();
     expect(getInput().value).toBe("default");
     getInput().dispatchEvent(
       new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }),
@@ -74,20 +74,20 @@ describe("input-dialog", () => {
 
     const result = await p;
     expect(result).toBeNull();
-    expect(getOverlay().classList.contains("hidden")).toBeTruthy();
+    expect(getOverlay().hidden).toBeTruthy();
   });
 
   it("backdrop click cancels and resolves with null", async () => {
     const p = showInputDialog("Type something...");
     await tick();
 
-    expect(getOverlay().classList.contains("hidden")).toBeFalsy();
+    expect(getOverlay().hidden).toBeFalsy();
     // Click the overlay itself (not the inner dialog)
     getOverlay().dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
 
     const result = await p;
     expect(result).toBeNull();
-    expect(getOverlay().classList.contains("hidden")).toBeTruthy();
+    expect(getOverlay().hidden).toBeTruthy();
   });
 
   it("empty input resolves with null", async () => {
@@ -149,13 +149,13 @@ describe("input-dialog", () => {
     );
     await p;
 
-    expect(getOverlay().classList.contains("hidden")).toBeTruthy();
+    expect(getOverlay().hidden).toBeTruthy();
 
     // Clicking the overlay after resolve should be a safe no-op
     getOverlay().dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
     await tick();
 
-    expect(getOverlay().classList.contains("hidden")).toBeTruthy();
+    expect(getOverlay().hidden).toBeTruthy();
 
     // A subsequent showInputDialog must still work correctly
     const p2 = showInputDialog("AfterCleanup");

@@ -8,6 +8,7 @@ import {
   type SaveAction,
 } from "./editor.ts";
 import { setupDOM, mockFetch } from "./test-helper.ts";
+import { TEST_IDS } from "./test-selectors.ts";
 
 describe("classifySaveResult", () => {
   it("no conflict → clean", () => {
@@ -214,7 +215,7 @@ describe("editor", () => {
   });
 
   afterEach(async () => {
-    document.body.querySelector(".context-menu")?.parentElement?.remove();
+    document.body.querySelector(TEST_IDS.contextMenu)?.parentElement?.remove();
     hideEditor();
     destroyEditor();
     shellHost.remove();
@@ -900,9 +901,9 @@ describe("editor", () => {
     menuBtn.click();
     await new Promise((r) => setTimeout(r, 0));
 
-    const menu = document.body.querySelector(".context-menu");
+    const menu = document.body.querySelector(TEST_IDS.contextMenu);
     expect(menu !== null).toBeTruthy();
-    const items = menu!.querySelectorAll(".context-menu-item");
+    const items = menu!.querySelectorAll(TEST_IDS.contextMenuItem);
     const labels = [...items].map((i) => i.textContent);
     expect(labels).toContain("Revisions");
 

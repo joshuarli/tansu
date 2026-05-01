@@ -1,0 +1,262 @@
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+:root {
+  --fg: #24292f;
+  --fg-muted: #57606a;
+  --bg: #fff;
+  --bg-subtle: #f6f8fa;
+  --bg-red: #faa0a0;
+  --border: #d0d7de;
+  --link: #0969da;
+  --accent: #0969da;
+  --danger: #cf222e;
+  --radius: 6px;
+  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --tab-min-label: 4ch;
+  --tab-min-controls: 2.75rem;
+}
+
+/* App layout */
+
+body {
+  font-family: var(--font);
+  color: var(--fg);
+  background: var(--bg);
+  line-height: 1.6;
+}
+
+#app {
+  display: flex;
+  flex-direction: row;
+  height: 100vh;
+}
+
+.app-main {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* Tab bar host */
+
+#tab-bar {
+  display: flex;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-subtle);
+  min-height: 36px;
+  overflow-x: auto;
+  flex-shrink: 0;
+  scrollbar-width: none;
+}
+
+#tab-bar::-webkit-scrollbar {
+  display: none;
+}
+
+/* Server status */
+
+.server-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  padding: 4px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-red);
+  color: var(--fg-muted);
+  font-size: 12px;
+}
+
+.server-status.hidden {
+  display: none;
+}
+
+/* Editor area shell */
+
+#editor-area {
+  flex: 1;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+#empty-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--fg-muted);
+  font-size: 15px;
+}
+
+#empty-state kbd {
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 2px 6px;
+  font-family: var(--mono);
+  font-size: 13px;
+  margin: 0 4px;
+}
+
+/* Notification pill */
+
+.notification {
+  position: fixed;
+  top: 8px;
+  right: 12px;
+  z-index: 400;
+  font-size: 12px;
+  padding: 4px 12px;
+  border-radius: 12px;
+  pointer-events: auto;
+  cursor: pointer;
+  max-width: min(32rem, calc(100vw - 24px));
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.notification.hidden {
+  display: none;
+}
+
+.notification.error {
+  background: var(--danger);
+  color: white;
+}
+
+.notification.info {
+  background: var(--fg-muted);
+  color: white;
+}
+
+.notification.success {
+  background: #1a7f37;
+  color: white;
+}
+
+/* Unlock screen */
+
+#unlock-screen {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100vh;
+  gap: 24px;
+}
+
+#unlock-screen h1 {
+  font-size: 24px;
+  font-weight: 600;
+}
+
+#unlock-screen p {
+  color: var(--fg-muted);
+  font-size: 14px;
+}
+
+#unlock-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 360px;
+  max-width: 90vw;
+}
+
+#unlock-form input {
+  font-family: var(--mono);
+  font-size: 14px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  outline: none;
+  letter-spacing: 0.5px;
+}
+
+#unlock-form input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(9, 105, 218, 0.15);
+}
+
+#unlock-form button {
+  padding: 8px 16px;
+  background: var(--accent);
+  color: white;
+  border: none;
+  border-radius: var(--radius);
+  font-size: 14px;
+  cursor: pointer;
+}
+
+#unlock-form button:hover {
+  opacity: 0.9;
+}
+
+#unlock-form button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+#unlock-error {
+  color: var(--danger);
+  font-size: 13px;
+  min-height: 1.6em;
+}
+
+#unlock-status {
+  color: var(--fg-muted);
+  font-size: 13px;
+  min-height: 1.6em;
+}
+
+#unlock-biometric {
+  padding: 10px 24px;
+  background: var(--accent);
+  color: white;
+  border: none;
+  border-radius: var(--radius);
+  font-size: 15px;
+  cursor: pointer;
+}
+
+#unlock-biometric:hover {
+  opacity: 0.9;
+}
+
+.prf-remove {
+  padding: 2px 8px;
+  font-size: 12px;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  color: var(--danger);
+}
+
+.prf-remove:hover {
+  background: var(--bg-subtle);
+}
+
+#prf-add,
+#lock-now {
+  padding: 6px 12px;
+  font-size: 13px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  cursor: pointer;
+}
+
+#prf-add:hover,
+#lock-now:hover {
+  background: var(--bg-subtle);
+}

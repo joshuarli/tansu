@@ -4,6 +4,8 @@ import { activateVault, getStatus, getVaults, type VaultEntry } from "./api.ts";
 import { serverStore } from "./server-store.ts";
 import { closeAllTabs, getTabs, restoreSession } from "./tab-state.ts";
 
+import styles from "./filenav.module.css";
+
 export function VaultSwitcher() {
   const [vaults, setVaults] = createSignal<VaultEntry[]>([]);
 
@@ -47,7 +49,8 @@ export function VaultSwitcher() {
   return (
     <Show when={vaults().length > 1}>
       <select
-        class="vault-select"
+        class={styles["vaultSelect"]}
+        data-ui="vault-select"
         title="Switch vault"
         aria-label="Switch vault"
         onChange={(e) => {

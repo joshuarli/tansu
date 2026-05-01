@@ -43,6 +43,8 @@ import {
 import { uiStore } from "./ui-store.ts";
 import { createPrfCredential, isPrfLikelySupported } from "./webauthn.ts";
 
+import styles from "./settings.module.css";
+
 type SettingsSectionsViewProps<
   Model extends Record<string, unknown>,
   TSection extends SectionId,
@@ -81,7 +83,7 @@ function renderField<Model extends Record<string, unknown>>(
 
   if (field.kind === "checkbox") {
     return (
-      <label class="settings-row">
+      <label class={`${styles["row"]} settings-row`}>
         <span>{field.label}</span>
         <input
           type="checkbox"
@@ -96,7 +98,7 @@ function renderField<Model extends Record<string, unknown>>(
 
   if (field.kind === "select") {
     return (
-      <label class="settings-row">
+      <label class={`${styles["row"]} settings-row`}>
         <span>{field.label}</span>
         <select
           data-key={String(key)}
@@ -114,7 +116,7 @@ function renderField<Model extends Record<string, unknown>>(
 
   if (field.kind === "range") {
     return (
-      <label class="settings-row">
+      <label class={`${styles["row"]} settings-row`}>
         <span>{field.label}</span>
         <input
           type="range"
@@ -126,7 +128,7 @@ function renderField<Model extends Record<string, unknown>>(
           value={String(current()[key])}
           onInput={(e) => onInput(key, e.currentTarget.value)}
         />
-        <span class="slider-value">
+        <span class={`${styles["sliderValue"]} slider-value`}>
           {field.format ? field.format(current()[key]) : String(current()[key])}
         </span>
       </label>
@@ -135,8 +137,16 @@ function renderField<Model extends Record<string, unknown>>(
 
   return (
     <>
-      <Show when={field.hint}>{(hint) => <p class="settings-hint">{hint()}</p>}</Show>
-      <label class={field.kind === "text" ? "settings-text" : "settings-row"}>
+      <Show when={field.hint}>
+        {(hint) => <p class={`${styles["hint"]} settings-hint`}>{hint()}</p>}
+      </Show>
+      <label
+        class={
+          field.kind === "text"
+            ? `${styles["text"]} settings-text`
+            : `${styles["row"]} settings-row`
+        }
+      >
         <Show when={field.kind !== "text"}>
           <span>{field.label}</span>
         </Show>
@@ -144,7 +154,7 @@ function renderField<Model extends Record<string, unknown>>(
           type={field.kind}
           data-key={String(key)}
           data-scope={scope}
-          class={field.kind === "text" ? "settings-text" : undefined}
+          class={field.kind === "text" ? `${styles["text"]} settings-text` : undefined}
           value={field.format ? field.format(current()[key]) : String(current()[key])}
           placeholder={field.placeholder}
           min={field.min}
@@ -195,7 +205,7 @@ function SettingsSectionsView<Model extends Record<string, unknown>, TSection ex
           <h2>{props.title}</h2>
           <For each={props.sections}>
             {(section) => (
-              <div class="settings-section">
+              <div class={`${styles["section"]} settings-section`}>
                 <h3>{section.title}</h3>
                 {renderSection(
                   current,
@@ -210,7 +220,7 @@ function SettingsSectionsView<Model extends Record<string, unknown>, TSection ex
             )}
           </For>
           <Show when={props.extra}>{(extra) => extra()()}</Show>
-          <div class="settings-actions">
+          <div class={`${styles["actions"]} settings-actions`}>
             <button id={props.saveId} onClick={props.onSave}>
               Save
             </button>
@@ -235,17 +245,19 @@ function ServerSecuritySection(
 ) {
   return (
     <Show when={props.status()?.encrypted}>
-      <div class="settings-section">
+      <div class={`${styles["section"]} settings-section`}>
         <h3>Security</h3>
         <Show
           when={(props.status()?.prf_credential_ids.length ?? 0) > 0}
-          fallback={<p class="settings-hint">No biometric credentials registered.</p>}
+          fallback={
+            <p class={`${styles["hint"]} settings-hint`}>No biometric credentials registered.</p>
+          }
         >
           <>
-            <p class="settings-hint">Registered biometric credentials:</p>
+            <p class={`${styles["hint"]} settings-hint`}>Registered biometric credentials:</p>
             <For each={props.status()?.prf_credential_ids ?? []}>
               {(id, i) => (
-                <div class="settings-row">
+                <div class={`${styles["row"]} settings-row`}>
                   <span>
                     {props.status()?.prf_credential_names[i()] || `${id.slice(0, 12)}...`}
                   </span>
@@ -259,7 +271,11 @@ function ServerSecuritySection(
         </Show>
         <Show
           when={isPrfLikelySupported()}
-          fallback={<p class="settings-hint">WebAuthn PRF not available in this browser.</p>}
+          fallback={
+            <p class={`${styles["hint"]} settings-hint`}>
+              WebAuthn PRF not available in this browser.
+            </p>
+          }
         >
           <button id="prf-add" onClick={props.onAddPrf}>
             Add biometric credential
@@ -387,10 +403,15 @@ export function SettingsModal() {
 
   return (
     <Show when={modal.shouldRender()}>
-      <OverlayFrame id="settings-overlay" isOpen={modal.isOpen()} onClose={modal.close}>
+      <OverlayFrame
+        id="settings-overlay"
+        class={styles["overlay"]}
+        isOpen={modal.isOpen()}
+        onClose={modal.close}
+      >
         <div
           id="settings-panel"
-          class="settings-modal"
+          class={`${styles["modal"]} settings-modal`}
           role="dialog"
           aria-modal="true"
           aria-label="Server settings"
@@ -482,10 +503,15 @@ export function VaultSettingsModal(props: Readonly<ServerSettingsModalProps> = {
 
   return (
     <Show when={modal.shouldRender()}>
-      <OverlayFrame id="vault-settings-overlay" isOpen={modal.isOpen()} onClose={modal.close}>
+      <OverlayFrame
+        id="vault-settings-overlay"
+        class={styles["overlay"]}
+        isOpen={modal.isOpen()}
+        onClose={modal.close}
+      >
         <div
           id="vault-settings-panel"
-          class="settings-modal"
+          class={`${styles["modal"]} settings-modal`}
           role="dialog"
           aria-modal="true"
           aria-label="Vault settings"
@@ -556,10 +582,15 @@ export function AppSettingsModal(props: Readonly<AppSettingsModalProps> = {}) {
 
   return (
     <Show when={modal.shouldRender()}>
-      <OverlayFrame id="app-settings-overlay" isOpen={modal.isOpen()} onClose={modal.close}>
+      <OverlayFrame
+        id="app-settings-overlay"
+        class={styles["overlay"]}
+        isOpen={modal.isOpen()}
+        onClose={modal.close}
+      >
         <div
           id="app-settings-panel"
-          class="settings-modal"
+          class={`${styles["modal"]} settings-modal`}
           role="dialog"
           aria-modal="true"
           aria-label="App settings"

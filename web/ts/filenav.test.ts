@@ -3,11 +3,12 @@ import { render } from "solid-js/web";
 import { Sidebar } from "./filenav.tsx";
 import { serverStore } from "./server-store.ts";
 import { setupDOM, mockFetch } from "./test-helper.ts";
+import { TEST_IDS } from "./test-selectors.ts";
 import { uiStore } from "./ui-store.ts";
 
 const tick = () => new Promise<void>((r) => setTimeout(r, 0));
 const drain = () => new Promise<void>((r) => setTimeout(r, 50));
-const activeCount = () => document.querySelectorAll(".nav-file.active").length;
+const activeCount = () => document.querySelectorAll(TEST_IDS.activeNavFile).length;
 
 function emit(
   event: "files:changed" | "pinned:changed" | "vault:switched",
@@ -139,10 +140,10 @@ describe("filenav", () => {
     serverStore.notifyFilesChanged("notes/beta.md");
     await drain();
 
-    const rows = [...document.querySelectorAll<HTMLElement>(".nav-file")];
+    const rows = [...document.querySelectorAll<HTMLElement>(TEST_IDS.navFile)];
     const betaRows = rows.filter((row) => row.title === "notes/beta.md");
     expect(betaRows).toHaveLength(1);
-    expect(betaRows[0]?.querySelector(".nav-file-name")?.textContent).toBe("beta");
+    expect(betaRows[0]?.querySelector(TEST_IDS.navFileName)?.textContent).toBe("beta");
   });
 
   it("no duplicate .active after two rapid files:changed (recent mode)", async () => {
@@ -194,7 +195,7 @@ describe("filenav", () => {
     await drain();
 
     expect(activeCount()).toBe(1);
-    const activeEl = document.querySelector(".nav-file.active") as HTMLElement;
+    const activeEl = document.querySelector(TEST_IDS.activeNavFile) as HTMLElement;
     expect(activeEl?.title).toBe("notes/beta.md");
   });
 
@@ -224,7 +225,7 @@ describe("filenav", () => {
     await new Promise<void>((r) => setTimeout(r, 100));
 
     expect(activeCount()).toBe(1);
-    const activeEl = document.querySelector(".nav-file.active") as HTMLElement;
+    const activeEl = document.querySelector(TEST_IDS.activeNavFile) as HTMLElement;
     expect(activeEl?.title).toBe("notes/beta.md");
   });
 
@@ -254,7 +255,7 @@ describe("filenav", () => {
     await drain();
 
     const container = document.querySelector("#sidebar-tree")!;
-    expect(container.querySelector(".nav-file") !== null).toBeTruthy();
+    expect(container.querySelector(TEST_IDS.navFile) !== null).toBeTruthy();
   });
 
   it("typing empty string in search mode returns to recent mode", async () => {
@@ -271,7 +272,7 @@ describe("filenav", () => {
 
     // Should render recent files
     const container = document.querySelector("#sidebar-tree")!;
-    expect(container.querySelector(".nav-file") !== null).toBeTruthy();
+    expect(container.querySelector(TEST_IDS.navFile) !== null).toBeTruthy();
   });
 
   it("Escape key in search mode resets to recent mode", async () => {
@@ -287,7 +288,7 @@ describe("filenav", () => {
 
     expect(searchInput.value).toBe("");
     const container = document.querySelector("#sidebar-tree")!;
-    expect(container.querySelector(".nav-file") !== null).toBeTruthy();
+    expect(container.querySelector(TEST_IDS.navFile) !== null).toBeTruthy();
   });
 
   it("Escape key outside search mode does nothing", async () => {
@@ -315,7 +316,7 @@ describe("filenav", () => {
     await drain();
 
     const container = document.querySelector("#sidebar-tree")!;
-    const dirLine = container.querySelector(".nav-file-dir");
+    const dirLine = container.querySelector(TEST_IDS.navFileDir);
     expect(dirLine !== null).toBeTruthy();
     expect(dirLine!.textContent).toBe("folder");
   });
@@ -401,7 +402,7 @@ describe("filenav", () => {
     await drain();
 
     const container = document.querySelector("#sidebar-tree")!;
-    const navFile = container.querySelector(".nav-file") as HTMLElement;
+    const navFile = container.querySelector(TEST_IDS.navFile) as HTMLElement;
     expect(navFile !== null).toBeTruthy();
 
     navFile.dispatchEvent(
@@ -409,9 +410,9 @@ describe("filenav", () => {
     );
     await tick();
 
-    const menu = document.body.querySelector(".context-menu");
+    const menu = document.body.querySelector(TEST_IDS.contextMenu);
     expect(menu !== null).toBeTruthy();
-    const items = menu!.querySelectorAll(".context-menu-item");
+    const items = menu!.querySelectorAll(TEST_IDS.contextMenuItem);
     expect(items[0]!.textContent).toBe("Rename...");
     expect(items[1]!.textContent).toBe("Pin");
     expect(items[2]!.textContent).toBe("Delete");
@@ -438,13 +439,13 @@ describe("filenav", () => {
     await drain();
 
     const container = document.querySelector("#sidebar-tree")!;
-    const navFile = container.querySelector(".nav-file") as HTMLElement;
+    const navFile = container.querySelector(TEST_IDS.navFile) as HTMLElement;
     navFile.dispatchEvent(
       new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 50, clientY: 50 }),
     );
     await tick();
 
-    const items = document.body.querySelectorAll(".context-menu-item");
+    const items = document.body.querySelectorAll(TEST_IDS.contextMenuItem);
     (items[1] as HTMLElement).click(); // Pin
     await new Promise((r) => setTimeout(r, 50));
 
@@ -470,7 +471,7 @@ describe("filenav", () => {
 
     const container = document.querySelector("#sidebar-tree")!;
     // Alpha should appear once (pinned, not also in recent section)
-    const navFiles = container.querySelectorAll(".nav-file");
+    const navFiles = container.querySelectorAll(TEST_IDS.navFile);
     expect(navFiles.length).toBeGreaterThan(0);
 
     // Restore
@@ -491,7 +492,7 @@ describe("filenav", () => {
     await drain();
 
     const container = document.querySelector("#sidebar-tree")!;
-    const alphaRows = [...container.querySelectorAll<HTMLElement>(".nav-file")].filter(
+    const alphaRows = [...container.querySelectorAll<HTMLElement>(TEST_IDS.navFile)].filter(
       (el) => el.title === "notes/alpha.md",
     );
     expect(alphaRows).toHaveLength(1);
@@ -510,7 +511,7 @@ describe("filenav", () => {
     await drain();
 
     const container = document.querySelector("#sidebar-tree")!;
-    const navFile = [...container.querySelectorAll<HTMLElement>(".nav-file")].find(
+    const navFile = [...container.querySelectorAll<HTMLElement>(TEST_IDS.navFile)].find(
       (el) => el.title === "notes/click-me.md",
     );
     if (!navFile) {
@@ -535,13 +536,13 @@ describe("filenav", () => {
     await drain();
 
     const container = document.querySelector("#sidebar-tree")!;
-    const navFile = container.querySelector(".nav-file") as HTMLElement;
+    const navFile = container.querySelector(TEST_IDS.navFile) as HTMLElement;
     navFile.dispatchEvent(
       new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 50, clientY: 50 }),
     );
     await tick();
 
-    const items = document.body.querySelectorAll(".context-menu-item");
+    const items = document.body.querySelectorAll(TEST_IDS.contextMenuItem);
     (items[0] as HTMLElement).click(); // Rename...
     await new Promise((r) => setTimeout(r, 20));
 
@@ -571,13 +572,13 @@ describe("filenav", () => {
     await drain();
 
     const container = document.querySelector("#sidebar-tree")!;
-    const navFile = container.querySelector(".nav-file") as HTMLElement;
+    const navFile = container.querySelector(TEST_IDS.navFile) as HTMLElement;
     navFile.dispatchEvent(
       new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 50, clientY: 50 }),
     );
     await tick();
 
-    const items = document.body.querySelectorAll(".context-menu-item");
+    const items = document.body.querySelectorAll(TEST_IDS.contextMenuItem);
     (items[2] as HTMLElement).click(); // Delete
     await drain();
     // confirm returns true (mocked by setupDOM), so deletion proceeds
@@ -595,13 +596,13 @@ describe("filenav", () => {
     await drain();
 
     const container = document.querySelector("#sidebar-tree")!;
-    const navFile = container.querySelector(".nav-file") as HTMLElement;
+    const navFile = container.querySelector(TEST_IDS.navFile) as HTMLElement;
     navFile.dispatchEvent(
       new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 50, clientY: 50 }),
     );
     await tick();
 
-    const items = document.body.querySelectorAll(".context-menu-item");
+    const items = document.body.querySelectorAll(TEST_IDS.contextMenuItem);
     (items[2] as HTMLElement).click();
     await drain();
 
@@ -625,7 +626,7 @@ describe("filenav", () => {
     await drain();
 
     expect(activeCount()).toBe(1);
-    const activeEl = document.querySelector(".nav-file.active") as HTMLElement;
+    const activeEl = document.querySelector(TEST_IDS.activeNavFile) as HTMLElement;
     expect(activeEl?.title).toBe("notes/beta.md");
   });
 
@@ -652,7 +653,7 @@ describe("filenav", () => {
     await new Promise((r) => setTimeout(r, 120));
 
     const container = document.querySelector("#sidebar-tree")!;
-    const rows = [...container.querySelectorAll<HTMLElement>(".nav-file")];
+    const rows = [...container.querySelectorAll<HTMLElement>(TEST_IDS.navFile)];
     const titles = rows.map((el) => el.title);
     // Fresh result for "ab" should be shown; stale result for "a" should not have overwritten it
     expect(titles).toContain("notes/fresh.md");
@@ -668,13 +669,13 @@ describe("filenav", () => {
     await drain();
 
     const container = document.querySelector("#sidebar-tree")!;
-    const navFile = container.querySelector(".nav-file") as HTMLElement;
+    const navFile = container.querySelector(TEST_IDS.navFile) as HTMLElement;
     navFile.dispatchEvent(
       new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 50, clientY: 50 }),
     );
     await tick();
 
-    const items = document.body.querySelectorAll(".context-menu-item");
+    const items = document.body.querySelectorAll(TEST_IDS.contextMenuItem);
     expect(items[1]!.textContent).toBe("Unpin");
 
     (items[1] as HTMLElement).click();
@@ -704,7 +705,7 @@ describe("filenav", () => {
     await drain();
 
     expect(activeCount()).toBe(1);
-    expect((document.querySelector(".nav-file.active") as HTMLElement)?.title).toBe(
+    expect((document.querySelector(TEST_IDS.activeNavFile) as HTMLElement)?.title).toBe(
       "notes/alpha.md",
     );
 
@@ -713,7 +714,7 @@ describe("filenav", () => {
     await drain();
 
     expect(activeCount()).toBe(1);
-    const activeEl = document.querySelector(".nav-file.active") as HTMLElement;
+    const activeEl = document.querySelector(TEST_IDS.activeNavFile) as HTMLElement;
     expect(activeEl?.title).toBe("notes/beta.md");
   });
 });

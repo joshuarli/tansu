@@ -3,6 +3,8 @@ import { Show, createEffect } from "solid-js";
 import { OverlayFrame } from "./overlay.tsx";
 import { createPromiseModalController } from "./promise-modal.ts";
 
+import styles from "./dialog.module.css";
+
 type AlertDialogState = {
   title: string;
   message: string;
@@ -21,13 +23,14 @@ export function AlertDialogHost() {
   return (
     <OverlayFrame
       id="alert-dialog-overlay"
+      class={styles["overlay"]}
       isOpen={dialog.isOpen()}
       onClose={() => {
         dialog.cancel();
       }}
     >
       <div
-        class="input-dialog alert-dialog"
+        class={`${styles["panel"]} ${styles["alertDialog"]}`}
         role="alertdialog"
         aria-modal="true"
         aria-label={dialog.current()?.title ?? "Alert"}
@@ -35,14 +38,14 @@ export function AlertDialogHost() {
         <Show when={dialog.current()}>
           {(current) => (
             <>
-              <div class="alert-dialog-title">{current().title}</div>
-              <div class="alert-dialog-message">{current().message}</div>
+              <div class={styles["title"]}>{current().title}</div>
+              <div class={styles["message"]}>{current().message}</div>
               <button
                 type="button"
                 ref={(el) => {
                   buttonEl = el;
                 }}
-                class="alert-dialog-button"
+                class={styles["button"]}
                 onClick={() => dialog.closeWithResult(undefined)}
                 onKeyDown={(e) => {
                   if (e.key === "Escape" || e.key === "Enter") {

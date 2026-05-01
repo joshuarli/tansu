@@ -16,6 +16,8 @@ import { closeTabByPath, getActiveTab, openTab } from "./tab-state.ts";
 import { relativeTime } from "./util.ts";
 import { VaultSwitcher } from "./vault-switcher.tsx";
 
+import styles from "./filenav.module.css";
+
 type NavRow = {
   path: string;
   title: string;
@@ -59,22 +61,34 @@ function FileRow(props: Readonly<NavRow>) {
   return (
     <div
       ref={el}
-      class={`nav-file${props.active ? " active" : ""}`}
+      class={`${styles["navFile"]}${props.active ? ` ${styles["active"]}` : ""}`}
+      data-ui="nav-file"
+      data-active={props.active ? "true" : undefined}
       title={props.path}
       onClick={() => void openTab(props.path)}
       onContextMenu={props.onContextMenu}
     >
       <Show
         when={props.dir}
-        fallback={<span class="nav-file-name">{props.title || stemFromPath(props.path)}</span>}
+        fallback={
+          <span class={styles["name"]} data-ui="nav-file-name">
+            {props.title || stemFromPath(props.path)}
+          </span>
+        }
       >
-        <div class="nav-file-text">
-          <span class="nav-file-name">{props.title || stemFromPath(props.path)}</span>
-          <div class="nav-file-dir">{props.dir}</div>
+        <div class={styles["text"]} data-ui="nav-file-text">
+          <span class={styles["name"]} data-ui="nav-file-name">
+            {props.title || stemFromPath(props.path)}
+          </span>
+          <div class={styles["dir"]} data-ui="nav-file-dir">
+            {props.dir}
+          </div>
         </div>
       </Show>
       <Show when={props.timeLabel}>
-        <span class="nav-file-time">{props.timeLabel}</span>
+        <span class={styles["time"]} data-ui="nav-file-time">
+          {props.timeLabel}
+        </span>
       </Show>
     </div>
   );
@@ -182,10 +196,14 @@ export function Sidebar(props: Readonly<{ appEl: HTMLElement }>) {
   );
 
   return (
-    <div id="sidebar" class={collapsed() ? "sidebar-collapsed" : ""}>
-      <div class="sidebar-header">
+    <div
+      id="sidebar"
+      class={`${styles["sidebar"]}${collapsed() ? ` ${styles["collapsed"]} sidebar-collapsed` : ""}`}
+    >
+      <div class={`${styles["header"]} sidebar-header`}>
         <input
           id="sidebar-search"
+          class={styles["search"]}
           type="text"
           placeholder="Filter files..."
           aria-label="Filter files"
@@ -213,6 +231,7 @@ export function Sidebar(props: Readonly<{ appEl: HTMLElement }>) {
         />
         <button
           id="sidebar-collapse"
+          class={styles["collapseButton"]}
           title={collapsed() ? "Expand sidebar" : "Collapse sidebar"}
           aria-label={collapsed() ? "Expand sidebar" : "Collapse sidebar"}
           onClick={() => {
@@ -223,16 +242,20 @@ export function Sidebar(props: Readonly<{ appEl: HTMLElement }>) {
           {collapsed() ? "\u203A" : "\u2039"}
         </button>
       </div>
-      <div id="vault-switcher">
+      <div id="vault-switcher" class={styles["vaultSwitcher"]}>
         <VaultSwitcher />
       </div>
-      <div id="sidebar-tree">
+      <div id="sidebar-tree" class={styles["tree"]}>
         <Switch>
           <Match when={currentMode() === "search" && searchError()}>
-            <div class="nav-empty">Search failed</div>
+            <div class={styles["empty"]} data-ui="nav-empty">
+              Search failed
+            </div>
           </Match>
           <Match when={currentMode() === "search" && searchResults().length === 0}>
-            <div class="nav-empty">No matches</div>
+            <div class={styles["empty"]} data-ui="nav-empty">
+              No matches
+            </div>
           </Match>
           <Match when={currentMode() === "search"}>
             <For each={searchResults()}>
@@ -262,10 +285,14 @@ export function Sidebar(props: Readonly<{ appEl: HTMLElement }>) {
             </For>
           </Match>
           <Match when={recentError()}>
-            <div class="nav-empty">Failed to load</div>
+            <div class={styles["empty"]} data-ui="nav-empty">
+              Failed to load
+            </div>
           </Match>
           <Match when={pinnedFiles().length === 0 && recentNonPinned().length === 0}>
-            <div class="nav-empty">No files</div>
+            <div class={styles["empty"]} data-ui="nav-empty">
+              No files
+            </div>
           </Match>
           <Match when={true}>
             <>

@@ -7,6 +7,8 @@ import { showInputDialog } from "./input-dialog.tsx";
 import { createNewNote as _createNewNote } from "./tab-actions.ts";
 import { closeTab, getActiveIndex, getTabs, switchTab } from "./tab-state.ts";
 
+import styles from "./tabs.module.css";
+
 export async function promptNewNote(): Promise<void> {
   const name = await showInputDialog("New note name...");
   if (!name) {
@@ -55,7 +57,7 @@ function TabBar() {
   createEffect(() => {
     getActiveIndex(); // track
     queueMicrotask(() => {
-      rootEl?.querySelector<HTMLElement>(".tab.active")?.scrollIntoView({
+      rootEl?.querySelector<HTMLElement>('[data-ui="tab"][data-active="true"]')?.scrollIntoView({
         block: "nearest",
         inline: "nearest",
       });
@@ -73,7 +75,9 @@ function TabBar() {
         <For each={getTabs()}>
           {(tab, i) => (
             <div
-              class={`tab${i() === getActiveIndex() ? " active" : ""}`}
+              class={`${styles["tab"]}${i() === getActiveIndex() ? ` ${styles["active"]}` : ""}`}
+              data-ui="tab"
+              data-active={i() === getActiveIndex() ? "true" : undefined}
               onMouseEnter={(e) => {
                 const rect = e.currentTarget.getBoundingClientRect();
                 setHoveredIndex(i());
@@ -96,13 +100,20 @@ function TabBar() {
                 }
               }}
             >
-              {tab.dirty ? <span class="dirty">●</span> : null}
-              <span class="tab-label">
-                <span class="tab-label-text">{tab.title}</span>
+              {tab.dirty ? (
+                <span class={styles["dirty"]} data-ui="tab-dirty">
+                  ●
+                </span>
+              ) : null}
+              <span class={styles["label"]} data-ui="tab-label">
+                <span class={styles["labelText"]} data-ui="tab-label-text">
+                  {tab.title}
+                </span>
               </span>
               <button
                 type="button"
-                class="close"
+                class={styles["close"]}
+                data-ui="tab-close"
                 aria-label={`Close ${tab.title}`}
                 onClick={(e) => {
                   e.stopPropagation();
@@ -116,7 +127,8 @@ function TabBar() {
         </For>
       </div>
       <div
-        class="tab-tooltip"
+        class={styles["tooltip"]}
+        data-ui="tab-tooltip"
         style={{
           display: tooltip() ? "block" : "none",
           top: tooltip() ? `${tooltip()!.top}px` : "0px",
@@ -137,7 +149,8 @@ export function TabBarShell() {
       <TabBar />
       <button
         type="button"
-        class="tab tab-new"
+        class={`${styles["tab"]} ${styles["newTab"]}`}
+        data-ui="tab-new"
         title="New note (Ctrl+N)"
         aria-label="New note"
         onClick={() => void promptNewNote()}

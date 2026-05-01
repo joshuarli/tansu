@@ -1,5 +1,7 @@
 import { For, onMount } from "solid-js";
 
+import styles from "./context-menu.module.css";
+
 export type MenuItem = {
   label: string;
   danger?: boolean;
@@ -38,7 +40,8 @@ export function ContextMenu(props: Readonly<ContextMenuProps>) {
   return (
     <div
       role="menu"
-      class="context-menu"
+      class={styles["menu"]}
+      data-ui="context-menu"
       style={{ left: `${props.x}px`, top: `${props.y}px` }}
       onKeyDown={handleKeyDown}
     >
@@ -51,7 +54,9 @@ export function ContextMenu(props: Readonly<ContextMenuProps>) {
             ref={(el) => {
               buttonRefs[i()] = el;
             }}
-            class={`context-menu-item${item.danger ? " danger" : ""}`}
+            class={`${styles["item"]}${item.danger ? ` ${styles["danger"]}` : ""}`}
+            data-ui="context-menu-item"
+            data-danger={item.danger ? "true" : undefined}
             onClick={() => props.onSelect(item.onclick)}
           >
             {item.label}

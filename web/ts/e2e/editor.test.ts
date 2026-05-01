@@ -5,6 +5,8 @@ import type { Page } from "playwright";
 
 import { setup, teardown } from "./setup.ts";
 
+const ACTIVE_TAB_DIRTY = '[data-ui="tab"][data-active="true"] [data-ui="tab-dirty"]';
+
 describe("e2e: editor", () => {
   let page: Page;
   let baseUrl: string;
@@ -75,13 +77,13 @@ describe("e2e: editor", () => {
     // Typing marks dirty
     await page.click(".editor-content");
     await page.keyboard.type("new text");
-    await page.waitForSelector(".tab.active .dirty", { timeout: 2000 });
-    await expect(page.isVisible(".tab.active .dirty")).resolves.toBeTruthy();
+    await page.waitForSelector(ACTIVE_TAB_DIRTY, { timeout: 2000 });
+    await expect(page.isVisible(ACTIVE_TAB_DIRTY)).resolves.toBeTruthy();
 
     // Cmd+S saves and clears dirty
     await page.keyboard.press("Meta+s");
     await page.waitForTimeout(500);
-    await expect(page.isVisible(".tab.active .dirty")).resolves.toBeFalsy();
+    await expect(page.isVisible(ACTIVE_TAB_DIRTY)).resolves.toBeFalsy();
 
     // Inline bold transform: **text** → <strong>
     await resetEditor("");

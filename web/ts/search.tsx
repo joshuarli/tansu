@@ -9,6 +9,8 @@ import { getVaultSettings } from "./settings.ts";
 import { setCursor } from "./tab-state.ts";
 import { uiStore } from "./ui-store.ts";
 
+import styles from "./search.module.css";
+
 type SearchModalProps = {
   openTab: (path: string) => Promise<unknown>;
   invalidateNoteCache: () => void;
@@ -34,7 +36,7 @@ function parseExcerpt(raw: string): ExcerptPart[] {
 
 function Excerpt(props: Readonly<{ excerpt: string }>) {
   return (
-    <div class="excerpt">
+    <div class={`${styles["excerpt"]} excerpt`}>
       <For each={parseExcerpt(props.excerpt)}>
         {(part) => (part.bold ? <b>{part.text}</b> : part.text)}
       </For>
@@ -54,7 +56,7 @@ function Score(props: Readonly<{ result: SearchResult }>) {
   if (fs.content > 0)
     parts.push(`content:${fs.content.toPrecision(settings.searchScorePrecision)}`);
   return (
-    <div class="score">
+    <div class={`${styles["score"]} score`}>
       {props.result.score.toPrecision(settings.searchScorePrecision)}
       {parts.length > 0 ? ` = ${parts.join(" + ")}` : ""}
     </div>
@@ -201,10 +203,21 @@ export function SearchModal(props: Readonly<SearchModalProps>) {
 
   return (
     <Show when={modal.shouldRender()}>
-      <OverlayFrame id="search-overlay" isOpen={modal.isOpen()} onClose={modal.close}>
-        <div class="search-modal" role="dialog" aria-modal="true" aria-label="Search notes">
+      <OverlayFrame
+        id="search-overlay"
+        class={styles["overlay"]}
+        isOpen={modal.isOpen()}
+        onClose={modal.close}
+      >
+        <div
+          class={`${styles["modal"]} search-modal`}
+          role="dialog"
+          aria-modal="true"
+          aria-label="Search notes"
+        >
           <input
             id="search-input"
+            class={styles["input"]}
             ref={(el) => {
               inputEl = el;
             }}
@@ -220,6 +233,7 @@ export function SearchModal(props: Readonly<SearchModalProps>) {
           />
           <div
             id="search-results"
+            class={styles["results"]}
             ref={(el) => {
               resultsEl = el;
             }}
@@ -228,14 +242,16 @@ export function SearchModal(props: Readonly<SearchModalProps>) {
               {(result, index) => (
                 <button
                   type="button"
-                  class={`search-result${index() === selectedIndex() ? " selected" : ""}`}
+                  class={`${styles["result"]} search-result${
+                    index() === selectedIndex() ? ` ${styles["selected"]} selected` : ""
+                  }`}
                   onClick={() => void selectItem(index())}
                 >
-                  <span class="title">
+                  <span class={`${styles["title"]} title`}>
                     <span>{result.title}</span>
                     <For each={result.tags}>{(tag) => <span class="tag-pill">#{tag}</span>}</For>
                   </span>
-                  <span class="path">{result.path}</span>
+                  <span class={`${styles["path"]} path`}>{result.path}</span>
                   <Show when={showScoreBreakdown()}>
                     <Score result={result} />
                   </Show>
@@ -248,7 +264,9 @@ export function SearchModal(props: Readonly<SearchModalProps>) {
             <Show when={query().length > 0 && !uiStore.searchScopePath()}>
               <button
                 type="button"
-                class={`search-create${selectedIndex() === results().length ? " selected" : ""}`}
+                class={`${styles["create"]} search-create${
+                  selectedIndex() === results().length ? ` ${styles["selected"]} selected` : ""
+                }`}
                 onClick={() => void selectItem(results().length)}
               >
                 Create "{query()}"

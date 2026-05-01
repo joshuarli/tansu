@@ -3,9 +3,16 @@ import { render } from "solid-js/web";
 import type { Tab } from "./tab-state.ts";
 import { TabBarShell } from "./tabs.tsx";
 import { setupDOM, mockFetch } from "./test-helper.ts";
+import { TEST_IDS } from "./test-selectors.ts";
 import { uiStore } from "./ui-store.ts";
 
 const tick = () => new Promise<void>((r) => setTimeout(r, 0));
+const tabSelector = TEST_IDS.tab;
+const tabCloseSelector = TEST_IDS.tabClose;
+const tabDirtySelector = TEST_IDS.tabDirty;
+const tabLabelTextSelector = TEST_IDS.tabLabelText;
+const newTabSelector = TEST_IDS.newTab;
+const tabTooltipSelector = TEST_IDS.tabTooltip;
 
 describe("tabs", () => {
   let cleanup: () => void;
@@ -73,7 +80,7 @@ describe("tabs", () => {
   it("tab bar renders correct number of tabs", async () => {
     await openTwo();
     const tabBar = document.querySelector("#tab-bar")!;
-    const tabEls = tabBar.querySelectorAll(".tab:not(.tab-new)");
+    const tabEls = tabBar.querySelectorAll(tabSelector);
     expect(tabEls).toHaveLength(2);
     while (getTabs().length > 0) {
       closeTab(0);
@@ -91,13 +98,13 @@ describe("tabs", () => {
     expect(emptyState.style.display).toBe("");
   });
 
-  it("active tab gets .active class; others do not", async () => {
+  it("active tab exposes active state; others do not", async () => {
     await openTwo();
     const tabBar = document.querySelector("#tab-bar")!;
-    const tabEls = tabBar.querySelectorAll(".tab:not(.tab-new)");
+    const tabEls = tabBar.querySelectorAll<HTMLElement>(tabSelector);
     // beta was opened second so it is active (index 1)
-    expect(tabEls[1]!.classList.contains("active")).toBeTruthy();
-    expect(tabEls[0]!.classList.contains("active")).toBeFalsy();
+    expect(tabEls[1]!.dataset["active"]).toBe("true");
+    expect(tabEls[0]!.dataset["active"]).toBeUndefined();
     while (getTabs().length > 0) {
       closeTab(0);
     }
@@ -106,16 +113,16 @@ describe("tabs", () => {
   it("clicking an inactive tab switches the active tab", async () => {
     await openTwo();
     const tabBar = document.querySelector("#tab-bar")!;
-    const tabEls = tabBar.querySelectorAll(".tab:not(.tab-new)");
+    const tabEls = tabBar.querySelectorAll(tabSelector);
 
     expect(getActiveTab()?.path).toBe("notes/beta.md");
     (tabEls[0] as HTMLElement).click();
     await tick();
 
-    const renderedTabEls = tabBar.querySelectorAll(".tab:not(.tab-new)");
+    const renderedTabEls = tabBar.querySelectorAll<HTMLElement>(tabSelector);
     expect(getActiveTab()?.path).toBe("notes/alpha.md");
-    expect(renderedTabEls[0]!.classList.contains("active")).toBeTruthy();
-    expect(renderedTabEls[1]!.classList.contains("active")).toBeFalsy();
+    expect(renderedTabEls[0]!.dataset["active"]).toBe("true");
+    expect(renderedTabEls[1]!.dataset["active"]).toBeUndefined();
 
     while (getTabs().length > 0) {
       closeTab(0);
@@ -125,7 +132,7 @@ describe("tabs", () => {
   it("tab labels match note titles", async () => {
     await openTwo();
     const tabBar = document.querySelector("#tab-bar")!;
-    const labels = tabBar.querySelectorAll(".tab:not(.tab-new) .tab-label-text");
+    const labels = tabBar.querySelectorAll(`${tabSelector} ${tabLabelTextSelector}`);
     expect(labels[0]!.textContent).toBe("alpha");
     expect(labels[1]!.textContent).toBe("beta");
     while (getTabs().length > 0) {
@@ -136,7 +143,7 @@ describe("tabs", () => {
   it("+ button is always present", async () => {
     await openTwo();
     const tabBar = document.querySelector("#tab-bar")!;
-    const addBtn = tabBar.querySelector(".tab-new");
+    const addBtn = tabBar.querySelector(newTabSelector);
     expect(addBtn !== null).toBeTruthy();
     expect(addBtn!.textContent).toBe("+");
     while (getTabs().length > 0) {
@@ -147,13 +154,13 @@ describe("tabs", () => {
   it("dirty indicator appears after markDirty, absent otherwise", async () => {
     await openTwo();
     const tabBar = document.querySelector("#tab-bar")!;
-    const tabEls = () => tabBar.querySelectorAll(".tab:not(.tab-new)");
+    const tabEls = () => tabBar.querySelectorAll<HTMLElement>(tabSelector);
 
-    expect(tabEls()[0]!.querySelector(".dirty")).toBeNull();
+    expect(tabEls()[0]!.querySelector(tabDirtySelector)).toBeNull();
     markDirty("notes/alpha.md");
     await tick();
-    expect(tabEls()[0]!.querySelector(".dirty") !== null).toBeTruthy();
-    expect(tabEls()[1]!.querySelector(".dirty")).toBeNull();
+    expect(tabEls()[0]!.querySelector(tabDirtySelector) !== null).toBeTruthy();
+    expect(tabEls()[1]!.querySelector(tabDirtySelector)).toBeNull();
     while (getTabs().length > 0) {
       closeTab(0);
     }
@@ -164,13 +171,13 @@ describe("tabs", () => {
     const tabBar = document.querySelector("#tab-bar")!;
     markDirty("notes/alpha.md");
     await tick();
-    const tabEls = tabBar.querySelectorAll(".tab:not(.tab-new)");
-    const closeBtn = tabEls[0]!.querySelector(".close") as HTMLElement;
+    const tabEls = tabBar.querySelectorAll(tabSelector);
+    const closeBtn = tabEls[0]!.querySelector(tabCloseSelector) as HTMLElement;
     closeBtn.click();
     await tick();
-    const remaining = tabBar.querySelectorAll(".tab:not(.tab-new)");
+    const remaining = tabBar.querySelectorAll(tabSelector);
     expect(remaining).toHaveLength(1);
-    expect(remaining[0]!.querySelector("span:not(.close):not(.dirty)")!.textContent).toBe("beta");
+    expect(remaining[0]!.querySelector(tabLabelTextSelector)!.textContent).toBe("beta");
     while (getTabs().length > 0) {
       closeTab(0);
     }
@@ -179,15 +186,15 @@ describe("tabs", () => {
   it("close button on an inactive tab does not switch before closing", async () => {
     await openTwo();
     const tabBar = document.querySelector("#tab-bar")!;
-    const tabEls = tabBar.querySelectorAll(".tab:not(.tab-new)");
-    const closeBtn = tabEls[0]!.querySelector(".close") as HTMLElement;
+    const tabEls = tabBar.querySelectorAll(tabSelector);
+    const closeBtn = tabEls[0]!.querySelector(tabCloseSelector) as HTMLElement;
 
     expect(getActiveTab()?.path).toBe("notes/beta.md");
     closeBtn.click();
     await tick();
 
     expect(getActiveTab()?.path).toBe("notes/beta.md");
-    expect(tabBar.querySelectorAll(".tab:not(.tab-new)")).toHaveLength(1);
+    expect(tabBar.querySelectorAll(tabSelector)).toHaveLength(1);
 
     while (getTabs().length > 0) {
       closeTab(0);
@@ -201,14 +208,14 @@ describe("tabs", () => {
     await openTab("notes/gamma.md");
     await tick();
     const tabBar = document.querySelector("#tab-bar")!;
-    const tabEl = tabBar.querySelectorAll(".tab:not(.tab-new)")[0]!;
+    const tabEl = tabBar.querySelectorAll(tabSelector)[0]!;
     (tabEl as HTMLElement).dispatchEvent(
       new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 50, clientY: 50 }),
     );
     await tick();
-    const menu = document.body.querySelector(".context-menu");
+    const menu = document.body.querySelector(TEST_IDS.contextMenu);
     expect(menu !== null).toBeTruthy();
-    const items = menu!.querySelectorAll(".context-menu-item");
+    const items = menu!.querySelectorAll(TEST_IDS.contextMenuItem);
     expect(items).toHaveLength(4);
     expect(items[0]!.textContent).toBe("Rename...");
     expect(items[1]!.textContent).toBe("Pin");
@@ -227,17 +234,17 @@ describe("tabs", () => {
     await openTab("notes/delta.md");
     await tick();
     const tabBar = document.querySelector("#tab-bar")!;
-    const countBefore = tabBar.querySelectorAll(".tab:not(.tab-new)").length;
-    const tabEl = tabBar.querySelectorAll(".tab:not(.tab-new)")[0]!;
+    const countBefore = tabBar.querySelectorAll(tabSelector).length;
+    const tabEl = tabBar.querySelectorAll(tabSelector)[0]!;
     (tabEl as HTMLElement).dispatchEvent(
       new MouseEvent("contextmenu", { bubbles: true, cancelable: true }),
     );
     await tick();
-    const items = document.body.querySelectorAll(".context-menu-item");
+    const items = document.body.querySelectorAll(TEST_IDS.contextMenuItem);
     (items[3] as HTMLElement).click();
     await tick();
-    expect(document.body.querySelector(".context-menu")).toBeNull();
-    expect(tabBar.querySelectorAll(".tab:not(.tab-new)")).toHaveLength(countBefore - 1);
+    expect(document.body.querySelector(TEST_IDS.contextMenu)).toBeNull();
+    expect(tabBar.querySelectorAll(tabSelector)).toHaveLength(countBefore - 1);
     while (getTabs().length > 0) {
       closeTab(0);
     }
@@ -251,7 +258,7 @@ describe("tabs", () => {
     await tick();
     const tabBar = document.querySelector("#tab-bar")!;
     const countBefore = getTabs().length;
-    const tabEl = tabBar.querySelectorAll(".tab:not(.tab-new)")[countBefore - 1]!;
+    const tabEl = tabBar.querySelectorAll(tabSelector)[countBefore - 1]!;
     (tabEl as HTMLElement).dispatchEvent(
       new MouseEvent("contextmenu", {
         bubbles: true,
@@ -261,24 +268,24 @@ describe("tabs", () => {
       }),
     );
     await tick();
-    const menu = document.body.querySelector(".context-menu");
-    const items = menu!.querySelectorAll(".context-menu-item");
+    const menu = document.body.querySelector(TEST_IDS.contextMenu);
+    const items = menu!.querySelectorAll(TEST_IDS.contextMenuItem);
     expect(items[2]!.textContent).toBe("Delete");
-    expect(items[2]!.classList.contains("danger")).toBeTruthy();
+    expect((items[2] as HTMLElement).dataset["danger"]).toBe("true");
     (items[2] as HTMLElement).click();
     await tick();
     await new Promise((r) => setTimeout(r, 50));
     expect(getTabs()).toHaveLength(countBefore - 1);
-    expect(document.body.querySelector(".context-menu")).toBeNull();
+    expect(document.body.querySelector(TEST_IDS.contextMenu)).toBeNull();
   });
 
   it("tab tooltip shows on mouseenter and hides on mouseleave", async () => {
     await openTwo();
     const tabBar = document.querySelector("#tab-bar")!;
-    const tabEl = tabBar.querySelectorAll(".tab:not(.tab-new)")[0]! as HTMLElement;
+    const tabEl = tabBar.querySelectorAll(tabSelector)[0]! as HTMLElement;
 
     tabEl.dispatchEvent(new MouseEvent("mouseenter", { bubbles: true }));
-    const tooltip = document.body.querySelector(".tab-tooltip") as HTMLElement;
+    const tooltip = document.body.querySelector(tabTooltipSelector) as HTMLElement;
     expect(tooltip !== null).toBeTruthy();
     expect(tooltip.style.display).toBe("block");
     expect(tooltip.textContent).toBe("alpha (space to close)");
@@ -294,14 +301,14 @@ describe("tabs", () => {
   it("space key closes the currently hovered tab", async () => {
     await openTwo();
     const tabBar = document.querySelector("#tab-bar")!;
-    const countBefore = tabBar.querySelectorAll(".tab:not(.tab-new)").length;
-    const tabEl = tabBar.querySelectorAll(".tab:not(.tab-new)")[0]! as HTMLElement;
+    const countBefore = tabBar.querySelectorAll(tabSelector).length;
+    const tabEl = tabBar.querySelectorAll(tabSelector)[0]! as HTMLElement;
 
     tabEl.dispatchEvent(new MouseEvent("mouseenter", { bubbles: true }));
     document.dispatchEvent(new KeyboardEvent("keydown", { key: " ", bubbles: true }));
     await tick();
 
-    expect(tabBar.querySelectorAll(".tab:not(.tab-new)")).toHaveLength(countBefore - 1);
+    expect(tabBar.querySelectorAll(tabSelector)).toHaveLength(countBefore - 1);
 
     while (getTabs().length > 0) {
       closeTab(0);
@@ -311,8 +318,8 @@ describe("tabs", () => {
   it("space key with modifier keys ignored", async () => {
     await openTwo();
     const tabBar = document.querySelector("#tab-bar")!;
-    const countBefore = tabBar.querySelectorAll(".tab:not(.tab-new)").length;
-    const tabEl = tabBar.querySelectorAll(".tab:not(.tab-new)")[0]! as HTMLElement;
+    const countBefore = tabBar.querySelectorAll(tabSelector).length;
+    const tabEl = tabBar.querySelectorAll(tabSelector)[0]! as HTMLElement;
 
     tabEl.dispatchEvent(new MouseEvent("mouseenter", { bubbles: true }));
     document.dispatchEvent(
@@ -320,7 +327,7 @@ describe("tabs", () => {
     );
     await tick();
 
-    expect(tabBar.querySelectorAll(".tab:not(.tab-new)")).toHaveLength(countBefore);
+    expect(tabBar.querySelectorAll(tabSelector)).toHaveLength(countBefore);
 
     while (getTabs().length > 0) {
       closeTab(0);
@@ -330,8 +337,8 @@ describe("tabs", () => {
   it("space key does not close hovered tab when focus is in an input", async () => {
     await openTwo();
     const tabBar = document.querySelector("#tab-bar")!;
-    const countBefore = tabBar.querySelectorAll(".tab:not(.tab-new)").length;
-    const tabEl = tabBar.querySelectorAll(".tab:not(.tab-new)")[0]! as HTMLElement;
+    const countBefore = tabBar.querySelectorAll(tabSelector).length;
+    const tabEl = tabBar.querySelectorAll(tabSelector)[0]! as HTMLElement;
     const input = document.querySelector("#sidebar-search") as HTMLInputElement;
 
     tabEl.dispatchEvent(new MouseEvent("mouseenter", { bubbles: true }));
@@ -339,7 +346,7 @@ describe("tabs", () => {
     input.dispatchEvent(new KeyboardEvent("keydown", { key: " ", bubbles: true }));
     await tick();
 
-    expect(tabBar.querySelectorAll(".tab:not(.tab-new)")).toHaveLength(countBefore);
+    expect(tabBar.querySelectorAll(tabSelector)).toHaveLength(countBefore);
 
     while (getTabs().length > 0) {
       closeTab(0);
@@ -349,13 +356,13 @@ describe("tabs", () => {
   it("space key does nothing when no tab is hovered", async () => {
     await openTwo();
     const tabBar = document.querySelector("#tab-bar")!;
-    const countBefore = tabBar.querySelectorAll(".tab:not(.tab-new)").length;
+    const countBefore = tabBar.querySelectorAll(tabSelector).length;
 
     // Don't mouseenter any tab
     document.dispatchEvent(new KeyboardEvent("keydown", { key: " ", bubbles: true }));
     await tick();
 
-    expect(tabBar.querySelectorAll(".tab:not(.tab-new)")).toHaveLength(countBefore);
+    expect(tabBar.querySelectorAll(tabSelector)).toHaveLength(countBefore);
 
     while (getTabs().length > 0) {
       closeTab(0);
@@ -365,13 +372,13 @@ describe("tabs", () => {
   it("middle click (auxclick button=1) closes the tab", async () => {
     await openTwo();
     const tabBar = document.querySelector("#tab-bar")!;
-    const countBefore = tabBar.querySelectorAll(".tab:not(.tab-new)").length;
-    const tabEl = tabBar.querySelectorAll(".tab:not(.tab-new)")[0]! as HTMLElement;
+    const countBefore = tabBar.querySelectorAll(tabSelector).length;
+    const tabEl = tabBar.querySelectorAll(tabSelector)[0]! as HTMLElement;
 
     tabEl.dispatchEvent(new MouseEvent("auxclick", { button: 1, bubbles: true, cancelable: true }));
     await tick();
 
-    expect(tabBar.querySelectorAll(".tab:not(.tab-new)")).toHaveLength(countBefore - 1);
+    expect(tabBar.querySelectorAll(tabSelector)).toHaveLength(countBefore - 1);
 
     while (getTabs().length > 0) {
       closeTab(0);
@@ -381,13 +388,13 @@ describe("tabs", () => {
   it("auxclick with button != 1 does not close tab", async () => {
     await openTwo();
     const tabBar = document.querySelector("#tab-bar")!;
-    const countBefore = tabBar.querySelectorAll(".tab:not(.tab-new)").length;
-    const tabEl = tabBar.querySelectorAll(".tab:not(.tab-new)")[0]! as HTMLElement;
+    const countBefore = tabBar.querySelectorAll(tabSelector).length;
+    const tabEl = tabBar.querySelectorAll(tabSelector)[0]! as HTMLElement;
 
     tabEl.dispatchEvent(new MouseEvent("auxclick", { button: 2, bubbles: true }));
     await tick();
 
-    expect(tabBar.querySelectorAll(".tab:not(.tab-new)")).toHaveLength(countBefore);
+    expect(tabBar.querySelectorAll(tabSelector)).toHaveLength(countBefore);
 
     while (getTabs().length > 0) {
       closeTab(0);
@@ -401,7 +408,7 @@ describe("tabs", () => {
     await openTab("notes/to-pin.md");
     await tick();
     const tabBar = document.querySelector("#tab-bar")!;
-    const tabEl = tabBar.querySelectorAll(".tab:not(.tab-new)")[0]!;
+    const tabEl = tabBar.querySelectorAll(tabSelector)[0]!;
 
     mock.on("GET", "/api/pinned", []);
     mock.on("POST", "/api/pin", {});
@@ -410,7 +417,7 @@ describe("tabs", () => {
       new MouseEvent("contextmenu", { bubbles: true, cancelable: true }),
     );
     await tick();
-    const items = document.body.querySelectorAll(".context-menu-item");
+    const items = document.body.querySelectorAll(TEST_IDS.contextMenuItem);
     expect(items[1]!.textContent).toBe("Pin");
     (items[1] as HTMLElement).click();
     await tick();
@@ -428,7 +435,7 @@ describe("tabs", () => {
     await openTab("notes/to-pin.md");
     await tick();
     const tabBar = document.querySelector("#tab-bar")!;
-    const tabEl = tabBar.querySelectorAll(".tab:not(.tab-new)")[0]!;
+    const tabEl = tabBar.querySelectorAll(tabSelector)[0]!;
 
     mock.on("GET", "/api/pinned", []);
     mock.on("POST", "/api/pin", { error: "pin failed" }, 500);
@@ -437,7 +444,7 @@ describe("tabs", () => {
       new MouseEvent("contextmenu", { bubbles: true, cancelable: true }),
     );
     await tick();
-    const items = document.body.querySelectorAll(".context-menu-item");
+    const items = document.body.querySelectorAll(TEST_IDS.contextMenuItem);
     (items[1] as HTMLElement).click();
     await new Promise((r) => setTimeout(r, 50));
 
@@ -473,13 +480,13 @@ describe("tabs", () => {
     }
     await tick();
     const tabBar = document.querySelector("#tab-bar")!;
-    const addBtn = tabBar.querySelector(".tab-new") as HTMLElement;
+    const addBtn = tabBar.querySelector(newTabSelector) as HTMLElement;
 
     addBtn.click();
     await tick();
 
-    const overlay = document.querySelector("#input-dialog-overlay")!;
-    expect(overlay.classList.contains("hidden")).toBeFalsy();
+    const overlay = document.querySelector("#input-dialog-overlay") as HTMLElement;
+    expect(overlay.hidden).toBeFalsy();
 
     const dialogInput = document.querySelector("#input-dialog-input") as HTMLInputElement;
     dialogInput.value = "via-dialog";
@@ -520,22 +527,20 @@ describe("tabs", () => {
     await openTab("notes/to-rename.md");
     await tick();
     const tabBar = document.querySelector("#tab-bar")!;
-    const tabEl = tabBar.querySelectorAll(".tab:not(.tab-new)")[getTabs().length - 1]!;
+    const tabEl = tabBar.querySelectorAll(tabSelector)[getTabs().length - 1]!;
 
     (tabEl as HTMLElement).dispatchEvent(
       new MouseEvent("contextmenu", { bubbles: true, cancelable: true }),
     );
     await tick();
-    const items = document.body.querySelectorAll(".context-menu-item");
+    const items = document.body.querySelectorAll(TEST_IDS.contextMenuItem);
     expect(items[0]!.textContent).toBe("Rename...");
     (items[0] as HTMLElement).click();
 
     // context-menu defers onclick via setTimeout; after tick the dialog is open
     await tick();
     const dialogInput = document.querySelector("#input-dialog-input") as HTMLInputElement;
-    expect(
-      document.querySelector("#input-dialog-overlay")!.classList.contains("hidden"),
-    ).toBeFalsy();
+    expect((document.querySelector("#input-dialog-overlay") as HTMLElement).hidden).toBeFalsy();
     dialogInput.value = "renamed-note";
     dialogInput.dispatchEvent(
       new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }),
@@ -559,10 +564,10 @@ describe("tabs", () => {
     await openTab("notes/pos-test.md");
     await tick();
     const tabBar = document.querySelector("#tab-bar")!;
-    const tabEl = tabBar.querySelectorAll(".tab:not(.tab-new)")[0]! as HTMLElement;
+    const tabEl = tabBar.querySelectorAll(tabSelector)[0]! as HTMLElement;
     const rect = tabEl.getBoundingClientRect();
     (tabEl as HTMLElement).dispatchEvent(new MouseEvent("mouseenter", { bubbles: true }));
-    const tooltip = document.body.querySelector(".tab-tooltip") as HTMLElement;
+    const tooltip = document.body.querySelector(tabTooltipSelector) as HTMLElement;
     expect(tooltip.style.display).toBe("block");
     // top = rect.bottom + 6px
     expect(tooltip.style.top).toBe(`${rect.bottom + 6}px`);
@@ -580,7 +585,7 @@ describe("tabs", () => {
     await openTab("notes/pinned-tab.md");
     await tick();
     const tabBar = document.querySelector("#tab-bar")!;
-    const tabEl = tabBar.querySelectorAll(".tab:not(.tab-new)")[0]!;
+    const tabEl = tabBar.querySelectorAll(tabSelector)[0]!;
 
     mock.on("GET", "/api/pinned", [{ path: "notes/pinned-tab.md", title: "pinned-tab" }]);
     mock.on("DELETE", "/api/pin", {});
@@ -589,7 +594,7 @@ describe("tabs", () => {
       new MouseEvent("contextmenu", { bubbles: true, cancelable: true }),
     );
     await tick();
-    const items = document.body.querySelectorAll(".context-menu-item");
+    const items = document.body.querySelectorAll(TEST_IDS.contextMenuItem);
     expect(items[1]!.textContent).toBe("Unpin");
     (items[1] as HTMLElement).click();
     await tick();

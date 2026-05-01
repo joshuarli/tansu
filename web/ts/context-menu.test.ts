@@ -1,5 +1,6 @@
 import type { showContextMenu as ShowContextMenu } from "./context-menu.ts";
 import { setupDOM } from "./test-helper.ts";
+import { TEST_IDS } from "./test-selectors.ts";
 
 const tick = () => new Promise<void>((r) => setTimeout(r, 0));
 
@@ -19,34 +20,34 @@ describe("context-menu", () => {
   it("renders at the requested coordinates", () => {
     showContextMenu([{ label: "Rename", onclick: () => {} }], 120, 240);
 
-    const menu = document.querySelector(".context-menu") as HTMLElement | null;
+    const menu = document.querySelector(TEST_IDS.contextMenu) as HTMLElement | null;
     expect(menu).not.toBeNull();
     expect(menu!.style.left).toBe("120px");
     expect(menu!.style.top).toBe("240px");
   });
 
-  it("applies the danger class to danger items", () => {
+  it("marks danger items with a data attribute", () => {
     showContextMenu([{ label: "Delete", danger: true, onclick: () => {} }], 0, 0);
 
-    const item = document.querySelector(".context-menu-item") as HTMLElement | null;
+    const item = document.querySelector(TEST_IDS.contextMenuItem) as HTMLElement | null;
     expect(item).not.toBeNull();
-    expect(item!.classList.contains("danger")).toBeTruthy();
+    expect(item!.dataset["danger"]).toBe("true");
   });
 
   it("outside click dismisses the active menu", async () => {
     showContextMenu([{ label: "Rename", onclick: () => {} }], 10, 10);
     await tick();
 
-    expect(document.querySelector(".context-menu")).not.toBeNull();
+    expect(document.querySelector(TEST_IDS.contextMenu)).not.toBeNull();
     document.body.click();
-    expect(document.querySelector(".context-menu")).toBeNull();
+    expect(document.querySelector(TEST_IDS.contextMenu)).toBeNull();
   });
 
   it("showing a second menu replaces the first", () => {
     showContextMenu([{ label: "First", onclick: () => {} }], 1, 1);
     showContextMenu([{ label: "Second", onclick: () => {} }], 2, 2);
 
-    const menus = document.querySelectorAll(".context-menu");
+    const menus = document.querySelectorAll(TEST_IDS.contextMenu);
     expect(menus).toHaveLength(1);
     expect(menus[0]!.textContent).toBe("Second");
   });
@@ -58,7 +59,7 @@ describe("context-menu", () => {
         {
           label: "Rename",
           onclick: () => {
-            sawMenuDuringAction = document.querySelector(".context-menu") !== null;
+            sawMenuDuringAction = document.querySelector(TEST_IDS.contextMenu) !== null;
           },
         },
       ],
@@ -66,8 +67,8 @@ describe("context-menu", () => {
       0,
     );
 
-    (document.querySelector(".context-menu-item") as HTMLElement).click();
-    expect(document.querySelector(".context-menu")).toBeNull();
+    (document.querySelector(TEST_IDS.contextMenuItem) as HTMLElement).click();
+    expect(document.querySelector(TEST_IDS.contextMenu)).toBeNull();
     await tick();
     expect(sawMenuDuringAction).toBeFalsy();
   });
@@ -82,7 +83,7 @@ describe("context-menu", () => {
         0,
         0,
       );
-      const items = document.querySelectorAll(".context-menu-item");
+      const items = document.querySelectorAll(TEST_IDS.contextMenuItem);
       expect(document.activeElement).toBe(items[0]);
     });
 
@@ -95,7 +96,7 @@ describe("context-menu", () => {
         0,
         0,
       );
-      const items = document.querySelectorAll(".context-menu-item");
+      const items = document.querySelectorAll(TEST_IDS.contextMenuItem);
       (items[0] as HTMLElement).dispatchEvent(
         new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }),
       );
@@ -111,7 +112,7 @@ describe("context-menu", () => {
         0,
         0,
       );
-      const items = document.querySelectorAll(".context-menu-item");
+      const items = document.querySelectorAll(TEST_IDS.contextMenuItem);
       (items[0] as HTMLElement).dispatchEvent(
         new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }),
       );
@@ -131,7 +132,7 @@ describe("context-menu", () => {
         0,
         0,
       );
-      const items = document.querySelectorAll(".context-menu-item");
+      const items = document.querySelectorAll(TEST_IDS.contextMenuItem);
       (items[0] as HTMLElement).dispatchEvent(
         new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }),
       );
@@ -140,9 +141,9 @@ describe("context-menu", () => {
 
     it("Escape closes the menu", () => {
       showContextMenu([{ label: "One", onclick: () => {} }], 0, 0);
-      const item = document.querySelector(".context-menu-item") as HTMLElement;
+      const item = document.querySelector(TEST_IDS.contextMenuItem) as HTMLElement;
       item.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
-      expect(document.querySelector(".context-menu")).toBeNull();
+      expect(document.querySelector(TEST_IDS.contextMenu)).toBeNull();
     });
   });
 });

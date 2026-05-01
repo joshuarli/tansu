@@ -2,6 +2,7 @@ import { render } from "solid-js/web";
 
 import { serverStore } from "./server-store.ts";
 import { setupDOM, mockFetch } from "./test-helper.ts";
+import { TEST_IDS } from "./test-selectors.ts";
 import { VaultSwitcher } from "./vault-switcher.tsx";
 
 describe("vault-switcher", () => {
@@ -36,7 +37,7 @@ describe("vault-switcher", () => {
     await new Promise((r) => setTimeout(r, 20));
 
     expect(getContainer().textContent).toBe("");
-    expect(document.querySelector(".vault-select")).toBeNull();
+    expect(document.querySelector(TEST_IDS.vaultSelect)).toBeNull();
   });
 
   it("renders a select when multiple vaults exist", async () => {
@@ -48,7 +49,7 @@ describe("vault-switcher", () => {
     await serverStore.handleVaultSwitched();
     await new Promise((r) => setTimeout(r, 20));
 
-    const select = document.querySelector(".vault-select") as HTMLSelectElement | null;
+    const select = document.querySelector(TEST_IDS.vaultSelect) as HTMLSelectElement | null;
     expect(select).not.toBeNull();
     expect(select!.options).toHaveLength(2);
     expect(select!.options[0]!.selected).toBeTruthy();
@@ -71,12 +72,12 @@ describe("vault-switcher", () => {
     await serverStore.handleVaultSwitched();
     await new Promise((r) => setTimeout(r, 20));
 
-    const select = document.querySelector(".vault-select") as HTMLSelectElement;
+    const select = document.querySelector(TEST_IDS.vaultSelect) as HTMLSelectElement;
     select.value = "1";
     select.dispatchEvent(new Event("change", { bubbles: true }));
     await new Promise((r) => setTimeout(r, 50));
 
-    const refreshedSelect = document.querySelector(".vault-select") as HTMLSelectElement;
+    const refreshedSelect = document.querySelector(TEST_IDS.vaultSelect) as HTMLSelectElement;
     expect(refreshedSelect.value).toBe("0");
     globalThis.confirm = originalConfirm;
     closeAllTabs();

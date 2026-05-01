@@ -5,6 +5,8 @@ import type { Page } from "playwright";
 
 import { setup, teardown } from "./setup.ts";
 
+const ACTIVE_TAB_DIRTY = '[data-ui="tab"][data-active="true"] [data-ui="tab-dirty"]';
+
 describe("e2e: new file save regression", () => {
   let page: Page;
   let notesDir: string;
@@ -36,13 +38,13 @@ describe("e2e: new file save regression", () => {
 
     // Type "foo" in the body after the generated H1.
     await page.fill(".editor-source", "# regression-test-note\n\nfoo");
-    await page.waitForSelector(".tab.active .dirty", { timeout: 2000 });
+    await page.waitForSelector(ACTIVE_TAB_DIRTY, { timeout: 2000 });
 
     // First save
     await page.keyboard.press("Meta+s");
     await page.waitForTimeout(500);
     // Dirty indicator should be gone
-    await expect(page.isVisible(".tab.active .dirty")).resolves.toBeFalsy();
+    await expect(page.isVisible(ACTIVE_TAB_DIRTY)).resolves.toBeFalsy();
 
     // Verify file has the generated title and "foo"
     const filePath = join(notesDir, "regression-test-note.md");
@@ -51,12 +53,12 @@ describe("e2e: new file save regression", () => {
 
     // Add "bar" on the next line.
     await page.fill(".editor-source", "# regression-test-note\n\nfoo\nbar");
-    await page.waitForSelector(".tab.active .dirty", { timeout: 2000 });
+    await page.waitForSelector(ACTIVE_TAB_DIRTY, { timeout: 2000 });
 
     // Second save
     await page.keyboard.press("Meta+s");
     await page.waitForTimeout(500);
-    await expect(page.isVisible(".tab.active .dirty")).resolves.toBeFalsy();
+    await expect(page.isVisible(ACTIVE_TAB_DIRTY)).resolves.toBeFalsy();
 
     // Verify file has the generated title and "foo\nbar"
     const after2 = readFileSync(filePath, "utf8");

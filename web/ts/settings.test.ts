@@ -526,7 +526,7 @@ describe("settings", () => {
     await new Promise((r) => setTimeout(r, 20));
 
     const settingsOverlay = document.querySelector("#settings-overlay") as HTMLElement;
-    expect(settingsOverlay.classList.contains("hidden")).toBeTruthy();
+    expect(settingsOverlay.hidden).toBeTruthy();
 
     // Name the credential via input dialog
     const dialogInput = document.querySelector("#input-dialog-input") as HTMLInputElement | null;
@@ -539,7 +539,7 @@ describe("settings", () => {
     // Wait for registration and status refresh
     await new Promise((r) => setTimeout(r, 80));
 
-    expect(settingsOverlay.classList.contains("hidden")).toBeFalsy();
+    expect(settingsOverlay.hidden).toBeFalsy();
     expect(panel.innerHTML).toContain("New Key");
 
     closeSettings();
@@ -585,7 +585,7 @@ describe("settings", () => {
     await openSettings();
     expect(isSettingsOpen()).toBeTruthy();
     const overlay = document.querySelector("#settings-overlay") as HTMLElement;
-    expect(overlay.classList.contains("hidden")).toBeFalsy();
+    expect(overlay.hidden).toBeFalsy();
 
     // Panel rendered with form elements
     const panel = document.querySelector("#settings-panel")!;

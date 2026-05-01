@@ -1,0 +1,167 @@
+.sidebar {
+  width: 220px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-right: 1px solid var(--border);
+  background: var(--bg-subtle);
+  transition: width 0.15s ease;
+}
+
+.collapsed {
+  width: 28px;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  overflow: hidden;
+}
+
+.search {
+  flex: 1;
+  min-width: 0;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+  font-size: 12px;
+  box-sizing: border-box;
+}
+
+.search:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.collapseButton {
+  flex-shrink: 0;
+  padding: 2px 4px;
+  border: none;
+  border-radius: var(--radius);
+  background: none;
+  color: var(--fg-muted);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.collapseButton:hover {
+  background: var(--border);
+  color: var(--fg);
+}
+
+.collapsed .search,
+.collapsed .tree {
+  display: none;
+}
+
+.collapsed .header {
+  justify-content: center;
+  padding: 6px 0;
+  border-bottom: none;
+}
+
+.collapsed .collapseButton {
+  padding: 4px 6px;
+}
+
+.tree {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 0;
+}
+
+.vaultSwitcher {
+  flex-shrink: 0;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.vaultSwitcher:empty,
+.collapsed .vaultSwitcher {
+  display: none;
+}
+
+.vaultSelect {
+  width: 100%;
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.vaultSelect:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.navFile {
+  padding: 3px 8px;
+  color: var(--fg);
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  cursor: pointer;
+}
+
+.navFile:hover {
+  background: rgba(0, 0, 0, 0.04);
+}
+
+.active {
+  color: var(--accent);
+  background: rgba(9, 105, 218, 0.08);
+}
+
+.navFile > .name {
+  flex: 1;
+  min-width: 0;
+}
+
+.name {
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.time {
+  flex-shrink: 0;
+  font-size: 10px;
+  color: var(--fg-muted);
+}
+
+.text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.dir {
+  font-size: 11px;
+  color: var(--fg-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.empty {
+  padding: 12px 8px;
+  color: var(--fg-muted);
+  font-size: 12px;
+  text-align: center;
+}

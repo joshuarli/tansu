@@ -24,14 +24,14 @@ describe("alert dialog", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     const overlay = document.querySelector("#alert-dialog-overlay") as HTMLElement;
-    expect(overlay.classList.contains("hidden")).toBeFalsy();
+    expect(overlay.hidden).toBeFalsy();
     expect(overlay.textContent).toContain("Import failed");
     expect(overlay.textContent).toContain("Markdown was not produced.");
 
-    const button = document.querySelector(".alert-dialog-button") as HTMLButtonElement;
+    const button = overlay.querySelector("button") as HTMLButtonElement;
     button.click();
     await promise;
 
-    expect(overlay.classList.contains("hidden")).toBeTruthy();
+    expect(overlay.hidden).toBeTruthy();
   });
 });

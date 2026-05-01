@@ -1,0 +1,61 @@
+.overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  justify-content: center;
+  padding-top: 15vh;
+  background: rgba(0, 0, 0, 0.3);
+  z-index: 100;
+}
+
+.modal {
+  width: 500px;
+  max-height: 50vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 16px 70px rgba(0, 0, 0, 0.15);
+}
+
+.input {
+  border: none;
+  border-bottom: 1px solid var(--border);
+  border-radius: 12px 12px 0 0;
+  padding: 14px 18px;
+  font-family: var(--font);
+  font-size: 15px;
+  outline: none;
+}
+
+.list {
+  overflow-y: auto;
+  flex: 1;
+}
+
+.item {
+  display: flex;
+  width: 100%;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 18px;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: 14px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.item:hover,
+.selected {
+  background: var(--bg-subtle);
+}
+
+.shortcut {
+  color: var(--fg-muted);
+  font-family: var(--mono);
+  font-size: 12px;
+}

@@ -57,24 +57,25 @@ describe("palette", () => {
     uiStore.openPalette();
     expect(uiStore.paletteVisibleOpen()).toBeTruthy();
     const overlay = document.querySelector("#palette-overlay")!;
-    expect(overlay.classList.contains("hidden")).toBeFalsy();
+    expect((overlay as HTMLElement).hidden).toBeFalsy();
 
     // Items rendered
-    const listEl = document.querySelector("#palette-list")!;
+    let listEl = document.querySelector("#palette-list")!;
     expect(listEl.children).toHaveLength(3);
     expect(listEl.children[0]!.textContent!).toContain("Save");
 
     // Toggle closes
     uiStore.togglePalette();
     expect(uiStore.paletteVisibleOpen()).toBeFalsy();
-    expect(overlay.classList.contains("hidden")).toBeTruthy();
+    expect(document.querySelector("#palette-overlay")).toBeNull();
 
     // Toggle opens again
     uiStore.togglePalette();
     expect(uiStore.paletteVisibleOpen()).toBeTruthy();
 
     // Filter via input
-    const input = document.querySelector("#palette-input")! as HTMLInputElement;
+    let input = document.querySelector("#palette-input")! as HTMLInputElement;
+    listEl = document.querySelector("#palette-list")!;
     input.value = "sav";
     input.dispatchEvent(new Event("input"));
     expect(listEl.children).toHaveLength(1);
@@ -88,11 +89,13 @@ describe("palette", () => {
     // Keyboard: Escape closes
     uiStore.closePalette();
     uiStore.openPalette();
+    input = document.querySelector("#palette-input")! as HTMLInputElement;
     input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     expect(uiStore.paletteVisibleOpen()).toBeFalsy();
 
     // Keyboard: Enter selects
     uiStore.openPalette();
+    input = document.querySelector("#palette-input")! as HTMLInputElement;
     input.value = "";
     input.dispatchEvent(new Event("input"));
     actionCalled = false;
@@ -102,6 +105,8 @@ describe("palette", () => {
 
     // Keyboard: ArrowDown moves selection
     uiStore.openPalette();
+    input = document.querySelector("#palette-input")! as HTMLInputElement;
+    listEl = document.querySelector("#palette-list")!;
     input.value = "";
     input.dispatchEvent(new Event("input"));
     input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
@@ -200,7 +205,7 @@ describe("palette", () => {
     expect(commands[0]!.label).toBe("Save");
   });
 
-  it("selected index resets to 0 on open", () => {
+  it("selected index resets to 0 on open", async () => {
     uiStore.openPalette();
     const input = document.querySelector("#palette-input")! as HTMLInputElement;
     input.value = "";
@@ -213,9 +218,12 @@ describe("palette", () => {
 
     // Reopen — selection should reset to 0
     uiStore.openPalette();
-    input.value = "";
-    input.dispatchEvent(new Event("input"));
-    expect(listEl.children[0]!.classList.contains("selected")).toBeTruthy();
+    await new Promise((r) => setTimeout(r, 0));
+    const reopenedInput = document.querySelector("#palette-input")! as HTMLInputElement;
+    const reopenedListEl = document.querySelector("#palette-list")!;
+    reopenedInput.value = "";
+    reopenedInput.dispatchEvent(new Event("input"));
+    expect(reopenedListEl.children[0]!.classList.contains("selected")).toBeTruthy();
     uiStore.closePalette();
   });
 

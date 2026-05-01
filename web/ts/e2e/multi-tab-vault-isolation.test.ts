@@ -5,6 +5,9 @@ import type { BrowserContext, Page } from "playwright";
 
 import { setup, teardown } from "./setup.ts";
 
+const ACTIVE_TAB = '[data-ui="tab"][data-active="true"]';
+const VAULT_SELECT = '[data-ui="vault-select"]';
+
 type SessionState = {
   tabs: string[];
   active: number;
@@ -64,7 +67,7 @@ async function loadApp(page: Page, baseUrl: string): Promise<void> {
 }
 
 async function switchVault(page: Page, vaultIndex: number): Promise<void> {
-  const select = page.locator(".vault-select");
+  const select = page.locator(VAULT_SELECT);
   await select.waitFor({ timeout: 5_000 });
   const current = await select.inputValue();
   if (current === String(vaultIndex)) {
@@ -123,10 +126,10 @@ describe("e2e: multi-tab vault isolation", () => {
 
     await expect(editorText(page)).resolves.toContain("active original");
     await expect(editorText(secondPage)).resolves.toContain("other original");
-    await expect(page.$eval(".tab.active", (el) => el.textContent ?? "")).resolves.toContain(
+    await expect(page.$eval(ACTIVE_TAB, (el) => el.textContent ?? "")).resolves.toContain(
       `Vault ${activeSlot}`,
     );
-    await expect(secondPage.$eval(".tab.active", (el) => el.textContent ?? "")).resolves.toContain(
+    await expect(secondPage.$eval(ACTIVE_TAB, (el) => el.textContent ?? "")).resolves.toContain(
       `Vault ${otherSlot}`,
     );
     await Promise.all([

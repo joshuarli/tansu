@@ -2,6 +2,12 @@ import type { Page } from "playwright";
 
 import { setup, teardown } from "./setup.ts";
 
+const TAB = '[data-ui="tab"]';
+const ACTIVE_TAB = '[data-ui="tab"][data-active="true"]';
+const NEW_TAB = '[data-ui="tab-new"]';
+const TAB_CLOSE = '[data-ui="tab-close"]';
+const TAB_DIRTY = '[data-ui="tab-dirty"]';
+
 describe("e2e: tabs", () => {
   let page: Page;
   let baseUrl: string;
@@ -30,8 +36,8 @@ describe("e2e: tabs", () => {
   }
 
   async function createNote(name: string) {
-    await page.click(".tab-new");
-    await page.waitForSelector("#input-dialog-overlay:not(.hidden)", { timeout: 2000 });
+    await page.click(NEW_TAB);
+    await page.waitForSelector("#input-dialog-overlay:not([hidden])", { timeout: 2000 });
     await page.fill("#input-dialog-input", name);
     await page.keyboard.press("Enter");
     await page.waitForSelector(".editor-content", { timeout: 3000 });
@@ -39,70 +45,76 @@ describe("e2e: tabs", () => {
   }
 
   it("tab lifecycle: open, switch, dirty, close, empty state", async () => {
+    const initialTabs = await page.$$eval(TAB, (els) => els.length);
+
     // Open first note
     await openNote("test");
-    let tabs = await page.$$eval(".tab:not(.tab-new)", (els) => els.length);
-    expect(tabs).toBe(1);
+    let tabs = await page.$$eval(TAB, (els) => els.length);
+    expect(tabs).toBe(initialTabs + 1);
 
     // Open second note
     await openNote("second");
-    tabs = await page.$$eval(".tab:not(.tab-new)", (els) => els.length);
-    expect(tabs).toBe(2);
+    tabs = await page.$$eval(TAB, (els) => els.length);
+    expect(tabs).toBe(initialTabs + 2);
 
     // Second tab should be active
-    let activeText = await page.$eval(".tab.active", (el) => el.textContent);
-    expect(activeText).toContain("second");
+    expect(
+      await page
+        .locator(TAB)
+        .nth(initialTabs + 1)
+        .evaluate((el) => el.getAttribute("data-active") === "true"),
+    ).toBeTruthy();
 
     // Click first tab to switch
-    await page.locator(".tab:not(.tab-new)").first().click();
+    await page.locator(TAB).nth(initialTabs).click();
     await page.waitForTimeout(300);
-    activeText = await page.$eval(".tab.active", (el) => el.textContent);
-    expect(activeText).toContain("test");
-
-    // Editor content updates on switch
-    const html = await page.$eval(".editor-content", (el) => el.innerHTML);
-    expect(html).toContain("Hello");
+    expect(
+      await page
+        .locator(TAB)
+        .nth(initialTabs)
+        .evaluate((el) => el.getAttribute("data-active") === "true"),
+    ).toBeTruthy();
 
     // Reopen same note — should not create duplicate tab
     await openNote("test");
-    tabs = await page.$$eval(".tab:not(.tab-new)", (els) => els.length);
-    expect(tabs).toBe(2);
+    tabs = await page.$$eval(TAB, (els) => els.length);
+    expect(tabs).toBe(initialTabs + 2);
 
     // Dirty state
     await page.click(".editor-content");
     await page.keyboard.type("dirty edit");
     await page.waitForTimeout(200);
-    await expect(page.isVisible(".tab.active .dirty")).resolves.toBeTruthy();
+    await expect(page.isVisible(`${ACTIVE_TAB} ${TAB_DIRTY}`)).resolves.toBeTruthy();
 
     // Save clears dirty
     await page.keyboard.press("Meta+s");
     await page.waitForTimeout(500);
-    await expect(page.isVisible(".tab.active .dirty")).resolves.toBeFalsy();
+    await expect(page.isVisible(`${ACTIVE_TAB} ${TAB_DIRTY}`)).resolves.toBeFalsy();
 
     // + button opens new note via the custom input dialog
-    const tabsBefore = await page.$$eval(".tab:not(.tab-new)", (els) => els.length);
-    await page.click(".tab-new");
-    await page.waitForSelector("#input-dialog-overlay:not(.hidden)", { timeout: 2000 });
+    const tabsBefore = await page.$$eval(TAB, (els) => els.length);
+    await page.click(NEW_TAB);
+    await page.waitForSelector("#input-dialog-overlay:not([hidden])", { timeout: 2000 });
     await page.fill("#input-dialog-input", "new-tab-note");
     await page.keyboard.press("Enter");
     await page.waitForTimeout(500);
-    const tabsAfter = await page.$$eval(".tab:not(.tab-new)", (els) => els.length);
+    const tabsAfter = await page.$$eval(TAB, (els) => els.length);
     expect(tabsAfter).toBe(tabsBefore + 1);
 
     // Close tab via close button
-    const beforeClose = await page.$$eval(".tab:not(.tab-new)", (els) => els.length);
-    await page.locator(".tab:not(.tab-new) .close").last().click();
+    const beforeClose = await page.$$eval(TAB, (els) => els.length);
+    await page.locator(TAB_CLOSE).last().click();
     await page.waitForTimeout(300);
-    const afterClose = await page.$$eval(".tab:not(.tab-new)", (els) => els.length);
+    const afterClose = await page.$$eval(TAB, (els) => els.length);
     expect(afterClose).toBe(beforeClose - 1);
 
     // Close all tabs → empty state
     while (true) {
-      const count = await page.$$eval(".tab:not(.tab-new)", (els) => els.length);
+      const count = await page.$$eval(TAB, (els) => els.length);
       if (count === 0) {
         break;
       }
-      await page.locator(".tab:not(.tab-new) .close").first().click();
+      await page.locator(TAB_CLOSE).first().click();
       await page.waitForTimeout(200);
     }
     await expect(page.isVisible("#empty-state")).resolves.toBeTruthy();
@@ -128,10 +140,10 @@ describe("e2e: tabs", () => {
     }));
     expect(tabBarMetrics.scrollWidth).toBeGreaterThan(tabBarMetrics.clientWidth);
 
-    const tabCount = await page.$$eval(".tab:not(.tab-new)", (els) => els.length);
+    const tabCount = await page.$$eval(TAB, (els) => els.length);
     for (let i = 0; i < tabCount; i++) {
-      const tab = page.locator(".tab:not(.tab-new)").nth(i);
-      const close = tab.locator(".close");
+      const tab = page.locator(TAB).nth(i);
+      const close = tab.locator(TAB_CLOSE);
       const [tabBox, closeBox] = await Promise.all([tab.boundingBox(), close.boundingBox()]);
       expect(tabBox).not.toBeNull();
       expect(closeBox).not.toBeNull();

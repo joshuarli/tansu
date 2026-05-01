@@ -1,0 +1,66 @@
+.overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding-top: 20vh;
+  background: rgba(0, 0, 0, 0.3);
+  z-index: 200;
+}
+
+.panel {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  width: 400px;
+  box-shadow: 0 16px 70px rgba(0, 0, 0, 0.15);
+  overflow: hidden;
+}
+
+.input {
+  display: block;
+  width: 100%;
+  border: none;
+  padding: 14px 18px;
+  box-sizing: border-box;
+  background: transparent;
+  color: var(--fg);
+  font-family: var(--font);
+  font-size: 15px;
+}
+
+.input:focus {
+  outline: none;
+}
+
+.alertDialog {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 18px;
+  box-sizing: border-box;
+}
+
+.title {
+  color: var(--fg);
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.message {
+  color: var(--fg-muted);
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
+.button {
+  align-self: flex-end;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 14px;
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+  cursor: pointer;
+}

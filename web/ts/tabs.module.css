@@ -1,0 +1,95 @@
+.tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-right: 1px solid var(--border);
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--fg-muted);
+  flex: 0 1 auto;
+  min-width: calc(var(--tab-min-label) + var(--tab-min-controls) + 24px + 6px);
+  max-width: 18rem;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.tab:hover {
+  background: var(--bg);
+}
+
+.active {
+  background: var(--bg);
+  color: var(--fg);
+  font-weight: 500;
+}
+
+.label {
+  flex: 1 1 auto;
+  min-width: var(--tab-min-label);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.labelText {
+  display: inline;
+}
+
+.dirty,
+.close {
+  flex-shrink: 0;
+}
+
+.dirty {
+  color: var(--accent);
+  font-size: 10px;
+}
+
+.close {
+  background: none;
+  border: none;
+  border-radius: 3px;
+  padding: 0 2px;
+  color: var(--fg-muted);
+  font: inherit;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.close:hover {
+  background: var(--border);
+  color: var(--danger);
+}
+
+.newTab {
+  background: none;
+  border: none;
+  border-right: none;
+  padding: 6px 10px;
+  color: var(--fg-muted);
+  font: inherit;
+  font-size: 16px;
+}
+
+.newTab:hover {
+  color: var(--fg);
+}
+
+.tooltip {
+  position: fixed;
+  display: none;
+  transform: translateX(-50%);
+  background: var(--fg);
+  color: var(--bg);
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 100px;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 200;
+  max-width: min(32rem, calc(100vw - 24px));
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

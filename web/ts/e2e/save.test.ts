@@ -2,6 +2,8 @@ import type { Page, Response as PlaywrightResponse } from "playwright";
 
 import { setup, teardown } from "./setup.ts";
 
+const ACTIVE_TAB_DIRTY = '[data-ui="tab"][data-active="true"] [data-ui="tab-dirty"]';
+
 describe("e2e: save deduplication", () => {
   let page: Page;
   let baseUrl: string;
@@ -66,7 +68,7 @@ describe("e2e: save deduplication", () => {
   it("Cmd+S on modified note sends exactly 1 PUT with no 409", async () => {
     await page.click(".editor-content");
     await page.keyboard.type(" edited");
-    await page.waitForSelector(".tab.active .dirty", { timeout: 2000 });
+    await page.waitForSelector(ACTIVE_TAB_DIRTY, { timeout: 2000 });
 
     const reqs = await collectNoteRequests(async () => {
       await page.keyboard.press("Meta+s");
@@ -78,12 +80,12 @@ describe("e2e: save deduplication", () => {
   it("saving twice in sequence sends no GET after either save", async () => {
     await page.click(".editor-content");
     await page.keyboard.type(" first");
-    await page.waitForSelector(".tab.active .dirty", { timeout: 2000 });
+    await page.waitForSelector(ACTIVE_TAB_DIRTY, { timeout: 2000 });
     await page.keyboard.press("Meta+s");
     await page.waitForTimeout(200);
 
     await page.keyboard.type(" second");
-    await page.waitForSelector(".tab.active .dirty", { timeout: 2000 });
+    await page.waitForSelector(ACTIVE_TAB_DIRTY, { timeout: 2000 });
 
     const reqs = await collectNoteRequests(async () => {
       await page.keyboard.press("Meta+s");
