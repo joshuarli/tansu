@@ -60,6 +60,36 @@ describe("e2e: editor", () => {
     await page.click(".editor-content");
   }
 
+  async function selectListRange(
+    startIndex: number,
+    startOffset: number,
+    endIndex: number,
+    endOffset: number,
+  ) {
+    await page.evaluate(
+      ({ startIndex: start, startOffset: startOff, endIndex: end, endOffset: endOff }) => {
+        const items = document.querySelectorAll(".editor-content li");
+        const getTextNode = (item: Element): Node => {
+          const walker = document.createTreeWalker(item, NodeFilter.SHOW_TEXT);
+          const node = walker.nextNode();
+          if (!node) {
+            throw new Error("expected list item text node");
+          }
+          return node;
+        };
+        const startNode = getTextNode(items[start]!);
+        const endNode = getTextNode(items[end]!);
+        const sel = window.getSelection()!;
+        const range = document.createRange();
+        range.setStart(startNode, Math.min(startOff, startNode.textContent?.length ?? 0));
+        range.setEnd(endNode, Math.min(endOff, endNode.textContent?.length ?? 0));
+        sel.removeAllRanges();
+        sel.addRange(range);
+      },
+      { startIndex, startOffset, endIndex, endOffset },
+    );
+  }
+
   it("opens note, renders, source toggle, edit, save, transforms", async () => {
     // Renders markdown
     const html = await page.$eval(".editor-content", (el) => el.innerHTML);
@@ -240,6 +270,17 @@ describe("e2e: editor", () => {
     await page.keyboard.press("End");
     await page.keyboard.press("Tab");
     expect(await saveAndGetSource()).toBe("- one\n  - two");
+
+    await replaceEditorMarkdownInSession("- 1\n  - 2\n    - 3\n      - 4");
+    await selectListRange(1, 1, 3, 3);
+    await page.keyboard.press("Shift+Tab");
+    expect(await saveAndGetSource()).toBe("- 1\n- 2\n  - 3\n    - 4");
+
+    await replaceEditorMarkdownInSession("- 1\n- 2");
+    await page.locator(".editor-content li").nth(1).click();
+    await page.keyboard.press("End");
+    await page.keyboard.press("Shift+Tab");
+    expect(await saveAndGetSource()).toBe("- 1\n- 2");
   }, 20_000);
 
   it("source edit with single-newline heading survives save and mode refresh", async () => {

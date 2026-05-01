@@ -328,4 +328,18 @@ describe("shiftIndent", () => {
     const { md } = shiftIndent(src, thirdLineStart, src.length, true);
     expect(md).toBe("- 1\n  - 2\n  - 3");
   });
+
+  it("dedents each selected nested list line by exactly one level", () => {
+    const src = "- 1\n  - 2\n    - 3\n      - 4";
+    const secondLineStart = src.indexOf("  - 2");
+    const { md } = shiftIndent(src, secondLineStart, src.length, true);
+    expect(md).toBe("- 1\n- 2\n  - 3\n    - 4");
+  });
+
+  it("dedent is a no-op for top-level list items", () => {
+    const src = "- 1\n- 2";
+    const secondLineStart = src.indexOf("- 2");
+    const { md } = shiftIndent(src, secondLineStart, src.length, true);
+    expect(md).toBe("- 1\n- 2");
+  });
 });

@@ -509,6 +509,26 @@ describe("editor", () => {
     hideEditor();
   });
 
+  it("source mode: Shift+Tab removes one list indent step from space-indented lines", async () => {
+    showEditor("tab-source-list-lines.md", "# Tab");
+    await new Promise((r) => setTimeout(r, 50));
+
+    const sourceBtn = document.querySelector(".editor-toolbar-btn--source") as HTMLButtonElement;
+    sourceBtn.click();
+
+    const sourceEl = latestEditorSource();
+    sourceEl.value = "- 1\n  - 2\n    - 3";
+    sourceEl.selectionStart = sourceEl.value.indexOf("  - 2");
+    sourceEl.selectionEnd = sourceEl.value.length;
+    sourceEl.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Tab", shiftKey: true, bubbles: true }),
+    );
+
+    expect(sourceEl.value).toBe("- 1\n- 2\n  - 3");
+
+    hideEditor();
+  });
+
   it("WYSIWYG: Tab indents the current line", async () => {
     showEditor("tab-wysiwyg.md", "hello");
     await new Promise((r) => setTimeout(r, 50));
@@ -681,6 +701,29 @@ describe("editor", () => {
     );
 
     expect(getCurrentContent()).toBe("- 1\n  - 2\n  - 3");
+
+    hideEditor();
+  });
+
+  it("WYSIWYG: Shift+Tab on a top-level bullet is a no-op", async () => {
+    showEditor("list-dedent-top-level-noop.md", "- 1\n- 2");
+    await new Promise((r) => setTimeout(r, 50));
+
+    const contentEl = latestEditorContent();
+    const items = contentEl.querySelectorAll("li");
+    const textNode = items[1]!.firstChild as Text;
+    const range = document.createRange();
+    range.setStart(textNode, 1);
+    range.collapse(true);
+    const sel = window.getSelection()!;
+    sel.removeAllRanges();
+    sel.addRange(range);
+
+    contentEl.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Tab", shiftKey: true, bubbles: true }),
+    );
+
+    expect(getCurrentContent()).toBe("- 1\n- 2");
 
     hideEditor();
   });
