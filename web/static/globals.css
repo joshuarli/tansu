@@ -53,6 +53,8 @@ body {
   min-height: 36px;
   overflow-x: auto;
   flex-shrink: 0;
+  position: relative;
+  z-index: 1;
   scrollbar-width: none;
 }
 

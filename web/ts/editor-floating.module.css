@@ -41,7 +41,7 @@
   outline: 2px solid rgba(74, 158, 255, 0.6);
   outline-offset: 1px;
   border-radius: var(--radius);
-  z-index: 100;
+  z-index: 0;
   box-sizing: border-box;
 }
 

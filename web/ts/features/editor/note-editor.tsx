@@ -85,7 +85,7 @@ export function NoteEditor(props: Readonly<NoteEditorProps>) {
       >
         Press <kbd>Cmd+K</kbd> to search &middot; <kbd>Cmd+P</kbd> for commands
       </div>
-      <div style={{ display: editorVisible() ? "" : "none" }}>
+      <div style={{ display: editorVisible() ? "" : "none", width: "100%" }}>
         <EditorShell refs={shellRefs} tags={editorTags} isSourceMode={editorSourceMode} />
       </div>
     </div>
