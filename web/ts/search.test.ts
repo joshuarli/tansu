@@ -77,11 +77,11 @@ describe("search", () => {
 
   it("search basic lifecycle", async () => {
     // Initially closed
-    expect(uiStore.searchOpen()).toBeFalsy();
+    expect(uiStore.searchVisibleOpen()).toBeFalsy();
 
     // Open
     await openSearch();
-    expect(uiStore.searchOpen()).toBeTruthy();
+    expect(uiStore.searchVisibleOpen()).toBeTruthy();
     const overlay = document.querySelector("#search-overlay") as HTMLElement;
     expect(overlay.classList.contains("hidden")).toBeFalsy();
 
@@ -91,20 +91,20 @@ describe("search", () => {
 
     // Close
     await closeSearch();
-    expect(uiStore.searchOpen()).toBeFalsy();
+    expect(uiStore.searchVisibleOpen()).toBeFalsy();
     expect(overlay.classList.contains("hidden")).toBeTruthy();
 
     // Toggle
     uiStore.toggleSearch();
     await new Promise((r) => setTimeout(r, 0));
-    expect(uiStore.searchOpen()).toBeTruthy();
+    expect(uiStore.searchVisibleOpen()).toBeTruthy();
     uiStore.toggleSearch();
     await new Promise((r) => setTimeout(r, 0));
-    expect(uiStore.searchOpen()).toBeFalsy();
+    expect(uiStore.searchVisibleOpen()).toBeFalsy();
 
     // Open with scope
     await openSearch("notes/a.md");
-    expect(uiStore.searchOpen()).toBeTruthy();
+    expect(uiStore.searchVisibleOpen()).toBeTruthy();
     expect(input.placeholder).toBe("Find in note...");
     await closeSearch();
 
@@ -114,12 +114,12 @@ describe("search", () => {
 
     // Keyboard: Escape closes
     input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
-    expect(uiStore.searchOpen()).toBeFalsy();
+    expect(uiStore.searchVisibleOpen()).toBeFalsy();
 
     // Overlay click closes
     await openSearch();
     overlay.click();
-    expect(uiStore.searchOpen()).toBeFalsy();
+    expect(uiStore.searchVisibleOpen()).toBeFalsy();
   });
 
   it("search results and keyboard nav", async () => {
@@ -183,7 +183,7 @@ describe("search", () => {
     openTabCalled = false;
     input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
     await new Promise((r) => setTimeout(r, 10));
-    expect(uiStore.searchOpen()).toBeFalsy();
+    expect(uiStore.searchVisibleOpen()).toBeFalsy();
     expect(openTabCalled).toBeTruthy();
     expect(openTabPath).toBe("a.md");
 
@@ -196,7 +196,7 @@ describe("search", () => {
     const clickResult = resultsEl.children[0]! as HTMLElement;
     clickResult.click();
     await new Promise((r) => setTimeout(r, 10));
-    expect(uiStore.searchOpen()).toBeFalsy();
+    expect(uiStore.searchVisibleOpen()).toBeFalsy();
     expect(openTabCalled).toBeTruthy();
 
     // Empty query clears results (no search results, no Create option)
@@ -384,7 +384,7 @@ describe("search", () => {
 
     expect(openTabCalled).toBeTruthy();
     expect(openTabPath).toBe("my new note.md");
-    expect(uiStore.searchOpen()).toBeFalsy();
+    expect(uiStore.searchVisibleOpen()).toBeFalsy();
 
     mock.on("GET", "/api/search", [
       {
@@ -402,7 +402,7 @@ describe("search", () => {
     mock.on("GET", "/api/settings", { error: "fail" }, 500);
     await openSearch();
     await new Promise((r) => setTimeout(r, 100));
-    expect(uiStore.searchOpen()).toBeTruthy();
+    expect(uiStore.searchVisibleOpen()).toBeTruthy();
     await closeSearch();
     mock.on("GET", "/api/settings", {
       weight_title: 10,
@@ -441,7 +441,7 @@ describe("search", () => {
 
     expect(openTabCalled).toBeTruthy();
     expect(openTabPath).toBe("enter-create-test.md");
-    expect(uiStore.searchOpen()).toBeFalsy();
+    expect(uiStore.searchVisibleOpen()).toBeFalsy();
 
     mock.on("GET", "/api/search", [
       {

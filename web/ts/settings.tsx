@@ -30,8 +30,8 @@ import {
 } from "./constants.ts";
 import { getEditorPrefs, saveEditorPrefs, type EditorPrefs } from "./editor.ts";
 import { showInputDialog } from "./input-dialog.tsx";
+import { createManagedModal } from "./managed-modal.ts";
 import { reportActionError } from "./notify.ts";
-import { createOverlayLifecycle } from "./overlay-lifecycle.ts";
 import { OverlayFrame } from "./overlay.tsx";
 import { uiStore } from "./ui-store.ts";
 import { createPrfCredential, isPrfLikelySupported } from "./webauthn.ts";
@@ -390,8 +390,9 @@ export function SettingsModal(props: Readonly<SettingsModalProps> = {}) {
     close();
   }
 
-  const overlay = createOverlayLifecycle({
-    isOpen: uiStore.settingsOpen,
+  const modal = createManagedModal({
+    id: "settings",
+    isRequestedOpen: uiStore.isSettingsRequestedOpen,
     onOpen: () => {
       void open();
     },
@@ -399,7 +400,7 @@ export function SettingsModal(props: Readonly<SettingsModalProps> = {}) {
   });
 
   return (
-    <OverlayFrame id="settings-overlay" isOpen={uiStore.settingsOpen()} onClose={overlay.close}>
+    <OverlayFrame id="settings-overlay" isOpen={modal.isOpen()} onClose={modal.close}>
       <div id="settings-panel" role="dialog" aria-modal="true" aria-label="Settings">
         <SettingsView
           current={current}

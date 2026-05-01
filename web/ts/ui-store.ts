@@ -1,6 +1,7 @@
 import { createSignal } from "solid-js";
 
 import { NOTIFICATION_AUTO_DISMISS_MS } from "./constants.ts";
+import { createModalManager, modalManager } from "./modal-manager.ts";
 
 export type NotificationState = {
   hidden: boolean;
@@ -8,11 +9,13 @@ export type NotificationState = {
   type: "error" | "info" | "success";
 };
 
-export function createUiStore() {
-  const [searchOpen, setSearchOpen] = createSignal(false);
+type ModalManager = ReturnType<typeof createModalManager>;
+
+export function createUiStore(manager: ModalManager = modalManager) {
+  const [isSearchRequestedOpen, setSearchRequestedOpen] = createSignal(false);
   const [searchScopePath, setSearchScopePath] = createSignal<string | null>(null);
-  const [paletteOpen, setPaletteOpen] = createSignal(false);
-  const [settingsOpen, setSettingsOpen] = createSignal(false);
+  const [isPaletteRequestedOpen, setPaletteRequestedOpen] = createSignal(false);
+  const [isSettingsRequestedOpen, setSettingsRequestedOpen] = createSignal(false);
   const [serverStatus, setServerStatusSignal] = createSignal("");
   const [notification, setNotification] = createSignal<NotificationState>({
     hidden: true,
@@ -46,47 +49,81 @@ export function createUiStore() {
     }, autoDismissMs);
   }
 
+  function resetSearchModal() {
+    setSearchRequestedOpen(false);
+    setSearchScopePath(null);
+  }
+
+  function resetPaletteModal() {
+    setPaletteRequestedOpen(false);
+  }
+
+  function resetSettingsModal() {
+    setSettingsRequestedOpen(false);
+  }
+
   return {
-    searchOpen,
+    searchVisibleOpen: () => isSearchRequestedOpen() && manager.isActive("search"),
+    isSearchRequestedOpen,
     searchScopePath,
-    paletteOpen,
-    settingsOpen,
+    paletteVisibleOpen: () => isPaletteRequestedOpen() && manager.isActive("palette"),
+    isPaletteRequestedOpen,
+    settingsVisibleOpen: () => isSettingsRequestedOpen() && manager.isActive("settings"),
+    isSettingsRequestedOpen,
     serverStatus,
     notification,
     openSearch(scopePath?: string) {
+      manager.replace("search", resetSearchModal);
       setSearchScopePath(scopePath ?? null);
-      setSearchOpen(true);
+      setSearchRequestedOpen(true);
     },
     closeSearch() {
-      setSearchOpen(false);
-      setSearchScopePath(null);
+      resetSearchModal();
+      manager.close("search", { skipDismiss: true });
     },
     toggleSearch(scopePath?: string) {
-      if (searchOpen()) {
-        setSearchOpen(false);
-        setSearchScopePath(null);
+      if (isSearchRequestedOpen()) {
+        resetSearchModal();
+        manager.close("search", { skipDismiss: true });
       } else {
+        manager.replace("search", resetSearchModal);
         setSearchScopePath(scopePath ?? null);
-        setSearchOpen(true);
+        setSearchRequestedOpen(true);
       }
     },
     openPalette() {
-      setPaletteOpen(true);
+      manager.replace("palette", resetPaletteModal);
+      setPaletteRequestedOpen(true);
     },
     closePalette() {
-      setPaletteOpen(false);
+      resetPaletteModal();
+      manager.close("palette", { skipDismiss: true });
     },
     togglePalette() {
-      setPaletteOpen((open) => !open);
+      if (isPaletteRequestedOpen()) {
+        resetPaletteModal();
+        manager.close("palette", { skipDismiss: true });
+      } else {
+        manager.replace("palette", resetPaletteModal);
+        setPaletteRequestedOpen(true);
+      }
     },
     openSettings() {
-      setSettingsOpen(true);
+      manager.replace("settings", resetSettingsModal);
+      setSettingsRequestedOpen(true);
     },
     closeSettings() {
-      setSettingsOpen(false);
+      resetSettingsModal();
+      manager.close("settings", { skipDismiss: true });
     },
     toggleSettings() {
-      setSettingsOpen((open) => !open);
+      if (isSettingsRequestedOpen()) {
+        resetSettingsModal();
+        manager.close("settings", { skipDismiss: true });
+      } else {
+        manager.replace("settings", resetSettingsModal);
+        setSettingsRequestedOpen(true);
+      }
     },
     setServerStatus(msg: string) {
       setServerStatusSignal(msg);

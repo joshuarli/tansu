@@ -1,3 +1,4 @@
+import { createModalManager, modalManager } from "./modal-manager.ts";
 import { createServerStore } from "./server-store.ts";
 import { createTabsStore } from "./tab-state.ts";
 import { setupDOM } from "./test-helper.ts";
@@ -36,18 +37,65 @@ class MockEventSource extends EventTarget {
 }
 
 describe("store factories", () => {
+  afterEach(() => {
+    while (modalManager.activeModal()) {
+      modalManager.closeTop({ skipRestoreFocus: true });
+    }
+  });
+
   it("creates isolated UI stores", () => {
-    const first = createUiStore();
-    const second = createUiStore();
+    const first = createUiStore(createModalManager());
+    const second = createUiStore(createModalManager());
 
     first.openSearch("a.md");
     second.openPalette();
 
-    expect(first.searchOpen()).toBeTruthy();
+    expect(first.searchVisibleOpen()).toBeTruthy();
     expect(first.searchScopePath()).toBe("a.md");
-    expect(first.paletteOpen()).toBeFalsy();
-    expect(second.searchOpen()).toBeFalsy();
-    expect(second.paletteOpen()).toBeTruthy();
+    expect(first.paletteVisibleOpen()).toBeFalsy();
+    expect(second.searchVisibleOpen()).toBeFalsy();
+    expect(second.paletteVisibleOpen()).toBeTruthy();
+  });
+
+  it("keeps exclusive modals mutually exclusive within a UI store", () => {
+    const store = createUiStore(createModalManager());
+
+    store.openSearch("a.md");
+    expect(store.searchVisibleOpen()).toBeTruthy();
+    expect(store.searchScopePath()).toBe("a.md");
+
+    store.openSettings();
+    expect(store.searchVisibleOpen()).toBeFalsy();
+    expect(store.searchScopePath()).toBeNull();
+    expect(store.settingsVisibleOpen()).toBeTruthy();
+    expect(store.paletteVisibleOpen()).toBeFalsy();
+
+    store.openPalette();
+    expect(store.settingsVisibleOpen()).toBeFalsy();
+    expect(store.paletteVisibleOpen()).toBeTruthy();
+
+    store.toggleSearch("b.md");
+    expect(store.searchVisibleOpen()).toBeTruthy();
+    expect(store.searchScopePath()).toBe("b.md");
+    expect(store.paletteVisibleOpen()).toBeFalsy();
+    expect(store.settingsVisibleOpen()).toBeFalsy();
+  });
+
+  it("tracks requested and visible modal state separately when a stacked dialog obscures a modal", () => {
+    const manager = createModalManager();
+    const store = createUiStore(manager);
+
+    store.openSettings();
+    expect(store.isSettingsRequestedOpen()).toBeTruthy();
+    expect(store.settingsVisibleOpen()).toBeTruthy();
+
+    manager.push("input-dialog");
+    expect(store.isSettingsRequestedOpen()).toBeTruthy();
+    expect(store.settingsVisibleOpen()).toBeFalsy();
+
+    manager.closeTop({ skipRestoreFocus: true });
+    expect(store.isSettingsRequestedOpen()).toBeTruthy();
+    expect(store.settingsVisibleOpen()).toBeTruthy();
   });
 
   it("creates isolated tab stores", () => {

@@ -42,7 +42,7 @@ describe("settings", () => {
   }
 
   function isSettingsOpen() {
-    return uiStore.settingsOpen();
+    return uiStore.settingsVisibleOpen();
   }
 
   beforeEach(() => {
@@ -106,7 +106,7 @@ describe("settings", () => {
     await new Promise((r) => setTimeout(r, 10));
 
     // Settings should be closed after successful save
-    expect(uiStore.settingsOpen()).toBeFalsy();
+    expect(uiStore.settingsVisibleOpen()).toBeFalsy();
   });
 
   it("save sends the exact settings payload", async () => {
@@ -170,7 +170,7 @@ describe("settings", () => {
       show_score_breakdown: false,
       excluded_folders: ["archive", "drafts", "private"],
     });
-    expect(uiStore.settingsOpen()).toBeFalsy();
+    expect(uiStore.settingsVisibleOpen()).toBeFalsy();
   });
 
   it("cancel closes without saving", async () => {
@@ -183,7 +183,7 @@ describe("settings", () => {
     (panel.querySelector("#settings-cancel") as HTMLButtonElement).click();
     await new Promise((r) => setTimeout(r, 10));
 
-    expect(uiStore.settingsOpen()).toBeFalsy();
+    expect(uiStore.settingsVisibleOpen()).toBeFalsy();
     expect(
       mock.requests.some((req) => req.method === "PUT" && req.url === "/api/settings"),
     ).toBeFalsy();
@@ -428,6 +428,9 @@ describe("settings", () => {
     // Wait for createPrfCredential to resolve and showInputDialog to open
     await new Promise((r) => setTimeout(r, 20));
 
+    const settingsOverlay = document.querySelector("#settings-overlay") as HTMLElement;
+    expect(settingsOverlay.classList.contains("hidden")).toBeTruthy();
+
     // Name the credential via input dialog
     const dialogInput = document.querySelector("#input-dialog-input") as HTMLInputElement | null;
     expect(dialogInput).not.toBeNull();
@@ -439,6 +442,7 @@ describe("settings", () => {
     // Wait for registration and status refresh
     await new Promise((r) => setTimeout(r, 80));
 
+    expect(settingsOverlay.classList.contains("hidden")).toBeFalsy();
     expect(panel.innerHTML).toContain("New Key");
 
     closeSettings();

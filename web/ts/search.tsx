@@ -3,8 +3,8 @@ import { For, Show, createSignal } from "solid-js";
 import { createNote, getSettings, searchNotes, type SearchResult } from "./api.ts";
 import { SEARCH_MIN_QUERY_LENGTH, SEARCH_SCORE_PRECISION } from "./constants.ts";
 import { scrollSelectedIndexIntoView, wrapSelectionIndex } from "./listbox.ts";
+import { createManagedModal } from "./managed-modal.ts";
 import { reportActionError } from "./notify.ts";
-import { createOverlayLifecycle } from "./overlay-lifecycle.ts";
 import { OverlayFrame } from "./overlay.tsx";
 import { setCursor } from "./tab-state.ts";
 import { uiStore } from "./ui-store.ts";
@@ -108,7 +108,7 @@ export function SearchModal(props: Readonly<SearchModalProps>) {
     const latestQuery = inputEl?.value.trim() ?? "";
     if (
       reqId !== searchRequestId ||
-      !uiStore.searchOpen() ||
+      !uiStore.searchVisibleOpen() ||
       latestQuery !== trimmed ||
       uiStore.searchScopePath() !== scope
     ) {
@@ -188,14 +188,15 @@ export function SearchModal(props: Readonly<SearchModalProps>) {
     uiStore.closeSearch();
   }
 
-  const overlay = createOverlayLifecycle({
-    isOpen: uiStore.searchOpen,
+  const modal = createManagedModal({
+    id: "search",
+    isRequestedOpen: uiStore.isSearchRequestedOpen,
     onOpen: open,
     onClose: close,
   });
 
   return (
-    <OverlayFrame id="search-overlay" isOpen={uiStore.searchOpen()} onClose={overlay.close}>
+    <OverlayFrame id="search-overlay" isOpen={modal.isOpen()} onClose={modal.close}>
       <div class="search-modal" role="dialog" aria-modal="true" aria-label="Search notes">
         <input
           id="search-input"

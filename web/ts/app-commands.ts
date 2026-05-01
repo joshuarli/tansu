@@ -3,6 +3,7 @@ import type { Accessor } from "solid-js";
 import { createAppCommandRegistry } from "./command-registry.ts";
 import { matchesKey, type Command } from "./commands.ts";
 import { promptHtmlImport } from "./import-html.ts";
+import { modalManager } from "./modal-manager.ts";
 import { closeActiveTab, getActiveTab, nextTab, prevTab, reopenClosedTab } from "./tab-state.ts";
 import { promptNewNote } from "./tabs.tsx";
 import { uiStore } from "./ui-store.ts";
@@ -31,19 +32,9 @@ export function handleGlobalAppKeydown(
   commands: Accessor<readonly Command[]>,
 ): void {
   if (e.key === "Escape") {
-    if (uiStore.paletteOpen()) {
+    if (modalManager.activeModal()) {
       e.preventDefault();
-      uiStore.closePalette();
-      return;
-    }
-    if (uiStore.settingsOpen()) {
-      e.preventDefault();
-      uiStore.closeSettings();
-      return;
-    }
-    if (uiStore.searchOpen()) {
-      e.preventDefault();
-      uiStore.closeSearch();
+      modalManager.closeTop();
     }
     return;
   }

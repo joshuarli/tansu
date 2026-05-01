@@ -1,24 +1,5 @@
 import type { JSX } from "solid-js";
 
-export function createFocusRestorer() {
-  let savedFocus: Element | null = null;
-
-  return {
-    remember() {
-      savedFocus = document.activeElement;
-    },
-    restore() {
-      if (savedFocus instanceof HTMLElement) {
-        savedFocus.focus();
-      }
-      savedFocus = null;
-    },
-    clear() {
-      savedFocus = null;
-    },
-  };
-}
-
 type OverlayFrameProps = {
   id: string;
   isOpen: boolean;

@@ -1,28 +1,19 @@
-import { Show, createEffect, createSignal } from "solid-js";
+import { Show, createEffect } from "solid-js";
 
-import { createFocusRestorer, OverlayFrame } from "./overlay.tsx";
+import { OverlayFrame } from "./overlay.tsx";
+import { createPromiseModalController } from "./promise-modal.ts";
 
 type AlertDialogState = {
   title: string;
   message: string;
 };
 
-let pendingResolve: (() => void) | null = null;
 let buttonEl: HTMLButtonElement | null = null;
-const focus = createFocusRestorer();
-const [state, setState] = createSignal<AlertDialogState | null>(null);
-
-function closeActive() {
-  const resolve = pendingResolve;
-  pendingResolve = null;
-  setState(null);
-  focus.restore();
-  resolve?.();
-}
+const dialog = createPromiseModalController<AlertDialogState, void>("alert-dialog", undefined);
 
 export function AlertDialogHost() {
   createEffect(() => {
-    if (state() && buttonEl) {
+    if (dialog.current() && dialog.isOpen() && buttonEl) {
       buttonEl.focus();
     }
   });
@@ -30,18 +21,18 @@ export function AlertDialogHost() {
   return (
     <OverlayFrame
       id="alert-dialog-overlay"
-      isOpen={state() !== null}
+      isOpen={dialog.isOpen()}
       onClose={() => {
-        closeActive();
+        dialog.cancel();
       }}
     >
       <div
         class="input-dialog alert-dialog"
         role="alertdialog"
         aria-modal="true"
-        aria-label={state()?.title ?? "Alert"}
+        aria-label={dialog.current()?.title ?? "Alert"}
       >
-        <Show when={state()}>
+        <Show when={dialog.current()}>
           {(current) => (
             <>
               <div class="alert-dialog-title">{current().title}</div>
@@ -52,11 +43,11 @@ export function AlertDialogHost() {
                   buttonEl = el;
                 }}
                 class="alert-dialog-button"
-                onClick={() => closeActive()}
+                onClick={() => dialog.closeWithResult(undefined)}
                 onKeyDown={(e) => {
                   if (e.key === "Escape" || e.key === "Enter") {
                     e.preventDefault();
-                    closeActive();
+                    dialog.closeWithResult(undefined);
                   }
                 }}
               >
@@ -71,14 +62,5 @@ export function AlertDialogHost() {
 }
 
 export function showAlertDialog(title: string, message: string): Promise<void> {
-  focus.remember();
-
-  if (pendingResolve) {
-    pendingResolve();
-  }
-
-  return new Promise((resolve) => {
-    pendingResolve = resolve;
-    setState({ title, message });
-  });
+  return dialog.open({ title, message });
 }

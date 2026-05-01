@@ -1,29 +1,20 @@
-import { Show, createEffect, createSignal } from "solid-js";
+import { Show, createEffect } from "solid-js";
 
-import { createFocusRestorer, OverlayFrame } from "./overlay.tsx";
+import { OverlayFrame } from "./overlay.tsx";
+import { createPromiseModalController } from "./promise-modal.ts";
 
 type DialogState = {
   placeholder: string;
   defaultValue: string;
 };
 
-let pendingResolve: ((val: string | null) => void) | null = null;
 let inputEl: HTMLInputElement | null = null;
-const focus = createFocusRestorer();
-const [state, setState] = createSignal<DialogState | null>(null);
-
-function closeActive(value: string | null) {
-  const resolve = pendingResolve;
-  pendingResolve = null;
-  setState(null);
-  focus.restore();
-  resolve?.(value);
-}
+const dialog = createPromiseModalController<DialogState, string | null>("input-dialog", null);
 
 export function InputDialogHost() {
   createEffect(() => {
-    const current = state();
-    if (!current || !inputEl) {
+    const current = dialog.current();
+    if (!current || !dialog.isOpen() || !inputEl) {
       return;
     }
     inputEl.value = current.defaultValue;
@@ -34,18 +25,18 @@ export function InputDialogHost() {
   return (
     <OverlayFrame
       id="input-dialog-overlay"
-      isOpen={state() !== null}
+      isOpen={dialog.isOpen()}
       onClose={() => {
-        closeActive(null);
+        dialog.cancel();
       }}
     >
       <div
         class="input-dialog"
         role="dialog"
         aria-modal="true"
-        aria-label={state()?.placeholder ?? "Enter text"}
+        aria-label={dialog.current()?.placeholder ?? "Enter text"}
       >
-        <Show when={state()}>
+        <Show when={dialog.current()}>
           {(current) => (
             <input
               id="input-dialog-input"
@@ -59,10 +50,10 @@ export function InputDialogHost() {
               onKeyDown={(e) => {
                 if (e.key === "Enter") {
                   e.preventDefault();
-                  closeActive(e.currentTarget.value.trim() || null);
+                  dialog.closeWithResult(e.currentTarget.value.trim() || null);
                 } else if (e.key === "Escape") {
                   e.preventDefault();
-                  closeActive(null);
+                  dialog.cancel();
                 }
               }}
             />
@@ -74,14 +65,5 @@ export function InputDialogHost() {
 }
 
 export function showInputDialog(placeholder: string, defaultValue = ""): Promise<string | null> {
-  focus.remember();
-
-  if (pendingResolve) {
-    pendingResolve(null);
-  }
-
-  return new Promise((resolve) => {
-    pendingResolve = resolve;
-    setState({ placeholder, defaultValue });
-  });
+  return dialog.open({ placeholder, defaultValue });
 }

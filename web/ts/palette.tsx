@@ -3,7 +3,7 @@ import { For, createSignal } from "solid-js";
 import type { Command } from "./commands.ts";
 export { matchesKey, type Command } from "./commands.ts";
 import { scrollSelectedIndexIntoView, wrapSelectionIndex } from "./listbox.ts";
-import { createOverlayLifecycle } from "./overlay-lifecycle.ts";
+import { createManagedModal } from "./managed-modal.ts";
 import { OverlayFrame } from "./overlay.tsx";
 import { uiStore } from "./ui-store.ts";
 
@@ -72,14 +72,15 @@ export function PaletteModal(props: Readonly<PaletteProps>) {
     }
   }
 
-  const overlay = createOverlayLifecycle({
-    isOpen: uiStore.paletteOpen,
+  const modal = createManagedModal({
+    id: "palette",
+    isRequestedOpen: uiStore.isPaletteRequestedOpen,
     onOpen: open,
     onClose: close,
   });
 
   return (
-    <OverlayFrame id="palette-overlay" isOpen={uiStore.paletteOpen()} onClose={overlay.close}>
+    <OverlayFrame id="palette-overlay" isOpen={modal.isOpen()} onClose={modal.close}>
       <div class="palette-modal" role="dialog" aria-modal="true" aria-label="Command palette">
         <input
           id="palette-input"

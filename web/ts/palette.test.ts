@@ -51,11 +51,11 @@ describe("palette", () => {
 
   it("palette lifecycle", () => {
     // Initially closed
-    expect(uiStore.paletteOpen()).toBeFalsy();
+    expect(uiStore.paletteVisibleOpen()).toBeFalsy();
 
     // Open
     uiStore.openPalette();
-    expect(uiStore.paletteOpen()).toBeTruthy();
+    expect(uiStore.paletteVisibleOpen()).toBeTruthy();
     const overlay = document.querySelector("#palette-overlay")!;
     expect(overlay.classList.contains("hidden")).toBeFalsy();
 
@@ -66,12 +66,12 @@ describe("palette", () => {
 
     // Toggle closes
     uiStore.togglePalette();
-    expect(uiStore.paletteOpen()).toBeFalsy();
+    expect(uiStore.paletteVisibleOpen()).toBeFalsy();
     expect(overlay.classList.contains("hidden")).toBeTruthy();
 
     // Toggle opens again
     uiStore.togglePalette();
-    expect(uiStore.paletteOpen()).toBeTruthy();
+    expect(uiStore.paletteVisibleOpen()).toBeTruthy();
 
     // Filter via input
     const input = document.querySelector("#palette-input")! as HTMLInputElement;
@@ -89,7 +89,7 @@ describe("palette", () => {
     uiStore.closePalette();
     uiStore.openPalette();
     input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
-    expect(uiStore.paletteOpen()).toBeFalsy();
+    expect(uiStore.paletteVisibleOpen()).toBeFalsy();
 
     // Keyboard: Enter selects
     uiStore.openPalette();
@@ -98,7 +98,7 @@ describe("palette", () => {
     actionCalled = false;
     input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
     expect(actionCalled).toBeTruthy();
-    expect(uiStore.paletteOpen()).toBeFalsy();
+    expect(uiStore.paletteVisibleOpen()).toBeFalsy();
 
     // Keyboard: ArrowDown moves selection
     uiStore.openPalette();
@@ -123,7 +123,7 @@ describe("palette", () => {
     const saveItem = listEl.children[0]! as HTMLElement;
     saveItem.click();
     expect(actionCalled).toBeTruthy();
-    expect(uiStore.paletteOpen()).toBeFalsy();
+    expect(uiStore.paletteVisibleOpen()).toBeFalsy();
   });
 
   it("matchesKey correctly matches keyboard events", async () => {
@@ -241,11 +241,11 @@ describe("palette", () => {
 
   it("backdrop click (click on overlay but not modal) closes palette", () => {
     uiStore.openPalette();
-    expect(uiStore.paletteOpen()).toBeTruthy();
+    expect(uiStore.paletteVisibleOpen()).toBeTruthy();
 
     const overlay = document.querySelector("#palette-overlay")! as HTMLElement;
     overlay.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    expect(uiStore.paletteOpen()).toBeFalsy();
+    expect(uiStore.paletteVisibleOpen()).toBeFalsy();
   });
 
   it("filter with no matches renders empty list", () => {
@@ -281,7 +281,7 @@ describe("palette", () => {
       // action threw; palette should already be closed before the action ran
     }
 
-    expect(uiStore.paletteOpen()).toBeFalsy();
+    expect(uiStore.paletteVisibleOpen()).toBeFalsy();
 
     commands = buildCommands();
   });
