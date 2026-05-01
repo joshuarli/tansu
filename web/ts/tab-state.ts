@@ -4,7 +4,7 @@ import { stemFromPath } from "@joshuarli98/md-wysiwyg";
 import { batch, createSignal } from "solid-js";
 
 import type { SessionState } from "./api.ts";
-import { MAX_CLOSED_TABS } from "./constants.ts";
+import { getVaultSettings } from "./settings.ts";
 import {
   cacheNoteSnapshot,
   fetchNoteWithOfflineFallback,
@@ -149,7 +149,7 @@ export function createTabsStore() {
       }
 
       closedTabs.push(tab.path);
-      if (closedTabs.length > MAX_CLOSED_TABS) {
+      if (closedTabs.length > getVaultSettings().sessionMaxClosedTabs) {
         closedTabs.shift();
       }
       cacheNoteSnapshot(getActiveVaultIndex(), tab.path, tab.content, tab.mtime, tab.tags);
@@ -293,7 +293,7 @@ export function createTabsStore() {
 
       closedTabs.length = 0;
       if (state.closed?.length) {
-        closedTabs.push(...state.closed.slice(-MAX_CLOSED_TABS));
+        closedTabs.push(...state.closed.slice(-getVaultSettings().sessionMaxClosedTabs));
       }
       cursors = state.cursors ? { ...state.cursors } : {};
       tabs.length = 0;

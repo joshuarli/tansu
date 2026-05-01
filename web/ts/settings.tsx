@@ -1,4 +1,4 @@
-import { For, Show, createSignal } from "solid-js";
+import { For, Show, createSignal, type JSX } from "solid-js";
 
 import {
   getSettings,
@@ -10,306 +10,281 @@ import {
   type AppStatus,
   type Settings,
 } from "./api.ts";
-import {
-  SETTINGS_FUZZY_DISTANCE_DEFAULT,
-  SETTINGS_FUZZY_DISTANCE_OPTIONS,
-  SETTINGS_RECENCY_BOOST_DEFAULT,
-  SETTINGS_RECENCY_BOOST_OPTIONS,
-  SETTINGS_RESULT_LIMIT_DEFAULT,
-  SETTINGS_RESULT_LIMIT_MAX,
-  SETTINGS_RESULT_LIMIT_MIN,
-  SETTINGS_RESULT_LIMIT_STEP,
-  SETTINGS_SHOW_SCORE_BREAKDOWN_DEFAULT,
-  SETTINGS_WEIGHT_CONTENT_DEFAULT,
-  SETTINGS_WEIGHT_HEADINGS_DEFAULT,
-  SETTINGS_WEIGHT_MAX,
-  SETTINGS_WEIGHT_MIN,
-  SETTINGS_WEIGHT_STEP,
-  SETTINGS_WEIGHT_TAGS_DEFAULT,
-  SETTINGS_WEIGHT_TITLE_DEFAULT,
-} from "./constants.ts";
-import { getEditorPrefs, saveEditorPrefs, type EditorPrefs } from "./editor.ts";
 import { showInputDialog } from "./input-dialog.tsx";
-import { createManagedModal } from "./managed-modal.ts";
+import { createManagedModal } from "./modal-manager.ts";
 import { reportActionError } from "./notify.ts";
 import { OverlayFrame } from "./overlay.tsx";
+import {
+  APP_SETTINGS_SECTION_ORDER,
+  APP_SETTING_FIELDS,
+  SERVER_SETTINGS_SECTION_ORDER,
+  SERVER_SETTING_FIELDS,
+  VAULT_SETTINGS_SECTION_ORDER,
+  VAULT_SETTING_FIELDS,
+  defaultSettings,
+  getAppSettings,
+  getFieldEntries,
+  getVaultSettings,
+  normalizeExcludedFolders,
+  parseCheckboxField,
+  parseStringField,
+  saveAppSettings,
+  saveVaultSettings,
+  type AppSectionId,
+  type AppSettings,
+  type FieldEntry,
+  type FieldRegistry,
+  type SectionId,
+  type ServerSectionId,
+  type VaultSectionId,
+  type VaultSettings,
+  updateObjectField,
+} from "./settings.ts";
 import { uiStore } from "./ui-store.ts";
 import { createPrfCredential, isPrfLikelySupported } from "./webauthn.ts";
 
-const defaultSettings = (): Settings => ({
-  weight_title: SETTINGS_WEIGHT_TITLE_DEFAULT,
-  weight_headings: SETTINGS_WEIGHT_HEADINGS_DEFAULT,
-  weight_tags: SETTINGS_WEIGHT_TAGS_DEFAULT,
-  weight_content: SETTINGS_WEIGHT_CONTENT_DEFAULT,
-  fuzzy_distance: SETTINGS_FUZZY_DISTANCE_DEFAULT,
-  recency_boost: SETTINGS_RECENCY_BOOST_DEFAULT,
-  result_limit: SETTINGS_RESULT_LIMIT_DEFAULT,
-  show_score_breakdown: SETTINGS_SHOW_SCORE_BREAKDOWN_DEFAULT,
-  excluded_folders: [],
-});
-
-function normalizeExcludedFolders(values: readonly string[]): string[] {
-  return values.map((value) => value.trim()).filter((value) => value.length > 0);
-}
-
-function recencyLabel(value: number): string {
-  if (value === 0) {
-    return "Disabled";
-  }
-  if (value === 1) {
-    return "24 hours";
-  }
-  if (value === 2) {
-    return "7 days";
-  }
-  return "30 days";
-}
-
-type SettingsViewProps = {
-  current: () => Settings | null;
-  status: () => AppStatus | null;
-  onRange: (key: keyof Settings, value: string) => void;
-  onSelect: (key: keyof Settings, value: string) => void;
-  onNumber: (key: keyof Settings, value: string) => void;
-  onCheckbox: (key: keyof Settings, checked: boolean) => void;
-  onFolders: (value: string) => void;
-  onFoldersKeyDown: (e: KeyboardEvent) => void;
+type SettingsSectionsViewProps<
+  Model extends Record<string, unknown>,
+  TSection extends SectionId,
+> = {
+  title: string;
+  current: () => Model | null;
+  sections: readonly { id: TSection; title: string }[];
+  registry: FieldRegistry<Model>;
+  scope: string;
+  saveId: string;
+  cancelId: string;
+  onInput: <K extends keyof Model>(key: K, value: string) => void;
+  onToggle: <K extends keyof Model>(key: K, checked: boolean) => void;
   onSave: () => void;
   onClose: () => void;
-  onRemovePrf: (id: string) => void;
-  onAddPrf: () => void;
-  onLock: () => void;
-  securityStatus: () => string;
-  editorPrefs: () => EditorPrefs;
-  onEditorUndoStackMax: (value: string) => void;
+  extra?: () => JSX.Element;
 };
 
-function SettingsView(props: Readonly<SettingsViewProps>) {
+type ServerSettingsModalProps = {
+  onApplyVaultSettings?: () => void;
+};
+
+type AppSettingsModalProps = {
+  onApplyAppSettings?: () => void;
+};
+
+function renderField<Model extends Record<string, unknown>>(
+  entry: FieldEntry<Model>,
+  current: () => Model,
+  scope: string,
+  onInput: <K extends keyof Model>(key: K, value: string) => void,
+  onToggle: <K extends keyof Model>(key: K, checked: boolean) => void,
+  onSave: () => void,
+): JSX.Element {
+  const [key, field] = entry;
+
+  if (field.kind === "checkbox") {
+    return (
+      <label class="settings-row">
+        <span>{field.label}</span>
+        <input
+          type="checkbox"
+          data-key={String(key)}
+          data-scope={scope}
+          checked={Boolean(current()[key])}
+          onChange={(e) => onToggle(key, e.currentTarget.checked)}
+        />
+      </label>
+    );
+  }
+
+  if (field.kind === "select") {
+    return (
+      <label class="settings-row">
+        <span>{field.label}</span>
+        <select
+          data-key={String(key)}
+          data-scope={scope}
+          value={String(current()[key])}
+          onChange={(e) => onInput(key, e.currentTarget.value)}
+        >
+          <For each={field.options ?? []}>
+            {(option) => <option value={String(option.value)}>{option.label}</option>}
+          </For>
+        </select>
+      </label>
+    );
+  }
+
+  if (field.kind === "range") {
+    return (
+      <label class="settings-row">
+        <span>{field.label}</span>
+        <input
+          type="range"
+          data-key={String(key)}
+          data-scope={scope}
+          min={field.min}
+          max={field.max}
+          step={field.step}
+          value={String(current()[key])}
+          onInput={(e) => onInput(key, e.currentTarget.value)}
+        />
+        <span class="slider-value">
+          {field.format ? field.format(current()[key]) : String(current()[key])}
+        </span>
+      </label>
+    );
+  }
+
   return (
     <>
-      <Show
-        when={props.current()}
-        fallback={
-          <p style={{ padding: "1rem", color: "var(--fg-muted)", "font-size": "13px" }}>
-            Loading...
-          </p>
-        }
-      >
-        {(current) => (
-          <>
-            <h2>Settings</h2>
-            <div class="settings-section">
-              <h3>Search weights</h3>
-              <label class="settings-row">
-                <span>Title</span>
-                <input
-                  type="range"
-                  data-key="weight_title"
-                  min={SETTINGS_WEIGHT_MIN}
-                  max={SETTINGS_WEIGHT_MAX}
-                  step={SETTINGS_WEIGHT_STEP}
-                  value={current().weight_title}
-                  onInput={(e) => props.onRange("weight_title", e.currentTarget.value)}
-                />
-                <span class="slider-value">{current().weight_title}</span>
-              </label>
-              <label class="settings-row">
-                <span>Headings</span>
-                <input
-                  type="range"
-                  data-key="weight_headings"
-                  min={SETTINGS_WEIGHT_MIN}
-                  max={SETTINGS_WEIGHT_MAX}
-                  step={SETTINGS_WEIGHT_STEP}
-                  value={current().weight_headings}
-                  onInput={(e) => props.onRange("weight_headings", e.currentTarget.value)}
-                />
-                <span class="slider-value">{current().weight_headings}</span>
-              </label>
-              <label class="settings-row">
-                <span>Tags</span>
-                <input
-                  type="range"
-                  data-key="weight_tags"
-                  min={SETTINGS_WEIGHT_MIN}
-                  max={SETTINGS_WEIGHT_MAX}
-                  step={SETTINGS_WEIGHT_STEP}
-                  value={current().weight_tags}
-                  onInput={(e) => props.onRange("weight_tags", e.currentTarget.value)}
-                />
-                <span class="slider-value">{current().weight_tags}</span>
-              </label>
-              <label class="settings-row">
-                <span>Content</span>
-                <input
-                  type="range"
-                  data-key="weight_content"
-                  min={SETTINGS_WEIGHT_MIN}
-                  max={SETTINGS_WEIGHT_MAX}
-                  step={SETTINGS_WEIGHT_STEP}
-                  value={current().weight_content}
-                  onInput={(e) => props.onRange("weight_content", e.currentTarget.value)}
-                />
-                <span class="slider-value">{current().weight_content}</span>
-              </label>
-            </div>
-            <div class="settings-section">
-              <h3>Search options</h3>
-              <label class="settings-row">
-                <span>Fuzzy distance</span>
-                <select
-                  data-key="fuzzy_distance"
-                  value={String(current().fuzzy_distance)}
-                  onChange={(e) => props.onSelect("fuzzy_distance", e.currentTarget.value)}
-                >
-                  <For each={SETTINGS_FUZZY_DISTANCE_OPTIONS}>
-                    {(value) => (
-                      <option value={String(value)}>
-                        {value === 0 ? "0 (exact only)" : value}
-                      </option>
-                    )}
-                  </For>
-                </select>
-              </label>
-              <label class="settings-row">
-                <span>Recency boost</span>
-                <select
-                  data-key="recency_boost"
-                  value={String(current().recency_boost)}
-                  onChange={(e) => props.onSelect("recency_boost", e.currentTarget.value)}
-                >
-                  <For each={SETTINGS_RECENCY_BOOST_OPTIONS}>
-                    {(value) => <option value={String(value)}>{recencyLabel(value)}</option>}
-                  </For>
-                </select>
-              </label>
-              <label class="settings-row">
-                <span>Result limit</span>
-                <input
-                  type="number"
-                  data-key="result_limit"
-                  value={current().result_limit}
-                  min={SETTINGS_RESULT_LIMIT_MIN}
-                  max={SETTINGS_RESULT_LIMIT_MAX}
-                  step={SETTINGS_RESULT_LIMIT_STEP}
-                  onInput={(e) => props.onNumber("result_limit", e.currentTarget.value)}
-                />
-              </label>
-              <label class="settings-row">
-                <span>Show score breakdown</span>
-                <input
-                  type="checkbox"
-                  data-key="show_score_breakdown"
-                  checked={current().show_score_breakdown}
-                  onChange={(e) =>
-                    props.onCheckbox("show_score_breakdown", e.currentTarget.checked)
-                  }
-                />
-              </label>
-            </div>
-            <div class="settings-section">
-              <h3>Excluded folders</h3>
-              <p class="settings-hint">
-                Comma-separated folder names to exclude from indexing. Changes trigger a reindex.
-              </p>
-              <input
-                type="text"
-                data-key="excluded_folders"
-                class="settings-text"
-                value={current().excluded_folders.join(", ")}
-                placeholder="archive, drafts"
-                onInput={(e) => props.onFolders(e.currentTarget.value)}
-                onKeyDown={(e) => props.onFoldersKeyDown(e)}
-              />
-            </div>
-            <Show when={props.status()?.encrypted}>
-              <div class="settings-section">
-                <h3>Security</h3>
-                <Show
-                  when={(props.status()?.prf_credential_ids.length ?? 0) > 0}
-                  fallback={<p class="settings-hint">No biometric credentials registered.</p>}
-                >
-                  <>
-                    <p class="settings-hint">Registered biometric credentials:</p>
-                    <For each={props.status()?.prf_credential_ids ?? []}>
-                      {(id, i) => (
-                        <div class="settings-row">
-                          <span>
-                            {props.status()?.prf_credential_names[i()] || `${id.slice(0, 12)}...`}
-                          </span>
-                          <button
-                            class="prf-remove"
-                            data-id={id}
-                            onClick={() => props.onRemovePrf(id)}
-                          >
-                            Remove
-                          </button>
-                        </div>
-                      )}
-                    </For>
-                  </>
-                </Show>
-                <Show
-                  when={isPrfLikelySupported()}
-                  fallback={
-                    <p class="settings-hint">WebAuthn PRF not available in this browser.</p>
-                  }
-                >
-                  <button id="prf-add" onClick={props.onAddPrf}>
-                    Add biometric credential
-                  </button>
-                </Show>
-                <button id="lock-now" style={{ "margin-top": "8px" }} onClick={props.onLock}>
-                  Lock now
-                </button>
-                <div
-                  id="security-status"
-                  style={{
-                    "min-height": "1.6em",
-                    "font-size": "13px",
-                    color: "var(--fg-muted)",
-                  }}
-                >
-                  {props.securityStatus()}
-                </div>
-              </div>
-            </Show>
-            <div class="settings-section">
-              <h3>Editor</h3>
-              <label class="settings-row">
-                <span>Undo history</span>
-                <input
-                  type="number"
-                  min="50"
-                  max="1000"
-                  step="50"
-                  value={props.editorPrefs().undoStackMax}
-                  onInput={(e) => props.onEditorUndoStackMax(e.currentTarget.value)}
-                />
-              </label>
-            </div>
-            <div class="settings-actions">
-              <button id="settings-save" onClick={props.onSave}>
-                Save
-              </button>
-              <button id="settings-cancel" onClick={props.onClose}>
-                Cancel
-              </button>
-            </div>
-          </>
-        )}
-      </Show>
+      <Show when={field.hint}>{(hint) => <p class="settings-hint">{hint()}</p>}</Show>
+      <label class={field.kind === "text" ? "settings-text" : "settings-row"}>
+        <Show when={field.kind !== "text"}>
+          <span>{field.label}</span>
+        </Show>
+        <input
+          type={field.kind}
+          data-key={String(key)}
+          data-scope={scope}
+          class={field.kind === "text" ? "settings-text" : undefined}
+          value={field.format ? field.format(current()[key]) : String(current()[key])}
+          placeholder={field.placeholder}
+          min={field.min}
+          max={field.max}
+          step={field.step}
+          onInput={(e) => onInput(key, e.currentTarget.value)}
+          onKeyDown={(e) => {
+            if (field.saveOnEnter && e.key === "Enter") {
+              e.preventDefault();
+              onSave();
+            }
+          }}
+        />
+      </label>
     </>
   );
 }
 
-type SettingsModalProps = {
-  onApplyEditorPrefs?: (prefs: EditorPrefs) => void;
-};
+function renderSection<Model extends Record<string, unknown>, TSection extends SectionId>(
+  current: () => Model,
+  sectionId: TSection,
+  registry: FieldRegistry<Model>,
+  scope: string,
+  onInput: <K extends keyof Model>(key: K, value: string) => void,
+  onToggle: <K extends keyof Model>(key: K, checked: boolean) => void,
+  onSave: () => void,
+): JSX.Element {
+  const fields = getFieldEntries(registry).filter(([, field]) => field.section === sectionId);
+  return (
+    <For each={fields}>
+      {(entry) => renderField(entry, current, scope, onInput, onToggle, onSave)}
+    </For>
+  );
+}
 
-export function SettingsModal(props: Readonly<SettingsModalProps> = {}) {
+function SettingsSectionsView<Model extends Record<string, unknown>, TSection extends SectionId>(
+  props: Readonly<SettingsSectionsViewProps<Model, TSection>>,
+) {
+  return (
+    <Show
+      when={props.current()}
+      fallback={
+        <p style={{ padding: "1rem", color: "var(--fg-muted)", "font-size": "13px" }}>Loading...</p>
+      }
+    >
+      {(current) => (
+        <>
+          <h2>{props.title}</h2>
+          <For each={props.sections}>
+            {(section) => (
+              <div class="settings-section">
+                <h3>{section.title}</h3>
+                {renderSection(
+                  current,
+                  section.id,
+                  props.registry,
+                  props.scope,
+                  props.onInput,
+                  props.onToggle,
+                  props.onSave,
+                )}
+              </div>
+            )}
+          </For>
+          <Show when={props.extra}>{(extra) => extra()()}</Show>
+          <div class="settings-actions">
+            <button id={props.saveId} onClick={props.onSave}>
+              Save
+            </button>
+            <button id={props.cancelId} onClick={props.onClose}>
+              Cancel
+            </button>
+          </div>
+        </>
+      )}
+    </Show>
+  );
+}
+
+function ServerSecuritySection(
+  props: Readonly<{
+    status: () => AppStatus | null;
+    securityStatus: () => string;
+    onRemovePrf: (id: string) => void;
+    onAddPrf: () => void;
+    onLock: () => void;
+  }>,
+) {
+  return (
+    <Show when={props.status()?.encrypted}>
+      <div class="settings-section">
+        <h3>Security</h3>
+        <Show
+          when={(props.status()?.prf_credential_ids.length ?? 0) > 0}
+          fallback={<p class="settings-hint">No biometric credentials registered.</p>}
+        >
+          <>
+            <p class="settings-hint">Registered biometric credentials:</p>
+            <For each={props.status()?.prf_credential_ids ?? []}>
+              {(id, i) => (
+                <div class="settings-row">
+                  <span>
+                    {props.status()?.prf_credential_names[i()] || `${id.slice(0, 12)}...`}
+                  </span>
+                  <button class="prf-remove" data-id={id} onClick={() => props.onRemovePrf(id)}>
+                    Remove
+                  </button>
+                </div>
+              )}
+            </For>
+          </>
+        </Show>
+        <Show
+          when={isPrfLikelySupported()}
+          fallback={<p class="settings-hint">WebAuthn PRF not available in this browser.</p>}
+        >
+          <button id="prf-add" onClick={props.onAddPrf}>
+            Add biometric credential
+          </button>
+        </Show>
+        <button id="lock-now" style={{ "margin-top": "8px" }} onClick={props.onLock}>
+          Lock now
+        </button>
+        <div
+          id="security-status"
+          style={{
+            "min-height": "1.6em",
+            "font-size": "13px",
+            color: "var(--fg-muted)",
+          }}
+        >
+          {props.securityStatus()}
+        </div>
+      </div>
+    </Show>
+  );
+}
+
+export function SettingsModal() {
   const [current, setCurrent] = createSignal<Settings | null>(null);
-  const [editorPrefs, setEditorPrefs] = createSignal<EditorPrefs>(getEditorPrefs());
   const [status, setStatus] = createSignal<AppStatus | null>(null);
   const [securityStatus, setSecurityStatus] = createSignal("");
 
@@ -319,7 +294,6 @@ export function SettingsModal(props: Readonly<SettingsModalProps> = {}) {
 
   async function open() {
     setSecurityStatus("");
-    setEditorPrefs(getEditorPrefs());
     try {
       setCurrent(await getSettings());
     } catch {
@@ -341,12 +315,8 @@ export function SettingsModal(props: Readonly<SettingsModalProps> = {}) {
       ...snapshot,
       excluded_folders: normalizeExcludedFolders(snapshot.excluded_folders),
     };
-
     try {
       await saveSettings(updated);
-      const nextEditorPrefs = editorPrefs();
-      saveEditorPrefs(nextEditorPrefs);
-      props.onApplyEditorPrefs?.(nextEditorPrefs);
       setCurrent(updated);
       close();
     } catch (error) {
@@ -390,6 +360,22 @@ export function SettingsModal(props: Readonly<SettingsModalProps> = {}) {
     close();
   }
 
+  function updateServerSetting<K extends keyof Settings>(key: K, rawValue: string) {
+    setCurrent((prev) =>
+      prev
+        ? updateObjectField(prev, key, parseStringField(SERVER_SETTING_FIELDS, key, rawValue))
+        : prev,
+    );
+  }
+
+  function toggleServerSetting<K extends keyof Settings>(key: K, checked: boolean) {
+    setCurrent((prev) =>
+      prev
+        ? updateObjectField(prev, key, parseCheckboxField(SERVER_SETTING_FIELDS, key, checked))
+        : prev,
+    );
+  }
+
   const modal = createManagedModal({
     id: "settings",
     isRequestedOpen: uiStore.isSettingsRequestedOpen,
@@ -400,60 +386,199 @@ export function SettingsModal(props: Readonly<SettingsModalProps> = {}) {
   });
 
   return (
-    <OverlayFrame id="settings-overlay" isOpen={modal.isOpen()} onClose={modal.close}>
-      <div id="settings-panel" role="dialog" aria-modal="true" aria-label="Settings">
-        <SettingsView
-          current={current}
-          status={status}
-          securityStatus={securityStatus}
-          onRange={(key, value) => {
-            setCurrent((prev) => (prev ? { ...prev, [key]: Number.parseFloat(value) } : prev));
-          }}
-          onSelect={(key, value) => {
-            setCurrent((prev) => (prev ? { ...prev, [key]: Number.parseInt(value, 10) } : prev));
-          }}
-          onNumber={(key, value) => {
-            setCurrent((prev) => (prev ? { ...prev, [key]: Number.parseInt(value, 10) } : prev));
-          }}
-          onCheckbox={(key, checked) => {
-            setCurrent((prev) => (prev ? { ...prev, [key]: checked } : prev));
-          }}
-          onFolders={(value) => {
-            setCurrent((prev) =>
-              prev
-                ? {
-                    ...prev,
-                    excluded_folders: normalizeExcludedFolders(value.split(",")),
-                  }
-                : prev,
-            );
-          }}
-          onFoldersKeyDown={(e) => {
-            if (e.key === "Enter") {
-              e.preventDefault();
+    <Show when={modal.shouldRender()}>
+      <OverlayFrame id="settings-overlay" isOpen={modal.isOpen()} onClose={modal.close}>
+        <div
+          id="settings-panel"
+          class="settings-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Server settings"
+        >
+          <SettingsSectionsView<Settings, ServerSectionId>
+            title="Server settings"
+            current={current}
+            sections={SERVER_SETTINGS_SECTION_ORDER}
+            registry={SERVER_SETTING_FIELDS}
+            scope="server-setting"
+            saveId="settings-save"
+            cancelId="settings-cancel"
+            onInput={updateServerSetting}
+            onToggle={toggleServerSetting}
+            onSave={() => {
               void save();
-            }
-          }}
-          onSave={() => {
-            void save();
-          }}
-          onClose={close}
-          onRemovePrf={(id) => {
-            void removeCredential(id);
-          }}
-          onAddPrf={() => {
-            void addCredential();
-          }}
-          onLock={() => {
-            void lockNow();
-          }}
-          editorPrefs={editorPrefs}
-          onEditorUndoStackMax={(value) => {
-            const n = Number.parseInt(value, 10);
-            if (!Number.isNaN(n)) setEditorPrefs((prev) => ({ ...prev, undoStackMax: n }));
-          }}
-        />
-      </div>
-    </OverlayFrame>
+            }}
+            onClose={close}
+            extra={() => (
+              <ServerSecuritySection
+                status={status}
+                securityStatus={securityStatus}
+                onRemovePrf={(id) => {
+                  void removeCredential(id);
+                }}
+                onAddPrf={() => {
+                  void addCredential();
+                }}
+                onLock={() => {
+                  void lockNow();
+                }}
+              />
+            )}
+          />
+        </div>
+      </OverlayFrame>
+    </Show>
+  );
+}
+
+export function VaultSettingsModal(props: Readonly<ServerSettingsModalProps> = {}) {
+  const [current, setCurrent] = createSignal<VaultSettings | null>(null);
+
+  function close() {
+    uiStore.closeVaultSettings();
+  }
+
+  function open() {
+    setCurrent(getVaultSettings());
+  }
+
+  function save() {
+    const snapshot = current();
+    if (!snapshot) {
+      return;
+    }
+    const updated: VaultSettings = {
+      ...snapshot,
+      formatToolbarHeadingLevels: [...snapshot.formatToolbarHeadingLevels],
+    };
+    saveVaultSettings(updated);
+    props.onApplyVaultSettings?.();
+    setCurrent(updated);
+    close();
+  }
+
+  function updateVaultSetting<K extends keyof VaultSettings>(key: K, rawValue: string) {
+    const nextValue = parseStringField(VAULT_SETTING_FIELDS, key, rawValue);
+    if (typeof nextValue === "number" && Number.isNaN(nextValue)) {
+      return;
+    }
+    setCurrent((prev) => (prev ? updateObjectField(prev, key, nextValue) : prev));
+  }
+
+  function toggleVaultSetting<K extends keyof VaultSettings>(key: K, checked: boolean) {
+    setCurrent((prev) =>
+      prev
+        ? updateObjectField(prev, key, parseCheckboxField(VAULT_SETTING_FIELDS, key, checked))
+        : prev,
+    );
+  }
+
+  const modal = createManagedModal({
+    id: "vault-settings",
+    isRequestedOpen: uiStore.isVaultSettingsRequestedOpen,
+    onOpen: open,
+    onClose: close,
+  });
+
+  return (
+    <Show when={modal.shouldRender()}>
+      <OverlayFrame id="vault-settings-overlay" isOpen={modal.isOpen()} onClose={modal.close}>
+        <div
+          id="vault-settings-panel"
+          class="settings-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Vault settings"
+        >
+          <SettingsSectionsView<VaultSettings, VaultSectionId>
+            title="Vault settings"
+            current={current}
+            sections={VAULT_SETTINGS_SECTION_ORDER}
+            registry={VAULT_SETTING_FIELDS}
+            scope="vault-setting"
+            saveId="vault-settings-save"
+            cancelId="vault-settings-cancel"
+            onInput={updateVaultSetting}
+            onToggle={toggleVaultSetting}
+            onSave={save}
+            onClose={close}
+          />
+        </div>
+      </OverlayFrame>
+    </Show>
+  );
+}
+
+export function AppSettingsModal(props: Readonly<AppSettingsModalProps> = {}) {
+  const [current, setCurrent] = createSignal<AppSettings | null>(null);
+
+  function close() {
+    uiStore.closeAppSettings();
+  }
+
+  function open() {
+    setCurrent(getAppSettings());
+  }
+
+  function save() {
+    const snapshot = current();
+    if (!snapshot) {
+      return;
+    }
+    saveAppSettings(snapshot);
+    props.onApplyAppSettings?.();
+    setCurrent(snapshot);
+    close();
+  }
+
+  function updateAppSetting<K extends keyof AppSettings>(key: K, rawValue: string) {
+    const nextValue = parseStringField(APP_SETTING_FIELDS, key, rawValue);
+    if (typeof nextValue === "number" && Number.isNaN(nextValue)) {
+      return;
+    }
+    setCurrent((prev) => (prev ? updateObjectField(prev, key, nextValue) : prev));
+  }
+
+  function toggleAppSetting<K extends keyof AppSettings>(key: K, checked: boolean) {
+    setCurrent((prev) =>
+      prev
+        ? updateObjectField(prev, key, parseCheckboxField(APP_SETTING_FIELDS, key, checked))
+        : prev,
+    );
+  }
+
+  const modal = createManagedModal({
+    id: "app-settings",
+    isRequestedOpen: uiStore.isAppSettingsRequestedOpen,
+    onOpen: open,
+    onClose: close,
+  });
+
+  return (
+    <Show when={modal.shouldRender()}>
+      <OverlayFrame id="app-settings-overlay" isOpen={modal.isOpen()} onClose={modal.close}>
+        <div
+          id="app-settings-panel"
+          class="settings-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-label="App settings"
+        >
+          <SettingsSectionsView<AppSettings, AppSectionId>
+            title="App settings"
+            current={current}
+            sections={APP_SETTINGS_SECTION_ORDER}
+            registry={APP_SETTING_FIELDS}
+            scope="app-setting"
+            saveId="app-settings-save"
+            cancelId="app-settings-cancel"
+            onInput={updateAppSetting}
+            onToggle={toggleAppSetting}
+            onSave={save}
+            onClose={close}
+          />
+        </div>
+      </OverlayFrame>
+    </Show>
   );
 }

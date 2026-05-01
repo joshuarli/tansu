@@ -2,6 +2,7 @@ export type KeyBinding = {
   key: string;
   meta?: boolean;
   shift?: boolean;
+  alt?: boolean;
 };
 
 export type Command = {
@@ -17,5 +18,7 @@ export function matchesKey(e: KeyboardEvent, k: Readonly<KeyBinding>): boolean {
   if (!k.meta && meta) return false;
   if (k.shift && !e.shiftKey) return false;
   if (!k.shift && e.shiftKey) return false;
+  if (k.alt && !e.altKey) return false;
+  if (!k.alt && e.altKey) return false;
   return e.key === k.key;
 }

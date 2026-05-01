@@ -1,7 +1,7 @@
 import { createSignal } from "solid-js";
 
-import { NOTIFICATION_AUTO_DISMISS_MS } from "./constants.ts";
 import { createModalManager, modalManager } from "./modal-manager.ts";
+import { getVaultSettings } from "./settings.ts";
 
 export type NotificationState = {
   hidden: boolean;
@@ -15,7 +15,9 @@ export function createUiStore(manager: ModalManager = modalManager) {
   const [isSearchRequestedOpen, setSearchRequestedOpen] = createSignal(false);
   const [searchScopePath, setSearchScopePath] = createSignal<string | null>(null);
   const [isPaletteRequestedOpen, setPaletteRequestedOpen] = createSignal(false);
+  const [isAppSettingsRequestedOpen, setAppSettingsRequestedOpen] = createSignal(false);
   const [isSettingsRequestedOpen, setSettingsRequestedOpen] = createSignal(false);
+  const [isVaultSettingsRequestedOpen, setVaultSettingsRequestedOpen] = createSignal(false);
   const [serverStatus, setServerStatusSignal] = createSignal("");
   const [notification, setNotification] = createSignal<NotificationState>({
     hidden: true,
@@ -40,7 +42,7 @@ export function createUiStore(manager: ModalManager = modalManager) {
   function showNotification(
     msg: string,
     type: "error" | "info" | "success" = "error",
-    autoDismissMs = NOTIFICATION_AUTO_DISMISS_MS,
+    autoDismissMs = getVaultSettings().notificationAutoDismissMs,
   ) {
     clearNotificationTimer();
     setNotification({ hidden: false, msg, type });
@@ -58,8 +60,16 @@ export function createUiStore(manager: ModalManager = modalManager) {
     setPaletteRequestedOpen(false);
   }
 
+  function resetAppSettingsModal() {
+    setAppSettingsRequestedOpen(false);
+  }
+
   function resetSettingsModal() {
     setSettingsRequestedOpen(false);
+  }
+
+  function resetVaultSettingsModal() {
+    setVaultSettingsRequestedOpen(false);
   }
 
   return {
@@ -68,8 +78,13 @@ export function createUiStore(manager: ModalManager = modalManager) {
     searchScopePath,
     paletteVisibleOpen: () => isPaletteRequestedOpen() && manager.isActive("palette"),
     isPaletteRequestedOpen,
+    appSettingsVisibleOpen: () => isAppSettingsRequestedOpen() && manager.isActive("app-settings"),
+    isAppSettingsRequestedOpen,
     settingsVisibleOpen: () => isSettingsRequestedOpen() && manager.isActive("settings"),
     isSettingsRequestedOpen,
+    vaultSettingsVisibleOpen: () =>
+      isVaultSettingsRequestedOpen() && manager.isActive("vault-settings"),
+    isVaultSettingsRequestedOpen,
     serverStatus,
     notification,
     openSearch(scopePath?: string) {
@@ -108,6 +123,23 @@ export function createUiStore(manager: ModalManager = modalManager) {
         setPaletteRequestedOpen(true);
       }
     },
+    openAppSettings() {
+      manager.replace("app-settings", resetAppSettingsModal);
+      setAppSettingsRequestedOpen(true);
+    },
+    closeAppSettings() {
+      resetAppSettingsModal();
+      manager.close("app-settings", { skipDismiss: true });
+    },
+    toggleAppSettings() {
+      if (isAppSettingsRequestedOpen()) {
+        resetAppSettingsModal();
+        manager.close("app-settings", { skipDismiss: true });
+      } else {
+        manager.replace("app-settings", resetAppSettingsModal);
+        setAppSettingsRequestedOpen(true);
+      }
+    },
     openSettings() {
       manager.replace("settings", resetSettingsModal);
       setSettingsRequestedOpen(true);
@@ -123,6 +155,31 @@ export function createUiStore(manager: ModalManager = modalManager) {
       } else {
         manager.replace("settings", resetSettingsModal);
         setSettingsRequestedOpen(true);
+      }
+    },
+    openServerSettings() {
+      manager.replace("settings", resetSettingsModal);
+      setSettingsRequestedOpen(true);
+    },
+    closeServerSettings() {
+      resetSettingsModal();
+      manager.close("settings", { skipDismiss: true });
+    },
+    openVaultSettings() {
+      manager.replace("vault-settings", resetVaultSettingsModal);
+      setVaultSettingsRequestedOpen(true);
+    },
+    closeVaultSettings() {
+      resetVaultSettingsModal();
+      manager.close("vault-settings", { skipDismiss: true });
+    },
+    toggleVaultSettings() {
+      if (isVaultSettingsRequestedOpen()) {
+        resetVaultSettingsModal();
+        manager.close("vault-settings", { skipDismiss: true });
+      } else {
+        manager.replace("vault-settings", resetVaultSettingsModal);
+        setVaultSettingsRequestedOpen(true);
       }
     },
     setServerStatus(msg: string) {

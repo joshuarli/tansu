@@ -23,7 +23,9 @@ export function createAppCommands(opts: Readonly<AppCommandsOptions>): readonly 
     closeActiveTab,
     nextTab,
     prevTab,
-    openSettings: () => uiStore.openSettings(),
+    openAppSettings: () => uiStore.openAppSettings(),
+    openServerSettings: () => uiStore.openServerSettings(),
+    openVaultSettings: () => uiStore.openVaultSettings(),
   });
 }
 

@@ -1,9 +1,21 @@
-import { createSignal } from "solid-js";
+import { createEffect, createSignal, on, type Accessor } from "solid-js";
 
-export type ExclusiveModalId = "palette" | "search" | "settings";
+export type ExclusiveModalId =
+  | "palette"
+  | "search"
+  | "settings"
+  | "vault-settings"
+  | "app-settings";
 export type StackableModalId = "alert-dialog" | "input-dialog";
 export type ModalId = ExclusiveModalId | StackableModalId;
 export type ModalOpenMode = "replace" | "stack";
+
+type ManagedModalOptions = {
+  id: ModalId;
+  isRequestedOpen: Accessor<boolean>;
+  onOpen?: () => void;
+  onClose: () => void;
+};
 
 type ModalEntry = {
   id: ModalId;
@@ -94,6 +106,25 @@ export function createModalManager() {
     push,
     close,
     closeTop,
+  };
+}
+
+export function createManagedModal(opts: Readonly<ManagedModalOptions>) {
+  const shouldRender = () => opts.isRequestedOpen();
+  const isOpen = () => opts.isRequestedOpen() && modalManager.isActive(opts.id);
+
+  createEffect(
+    on(opts.isRequestedOpen, (requestedOpen, wasOpen) => {
+      if (requestedOpen && !wasOpen) {
+        opts.onOpen?.();
+      }
+    }),
+  );
+
+  return {
+    shouldRender,
+    isOpen,
+    close: opts.onClose,
   };
 }
 

@@ -1,4 +1,4 @@
-import { IMAGE_RESIZE_MIN_WIDTH_PX, IMAGE_RESIZE_WHEEL_SCALE } from "./constants.ts";
+import { getAppSettings } from "./settings.ts";
 
 export function initImageResize(editorContent: HTMLElement, onResize: () => void): () => void {
   let hoveredImg: HTMLImageElement | null = null;
@@ -20,8 +20,8 @@ export function initImageResize(editorContent: HTMLElement, onResize: () => void
     const img = target as HTMLImageElement;
     const currentWidth = img.getBoundingClientRect().width;
     const newWidth = Math.max(
-      IMAGE_RESIZE_MIN_WIDTH_PX,
-      Math.round(currentWidth - e.deltaY * IMAGE_RESIZE_WHEEL_SCALE),
+      getAppSettings().imageResizeMinWidthPx,
+      Math.round(currentWidth - e.deltaY * getAppSettings().imageResizeWheelScale),
     );
     img.setAttribute("width", String(newWidth));
     if (hoveredImg === img) {
@@ -108,7 +108,10 @@ export function initImageResize(editorContent: HTMLElement, onResize: () => void
     const dx = e.clientX - dragStartX;
     // west handles: dragging left increases width (negative dx = bigger)
     const sign = dragDir.includes("w") ? -1 : 1;
-    const newWidth = Math.max(IMAGE_RESIZE_MIN_WIDTH_PX, Math.round(dragStartWidth + sign * dx));
+    const newWidth = Math.max(
+      getAppSettings().imageResizeMinWidthPx,
+      Math.round(dragStartWidth + sign * dx),
+    );
     hoveredImg.setAttribute("width", String(newWidth));
     positionOverlay(hoveredImg);
     onResize();

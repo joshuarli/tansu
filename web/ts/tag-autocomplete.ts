@@ -1,9 +1,5 @@
 import { listTags } from "./api.ts";
-import {
-  TAG_AUTOCOMPLETE_MAX_RESULTS,
-  TAG_AUTOCOMPLETE_OFFSET_PX,
-  TAG_AUTOCOMPLETE_MIN_WIDTH_PX,
-} from "./constants.ts";
+import { getVaultSettings } from "./settings.ts";
 
 type TagSelection = (tag: string) => void;
 
@@ -141,7 +137,7 @@ async function showDropdown(target: InputTarget, query: string, currentRequestId
   const availableTags = allTags.filter((tag) => !target.selectedTags.includes(tag));
   const normalizedQuery = normalizeTagInput(query);
   const items: Item[] = rankTags(availableTags, normalizedQuery)
-    .slice(0, TAG_AUTOCOMPLETE_MAX_RESULTS)
+    .slice(0, getVaultSettings().tagAutocompleteMaxResults)
     .map((tag) => ({ kind: "existing", tag, label: `#${tag}` }));
   if (normalizedQuery && !items.some((item) => item.tag === normalizedQuery)) {
     items.push({ kind: "create", tag: normalizedQuery, label: `Create #${normalizedQuery}` });
@@ -156,8 +152,8 @@ async function showDropdown(target: InputTarget, query: string, currentRequestId
   autocompleteEl.className = "autocomplete";
   const rect = target.inputEl.getBoundingClientRect();
   autocompleteEl.style.left = `${rect.left}px`;
-  autocompleteEl.style.top = `${rect.bottom + TAG_AUTOCOMPLETE_OFFSET_PX}px`;
-  autocompleteEl.style.minWidth = `${Math.max(rect.width, TAG_AUTOCOMPLETE_MIN_WIDTH_PX)}px`;
+  autocompleteEl.style.top = `${rect.bottom + getVaultSettings().tagAutocompleteOffsetPx}px`;
+  autocompleteEl.style.minWidth = `${Math.max(rect.width, getVaultSettings().tagAutocompleteMinWidthPx)}px`;
 
   let selectedIndex = 0;
   for (const [index, item] of items.entries()) {

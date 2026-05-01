@@ -1284,7 +1284,8 @@ describe("editor", () => {
 
   it("autosave defers then fires when selection becomes collapsed", async () => {
     const { openTab, getTabs, closeTab } = await import("./tab-state.ts");
-    const { AUTOSAVE_DELAY_MS, AUTOSAVE_RETRY_DELAY_MS } = await import("./constants.ts");
+    const { getVaultSettings } = await import("./settings.ts");
+    const settings = getVaultSettings();
     mock.on("GET", "/api/note", { content: "# Defer Test", mtime: 1000 });
     mock.on("PUT", "/api/note", { mtime: 2001 });
     await openTab("defer-autosave.md");
@@ -1317,8 +1318,8 @@ describe("editor", () => {
 
       contentEl.dispatchEvent(new Event("input", { bubbles: true }));
 
-      // Advance past AUTOSAVE_DELAY_MS — tryAutosave should defer because selection is active
-      vi.advanceTimersByTime(AUTOSAVE_DELAY_MS + 1);
+      // Advance past the autosave delay — tryAutosave should defer because selection is active
+      vi.advanceTimersByTime(settings.autosaveDelayMs + 1);
 
       const savesAfterDefer =
         mock.requests.filter((r) => r.method === "PUT" && r.url.includes("/api/note")).length -
@@ -1327,7 +1328,7 @@ describe("editor", () => {
 
       // Restore real getSelection — retry should save (selection is now collapsed)
       window.getSelection = origGetSelection;
-      vi.advanceTimersByTime(AUTOSAVE_RETRY_DELAY_MS + 1);
+      vi.advanceTimersByTime(settings.autosaveRetryDelayMs + 1);
     } finally {
       // Always restore — prevents mock from leaking to other tests if assertion fails
       window.getSelection = origGetSelection;
@@ -1467,7 +1468,8 @@ describe("editor", () => {
   });
 
   it("autosave timer debounces rapid inputs and fires exactly once", async () => {
-    const { AUTOSAVE_DELAY_MS } = await import("./constants.ts");
+    const { getVaultSettings } = await import("./settings.ts");
+    const settings = getVaultSettings();
     const { openTab, getTabs, closeTab } = await import("./tab-state.ts");
     mock.on("GET", "/api/note", { content: "# Debounce", mtime: 1000 });
     mock.on("PUT", "/api/note", { mtime: 9001 });
@@ -1488,20 +1490,20 @@ describe("editor", () => {
       contentEl.dispatchEvent(new Event("input", { bubbles: true }));
 
       // Advance partway — no save yet
-      vi.advanceTimersByTime(AUTOSAVE_DELAY_MS / 2);
+      vi.advanceTimersByTime(settings.autosaveDelayMs / 2);
 
       // Second input resets the debounce timer
       contentEl.dispatchEvent(new Event("input", { bubbles: true }));
 
       // Advance to just before the second timer would fire — still no save
-      vi.advanceTimersByTime(AUTOSAVE_DELAY_MS / 2);
+      vi.advanceTimersByTime(settings.autosaveDelayMs / 2);
       const savesMid =
         mock.requests.filter((r) => r.method === "PUT" && r.url.includes("/api/note")).length -
         saveBefore;
       expect(savesMid).toBe(0);
 
       // Advance past the full second timer — autosave fires
-      vi.advanceTimersByTime(AUTOSAVE_DELAY_MS);
+      vi.advanceTimersByTime(settings.autosaveDelayMs);
     } finally {
       vi.useRealTimers();
     }

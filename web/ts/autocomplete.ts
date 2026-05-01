@@ -3,7 +3,7 @@
 import { clampNodeOffset, stemFromPath } from "@joshuarli98/md-wysiwyg";
 
 import { listNotes, type NoteEntry } from "./api.ts";
-import { AUTOCOMPLETE_MAX_RESULTS, AUTOCOMPLETE_OFFSET_PX } from "./constants.ts";
+import { getVaultSettings } from "./settings.ts";
 import { markDirty } from "./tab-state.ts";
 
 let autocompleteEl: HTMLElement | null = null;
@@ -139,7 +139,7 @@ async function showAutocomplete({
       const title = n.title.toLowerCase();
       return stem.includes(query) || title.includes(query);
     })
-    .slice(0, AUTOCOMPLETE_MAX_RESULTS);
+    .slice(0, getVaultSettings().autocompleteMaxResults);
 
   if (filtered.length === 0) {
     clearAutocomplete();
@@ -155,7 +155,7 @@ async function showAutocomplete({
   range.setEnd(textNode, cursorPos);
   const rect = range.getBoundingClientRect();
   autocompleteEl.style.left = `${rect.left}px`;
-  autocompleteEl.style.top = `${rect.bottom + AUTOCOMPLETE_OFFSET_PX}px`;
+  autocompleteEl.style.top = `${rect.bottom + getVaultSettings().autocompleteOffsetPx}px`;
 
   let selectedIdx = 0;
 

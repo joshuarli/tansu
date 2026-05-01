@@ -13,13 +13,7 @@ import {
   type FormatResult,
 } from "@joshuarli98/md-wysiwyg";
 
-import {
-  FORMAT_TOOLBAR_EDGE_PADDING_PX,
-  FORMAT_TOOLBAR_GAP_PX,
-  FORMAT_TOOLBAR_HEADING_LEVELS,
-  FORMAT_TOOLBAR_ICON_SIZE_PX,
-  FORMAT_TOOLBAR_STROKE_WIDTH,
-} from "./constants.ts";
+import { getVaultSettings } from "./settings.ts";
 
 type FormatToolbarOptions = {
   contentEl: HTMLElement;
@@ -38,11 +32,15 @@ type FormatButtonsOpts = {
   applySourceFormat: (transform: (md: string, start: number, end: number) => FormatResult) => void;
 };
 
+function isHeadingLevel(level: number): level is 1 | 2 | 3 | 4 | 5 | 6 {
+  return level >= 1 && level <= 6;
+}
+
 export function populateFormatButtons(container: HTMLElement, opts: FormatButtonsOpts): void {
   const { applyIndent, afterInline, afterBlock, applySourceFormat } = opts;
   const afterIndent = opts.afterIndent ?? (() => void 0);
-  const size = FORMAT_TOOLBAR_ICON_SIZE_PX;
-  const strokeWidth = FORMAT_TOOLBAR_STROKE_WIDTH;
+  const size = getVaultSettings().formatToolbarIconSizePx;
+  const strokeWidth = getVaultSettings().formatToolbarStrokeWidth;
 
   function btn(innerHTML: string, title: string, action: () => void) {
     const el = document.createElement("button");
@@ -93,7 +91,10 @@ export function populateFormatButtons(container: HTMLElement, opts: FormatButton
 
   sep();
 
-  for (const level of FORMAT_TOOLBAR_HEADING_LEVELS) {
+  for (const level of getVaultSettings().formatToolbarHeadingLevels) {
+    if (!isHeadingLevel(level)) {
+      continue;
+    }
     btn(`<span class="ftb-heading">H${level}</span>`, `Heading ${level}`, () => {
       applySourceFormat((md, start) => toggleHeading(md, start, level));
       afterBlock();
@@ -256,18 +257,16 @@ function positionToolbar(toolbar: HTMLElement, range: Range) {
   }
 
   const tbRect = toolbar.getBoundingClientRect();
-  const GAP = FORMAT_TOOLBAR_GAP_PX;
+  const gapPx = getVaultSettings().formatToolbarGapPx;
+  const edgePaddingPx = getVaultSettings().formatToolbarEdgePaddingPx;
 
-  let top = refRect.top - tbRect.height - GAP;
-  if (top < FORMAT_TOOLBAR_EDGE_PADDING_PX) {
-    top = refRect.bottom + GAP;
+  let top = refRect.top - tbRect.height - gapPx;
+  if (top < edgePaddingPx) {
+    top = refRect.bottom + gapPx;
   }
 
   let left = refRect.left - tbRect.width / 2;
-  left = Math.max(
-    FORMAT_TOOLBAR_EDGE_PADDING_PX,
-    Math.min(left, window.innerWidth - tbRect.width - FORMAT_TOOLBAR_EDGE_PADDING_PX),
-  );
+  left = Math.max(edgePaddingPx, Math.min(left, window.innerWidth - tbRect.width - edgePaddingPx));
 
   toolbar.style.top = `${top}px`;
   toolbar.style.left = `${left}px`;

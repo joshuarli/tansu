@@ -2,6 +2,7 @@ import { createEditor, type EditorHandle, escapeHtml, stemFromPath } from "@josh
 
 import { uploadImage } from "./api.ts";
 import { editorExtensions } from "./editor-config.ts";
+import { getAppSettings } from "./settings.ts";
 
 export type EditorAdapter = {
   readonly contentEl: HTMLElement;
@@ -24,7 +25,7 @@ export type EditorAdapter = {
   ): void;
   focus(): void;
   destroy(): void;
-  setConfig(config: { undoStackMax: number }): void;
+  setConfig(config: { undoStackMax: number; imageWebpQuality?: number }): void;
 };
 
 function buildImageFilename(path: string | null): string {
@@ -49,6 +50,7 @@ export function createEditorAdapter(
     onSave: () => void;
   },
 ): EditorAdapter {
+  const appSettings = getAppSettings();
   const handle: EditorHandle = createEditor(mountEl, {
     extensions: editorExtensions,
     onChange: opts.onChange,
@@ -56,6 +58,7 @@ export function createEditorAdapter(
     contentClassName: "editor-content",
     sourceClassName: "editor-source",
     undoStackMax: opts.undoStackMax,
+    imageWebpQuality: appSettings.imageWebpQuality,
     onImagePaste: async (blob) => {
       try {
         const savedName = await uploadImage(blob, buildImageFilename(opts.getCurrentPath()));

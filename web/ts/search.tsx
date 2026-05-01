@@ -1,11 +1,11 @@
 import { For, Show, createSignal } from "solid-js";
 
 import { createNote, getSettings, searchNotes, type SearchResult } from "./api.ts";
-import { SEARCH_MIN_QUERY_LENGTH, SEARCH_SCORE_PRECISION } from "./constants.ts";
 import { scrollSelectedIndexIntoView, wrapSelectionIndex } from "./listbox.ts";
-import { createManagedModal } from "./managed-modal.ts";
+import { createManagedModal } from "./modal-manager.ts";
 import { reportActionError } from "./notify.ts";
 import { OverlayFrame } from "./overlay.tsx";
+import { getVaultSettings } from "./settings.ts";
 import { setCursor } from "./tab-state.ts";
 import { uiStore } from "./ui-store.ts";
 
@@ -43,15 +43,19 @@ function Excerpt(props: Readonly<{ excerpt: string }>) {
 }
 
 function Score(props: Readonly<{ result: SearchResult }>) {
+  const settings = getVaultSettings();
   const fs = props.result.field_scores;
   const parts: string[] = [];
-  if (fs.title > 0) parts.push(`title:${fs.title.toPrecision(SEARCH_SCORE_PRECISION)}`);
-  if (fs.headings > 0) parts.push(`headings:${fs.headings.toPrecision(SEARCH_SCORE_PRECISION)}`);
-  if (fs.tags > 0) parts.push(`tags:${fs.tags.toPrecision(SEARCH_SCORE_PRECISION)}`);
-  if (fs.content > 0) parts.push(`content:${fs.content.toPrecision(SEARCH_SCORE_PRECISION)}`);
+  if (fs.title > 0) parts.push(`title:${fs.title.toPrecision(settings.searchScorePrecision)}`);
+  if (fs.headings > 0) {
+    parts.push(`headings:${fs.headings.toPrecision(settings.searchScorePrecision)}`);
+  }
+  if (fs.tags > 0) parts.push(`tags:${fs.tags.toPrecision(settings.searchScorePrecision)}`);
+  if (fs.content > 0)
+    parts.push(`content:${fs.content.toPrecision(settings.searchScorePrecision)}`);
   return (
     <div class="score">
-      {props.result.score.toPrecision(SEARCH_SCORE_PRECISION)}
+      {props.result.score.toPrecision(settings.searchScorePrecision)}
       {parts.length > 0 ? ` = ${parts.join(" + ")}` : ""}
     </div>
   );
@@ -92,7 +96,7 @@ export function SearchModal(props: Readonly<SearchModalProps>) {
 
     setQuery(trimmed);
 
-    if (trimmed.length < SEARCH_MIN_QUERY_LENGTH) {
+    if (trimmed.length < getVaultSettings().searchMinQueryLength) {
       setResults([]);
       setSelectedIndex(0);
       return;
@@ -196,61 +200,63 @@ export function SearchModal(props: Readonly<SearchModalProps>) {
   });
 
   return (
-    <OverlayFrame id="search-overlay" isOpen={modal.isOpen()} onClose={modal.close}>
-      <div class="search-modal" role="dialog" aria-modal="true" aria-label="Search notes">
-        <input
-          id="search-input"
-          ref={(el) => {
-            inputEl = el;
-          }}
-          type="text"
-          placeholder={uiStore.searchScopePath() ? "Find in note..." : "Search notes..."}
-          aria-label={uiStore.searchScopePath() ? "Find in note" : "Search notes"}
-          autocomplete="off"
-          spellcheck={false}
-          on:input={(e) => {
-            void runSearch(e.currentTarget.value);
-          }}
-          on:keydown={handleKeyDown}
-        />
-        <div
-          id="search-results"
-          ref={(el) => {
-            resultsEl = el;
-          }}
-        >
-          <For each={results()}>
-            {(result, index) => (
+    <Show when={modal.shouldRender()}>
+      <OverlayFrame id="search-overlay" isOpen={modal.isOpen()} onClose={modal.close}>
+        <div class="search-modal" role="dialog" aria-modal="true" aria-label="Search notes">
+          <input
+            id="search-input"
+            ref={(el) => {
+              inputEl = el;
+            }}
+            type="text"
+            placeholder={uiStore.searchScopePath() ? "Find in note..." : "Search notes..."}
+            aria-label={uiStore.searchScopePath() ? "Find in note" : "Search notes"}
+            autocomplete="off"
+            spellcheck={false}
+            on:input={(e) => {
+              void runSearch(e.currentTarget.value);
+            }}
+            on:keydown={handleKeyDown}
+          />
+          <div
+            id="search-results"
+            ref={(el) => {
+              resultsEl = el;
+            }}
+          >
+            <For each={results()}>
+              {(result, index) => (
+                <button
+                  type="button"
+                  class={`search-result${index() === selectedIndex() ? " selected" : ""}`}
+                  onClick={() => void selectItem(index())}
+                >
+                  <span class="title">
+                    <span>{result.title}</span>
+                    <For each={result.tags}>{(tag) => <span class="tag-pill">#{tag}</span>}</For>
+                  </span>
+                  <span class="path">{result.path}</span>
+                  <Show when={showScoreBreakdown()}>
+                    <Score result={result} />
+                  </Show>
+                  <Show when={result.excerpt}>
+                    <Excerpt excerpt={result.excerpt} />
+                  </Show>
+                </button>
+              )}
+            </For>
+            <Show when={query().length > 0 && !uiStore.searchScopePath()}>
               <button
                 type="button"
-                class={`search-result${index() === selectedIndex() ? " selected" : ""}`}
-                onClick={() => void selectItem(index())}
+                class={`search-create${selectedIndex() === results().length ? " selected" : ""}`}
+                onClick={() => void selectItem(results().length)}
               >
-                <span class="title">
-                  <span>{result.title}</span>
-                  <For each={result.tags}>{(tag) => <span class="tag-pill">#{tag}</span>}</For>
-                </span>
-                <span class="path">{result.path}</span>
-                <Show when={showScoreBreakdown()}>
-                  <Score result={result} />
-                </Show>
-                <Show when={result.excerpt}>
-                  <Excerpt excerpt={result.excerpt} />
-                </Show>
+                Create "{query()}"
               </button>
-            )}
-          </For>
-          <Show when={query().length > 0 && !uiStore.searchScopePath()}>
-            <button
-              type="button"
-              class={`search-create${selectedIndex() === results().length ? " selected" : ""}`}
-              onClick={() => void selectItem(results().length)}
-            >
-              Create "{query()}"
-            </button>
-          </Show>
+            </Show>
+          </div>
         </div>
-      </div>
-    </OverlayFrame>
+      </OverlayFrame>
+    </Show>
   );
 }

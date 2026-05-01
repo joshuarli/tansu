@@ -1,9 +1,9 @@
-import { For, createSignal } from "solid-js";
+import { For, Show, createSignal } from "solid-js";
 
 import type { Command } from "./commands.ts";
 export { matchesKey, type Command } from "./commands.ts";
 import { scrollSelectedIndexIntoView, wrapSelectionIndex } from "./listbox.ts";
-import { createManagedModal } from "./managed-modal.ts";
+import { createManagedModal } from "./modal-manager.ts";
 import { OverlayFrame } from "./overlay.tsx";
 import { uiStore } from "./ui-store.ts";
 
@@ -80,44 +80,46 @@ export function PaletteModal(props: Readonly<PaletteProps>) {
   });
 
   return (
-    <OverlayFrame id="palette-overlay" isOpen={modal.isOpen()} onClose={modal.close}>
-      <div class="palette-modal" role="dialog" aria-modal="true" aria-label="Command palette">
-        <input
-          id="palette-input"
-          ref={(el) => {
-            inputEl = el;
-          }}
-          type="text"
-          placeholder="Type a command..."
-          aria-label="Command search"
-          autocomplete="off"
-          spellcheck={false}
-          on:input={(e) => {
-            setQuery(e.currentTarget.value);
-            setSelectedIndex(0);
-          }}
-          on:keydown={handleKeyDown}
-        />
-        <div
-          id="palette-list"
-          ref={(el) => {
-            listEl = el;
-          }}
-        >
-          <For each={filtered()}>
-            {(command, index) => (
-              <button
-                type="button"
-                class={`palette-item${index() === selectedIndex() ? " selected" : ""}`}
-                onClick={() => selectCommand(command)}
-              >
-                <span class="palette-label">{command.label}</span>
-                <span class="palette-shortcut">{command.shortcut}</span>
-              </button>
-            )}
-          </For>
+    <Show when={modal.shouldRender()}>
+      <OverlayFrame id="palette-overlay" isOpen={modal.isOpen()} onClose={modal.close}>
+        <div class="palette-modal" role="dialog" aria-modal="true" aria-label="Command palette">
+          <input
+            id="palette-input"
+            ref={(el) => {
+              inputEl = el;
+            }}
+            type="text"
+            placeholder="Type a command..."
+            aria-label="Command search"
+            autocomplete="off"
+            spellcheck={false}
+            on:input={(e) => {
+              setQuery(e.currentTarget.value);
+              setSelectedIndex(0);
+            }}
+            on:keydown={handleKeyDown}
+          />
+          <div
+            id="palette-list"
+            ref={(el) => {
+              listEl = el;
+            }}
+          >
+            <For each={filtered()}>
+              {(command, index) => (
+                <button
+                  type="button"
+                  class={`palette-item${index() === selectedIndex() ? " selected" : ""}`}
+                  onClick={() => selectCommand(command)}
+                >
+                  <span class="palette-label">{command.label}</span>
+                  <span class="palette-shortcut">{command.shortcut}</span>
+                </button>
+              )}
+            </For>
+          </div>
         </div>
-      </div>
-    </OverlayFrame>
+      </OverlayFrame>
+    </Show>
   );
 }

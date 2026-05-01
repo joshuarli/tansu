@@ -1259,7 +1259,9 @@ body {
   cursor: pointer;
 }
 
-#settings-overlay {
+#settings-overlay,
+#vault-settings-overlay,
+#app-settings-overlay {
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.3);
@@ -1268,11 +1270,13 @@ body {
   padding-top: 10vh;
   z-index: 100;
 }
-#settings-overlay.hidden {
+#settings-overlay.hidden,
+#vault-settings-overlay.hidden,
+#app-settings-overlay.hidden {
   display: none;
 }
 
-#settings-panel {
+.settings-modal {
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: 12px;
@@ -1283,12 +1287,12 @@ body {
   box-shadow: 0 16px 70px rgba(0, 0, 0, 0.15);
 }
 
-#settings-panel h2 {
+.settings-modal h2 {
   font-size: 18px;
   font-weight: 600;
   margin-bottom: 20px;
 }
-#settings-panel h3 {
+.settings-modal h3 {
   font-size: 13px;
   font-weight: 600;
   color: var(--fg-muted);

@@ -10,7 +10,9 @@ type AppCommandRegistryOptions = {
   closeActiveTab: () => void;
   nextTab: () => void;
   prevTab: () => void;
-  openSettings: () => void;
+  openAppSettings: () => void;
+  openServerSettings: () => void;
+  openVaultSettings: () => void;
 };
 
 export function createAppCommandRegistry(
@@ -84,10 +86,22 @@ export function createAppCommandRegistry(
       action: () => opts.prevTab(),
     },
     {
-      label: "Settings",
-      shortcut: "⇧⌘S",
-      keys: { key: "s", meta: true, shift: true },
-      action: () => opts.openSettings(),
+      label: "App settings",
+      shortcut: "⌘,",
+      keys: { key: ",", meta: true },
+      action: () => opts.openAppSettings(),
+    },
+    {
+      label: "Vault settings",
+      shortcut: "⇧⌘,",
+      keys: { key: ",", meta: true, shift: true },
+      action: () => opts.openVaultSettings(),
+    },
+    {
+      label: "Server settings",
+      shortcut: "⌥⌘,",
+      keys: { key: ",", meta: true, alt: true },
+      action: () => opts.openServerSettings(),
     },
   ];
 }

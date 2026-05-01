@@ -7,7 +7,6 @@ export { invalidateTagCache } from "./tag-autocomplete.ts";
 import { loadBacklinks } from "./backlinks.tsx";
 import { clearConflictBanner } from "./conflict.ts";
 import { createEditorAdapter, type EditorAdapter } from "./editor-adapter.ts";
-import { getEditorPrefs, saveEditorPrefs, type EditorPrefs } from "./editor-prefs.ts";
 import {
   createSaveController,
   classifyReload,
@@ -25,6 +24,12 @@ import {
 import { toggleEditorSourceMode } from "./features/editor/source-mode.ts";
 import { initImageResize } from "./image-resize.ts";
 import { hideRevisions } from "./revisions.tsx";
+import {
+  getEditorPrefs,
+  getEditorRuntimeSettings,
+  saveEditorPrefs,
+  type EditorPrefs,
+} from "./settings.ts";
 import { getCursor, markClean, updateTabDraft } from "./tab-state.ts";
 
 export { getEditorPrefs, saveEditorPrefs, classifySaveResult, classifyReload };
@@ -38,7 +43,7 @@ export type EditorInstance = {
   saveCurrentNote(opts?: { silent?: boolean }): Promise<void>;
   reloadFromDisk(content: string, mtime: number): void;
   restoreRevision(content: string, mtime: number): void;
-  applyPrefs(prefs: EditorPrefs): void;
+  applyPrefs(): void;
   destroy(): void;
 };
 
@@ -170,7 +175,7 @@ export function initEditor(elements: Readonly<EditorElements>): EditorInstance {
     backlinksEl = elements.shellRefs.backlinksEl;
 
     handle = createEditorAdapter(elements.shellRefs.editorMountEl, {
-      undoStackMax: getEditorPrefs().undoStackMax,
+      undoStackMax: getEditorRuntimeSettings().undoStackMax,
       getCurrentPath: () => currentPath,
       onChange: onEditorTabMutation,
       onSave: () => {
@@ -224,8 +229,8 @@ export function initEditor(elements: Readonly<EditorElements>): EditorInstance {
     displayState.setType("editing");
   }
 
-  function applyPrefs(prefs: EditorPrefs) {
-    handle?.setConfig({ undoStackMax: prefs.undoStackMax });
+  function applyPrefs() {
+    handle?.setConfig(getEditorRuntimeSettings());
   }
 
   function destroy() {

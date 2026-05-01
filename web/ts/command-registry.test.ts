@@ -15,7 +15,9 @@ describe("command registry", () => {
       closeActiveTab: () => {},
       nextTab: () => {},
       prevTab: () => {},
-      openSettings: () => {},
+      openAppSettings: () => {},
+      openServerSettings: () => {},
+      openVaultSettings: () => {},
     });
 
     const importCommand = commands.find((command) => command.label === "Import HTML file");

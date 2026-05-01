@@ -11,7 +11,7 @@ import { InputDialogHost } from "./input-dialog.tsx";
 import { PaletteModal, type Command } from "./palette.tsx";
 import { SearchModal } from "./search.tsx";
 import { serverStore } from "./server-store.ts";
-import { SettingsModal } from "./settings.tsx";
+import { AppSettingsModal, SettingsModal, VaultSettingsModal } from "./settings.tsx";
 import { openTab, useTabs } from "./tab-state.ts";
 import { TabBarShell } from "./tabs.tsx";
 import { uiStore } from "./ui-store.ts";
@@ -100,9 +100,15 @@ export function App(props: Readonly<AppProps>) {
         />
       </div>
       <SearchModal openTab={openTab} invalidateNoteCache={invalidateNoteCache} />
-      <SettingsModal
-        onApplyEditorPrefs={(prefs) => {
-          editor?.applyPrefs(prefs);
+      <SettingsModal />
+      <AppSettingsModal
+        onApplyAppSettings={() => {
+          editor?.applyPrefs();
+        }}
+      />
+      <VaultSettingsModal
+        onApplyVaultSettings={() => {
+          editor?.applyPrefs();
         }}
       />
       <AlertDialogHost />

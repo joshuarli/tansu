@@ -1,7 +1,7 @@
 import { forceSaveNote, getNote, saveNote } from "./api.ts";
 import { showConflictBanner, handleReloadConflict } from "./conflict.ts";
-import { AUTOSAVE_DELAY_MS, AUTOSAVE_RETRY_DELAY_MS } from "./constants.ts";
 import { serverStore } from "./server-store.ts";
+import { getVaultSettings } from "./settings.ts";
 import {
   getActiveTab,
   getTabs,
@@ -93,7 +93,7 @@ export function createSaveController(opts: Readonly<SaveControllerOptions>) {
     if (handle && !handle.isSourceMode) {
       const selection = window.getSelection();
       if (selection && !selection.isCollapsed && handle.contentEl.contains(selection.anchorNode)) {
-        autosaveTimer = setTimeout(tryAutosave, AUTOSAVE_RETRY_DELAY_MS);
+        autosaveTimer = setTimeout(tryAutosave, getVaultSettings().autosaveRetryDelayMs);
         return;
       }
     }
@@ -102,7 +102,7 @@ export function createSaveController(opts: Readonly<SaveControllerOptions>) {
 
   function scheduleAutosave() {
     clearAutosaveTimer();
-    autosaveTimer = setTimeout(tryAutosave, AUTOSAVE_DELAY_MS);
+    autosaveTimer = setTimeout(tryAutosave, getVaultSettings().autosaveDelayMs);
   }
 
   function flushPendingAutosave() {

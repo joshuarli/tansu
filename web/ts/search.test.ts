@@ -20,6 +20,14 @@ describe("search", () => {
     await new Promise((r) => setTimeout(r, 0));
   }
 
+  function getSearchInput(): HTMLInputElement {
+    return document.querySelector("#search-input") as HTMLInputElement;
+  }
+
+  function getSearchResults(): HTMLElement {
+    return document.querySelector("#search-results") as HTMLElement;
+  }
+
   beforeAll(async () => {
     cleanup = setupDOM();
     const { delegateEvents } = await import("solid-js/web");
@@ -92,7 +100,7 @@ describe("search", () => {
     // Close
     await closeSearch();
     expect(uiStore.searchVisibleOpen()).toBeFalsy();
-    expect(overlay.classList.contains("hidden")).toBeTruthy();
+    expect(document.querySelector("#search-overlay")).toBeNull();
 
     // Toggle
     uiStore.toggleSearch();
@@ -105,26 +113,25 @@ describe("search", () => {
     // Open with scope
     await openSearch("notes/a.md");
     expect(uiStore.searchVisibleOpen()).toBeTruthy();
-    expect(input.placeholder).toBe("Find in note...");
+    expect(getSearchInput().placeholder).toBe("Find in note...");
     await closeSearch();
 
     // Open without scope
     await openSearch();
-    expect(input.placeholder).toBe("Search notes...");
+    expect(getSearchInput().placeholder).toBe("Search notes...");
 
     // Keyboard: Escape closes
-    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    getSearchInput().dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     expect(uiStore.searchVisibleOpen()).toBeFalsy();
 
     // Overlay click closes
     await openSearch();
-    overlay.click();
+    const reopenedOverlay = document.querySelector("#search-overlay") as HTMLElement;
+    reopenedOverlay.click();
     expect(uiStore.searchVisibleOpen()).toBeFalsy();
   });
 
   it("search results and keyboard nav", async () => {
-    const input = document.querySelector("#search-input")! as HTMLInputElement;
-    const resultsEl = document.querySelector("#search-results")!;
     mock.on("GET", "/api/search", [
       {
         path: "a.md",
@@ -138,6 +145,8 @@ describe("search", () => {
 
     // Type in search box → results render
     await openSearch();
+    const input = getSearchInput();
+    const resultsEl = getSearchResults();
     input.value = "alpha";
     input.dispatchEvent(new Event("input"));
     await new Promise((r) => setTimeout(r, 200));
@@ -189,11 +198,13 @@ describe("search", () => {
 
     // Click on result closes search
     await openSearch();
-    input.value = "alpha";
-    input.dispatchEvent(new Event("input"));
+    const reopenedInput = getSearchInput();
+    reopenedInput.value = "alpha";
+    reopenedInput.dispatchEvent(new Event("input"));
     await new Promise((r) => setTimeout(r, 200));
     openTabCalled = false;
-    const clickResult = resultsEl.children[0]! as HTMLElement;
+    const reopenedResultsEl = getSearchResults();
+    const clickResult = reopenedResultsEl.children[0]! as HTMLElement;
     clickResult.click();
     await new Promise((r) => setTimeout(r, 10));
     expect(uiStore.searchVisibleOpen()).toBeFalsy();
@@ -201,17 +212,15 @@ describe("search", () => {
 
     // Empty query clears results (no search results, no Create option)
     await openSearch();
-    input.value = "";
-    input.dispatchEvent(new Event("input"));
+    const finalInput = getSearchInput();
+    finalInput.value = "";
+    finalInput.dispatchEvent(new Event("input"));
     await new Promise((r) => setTimeout(r, 200));
-    expect(resultsEl.children).toHaveLength(0);
+    expect(getSearchResults().children).toHaveLength(0);
     await closeSearch();
   });
 
   it("scoped search sends the path and suppresses the create-note option", async () => {
-    const input = document.querySelector("#search-input")! as HTMLInputElement;
-    const resultsEl = document.querySelector("#search-results")!;
-
     mock.clearRequests();
     mock.on("GET", /\/api\/search\?q=alpha&path=notes%2Falpha\.md/, [
       {
@@ -225,6 +234,8 @@ describe("search", () => {
     ]);
 
     await openSearch("notes/alpha.md");
+    const input = getSearchInput();
+    const resultsEl = getSearchResults();
     input.value = "alpha";
     input.dispatchEvent(new Event("input"));
     await new Promise((r) => setTimeout(r, 200));
@@ -239,9 +250,6 @@ describe("search", () => {
   });
 
   it("score breakdown is hidden when the setting is disabled", async () => {
-    const input = document.querySelector("#search-input")! as HTMLInputElement;
-    const resultsEl = document.querySelector("#search-results")!;
-
     mock.on("GET", "/api/settings", {
       weight_title: 10,
       weight_headings: 5,
@@ -266,6 +274,8 @@ describe("search", () => {
 
     await openSearch();
     await new Promise((r) => setTimeout(r, 50));
+    const input = getSearchInput();
+    const resultsEl = getSearchResults();
     input.value = "alpha";
     input.dispatchEvent(new Event("input"));
     await new Promise((r) => setTimeout(r, 200));
@@ -290,9 +300,6 @@ describe("search", () => {
   });
 
   it("arrow navigation wraps between first and last items", async () => {
-    const input = document.querySelector("#search-input")! as HTMLInputElement;
-    const resultsEl = document.querySelector("#search-results")!;
-
     mock.on("GET", "/api/search", [
       {
         path: "a.md",
@@ -313,6 +320,8 @@ describe("search", () => {
     ]);
 
     await openSearch();
+    const input = getSearchInput();
+    const resultsEl = getSearchResults();
     input.value = "alpha";
     input.dispatchEvent(new Event("input"));
     await new Promise((r) => setTimeout(r, 200));
@@ -331,12 +340,11 @@ describe("search", () => {
   });
 
   it("search API error clears results", async () => {
-    const input = document.querySelector("#search-input")! as HTMLInputElement;
-    const resultsEl = document.querySelector("#search-results")!;
-
     mock.on("GET", "/api/search", { error: "fail" }, 500);
 
     await openSearch();
+    const input = getSearchInput();
+    const resultsEl = getSearchResults();
     input.value = "broken query";
     input.dispatchEvent(new Event("input"));
     await new Promise((r) => setTimeout(r, 200));
@@ -363,14 +371,13 @@ describe("search", () => {
   });
 
   it("create note option calls createNote API", async () => {
-    const input = document.querySelector("#search-input")! as HTMLInputElement;
-    const resultsEl = document.querySelector("#search-results")!;
-
     mock.on("GET", "/api/search", []);
     mock.on("POST", "/api/note", { mtime: 9999 });
 
     openTabCalled = false;
     await openSearch();
+    const input = getSearchInput();
+    const resultsEl = getSearchResults();
     input.value = "my new note";
     input.dispatchEvent(new Event("input"));
     await new Promise((r) => setTimeout(r, 200));
@@ -418,14 +425,13 @@ describe("search", () => {
   });
 
   it("Enter on create option creates note without clicking", async () => {
-    const input = document.querySelector("#search-input")! as HTMLInputElement;
-    const resultsEl = document.querySelector("#search-results")!;
-
     mock.on("GET", "/api/search", []);
     mock.on("POST", "/api/note", { mtime: 9999 });
 
     openTabCalled = false;
     await openSearch();
+    const input = getSearchInput();
+    const resultsEl = getSearchResults();
     input.value = "enter-create-test";
     input.dispatchEvent(new Event("input"));
     await new Promise((r) => setTimeout(r, 200));
@@ -456,9 +462,6 @@ describe("search", () => {
   });
 
   it("click on result at index > 0 opens that result, not index 0", async () => {
-    const input = document.querySelector("#search-input")! as HTMLInputElement;
-    const resultsEl = document.querySelector("#search-results")!;
-
     mock.on("GET", "/api/search", [
       {
         path: "first.md",
@@ -481,6 +484,8 @@ describe("search", () => {
     openTabCalled = false;
     openTabPath = "";
     await openSearch();
+    const input = getSearchInput();
+    const resultsEl = getSearchResults();
     input.value = "test";
     input.dispatchEvent(new Event("input"));
     await new Promise((r) => setTimeout(r, 200));
@@ -506,9 +511,6 @@ describe("search", () => {
   });
 
   it("stale response from an old scope is ignored", async () => {
-    const input = document.querySelector("#search-input")! as HTMLInputElement;
-    const resultsEl = document.querySelector("#search-results")!;
-
     mock.onDelayed(
       "GET",
       /path=file-a\.md/,
@@ -536,10 +538,13 @@ describe("search", () => {
     ]);
 
     await openSearch("file-a.md");
+    let input = getSearchInput();
     input.value = "scoped";
     input.dispatchEvent(new Event("input"));
     await closeSearch();
     await openSearch("file-b.md");
+    input = getSearchInput();
+    const resultsEl = getSearchResults();
     input.value = "scoped";
     input.dispatchEvent(new Event("input"));
 
@@ -564,9 +569,6 @@ describe("search", () => {
   });
 
   it("ignores stale search responses", async () => {
-    const input = document.querySelector("#search-input")! as HTMLInputElement;
-    const resultsEl = document.querySelector("#search-results")!;
-
     mock.onDelayed(
       "GET",
       /\/api\/search\?q=alpha(?:&|$)/,
@@ -594,6 +596,8 @@ describe("search", () => {
     ]);
 
     await openSearch();
+    const input = getSearchInput();
+    const resultsEl = getSearchResults();
     input.value = "alpha";
     input.dispatchEvent(new Event("input"));
     input.value = "beta";

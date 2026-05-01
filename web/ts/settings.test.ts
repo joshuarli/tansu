@@ -1,7 +1,8 @@
 import { render } from "solid-js/web";
 
 import type { Settings } from "./api.ts";
-import { SettingsModal } from "./settings.tsx";
+import type { AppSettings, VaultSettings } from "./settings.ts";
+import { AppSettingsModal, SettingsModal, VaultSettingsModal } from "./settings.tsx";
 import { setupDOM, mockFetch } from "./test-helper.ts";
 import { uiStore } from "./ui-store.ts";
 
@@ -11,6 +12,42 @@ vi.mock(import("./webauthn.ts"), () => ({
 }));
 
 describe("settings", () => {
+  const expectedServerSettingKeys = [
+    "weight_title",
+    "weight_headings",
+    "weight_tags",
+    "weight_content",
+    "fuzzy_distance",
+    "recency_boost",
+    "result_limit",
+    "show_score_breakdown",
+    "excluded_folders",
+  ] as const satisfies ReadonlyArray<keyof Settings>;
+  const expectedVaultSettingKeys = [
+    "undoStackMax",
+    "searchMinQueryLength",
+    "searchScorePrecision",
+    "searchCliDefaultPort",
+    "autocompleteMaxResults",
+    "autocompleteOffsetPx",
+    "tagAutocompleteMaxResults",
+    "tagAutocompleteOffsetPx",
+    "tagAutocompleteMinWidthPx",
+    "autosaveDelayMs",
+    "autosaveRetryDelayMs",
+    "formatToolbarGapPx",
+    "formatToolbarEdgePaddingPx",
+    "formatToolbarIconSizePx",
+    "formatToolbarStrokeWidth",
+    "formatToolbarHeadingLevels",
+    "sessionMaxClosedTabs",
+    "notificationAutoDismissMs",
+  ] as const satisfies ReadonlyArray<keyof VaultSettings>;
+  const expectedAppSettingKeys = [
+    "imageWebpQuality",
+    "imageResizeMinWidthPx",
+    "imageResizeWheelScale",
+  ] as const satisfies ReadonlyArray<keyof AppSettings>;
   let cleanup: () => void;
   let mock: ReturnType<typeof mockFetch>;
   let disposeDialogHost: (() => void) | null = null;
@@ -41,12 +78,48 @@ describe("settings", () => {
     uiStore.closeSettings();
   }
 
+  async function openAppSettings() {
+    uiStore.closeAppSettings();
+    await new Promise((r) => setTimeout(r, 0));
+    uiStore.openAppSettings();
+    await new Promise((r) => setTimeout(r, 30));
+  }
+
+  function closeAppSettings() {
+    uiStore.closeAppSettings();
+  }
+
+  async function openVaultSettings() {
+    uiStore.closeVaultSettings();
+    await new Promise((r) => setTimeout(r, 0));
+    uiStore.openVaultSettings();
+    await new Promise((r) => setTimeout(r, 30));
+  }
+
+  function closeVaultSettings() {
+    uiStore.closeVaultSettings();
+  }
+
   function isSettingsOpen() {
     return uiStore.settingsVisibleOpen();
   }
 
+  function getRenderedKeys(
+    scope: "server-setting" | "vault-setting" | "app-setting",
+    root = "#settings-panel",
+  ): string[] {
+    return Array.from(
+      document.querySelectorAll<HTMLElement>(`${root} [data-scope="${scope}"][data-key]`),
+    )
+      .map((el) => el.dataset["key"] ?? "")
+      .filter((key) => key.length > 0)
+      .sort();
+  }
+
   beforeEach(() => {
     uiStore.closeSettings();
+    uiStore.closeAppSettings();
+    uiStore.closeVaultSettings();
     uiStore.hideNotification();
   });
 
@@ -75,6 +148,8 @@ describe("settings", () => {
       document.querySelector("#app") as HTMLElement,
     );
     render(() => SettingsModal(), document.querySelector("#settings-root") as HTMLElement);
+    render(() => AppSettingsModal(), document.querySelector("#settings-root") as HTMLElement);
+    render(() => VaultSettingsModal(), document.querySelector("#settings-root") as HTMLElement);
   });
 
   afterAll(() => {
@@ -107,6 +182,28 @@ describe("settings", () => {
 
     // Settings should be closed after successful save
     expect(uiStore.settingsVisibleOpen()).toBeFalsy();
+  });
+
+  it("renders every server setting from the typed registry", async () => {
+    await openSettings();
+    expect(getRenderedKeys("server-setting")).toStrictEqual([...expectedServerSettingKeys].sort());
+    closeSettings();
+  });
+
+  it("renders every vault setting from the typed registry", async () => {
+    await openVaultSettings();
+    expect(getRenderedKeys("vault-setting", "#vault-settings-panel")).toStrictEqual(
+      [...expectedVaultSettingKeys].sort(),
+    );
+    closeVaultSettings();
+  });
+
+  it("renders every app setting from the typed registry", async () => {
+    await openAppSettings();
+    expect(getRenderedKeys("app-setting", "#app-settings-panel")).toStrictEqual(
+      [...expectedAppSettingKeys].sort(),
+    );
+    closeAppSettings();
   });
 
   it("save sends the exact settings payload", async () => {
@@ -518,7 +615,7 @@ describe("settings", () => {
     // Close
     closeSettings();
     expect(isSettingsOpen()).toBeFalsy();
-    expect(overlay.classList.contains("hidden")).toBeTruthy();
+    expect(document.querySelector("#settings-overlay")).toBeNull();
 
     // Toggle
     uiStore.toggleSettings();
@@ -529,7 +626,8 @@ describe("settings", () => {
 
     // Overlay click closes
     await openSettings();
-    overlay.click();
+    const reopenedOverlay = document.querySelector("#settings-overlay") as HTMLElement;
+    reopenedOverlay.click();
     expect(isSettingsOpen()).toBeFalsy();
   });
 });
