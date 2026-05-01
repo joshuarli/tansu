@@ -217,4 +217,19 @@ describe("e2e: editor", () => {
     const src = await saveAndGetSource();
     expect(src).toBe("**bold**\nnext");
   }, 15_000);
+
+  it("source edit with single-newline heading survives save and mode refresh", async () => {
+    await page.click(".editor-toolbar-btn--source");
+    await page.waitForSelector(".editor-source", { state: "visible", timeout: 3000 });
+    await page.fill(".editor-source", "## hi\nhello");
+    await page.keyboard.press("Meta+s");
+    await page.waitForTimeout(500);
+    await page.reload();
+    await page.waitForSelector(".editor-content", { timeout: 3000 });
+    await page.click(".editor-toolbar-btn--source");
+    await page.waitForSelector(".editor-source", { state: "visible", timeout: 3000 });
+
+    const src = await page.$eval(".editor-source", (el: HTMLTextAreaElement) => el.value);
+    expect(src).toBe("## hi\nhello");
+  }, 15_000);
 });

@@ -410,6 +410,23 @@ describe("editor", () => {
     hideEditor();
   });
 
+  it("source mode toggle preserves single-newline heading content", async () => {
+    showEditor("toggle-heading.md", "## hi\nhello");
+    await new Promise((r) => setTimeout(r, 50));
+
+    const sourceBtn = document.querySelector(".editor-toolbar-btn--source") as HTMLButtonElement;
+    const sourceEl = latestEditorSource();
+
+    sourceBtn.click();
+    expect(sourceEl.value).toBe("## hi\nhello");
+
+    sourceBtn.click();
+    sourceBtn.click();
+    expect(sourceEl.value).toBe("## hi\nhello");
+
+    hideEditor();
+  });
+
   it("typing # in note content does not open tag autocomplete", async () => {
     showEditor("no-body-tags.md", "hello");
     await new Promise((r) => setTimeout(r, 50));
@@ -1155,6 +1172,33 @@ describe("editor", () => {
     contentEl.dispatchEvent(
       new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }),
     );
+
+    hideEditor();
+  });
+
+  it("pressing Enter at the end of a heading continues in plain text", async () => {
+    showEditor("heading-enter.md", "# Heading");
+    await new Promise((r) => setTimeout(r, 50));
+
+    const contentEl = latestEditorContent();
+    const heading = contentEl.querySelector("h1");
+    if (!(heading instanceof HTMLElement)) {
+      throw new Error("expected heading element");
+    }
+
+    const range = document.createRange();
+    range.selectNodeContents(heading);
+    range.collapse(false);
+    const sel = window.getSelection()!;
+    sel.removeAllRanges();
+    sel.addRange(range);
+
+    contentEl.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }),
+    );
+
+    expect(getCurrentContent()).toBe("# Heading\n");
+    expect(contentEl.querySelector("p")).toBeTruthy();
 
     hideEditor();
   });

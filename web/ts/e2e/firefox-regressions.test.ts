@@ -34,6 +34,34 @@ describe("e2e: firefox regressions", () => {
     await page.waitForTimeout(100);
   }
 
+  it("Enter after h1 preserves a single newline in source mode", async () => {
+    await openTestNote();
+    await setSource("# foo");
+
+    await page.locator(".editor-content h1").click();
+    await page.keyboard.press("End");
+    await page.keyboard.press("Enter");
+    await page.keyboard.type("bar");
+
+    await page.click(".editor-toolbar-btn--source");
+    await expect(page.$eval(".editor-source", (el: HTMLTextAreaElement) => el.value)).resolves.toBe(
+      "# foo\nbar",
+    );
+  }, 30_000);
+
+  it("typing # a Enter x does not create an extra blank paragraph in rich editor", async () => {
+    await openTestNote();
+    await setSource("");
+
+    await page.click(".editor-content");
+    await page.keyboard.type("# a");
+    await page.keyboard.press("Enter");
+    await page.keyboard.type("x");
+
+    const html = await page.$eval(".editor-content", (el) => el.innerHTML);
+    expect(html).toBe('<h1>a</h1><p class="md-heading-continuation">x</p>');
+  }, 30_000);
+
   it("Backspace on empty nested bullet preserves markdown through autosave and reload", async () => {
     await openTestNote();
     await setSource("- one\n- two");

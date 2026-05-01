@@ -49,6 +49,40 @@ describe("e2e: block transforms", () => {
     expect(hasH3).toBeTruthy();
   });
 
+  it("pressing Enter after a heading continues in plain text", async () => {
+    await resetEditor("");
+    await page.keyboard.type("## Heading");
+    await page.keyboard.press("Enter");
+    await page.keyboard.type("plain text");
+    await page.click(".editor-toolbar-btn--source");
+
+    const markdown = await page.inputValue(".editor-source");
+    expect(markdown).toBe("## Heading\nplain text");
+  });
+
+  it("pressing Enter after an h1 continues with a single newline", async () => {
+    await resetEditor("");
+    await page.keyboard.type("# foo");
+    await page.keyboard.press("Enter");
+    await page.keyboard.type("bar");
+    await page.click(".editor-toolbar-btn--source");
+
+    const markdown = await page.inputValue(".editor-source");
+    expect(markdown).toBe("# foo\nbar");
+  });
+
+  it("pressing Enter in a rendered h1 continues with a single newline", async () => {
+    await resetEditor("# foo");
+    await page.locator(".editor-content h1").click();
+    await page.keyboard.press("End");
+    await page.keyboard.press("Enter");
+    await page.keyboard.type("bar");
+    await page.click(".editor-toolbar-btn--source");
+
+    const markdown = await page.inputValue(".editor-source");
+    expect(markdown).toBe("# foo\nbar");
+  });
+
   it("unordered list: - + space creates UL", async () => {
     await resetEditor("");
     await page.keyboard.type("- ");

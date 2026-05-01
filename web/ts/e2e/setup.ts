@@ -4,9 +4,16 @@ import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
-import { chromium, firefox, type Browser, type BrowserContext, type Page } from "playwright";
+import {
+  chromium,
+  firefox,
+  webkit,
+  type Browser,
+  type BrowserContext,
+  type Page,
+} from "playwright";
 
-type BrowserName = "chromium" | "firefox";
+type BrowserName = "chromium" | "firefox" | "webkit";
 
 type SetupContext = {
   page: Page;
@@ -157,7 +164,9 @@ async function ensureBrowser(state: SharedState, browserName: BrowserName): Prom
   const browser =
     browserName === "firefox"
       ? await firefox.launch({ headless: true })
-      : await chromium.launch({ headless: true });
+      : browserName === "webkit"
+        ? await webkit.launch({ headless: true })
+        : await chromium.launch({ headless: true });
   state.browsers[browserName] = browser;
   return browser;
 }

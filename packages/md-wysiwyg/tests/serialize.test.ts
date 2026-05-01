@@ -46,7 +46,7 @@ describe("serialize", () => {
   });
 
   it("heading + paragraph", () => {
-    expect(domToMarkdown(html("<h1>Title</h1><p>Body</p>"))).toBe("# Title\n\nBody");
+    expect(domToMarkdown(html("<h1>Title</h1><p>Body</p>"))).toBe("# Title\nBody");
   });
 
   it("two adjacent paragraphs use single newline", () => {
@@ -55,11 +55,11 @@ describe("serialize", () => {
   it("three adjacent paragraphs", () => {
     expect(domToMarkdown(html("<p>a</p><p>b</p><p>c</p>"))).toBe("a\nb\nc");
   });
-  it("h2 + paragraph uses double newline", () => {
-    expect(domToMarkdown(html("<h2>Title</h2><p>Body</p>"))).toBe("## Title\n\nBody");
+  it("h2 + paragraph uses single newline", () => {
+    expect(domToMarkdown(html("<h2>Title</h2><p>Body</p>"))).toBe("## Title\nBody");
   });
-  it("paragraph + h2 uses double newline", () => {
-    expect(domToMarkdown(html("<p>intro</p><h2>Title</h2>"))).toBe("intro\n\n## Title");
+  it("paragraph + h2 uses single newline", () => {
+    expect(domToMarkdown(html("<p>intro</p><h2>Title</h2>"))).toBe("intro\n## Title");
   });
   it("paragraph + code block uses double newline", () => {
     expect(domToMarkdown(html('<p>before</p><pre><code class="language-js">x</code></pre>'))).toBe(
@@ -170,6 +170,14 @@ describe("serialize", () => {
     expect(domToMarkdown(html('<p>First</p><p data-md-blank="true"><br></p><p>Second</p>'))).toBe(
       "First\n\nSecond",
     );
+  });
+
+  it("heading continuation paragraph ignores leading placeholder break", () => {
+    expect(domToMarkdown(html("<h1>Title</h1><p><br>Body</p>"))).toBe("# Title\nBody");
+  });
+
+  it("paragraph ignores trailing placeholder break", () => {
+    expect(domToMarkdown(html("<p>Body<br></p>"))).toBe("Body");
   });
 
   it("blank paragraph marker preserves leading and trailing blank lines", () => {

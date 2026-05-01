@@ -38,6 +38,10 @@
   margin: 0;
 }
 
+.editor-content .md-heading-continuation {
+  margin-top: -0.5em;
+}
+
 .editor-content ul,
 .editor-content ol {
   margin: 0.5em 0;

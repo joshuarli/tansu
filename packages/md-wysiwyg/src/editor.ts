@@ -347,6 +347,14 @@ export function createEditor(container: HTMLElement, config: EditorConfig = {}):
     return block && isListItemBlock(block) ? block : null;
   }
 
+  function getHeadingBlock(node: Node): HTMLElement | null {
+    const block = getIndentableBlock(node);
+    if (!block) {
+      return null;
+    }
+    return /^H[1-6]$/.test(block.tagName) ? block : null;
+  }
+
   function getStructuralPasteBoundaryBlock(node: Node): HTMLElement | null {
     let cur: Node | null = node;
     while (cur && cur !== contentEl) {
@@ -405,6 +413,45 @@ export function createEditor(container: HTMLElement, config: EditorConfig = {}):
     }
     cfg.onChange?.();
     return true;
+  }
+
+  function handleHeadingEnter(): boolean {
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0 || !sel.isCollapsed) {
+      return false;
+    }
+    const anchorNode = sel.anchorNode;
+    if (!anchorNode) {
+      return false;
+    }
+    const range = sel.getRangeAt(0);
+
+    const heading = getHeadingBlock(anchorNode);
+    if (!heading || !isRangeAtEndOfBlock(range, heading)) {
+      return false;
+    }
+
+    trimTrailingPlaceholderBreaks(heading);
+    const paragraph = document.createElement("p");
+    paragraph.className = "md-heading-continuation";
+    paragraph.append(document.createElement("br"));
+    heading.after(paragraph);
+    placeCursorAtBlockStart(paragraph);
+    cfg.onChange?.();
+    return true;
+  }
+
+  function isRangeAtEndOfBlock(range: Range, block: HTMLElement): boolean {
+    const after = range.cloneRange();
+    after.selectNodeContents(block);
+    after.setStart(range.endContainer, range.endOffset);
+    return after.toString().replaceAll("​", "") === "";
+  }
+
+  function trimTrailingPlaceholderBreaks(block: HTMLElement): void {
+    while (block.lastChild instanceof HTMLBRElement) {
+      block.lastChild.remove();
+    }
   }
 
   // ── Source mode Tab key ─────────────────────────────────────────────────────
@@ -486,6 +533,10 @@ export function createEditor(container: HTMLElement, config: EditorConfig = {}):
     }
     if (e.key === "Backspace" && handleEmptyListItemBackspace(e)) return;
     if (e.key === "Enter" && !e.shiftKey) {
+      if (handleHeadingEnter()) {
+        e.preventDefault();
+        return;
+      }
       handleBlockTransform(e, contentEl, () => cfg.onChange?.());
     }
   }
