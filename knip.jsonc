@@ -1,8 +1,14 @@
 {
   "workspaces": {
     ".": {
-      "entry": ["web/ts/search-cli.ts", "web/ts/**/*.test.ts", "web/ts/e2e/**/*.ts"],
-      "project": ["web/ts/**/*.ts"],
+      "entry": [
+        "web/ts/main.tsx",
+        "web/ts/search-cli.ts",
+        "web/ts/**/*.test.ts",
+        "web/ts/**/*.test.tsx",
+        "web/ts/e2e/**/*.ts",
+      ],
+      "project": ["web/ts/**/*.{ts,tsx}"],
       "ignore": ["web/ts/test-helper.ts"],
     },
     "packages/md-wysiwyg": {
@@ -11,5 +17,5 @@
     },
   },
   // "agent" is vitest's built-in reporter for AI agent environments, not an npm package
-  "ignoreDependencies": ["oxfmt", "oxlint", "agent"],
+  "ignoreDependencies": ["oxfmt", "oxlint"],
 }

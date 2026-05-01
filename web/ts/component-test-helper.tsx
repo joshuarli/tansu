@@ -1,7 +1,7 @@
 import type { JSX } from "solid-js";
 import { render } from "solid-js/web";
 
-export type ComponentHarness = {
+type ComponentHarness = {
   container: HTMLElement;
   dispose(): void;
 };

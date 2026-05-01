@@ -2,7 +2,7 @@ import { getNote, saveState, getState, type SessionState } from "./api.ts";
 import { kvGet, kvPut, noteGet, notePut } from "./local-store.ts";
 import { getActiveVaultIndex } from "./vault-session.ts";
 
-export type StoredNote = {
+type StoredNote = {
   content: string;
   mtime: number;
   tags: string[];

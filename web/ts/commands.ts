@@ -1,4 +1,4 @@
-export type KeyBinding = {
+type KeyBinding = {
   key: string;
   meta?: boolean;
   shift?: boolean;

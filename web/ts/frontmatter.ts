@@ -1,6 +1,6 @@
 import { normalizeTagInput } from "./tag-autocomplete.ts";
 
-export type Frontmatter = {
+type Frontmatter = {
   hasFrontmatter: boolean;
   tags: string[];
   body: string;

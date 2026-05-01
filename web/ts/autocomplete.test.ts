@@ -1,4 +1,9 @@
-import type { CompleteWikiLink } from "./autocomplete.ts";
+import {
+  checkWikiLinkTrigger,
+  completeWikiLink,
+  hideAutocomplete,
+  invalidateNoteCache,
+} from "./autocomplete.ts";
 import { setupDOM, mockFetch } from "./test-helper.ts";
 
 const NOTES = [
@@ -14,10 +19,6 @@ function getDropdown() {
 describe("autocomplete", () => {
   let cleanup: () => void;
   let mock: ReturnType<typeof mockFetch>;
-  let checkWikiLinkTrigger: (el: HTMLElement, path: string) => void;
-  let hideAutocomplete: () => void;
-  let invalidateNoteCache: () => void;
-  let completeWikiLink: CompleteWikiLink;
   let contentEl: HTMLDivElement;
 
   beforeAll(async () => {
@@ -27,12 +28,6 @@ describe("autocomplete", () => {
     mock.on("GET", "/api/notes", NOTES);
     mock.on("PUT", "/api/state", {});
     mock.on("GET", "/api/state", { tabs: [], active: -1 });
-
-    const mod = await import("./autocomplete.ts");
-    ({ checkWikiLinkTrigger } = mod);
-    ({ hideAutocomplete } = mod);
-    ({ invalidateNoteCache } = mod);
-    ({ completeWikiLink } = mod);
 
     contentEl = document.createElement("div");
     contentEl.contentEditable = "true";

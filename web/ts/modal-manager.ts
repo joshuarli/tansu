@@ -1,15 +1,8 @@
 import { createEffect, createSignal, on, type Accessor } from "solid-js";
 
-export type ExclusiveModalId =
-  | "palette"
-  | "search"
-  | "settings"
-  | "vault-settings"
-  | "app-settings";
+type ExclusiveModalId = "palette" | "search" | "settings" | "vault-settings" | "app-settings";
 export type StackableModalId = "alert-dialog" | "input-dialog";
-export type ModalId = ExclusiveModalId | StackableModalId;
-export type ModalOpenMode = "replace" | "stack";
-
+type ModalId = ExclusiveModalId | StackableModalId;
 type ManagedModalOptions = {
   id: ModalId;
   isRequestedOpen: Accessor<boolean>;

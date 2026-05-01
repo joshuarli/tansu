@@ -16,7 +16,7 @@ type UndoControllerOptions = {
   onChange?: () => void;
 };
 
-export type EditorUndoController = {
+type EditorUndoController = {
   pushUndo(md: string, selStart: number, selEnd: number): void;
   checkpoint(): void;
   scheduleTypingCheckpoint(): void;

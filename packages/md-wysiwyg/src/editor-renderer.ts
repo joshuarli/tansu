@@ -5,7 +5,7 @@ import {
   renderMarkdownWithSelection,
 } from "./markdown.js";
 
-export type EditorRenderer = {
+type EditorRenderer = {
   render(md: string): void;
   renderWithCursor(md: string, offset: number): void;
   renderWithSelection(md: string, selStart: number, selEnd: number): void;

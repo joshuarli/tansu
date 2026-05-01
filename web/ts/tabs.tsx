@@ -15,7 +15,7 @@ export async function promptNewNote(): Promise<void> {
   await _createNewNote(name);
 }
 
-export function TabBar() {
+function TabBar() {
   const [hoveredIndex, setHoveredIndex] = createSignal(-1);
   const [tooltip, setTooltip] = createSignal<{
     label: string;

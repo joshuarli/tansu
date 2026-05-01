@@ -6,7 +6,7 @@ import {
   rememberTags,
 } from "./tag-autocomplete.ts";
 
-export type TagState = {
+type TagState = {
   tags(): string[];
   setTags(tags: readonly string[]): void;
   getCurrentContent(): string;

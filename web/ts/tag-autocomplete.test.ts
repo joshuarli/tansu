@@ -1,29 +1,20 @@
+import {
+  checkTagInput,
+  hideTagAutocomplete,
+  invalidateTagCache,
+  normalizeTagInput,
+  rankTags,
+} from "./tag-autocomplete.ts";
 import { setupDOM, mockFetch } from "./test-helper.ts";
 
 describe("tag-autocomplete", () => {
   let cleanup: () => void;
   let mock: ReturnType<typeof mockFetch>;
-  let normalizeTagInput: (text: string) => string;
-  let rankTags: (tags: readonly string[], query: string) => string[];
-  let checkTagInput: (
-    inputEl: HTMLInputElement,
-    selectedTags: readonly string[],
-    onSelect: (tag: string) => void,
-  ) => void;
-  let hideTagAutocomplete: () => void;
-  let invalidateTagCache: () => void;
 
   beforeAll(async () => {
     cleanup = setupDOM();
     mock = mockFetch();
     mock.on("GET", "/api/tags", { tags: ["alpha", "rust", "reader", "react"] });
-
-    const mod = await import("./tag-autocomplete.ts");
-    ({ normalizeTagInput } = mod);
-    ({ rankTags } = mod);
-    ({ checkTagInput } = mod);
-    ({ hideTagAutocomplete } = mod);
-    ({ invalidateTagCache } = mod);
   });
 
   afterAll(() => {

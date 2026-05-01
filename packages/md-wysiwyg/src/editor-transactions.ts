@@ -11,7 +11,7 @@ type SelectionTransactionOptions = {
   onChange?: () => void;
 };
 
-export type SelectionTransactionController = {
+type SelectionTransactionController = {
   applySelectionEdit(op: (md: string, selStart: number, selEnd: number) => FormatResult): boolean;
   replaceSelection(text: string, selectionOverride?: SelectionOffsets): boolean;
 };

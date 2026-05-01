@@ -5,9 +5,9 @@ export type EditorDisplayState =
   | { type: "revisions" }
   | { type: "conflict" };
 
-export type EditorDisplayStateType = EditorDisplayState["type"];
+type EditorDisplayStateType = EditorDisplayState["type"];
 
-export type EditorDisplayStateController = {
+type EditorDisplayStateController = {
   get(): EditorDisplayState;
   set(state: EditorDisplayState): void;
   setType(type: EditorDisplayStateType): void;

@@ -18,12 +18,12 @@ export type VaultSectionId =
   | "notifications";
 export type SectionId = ServerSectionId | VaultSectionId | AppSectionId;
 
-export type SelectOption = {
+type SelectOption = {
   value: string | number;
   label: string;
 };
 
-export type StringFieldDefinition<Model, K extends keyof Model> = {
+type StringFieldDefinition<Model, K extends keyof Model> = {
   section: SectionId;
   label: string;
   kind: "range" | "select" | "number" | "text";
@@ -38,14 +38,14 @@ export type StringFieldDefinition<Model, K extends keyof Model> = {
   saveOnEnter?: boolean;
 };
 
-export type CheckboxFieldDefinition<Model, K extends keyof Model> = {
+type CheckboxFieldDefinition<Model, K extends keyof Model> = {
   section: SectionId;
   label: string;
   kind: "checkbox";
   parse: (checked: boolean) => Model[K];
 };
 
-export type FieldDefinition<Model, K extends keyof Model> =
+type FieldDefinition<Model, K extends keyof Model> =
   | StringFieldDefinition<Model, K>
   | CheckboxFieldDefinition<Model, K>;
 
@@ -85,7 +85,7 @@ export type AppSettings = {
 };
 
 export type EditorPrefs = VaultSettings;
-export type EditorRuntimeSettings = Pick<VaultSettings, "undoStackMax"> &
+type EditorRuntimeSettings = Pick<VaultSettings, "undoStackMax"> &
   Pick<AppSettings, "imageWebpQuality">;
 
 export const SERVER_SETTINGS_SECTION_ORDER = [
@@ -110,7 +110,7 @@ export const APP_SETTINGS_SECTION_ORDER = [
   { id: "images", title: "Images" },
 ] as const satisfies readonly { id: AppSectionId; title: string }[];
 
-export const SERVER_SETTINGS_DEFAULTS: Settings = {
+const SERVER_SETTINGS_DEFAULTS: Settings = {
   weight_title: 10,
   weight_headings: 5,
   weight_tags: 25,
@@ -122,7 +122,7 @@ export const SERVER_SETTINGS_DEFAULTS: Settings = {
   excluded_folders: [],
 };
 
-export const VAULT_SETTINGS_DEFAULTS: VaultSettings = {
+const VAULT_SETTINGS_DEFAULTS: VaultSettings = {
   undoStackMax: 200,
   searchMinQueryLength: 2,
   searchScorePrecision: 3,
@@ -143,7 +143,7 @@ export const VAULT_SETTINGS_DEFAULTS: VaultSettings = {
   notificationAutoDismissMs: 5_000,
 };
 
-export const APP_SETTINGS_DEFAULTS: AppSettings = {
+const APP_SETTINGS_DEFAULTS: AppSettings = {
   imageWebpQuality: 0.85,
   imageResizeMinWidthPx: 50,
   imageResizeWheelScale: 1.5,
@@ -167,14 +167,14 @@ export function defaultSettings(): Settings {
   };
 }
 
-export function defaultVaultSettings(): VaultSettings {
+function defaultVaultSettings(): VaultSettings {
   return {
     ...VAULT_SETTINGS_DEFAULTS,
     formatToolbarHeadingLevels: [...VAULT_SETTINGS_DEFAULTS.formatToolbarHeadingLevels],
   };
 }
 
-export function defaultAppSettings(): AppSettings {
+function defaultAppSettings(): AppSettings {
   return { ...APP_SETTINGS_DEFAULTS };
 }
 
@@ -199,7 +199,7 @@ function formatNumberList(values: readonly number[]): string {
   return values.join(", ");
 }
 
-export function recencyLabel(value: number): string {
+function recencyLabel(value: number): string {
   if (value === 0) {
     return "Disabled";
   }
@@ -457,8 +457,6 @@ export const VAULT_SETTING_FIELDS = {
     parse: (value) => Number.parseInt(value, 10),
   },
 } satisfies FieldRegistry<VaultSettings>;
-
-export const EDITOR_PREF_FIELDS = VAULT_SETTING_FIELDS;
 
 export const APP_SETTING_FIELDS = {
   imageWebpQuality: {

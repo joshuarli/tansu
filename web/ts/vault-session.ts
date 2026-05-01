@@ -1,6 +1,6 @@
 const ACTIVE_VAULT_KEY = "tansu_vault";
 
-export function parseActiveVaultValue(raw: string | null): number {
+function parseActiveVaultValue(raw: string | null): number {
   const index = Number(raw);
   return Number.isInteger(index) && index >= 0 ? index : 0;
 }

@@ -7,7 +7,7 @@ export type SelectionOffsets = {
   end: number;
 };
 
-export type EditorSelectionController = {
+type EditorSelectionController = {
   getSelectionOffsets(): SelectionOffsets | null;
   getCursorOffset(): number;
   restoreSelectionFromRenderedMarkers(): void;
