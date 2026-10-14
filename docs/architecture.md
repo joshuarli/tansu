@@ -1,22 +1,21 @@
 # Architecture
 
-Tansu2 is a Rust server, static TypeScript frontend, and in-repo Markdown editor.
-Markdown files remain normal files. App-managed catalog, history, conflicts,
-search, settings, session, pins, recents, and repair state live under
-`$XDG_DATA_HOME/tansu/<vault-name>` or `~/.local/share/tansu/<vault-name>`.
+Tansu2 is a Rust server, a static TypeScript frontend, and an in-repo Markdown
+editor. Markdown files remain ordinary files in each vault. App-managed state
+uses the XDG data path. See [Configuration](configuration.md).
 
-## What Must Not Break
+## Data integrity
 
 - `noteId` is durable identity. `path` is mutable metadata.
 - `path_key` is the normalized live-path uniqueness key.
-- Every accepted content-changing write has a full recoverable snapshot.
-- Stale saves preserve canonical content and create conflict drafts.
-- Search is derived state; indexing failure cannot fail an accepted write.
-- Watcher events trigger reconciliation, not direct semantic edits.
+- Each accepted content-changing write has a full recoverable snapshot.
+- A stale save preserves canonical content and creates a conflict draft.
+- Search is derived state. Indexing failure cannot fail an accepted write.
+- Watcher events request reconciliation instead of making semantic edits.
 - Bootstrap returns note metadata, not all note bodies.
 - Inactive restored tabs do not fetch content until selected.
-- Markdown files never get hidden Tansu IDs.
-- `z-images/` assets are vault-local opaque files in V1.
+- Markdown files do not contain hidden Tansu IDs.
+- V1 `z-images/` assets are vault-local opaque files.
 
 ## Ownership
 
@@ -37,48 +36,43 @@ search, settings, session, pins, recents, and repair state live under
 | Editor engine           | `web/ts/editor/`                                          |
 | Dev/e2e fixture vaults  | `scripts/test-fixture.mjs`, `tests/fixtures/test-vaults/` |
 
-## Write Path
+## Writes and recovery
 
-Accepted writes canonicalize Markdown, compute `sha256:<hex>`, write compressed
-history, update catalog state/events, then update the visible Markdown file.
-Delta saves are only a transport optimization: the server reconstructs the full
-candidate content from an exact base snapshot, verifies the submitted final hash,
-and then follows the same full-snapshot write path. Startup repair uses
-committed catalog/history state to finish interrupted writes conservatively.
+Content writes canonicalize Markdown and maintain a compressed snapshot,
+catalog state, and visible Markdown file. Delta saves reconstruct the candidate
+from an exact base snapshot, verify the submitted final hash, and use the same
+recoverable write path. Startup repair uses catalog and history state to finish
+interrupted writes conservatively.
 
-The same identity rule applies to create, save, import, restore, delete, rename,
-and conflict recovery: history follows `noteId`, not path.
+Create, save, import, restore, delete, rename, and conflict recovery all keep
+history under `noteId`, not the current path.
 
 ## Reconciliation
 
-Reconciliation is intentionally conservative:
+Reconciliation applies these rules:
 
-- same path, changed hash: external edit
-- exact hash move, unambiguous: preserve identity
-- missing visible file with valid snapshot: tombstone
-- moved and edited: delete plus new note
-- invalid UTF-8, case collisions, corrupt/missing snapshots, catalog/file
-  mismatch: unresolved state
+- A same-path hash change is an external edit unless the file still matches the
+  last visible hash, in which case reconciliation restores the accepted snapshot.
+- An exact-hash move preserves identity only when the match is unambiguous.
+- A missing visible file with a valid snapshot becomes a tombstone.
+- A moved-and-edited file becomes a delete plus a new note.
+- Invalid UTF-8, case collisions, corrupt or missing snapshots, and catalog/file
+  mismatches become unresolved state.
 
-Never use title, mtime, filename similarity, or fuzzy content matching to keep
+Title, mtime, filename similarity, and fuzzy content matching do not preserve
 identity.
 
-## Frontend State
+## Frontend state
 
-- `notes` is `Map<noteId, NoteMeta>`.
-- Tabs store `noteId`; only the active tab mounts an editor.
-- Inactive tabs may hold in-memory drafts.
-- Dirty draft content is not persisted in session.
-- Session stores open tabs, active note, closed tabs, cursor offsets, and source
-  mode.
-- The mounted editor records its owning note id so tab-switch renders cannot sync
-  old editor content into the new active tab.
+- `notes` is a `Map<noteId, NoteMeta>`.
+- Tabs store `noteId`. Only the active tab mounts an editor.
+- Inactive tabs may hold in-memory drafts. Session state does not persist them.
+- Session state stores open tabs, the active note, closed tabs, cursor offsets,
+  and source mode.
+- The mounted editor records its owner note id so a tab switch cannot sync old
+  editor content into the newly active note.
 
-## Editor Boundary
-
-`web/ts/editor` owns Markdown rendering, DOM serialization, selection, source
-mode, undo/redo, formatting, paste handling, and editor extensions. It is an
-internal Tansu editor engine, not a reusable package boundary. The app
-mounts/configures it and handles persistence. Keep editor internals inside
-`web/ts/editor` rather than spreading them through the app shell. See
-[Editor](editor.md) for editor-specific invariants and extension behavior.
+`web/ts/editor/` owns Markdown rendering, DOM serialization, selection, source
+mode, undo/redo, formatting, paste handling, and extensions. The app owns note
+lifecycle, persistence, assets, settings, tabs, and session state. See
+[Editor](editor.md) for editor-specific behavior.

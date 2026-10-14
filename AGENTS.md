@@ -1,50 +1,27 @@
-# Tansu2 Agent Guide
+# Tansu2
 
-Tansu2 is a local Markdown note app. The core constraint is content integrity:
-note identity is durable, accepted writes are recoverable, and vaults do not
-leak into each other.
+Tansu2 is a local Markdown note app.
+Commands: frontend build `deno task build`, fixture app `make dev`, check `make check`, unit tests `make test`, Chromium e2e `make test-e2e-chromium`.
 
-## Read First
+## Invariants
 
-- [Architecture](docs/architecture.md): invariants, ownership, and change map.
-- [API](docs/api.md): generated DTOs, endpoints, and high-risk request examples.
-- [Development](docs/development.md): setup, commands, and validation.
-- [Logging](docs/logging.md): unified dev/e2e server, browser, and harness logs.
-- [Logging TODO](LOGGING-TODO.md): prioritized logging usefulness roadmap.
-- [Editor](docs/editor.md): editor model, rendering, selection, and extensions.
-- [Fixtures](docs/fixtures.md): shared dev/e2e test vaults.
-- [Migration](docs/migration.md): safe first run on an existing Markdown vault.
-- [V2](V2.md): deferred work.
-
-## Change Map
-
-- Server route or DTO: `src/api.rs`, `src/api_types.rs`, then `make types`.
-- Vault mutation, save, history, assets, search, watcher: `src/vault.rs`.
-- Catalog schema/current state/events: `src/catalog.rs`.
-- Snapshot/hash/conflict blobs: `src/history.rs`.
-- Startup or external file reconciliation: `src/reconcile.rs`.
-- Frontend state and editor lifecycle: `web/ts/app.ts`.
-- Frontend DOM and visual controls: `web/ts/view.ts`, `web/static/app.css`.
-- Markdown editor internals: `web/ts/editor/`; see `docs/editor.md`.
-- Dev/e2e vault content: `tests/fixtures/test-vaults/`.
-
-## Non-Negotiables
-
-- Use `noteId`, not `path`, for identity.
-- Do not let search, SSE, or watcher freshness roll back accepted note writes.
-- Keep V1 frontmatter support tags-only.
-- Keep Markdown/editor behavior inside `web/ts/editor`; update `docs/editor.md`
-  when editor invariants or extension behavior change.
-- Keep per-vault mutations serialized unless a tested design change says
-  otherwise.
-- Do not add broad dependencies without updating docs.
+- `noteId` is durable identity. `path` is mutable metadata.
+- Every accepted content-changing write has a full recoverable snapshot. Stale saves preserve canonical content and create conflict drafts.
+- Search is derived state. Indexing failures cannot reject accepted writes.
+- Watcher events trigger reconciliation. Search, SSE, and watcher freshness never roll back accepted writes.
+- V1 frontmatter support is tags-only. Markdown files contain no hidden Tansu IDs.
+- `z-images/` assets are vault-local opaque files in V1.
+- Per-vault mutations stay serialized unless a tested design change says otherwise.
+- Markdown editor behavior stays inside `web/ts/editor/`. Update `docs/editor.md` when editor invariants or extension behavior change.
+- Broad dependencies require documentation updates.
 - Do not build release binaries, run pre-commit hooks, or push.
 
-## Fast Checks
+## Topics
 
-- `make check`
-- `make test`
-- `make test-e2e`
-
-`make dev` points at the shared fixture vaults and uses generated `.dev`
-config/data, not the user's real config or app data.
+- Architecture and API: [architecture](docs/architecture.md), [API](docs/api.md)
+- Vault configuration and migration: [configuration](docs/configuration.md), [migration](docs/migration.md)
+- Development and fixtures: [development](docs/development.md), [fixtures](docs/fixtures.md)
+- Browser support and performance: [browser support](docs/browser-support.md), [performance](docs/performance.md)
+- Editor behavior: [editor](docs/editor.md)
+- Logging and backlog: [logging](docs/logging.md), [logging backlog](docs/logging-backlog.md)
+- Deferred features: [product backlog](docs/product-backlog.md)

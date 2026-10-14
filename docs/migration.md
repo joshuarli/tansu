@@ -1,57 +1,41 @@
 # Migration
 
-Tansu2 can open an existing Markdown vault by scanning `.md` files and assigning
-durable `noteId`s in app-managed vault state.
+Tansu2 scans Markdown files in a configured vault and assigns durable `noteId`s
+in app-managed state. Back up an existing vault before the first run.
 
-## Safe First Run
+## Before the first run
 
 1. Back up the vault.
-2. Confirm the vault is not nested inside another configured vault.
-3. Confirm note files are UTF-8 Markdown.
-4. Keep existing `z-images/` assets where they are.
-5. Add the vault to `$XDG_CONFIG_HOME/tansu/config.toml` or
-   `~/.config/tansu/config.toml`.
-6. Start Tansu2 and let startup reconciliation complete before editing.
-7. Inspect any unresolved notes before making app-driven changes.
+2. Read [Configuration](configuration.md) and add the vault.
+3. Check that the vault is not nested inside another configured vault.
+4. Confirm Markdown files are UTF-8 and no paths differ only by letter case.
+5. Keep existing `z-images/` assets in place.
+6. Start Tansu2 and let startup reconciliation finish before editing.
 
-## State Created
+## First scan
 
-Tansu2 keeps Markdown and assets in the vault, and stores runtime state under
-`$XDG_DATA_HOME/tansu/<vault-name>` or `~/.local/share/tansu/<vault-name>`:
+For each valid UTF-8 `.md` file, Tansu2 creates a generated `noteId`, metadata
+for its path, title, and tags, and a baseline history snapshot. It also creates
+a search document when indexing succeeds. Titles come from the first H1 or
+filename stem. The parser reads tags from tags-only frontmatter. It leaves other
+frontmatter in document content.
 
-```text
-~/.local/share/tansu/Personal/
-  vault.db
-  history/
-  search/
-```
+Tansu2 does not write hidden IDs into Markdown files. It stores catalog, history,
+and search state in the configured data directory. See
+[Configuration](configuration.md) for the path.
 
-Markdown files are not modified to add hidden IDs. Existing `z-images/` assets
-remain ordinary vault files.
+If the vault contains earlier Tansu2 state in `.tansu/` and app-managed state
+has no `vault.db`, startup copies that state to the app data directory. This
+does not import revision or settings formats from other note applications.
 
-If an older vault-local `.tansu/` exists and no app-data state exists yet, Tansu2
-copies that legacy state into the app data directory on startup.
+## Unresolved files
 
-## First Scan Behavior
+Reconciliation records invalid UTF-8, case-colliding paths, corrupt or missing
+snapshots, and catalog/file mismatches as unresolved. Unresolved files do not
+appear in the normal note list, and the app has no UI to inspect or repair them.
+It does not overwrite visible Markdown from a corrupt or missing snapshot.
+Exact-hash moves preserve identity only when the match is unambiguous.
+Moved-and-edited files become a delete plus a new note.
 
-Each visible Markdown file gets:
-
-- generated `noteId`
-- path/title/tags metadata
-- baseline history snapshot
-- search document if indexing succeeds
-
-Titles come from the first H1 or filename stem. Only tags-only frontmatter is
-treated as metadata; unsupported frontmatter stays document content.
-
-## Deferred Migration Work
-
-V1 does not import legacy Tansu revisions or broad legacy settings. See `V2.md`.
-
-## Safety Rules
-
-- path case collisions become unresolved state
-- invalid UTF-8 is not rewritten
-- corrupt/missing snapshots do not overwrite visible Markdown
-- moved-and-edited files become delete plus new note
-- exact-hash moves preserve identity only when unambiguous
+Importing other applications' revision formats remains deferred. See
+[Deferred features](product-backlog.md).
