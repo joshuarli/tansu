@@ -30,10 +30,10 @@ ENV PATH="/root/.cargo/bin:/usr/lib/llvm22/bin:${PATH}" \
   SQLITE3_INCLUDE_DIR=/opt/tansu-sqlite/include \
   LIBSQLITE3_SYS_USE_PKG_CONFIG=0
 
-RUN printf '#!/bin/sh\nexec clang --target=%s -fuse-ld=lld -static "$@"\n' "${TARGET}" > /usr/local/bin/tansu-linker \
-  && chmod 0755 /usr/local/bin/tansu-linker \
+RUN printf '#!/bin/sh\nexec clang --target=%s -fuse-ld=lld -static "$@"\n' "${TARGET}" > /usr/local/bin/tansu-clang \
+  && chmod 0755 /usr/local/bin/tansu-clang \
   && mkdir -p /root/.cargo \
-  && printf '[target."%s"]\nlinker = "/usr/local/bin/tansu-linker"\nrustflags = ["-C", "target-feature=+crt-static"]\n' "${TARGET}" > /root/.cargo/config.toml
+  && printf '[target."%s"]\nlinker = "/usr/local/bin/tansu-clang"\nrustflags = ["-C", "target-feature=+crt-static"]\n' "${TARGET}" > /root/.cargo/config.toml
 
 WORKDIR /work
 
@@ -45,7 +45,8 @@ COPY scripts ./scripts
 COPY web/dist ./web/dist
 
 RUN rustup target add "${TARGET}"
-RUN SQLITE_VERSION="${SQLITE_VERSION}" \
+RUN CC=/usr/local/bin/tansu-clang \
+  SQLITE_VERSION="${SQLITE_VERSION}" \
   SQLITE_AUTOCONF="${SQLITE_AUTOCONF}" \
   SQLITE_RELEASE_YEAR="${SQLITE_RELEASE_YEAR}" \
   SQLITE_SHA3_256="${SQLITE_SHA3_256}" \
