@@ -317,6 +317,8 @@ Append-only, one line per judgment call a reader would miss.
 
 2026-10-14 | G1 | Ignore only `ENOENT` for entries that disappear during benchmark directory sizing; Tantivy atomically replaces index files while the measurement runs.
 2026-10-14 | G1 | Keep the cache benchmark's nine samples; the overlong run was an unbounded wait for a filename missing from the copied fixture, not representative sampling work.
+2026-10-14 | P0 | Start the campaign from the actual `a875868` checkout; the prepared `1ecf383` baseline exists as an ancestor but is not the checked-out commit.
+2026-10-14 | G1 | Keep the root package as the only workspace member until the first crate lands; `crates/*` fails Cargo metadata when the directory has no members, and a placeholder crate would be dead code.
 
 # Campaign log
 

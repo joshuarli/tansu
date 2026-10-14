@@ -14,7 +14,7 @@ Commands: frontend build `deno task build`, fixture app `make dev`, check `make 
 - Per-vault mutations stay serialized unless a tested design change says otherwise.
 - Markdown editor behavior stays inside `web/ts/editor/`. Update `docs/editor.md` when editor invariants or extension behavior change.
 - Broad dependencies require documentation updates.
-- Do not build release binaries, run pre-commit hooks, or push.
+- Release builds are permitted only for items O1-O4, H4 and Z3; do not run pre-commit hooks or push.
 
 ## Topics
 

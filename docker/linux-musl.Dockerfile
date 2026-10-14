@@ -34,6 +34,7 @@ WORKDIR /work
 
 COPY rust-toolchain.toml Cargo.toml Cargo.lock ./
 COPY src ./src
+COPY crates ./crates
 COPY scripts ./scripts
 
 RUN rustup target add "${TARGET}"

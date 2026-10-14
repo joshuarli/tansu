@@ -3,6 +3,9 @@ name = "tansu2"
 version = "0.1.0"
 edition = "2024"
 
+[workspace]
+members = ["."]
+
 [dependencies]
 fastrand = "2.4"
 httparse = "1.10"
