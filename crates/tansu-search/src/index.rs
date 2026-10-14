@@ -17,8 +17,9 @@ use crate::types::{DocumentInput, NoteIdentity};
 
 const SCHEMA_VERSION: u32 = 2;
 const ANALYZER_VERSION: u32 = 2;
+const MAX_SHARED_WRITER_MEMORY_BUDGET: usize = 64 * 1024 * 1024;
 const WRITER_MEMORY_BUDGET: usize = 15_000_000;
-const WRITER_COUNT: usize = 8;
+const WRITER_COUNT: usize = MAX_SHARED_WRITER_MEMORY_BUDGET / WRITER_MEMORY_BUDGET;
 
 static WRITER_COUNT_IN_USE: Mutex<usize> = Mutex::new(0);
 static WRITER_AVAILABLE: Condvar = Condvar::new();
@@ -391,6 +392,11 @@ fn watermark_payload(watermark: i64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn active_index_writers_stay_within_shared_memory_budget() {
+        assert!(WRITER_MEMORY_BUDGET * WRITER_COUNT <= MAX_SHARED_WRITER_MEMORY_BUDGET);
+    }
 
     fn identity(path: &str, revision: i64) -> NoteIdentity {
         NoteIdentity::new(

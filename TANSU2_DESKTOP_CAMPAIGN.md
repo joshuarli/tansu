@@ -331,6 +331,7 @@ Append-only, one line per judgment call a reader would miss.
 2026-10-14 | INT | Construct paste events with an explicitly attached `DataTransfer`; Firefox ignores `clipboardData` in synthetic `ClipboardEvent` initialization.
 2026-10-14 | N1 | Detect and replay the exact HTTP/2 prior-knowledge preface so Hyper enforces explicit H1 and H2 header limits without enabling h2c upgrades.
 2026-10-14 | Z1 | Remove the retired contenteditable engine after V2 cross-browser workflow and CodeMirror source, selection, and paste coverage passed; move the large-note harness to the maintained adapter.
+2026-10-14 | O3 | Limit four concurrent Tantivy writers to 15 MB each (60 MB total); each idle writer is still released after ten seconds.
 
 # Campaign log
 
