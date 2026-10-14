@@ -1,5 +1,3 @@
-import Defuddle from "defuddle/full";
-
 import { importHtml, type HtmlImportParseResult, type ImportedHtml } from "./html-importer.ts";
 import type { NoteMeta } from "./types.generated.ts";
 
@@ -11,12 +9,26 @@ export async function pickHtmlImport(notes: Iterable<NoteMeta>): Promise<Importe
     return null;
   }
   const html = await file.text();
-  return importHtml({ html, fallbackTitle: file.name, notes, parse: parseHtmlWithDefuddle });
+  return importHtml({ html, fallbackTitle: file.name, notes, parse: parseHtml });
 }
 
-async function parseHtmlWithDefuddle(html: string): Promise<HtmlImportParseResult> {
+async function parseHtml(html: string): Promise<HtmlImportParseResult> {
   const doc = new DOMParser().parseFromString(html, "text/html");
-  return new Defuddle(doc, { separateMarkdown: true }).parseAsync();
+  const metadata = (name: string): string | undefined =>
+    doc.querySelector(`meta[name="${name}"]`)?.getAttribute("content") ?? undefined;
+  const site = doc.querySelector('meta[property="og:site_name"]')?.getAttribute("content");
+  const author = metadata("author");
+  const published = metadata("date") ?? metadata("publish_date");
+  const description = metadata("description");
+  const contentMarkdown = doc.body.innerText || doc.body.textContent || undefined;
+  return {
+    ...(doc.title ? { title: doc.title } : {}),
+    ...(author ? { author } : {}),
+    ...(site ? { site } : {}),
+    ...(published ? { published } : {}),
+    ...(description ? { description } : {}),
+    ...(contentMarkdown ? { contentMarkdown } : {}),
+  };
 }
 
 function pickHtmlFile(): Promise<File | null> {

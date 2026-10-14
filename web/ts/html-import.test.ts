@@ -2,20 +2,6 @@ import { beforeEach, vi, describe, expect, it } from "vitest";
 
 import type { NoteMeta } from "./types.generated.ts";
 
-const defuddle = vi.hoisted(() => ({
-  parseAsync: vi.fn(),
-}));
-
-vi.mock(
-  import("defuddle/full"),
-  () =>
-    ({
-      default: vi.fn(function () {
-        return defuddle;
-      }),
-    }) as never,
-);
-
 const { pickHtmlImport } = await import("./html-import.ts");
 
 describe("HTML import", () => {
@@ -31,14 +17,9 @@ describe("HTML import", () => {
 
   it("creates unique markdown with imported metadata", async () => {
     mockPickedFile(new File(["<article>body</article>"], "Saved Page.html", { type: "text/html" }));
-    defuddle.parseAsync.mockResolvedValueOnce({
-      title: "Saved Page",
-      author: "Ada",
-      site: "Example",
-      published: "2026-05-20",
-      description: "Imported description",
-      contentMarkdown: "Body text",
-    });
+    mockHtmlText(
+      '<title>Saved Page</title><meta name="author" content="Ada"><meta property="og:site_name" content="Example"><meta name="date" content="2026-05-20"><meta name="description" content="Imported description"><article>Body text</article>',
+    );
 
     await expect(
       pickHtmlImport([note("saved-page.md"), note("Saved Page.md")]),
@@ -51,14 +32,14 @@ describe("HTML import", () => {
 
   it("falls back to the file name and rejects empty markdown", async () => {
     mockPickedFile(new File(["<article></article>"], "clip.htm", { type: "text/html" }));
-    defuddle.parseAsync.mockResolvedValueOnce({ title: "", contentMarkdown: "  " });
+    mockHtmlText("<title></title><article>  </article>");
 
     await expect(pickHtmlImport([])).resolves.toBeNull();
   });
 
   it("does not duplicate an existing top-level heading", async () => {
     mockPickedFile(new File(["<article>body</article>"], "clip.html", { type: "text/html" }));
-    defuddle.parseAsync.mockResolvedValueOnce({ title: "Clip", contentMarkdown: "# Clip\n\nBody" });
+    mockHtmlText("<title>Clip</title><article># Clip\n\nBody</article>");
 
     await expect(pickHtmlImport([])).resolves.toStrictEqual({
       path: "Clip.md",
@@ -66,6 +47,10 @@ describe("HTML import", () => {
     });
   });
 });
+
+function mockHtmlText(html: string): void {
+  vi.spyOn(File.prototype, "text").mockResolvedValueOnce(html);
+}
 
 function mockPickedFile(file: File | null): void {
   const createElement = document.createElement.bind(document);
