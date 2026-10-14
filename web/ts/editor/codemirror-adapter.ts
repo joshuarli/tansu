@@ -28,7 +28,16 @@ import { calloutDecoration } from "./callout-decoration.js";
 import { sanitizeHtmlToMarkdown } from "./clipboard.js";
 import { findLiteral, outlineFromSyntaxTree, type FindMatch, type Outline } from "./source-navigation.js";
 import { tagsSourceEdit } from "./tag-source.js";
-import { createCalloutExtension, type EditorChange, type EditorConfig, type EditorExtension } from "./tansu-extensions.js";
+import {
+  createCalloutExtension,
+  type EditorChange,
+  type EditorConfig,
+  type EditorExtension,
+  type EditorImagePasteSelection,
+  type EditorImagePasteState,
+  type EditorImageUploadRequest,
+  type EditorImageUploadResult,
+} from "./tansu-extensions.js";
 import { resolveWikiTarget, suggestWikiTargets } from "./wiki-target.js";
 import { wikiImages } from "./wiki-images.js";
 import {
@@ -116,6 +125,23 @@ type SessionData = {
   sourceCacheRevision: number;
   scroll: EditorScrollSnapshot;
 };
+
+type PendingImagePaste = {
+  uploadId: number;
+  session: EditorSession;
+  data: SessionData;
+  revision: number;
+  selection: EditorImagePasteSelection;
+  file: File;
+  previewUrl: string;
+  controller: AbortController;
+  task: Promise<void> | null;
+  finished: boolean;
+};
+
+type ImagePasteOutcome =
+  | { status: "inserted" | "stale" }
+  | { status: "failed"; message: string };
 
 const sessions = new WeakMap<EditorSession, SessionData>();
 
@@ -241,6 +267,227 @@ export function createCodeMirrorEditor(container: HTMLElement, initialConfig: Ed
   const owner = Symbol("editor");
   const modeCompartment = new Compartment();
   const readOnlyCompartment = new Compartment();
+  const imagePastes = new Map<number, PendingImagePaste>();
+  let nextImagePasteId = 1;
+
+  function notifyImagePasteState(state: EditorImagePasteState): void {
+    if (disposed) return;
+    try {
+      config.onImagePasteStateChange?.(state);
+    } catch (error) {
+      console.error(error);
+    }
+  }
+
+  function imagePasteContext(paste: PendingImagePaste): Pick<EditorImagePasteState, "uploadId" | "noteId" | "revision" | "selection"> {
+    return {
+      uploadId: paste.uploadId,
+      noteId: paste.session.noteId,
+      revision: paste.revision,
+      selection: { ...paste.selection },
+    };
+  }
+
+  function notifyImagePaste(paste: PendingImagePaste, outcome: ImagePasteOutcome): void {
+    notifyImagePasteState({ ...imagePasteContext(paste), ...outcome });
+  }
+
+  function markImagePasteFinished(paste: PendingImagePaste): boolean {
+    if (paste.finished) return false;
+    paste.finished = true;
+    URL.revokeObjectURL(paste.previewUrl);
+    return true;
+  }
+
+  function finishImagePaste(paste: PendingImagePaste, outcome: ImagePasteOutcome): void {
+    if (!markImagePasteFinished(paste)) return;
+    notifyImagePaste(paste, outcome);
+  }
+
+  function abortInvalidImagePastes(session: EditorSession): void {
+    for (const paste of imagePastes.values()) {
+      if (paste.session === session && !paste.finished && !imagePasteIsCurrent(paste)) {
+        paste.controller.abort();
+        finishImagePaste(paste, { status: "stale" });
+      }
+    }
+  }
+
+  function imagePasteIsCurrent(paste: PendingImagePaste): boolean {
+    return !disposed &&
+      sessions.get(paste.session) === paste.data &&
+      paste.data.revision === paste.revision &&
+      !paste.data.readOnly;
+  }
+
+  function finishImagePasteError(paste: PendingImagePaste, error: unknown): void {
+    if (paste.finished) return;
+    if (!imagePasteIsCurrent(paste)) {
+      finishImagePaste(paste, { status: "stale" });
+      return;
+    }
+    finishImagePaste(paste, {
+      status: "failed",
+      message: error instanceof Error ? error.message : String(error),
+    });
+  }
+
+  function webpAssetMarkdown(result: EditorImageUploadResult): string {
+    const prefix = "z-images/";
+    const assetName = result.name.startsWith(prefix) ? result.name.slice(prefix.length) : "";
+    if (
+      assetName === "" ||
+      assetName.includes("/") ||
+      assetName.includes("\\") ||
+      !assetName.endsWith(".webp") ||
+      result.markdown.trim() === ""
+    ) {
+      throw new TypeError("Image upload returned an invalid WebP asset");
+    }
+    return result.markdown;
+  }
+
+  async function encodeImageAsWebp(file: File): Promise<Blob> {
+    if (file.type === "image/webp") return file;
+    const bitmap = await createImageBitmap(file);
+    try {
+      const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+      const context = canvas.getContext("2d");
+      if (context === null) throw new Error("Could not create an image conversion context");
+      context.drawImage(bitmap, 0, 0);
+      const image = await canvas.convertToBlob({ type: "image/webp", quality: 0.85 });
+      if (image.type !== "image/webp") throw new Error("Browser did not convert the pasted image to WebP");
+      return image;
+    } finally {
+      bitmap.close();
+    }
+  }
+
+  function insertPastedImage(paste: PendingImagePaste, markdown: string): void {
+    const from = Math.min(paste.selection.anchor, paste.selection.head);
+    const to = Math.max(paste.selection.anchor, paste.selection.head);
+    const transaction = {
+      changes: { from, to, insert: markdown },
+      selection: { anchor: from + markdown.length },
+      annotations: [transactionOrigin.of("userEdit"), Transaction.userEvent.of("input.image-paste")],
+    };
+
+    if (!markImagePasteFinished(paste)) return;
+    try {
+      if (activeSession === paste.session) {
+        view.dispatch(transaction);
+      } else {
+        const update = paste.data.state.update(transaction);
+        paste.data.state = update.state;
+        paste.data.revision++;
+        paste.data.dirty = true;
+        paste.data.sourceCacheRevision = -1;
+        abortInvalidImagePastes(paste.session);
+        config.onChange?.({ noteId: paste.session.noteId, revision: paste.data.revision, origin: "userEdit" });
+      }
+    } finally {
+      notifyImagePaste(paste, { status: "inserted" });
+    }
+  }
+
+  async function runImagePaste(
+    paste: PendingImagePaste,
+    upload: (request: EditorImageUploadRequest) => Promise<EditorImageUploadResult>,
+  ): Promise<void> {
+    try {
+      let image: Blob;
+      try {
+        image = await encodeImageAsWebp(paste.file);
+      } catch (error) {
+        finishImagePasteError(paste, error);
+        return;
+      }
+      if (paste.finished) return;
+      if (!imagePasteIsCurrent(paste)) {
+        finishImagePaste(paste, { status: "stale" });
+        return;
+      }
+      let result: EditorImageUploadResult;
+      try {
+        result = await upload({
+          image,
+          noteId: paste.session.noteId,
+          revision: paste.revision,
+          selection: { ...paste.selection },
+          signal: paste.controller.signal,
+        });
+      } catch (error) {
+        finishImagePasteError(paste, error);
+        return;
+      }
+      if (paste.finished) return;
+      if (!imagePasteIsCurrent(paste)) {
+        finishImagePaste(paste, { status: "stale" });
+        return;
+      }
+      let markdown: string;
+      try {
+        markdown = webpAssetMarkdown(result);
+      } catch (error) {
+        finishImagePasteError(paste, error);
+        return;
+      }
+      insertPastedImage(paste, markdown);
+    } finally {
+      imagePastes.delete(paste.uploadId);
+    }
+  }
+
+  function beginImagePaste(view: EditorView, file: File): void {
+    const session = activeSession;
+    const upload = config.uploadPastedImage;
+    if (session === null || upload === undefined || view.state.facet(readOnlyFacet)) return;
+    const data = sessionData(session, owner);
+    if (data.readOnly) return;
+    const selection = view.state.selection.main;
+    const uploadId = nextImagePasteId++;
+    const revision = data.revision;
+    const pasteSelection = { anchor: selection.anchor, head: selection.head };
+    let previewUrl: string;
+    try {
+      previewUrl = URL.createObjectURL(file);
+    } catch (error) {
+      notifyImagePasteState({
+        uploadId,
+        noteId: session.noteId,
+        revision,
+        selection: pasteSelection,
+        status: "failed",
+        message: error instanceof Error ? error.message : String(error),
+      });
+      return;
+    }
+    const paste: PendingImagePaste = {
+      uploadId,
+      session,
+      data,
+      revision,
+      selection: pasteSelection,
+      file,
+      previewUrl,
+      controller: new AbortController(),
+      task: null,
+      finished: false,
+    };
+    imagePastes.set(paste.uploadId, paste);
+    notifyImagePasteState({
+      ...imagePasteContext(paste),
+      status: "uploading",
+      previewUrl: paste.previewUrl,
+    });
+    if (paste.finished) {
+      imagePastes.delete(paste.uploadId);
+      return;
+    }
+    paste.task = runImagePaste(paste, upload).catch((error: unknown) => {
+      console.error(error);
+    });
+  }
 
   const updateListener = EditorView.updateListener.of((update) => {
     if (activeSession === null) return;
@@ -259,11 +506,22 @@ export function createCodeMirrorEditor(container: HTMLElement, initialConfig: Ed
       revision: data.revision,
       origin: "userEdit",
     };
+    abortInvalidImagePastes(activeSession);
     config.onChange?.(change);
   });
 
   const pasteHandler = EditorView.domEventHandlers({
     paste(event, editorView) {
+      const imageItem = config.uploadPastedImage === undefined || event.clipboardData === null
+        ? undefined
+        : [...event.clipboardData.items].find((item) => item.type.startsWith("image/"));
+      if (imageItem !== undefined) {
+        event.preventDefault();
+        event.stopPropagation();
+        const file = imageItem.getAsFile();
+        if (file !== null) beginImagePaste(editorView, file);
+        return true;
+      }
       const html = event.clipboardData?.getData("text/html");
       if (!html) return false;
       event.preventDefault();
@@ -435,6 +693,10 @@ export function createCodeMirrorEditor(container: HTMLElement, initialConfig: Ed
       storeActiveState();
       activeSession = null;
       disposed = true;
+      for (const paste of imagePastes.values()) {
+        paste.controller.abort();
+        markImagePasteFinished(paste);
+      }
       view.destroy();
     },
 
@@ -470,6 +732,7 @@ export function createCodeMirrorEditor(container: HTMLElement, initialConfig: Ed
       if (data.dirty) return { kind: "dirty", revision: data.revision };
       if (currentSource(data) === source) return { kind: "unchanged", revision: data.revision };
       data.revision++;
+      abortInvalidImagePastes(session);
       data.dirty = false;
       data.sourceCache = source;
       data.sourceCacheRevision = data.revision;
@@ -509,12 +772,14 @@ export function createCodeMirrorEditor(container: HTMLElement, initialConfig: Ed
       if (disposed) throw new TypeError("Editor has been disposed");
       const previous = config;
       config = { ...config, ...partial };
-      const data = activeSession === null ? null : sessionData(activeSession, owner);
+      const session = activeSession;
+      const data = session === null ? null : sessionData(session, owner);
       if (data === null) return;
       const previousMode = data.mode;
       const previousReadOnly = data.readOnly;
       if (Object.hasOwn(partial, "readOnly")) data.readOnly = partial.readOnly ?? false;
       if (Object.hasOwn(partial, "mode")) data.mode = partial.mode ?? data.mode;
+      if (session !== null && data.readOnly) abortInvalidImagePastes(session);
       if (
         data.mode !== previousMode ||
         data.readOnly !== previousReadOnly ||

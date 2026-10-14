@@ -17,6 +17,8 @@ export type EditorConfig = {
   onSave?: () => void;
   onFindRequested?: () => void;
   onChange?: (change: EditorChange) => void;
+  uploadPastedImage?: (request: EditorImageUploadRequest) => Promise<EditorImageUploadResult>;
+  onImagePasteStateChange?: (state: EditorImagePasteState) => void;
 };
 
 export type EditorChange = {
@@ -24,6 +26,37 @@ export type EditorChange = {
   revision: number;
   origin: "userEdit";
 };
+
+export type EditorImagePasteSelection = {
+  anchor: number;
+  head: number;
+};
+
+export type EditorImageUploadRequest = {
+  image: Blob;
+  noteId: string;
+  revision: number;
+  selection: EditorImagePasteSelection;
+  signal: AbortSignal;
+};
+
+export type EditorImageUploadResult = {
+  name: string;
+  markdown: string;
+};
+
+type EditorImagePasteContext = {
+  uploadId: number;
+  noteId: string;
+  revision: number;
+  selection: EditorImagePasteSelection;
+};
+
+export type EditorImagePasteState = EditorImagePasteContext & (
+  | { status: "uploading"; previewUrl: string }
+  | { status: "inserted" | "stale" }
+  | { status: "failed"; message: string }
+);
 
 export type WikiImageExtensionOptions = {
   resolveUrl: (name: string) => string | null;

@@ -5,9 +5,8 @@
 `EditorState` for each open note. CodeMirror owns the Markdown source and
 transactions. The DOM is a view and never supplies saved source.
 
-The app still imports `web/ts/editor/index.ts`. That entry point keeps current
-app callers working while they move to the CodeMirror adapter. Keep the old
-engine and its tests until the app cutover and test review are complete.
+The app imports the CodeMirror adapter directly. The old engine and tests remain
+until their retirement review is complete.
 
 ## Source and sessions
 
@@ -58,6 +57,18 @@ text paste goes through CodeMirror. Rich HTML paste passes through
 `sanitizeHtmlToMarkdown`, which removes active elements, event attributes, and
 unsafe URLs before converting supported HTML to Markdown.
 
+When `uploadPastedImage` is configured, image paste keeps WebP clipboard bytes
+as-is and converts other clipboard files to WebP. It passes the blob, note ID,
+source revision, selection, and an abort signal to the upload callback. The
+callback returns the server's `z-images/`
+asset name and wiki-image Markdown. The adapter inserts that Markdown only into
+the captured session and selection while the source revision is still current.
+An intervening edit, clean reload, or read-only change aborts the request and
+reports it as stale. The state callback reports uploading, inserted, stale,
+and failed states. Its preview object URL is revoked on every terminal state
+and when the editor is disposed; upload callbacks must honor the abort signal to
+stop their request on invalidation or disposal.
+
 Atomic table edits resolve the current syntax-tree range for the edited cell.
 They replace only that cell's source span. Find treats the query as literal
 text, uses smart case, and returns UTF-16 source ranges. The outline reads
@@ -86,5 +97,5 @@ The build fails if the fixture bundle contains React or more than one
 Run the focused adapter tests with:
 
 ```sh
-pnpm exec vitest run web/ts/editor/tests/editor-session.test.ts web/ts/editor/tests/editor-source-operations.test.ts
+pnpm exec vitest run web/ts/editor/tests/editor-session.test.ts web/ts/editor/tests/editor-source-operations.test.ts web/ts/editor/tests/image-paste.test.ts
 ```
