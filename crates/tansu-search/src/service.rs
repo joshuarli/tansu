@@ -345,12 +345,8 @@ fn worker_loop(
                     });
                     hits
                 });
-                if matches!(&result, Err(error) if !matches!(error, SearchError::QueryTooLong { .. })) {
-                    state.dirty.store(true, Ordering::Release);
-                    state.degraded.store(true, Ordering::Release);
-                    state
-                        .needs_reconciliation
-                        .store(true, Ordering::Release);
+                if let Err(error) = &result {
+                    mark_search_failure(&state, error);
                 }
                 let _ = reply.send(result);
             }
@@ -389,6 +385,24 @@ fn worker_loop(
             Message::Shutdown => return,
         }
     }
+}
+
+fn mark_search_failure(state: &SharedState, error: &SearchError) {
+    if matches!(
+        error,
+        SearchError::InvalidInput { .. }
+            | SearchError::LimitOutOfRange { .. }
+            | SearchError::QueryTooLong { .. }
+            | SearchError::InvalidRange { .. }
+            | SearchError::DuplicateOverlayNote
+    ) {
+        return;
+    }
+    state.dirty.store(true, Ordering::Release);
+    state.degraded.store(true, Ordering::Release);
+    state
+        .needs_reconciliation
+        .store(true, Ordering::Release);
 }
 
 fn collect_changes(
@@ -725,6 +739,56 @@ mod tests {
             }
         );
         assert!(!service.needs_reconciliation());
+    }
+
+    #[test]
+    fn request_validation_errors_preserve_status_and_storage_errors_degrade() {
+        let state = SharedState {
+            dirty: AtomicBool::new(false),
+            degraded: AtomicBool::new(false),
+            needs_reconciliation: AtomicBool::new(false),
+        };
+        let validation_errors = [
+            SearchError::InvalidInput { field: "query" },
+            SearchError::LimitOutOfRange {
+                value: 101,
+                maximum: 100,
+            },
+            SearchError::QueryTooLong {
+                bytes: 1025,
+                maximum: 1024,
+            },
+            SearchError::InvalidRange { start: 2, end: 1 },
+            SearchError::DuplicateOverlayNote,
+        ];
+
+        for error in &validation_errors {
+            mark_search_failure(&state, error);
+        }
+        assert_eq!(
+            SearchStatus {
+                dirty: state.dirty.load(Ordering::Acquire),
+                degraded: state.degraded.load(Ordering::Acquire),
+            },
+            SearchStatus {
+                dirty: false,
+                degraded: false,
+            }
+        );
+        assert!(!state.needs_reconciliation.load(Ordering::Acquire));
+
+        mark_search_failure(&state, &SearchError::WorkerStopped);
+        assert_eq!(
+            SearchStatus {
+                dirty: state.dirty.load(Ordering::Acquire),
+                degraded: state.degraded.load(Ordering::Acquire),
+            },
+            SearchStatus {
+                dirty: true,
+                degraded: true,
+            }
+        );
+        assert!(state.needs_reconciliation.load(Ordering::Acquire));
     }
 
     fn snapshot(identity: NoteIdentity, source: &str, local_revision: u64) -> DirtyNoteSnapshot {
