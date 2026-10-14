@@ -60,9 +60,11 @@ passkey recovery limits, and rollback guidance.
 ## Build
 
 `deno task build` creates fingerprinted frontend bundles and a manifest under
-`web/dist/`. Run it before Rust commands that compile the server, including
-`make check` and `make test`. Cargo embeds the files listed by that manifest
-and does not run Node or Deno.
+`web/dist/`. Cargo runs `build.rs` whenever it compiles the root package, and
+that script reads the manifest. `make dev` builds development assets before
+generating API types. Run `deno task build` before `make check`, `make test`,
+`make types`, or `make types-check`. Cargo embeds the listed assets and does
+not run Node or Deno.
 
 Build the Linux server for musl with Docker:
 

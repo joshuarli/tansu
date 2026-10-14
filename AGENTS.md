@@ -24,5 +24,6 @@ Commands: frontend build `deno task build`, fixture app `make dev`, check `make 
 - Browser support and performance: [browser support](docs/browser-support.md), [performance](docs/performance.md)
 - Editor behavior: [editor](docs/editor.md)
 - Security and deployment: [security](docs/security.md), [deployment](docs/deployment.md)
+- Security design proposals: [WebAuthn counter policy](docs/rfcs/0001-webauthn-counter-policy.md), [RP ID validation](docs/rfcs/0002-webauthn-rp-id-validation.md)
 - Logging and backlog: [logging](docs/logging.md), [logging backlog](docs/logging-backlog.md)
 - Deferred features: [product backlog](docs/product-backlog.md)

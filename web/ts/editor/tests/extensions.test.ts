@@ -1,5 +1,4 @@
 import { expect, afterAll, describe, beforeAll, it } from "vitest";
-/// Dedicated tests for the three built-in extension factories.
 
 import {
   createWikiLinkExtension,

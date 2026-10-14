@@ -15,6 +15,10 @@ value clears credentials, sessions, enrollment capabilities, and pending
 ceremonies in one database transaction. Enroll credentials again after changing
 either value.
 
+The verifier reports non-increasing signature counters, but the auth store
+currently does not act on that result. The policy proposal is in
+[RFC 0001](rfcs/0001-webauthn-counter-policy.md).
+
 ## Enrollment and sessions
 
 The first credential requires a random, expiring enrollment capability. The

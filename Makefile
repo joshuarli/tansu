@@ -3,8 +3,9 @@ DEV_DIR := $(CURDIR)/.dev
 DEV_CONFIG_HOME := $(DEV_DIR)/config
 DEV_DATA_HOME := $(DEV_DIR)/data
 
-dev: types dev-config
+dev:
 	deno task build:dev
+	$(MAKE) types dev-config
 	TANSU2_LOGS=pretty XDG_CONFIG_HOME="$(DEV_CONFIG_HOME)" XDG_DATA_HOME="$(DEV_DATA_HOME)" cargo run --bin $(NAME) -- --port 3000
 
 dev-config:
