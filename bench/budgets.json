@@ -1,27 +1,93 @@
 {
-  "tansu-editor-large-note": {
-    "chars": 43959,
-    "renderMsP95": 25,
-    "serializeMsP95": 75,
-    "editorSetValueMsP95": 150,
-    "editorGetValueMsP95": 40
-  },
   "integrated": {
-    "coldStartup": { "medianMs": 30000, "p95Ms": 30000 },
-    "chromium.warmStartup": { "medianMs": 1000, "p95Ms": 2000 },
-    "chromium.bootstrap": { "medianMs": 2000, "p95Ms": 5000 },
-    "chromium.firstEditorInteractive": { "medianMs": 5000, "p95Ms": 10000 },
-    "chromium.openNote": { "medianMs": 1000, "p95Ms": 3000 },
-    "chromium.switchNote": { "medianMs": 2000, "p95Ms": 5000 },
-    "chromium.editSave": { "medianMs": 2000, "p95Ms": 5000 },
-    "chromium.search": { "medianMs": 2000, "p95Ms": 5000 },
-    "chromium.conflictRestore": { "medianMs": 3000, "p95Ms": 8000 },
-    "chromium.ssePropagation": { "medianMs": 3000, "p95Ms": 8000 },
-    "chromium.watcherExternalEdit": { "medianMs": 5000, "p95Ms": 10000 },
-    "chromium.imagePath": { "medianMs": 2000, "p95Ms": 5000 },
-    "chromium.revisionRestore": { "medianMs": 3000, "p95Ms": 8000 },
-    "productionBundleBytes": { "maxBytes": 1500000 },
-    "catalogBytes": { "maxBytes": 200000000 },
-    "serverRssBytes": { "maxBytes": 800000000 }
+    "coldStartup": {
+      "medianMs": 30000,
+      "p95Ms": 30000
+    },
+    "chromium.warmStartup": {
+      "medianMs": 1000,
+      "p95Ms": 2000
+    },
+    "chromium.bootstrap": {
+      "medianMs": 2000,
+      "p95Ms": 5000
+    },
+    "chromium.firstEditorInteractive": {
+      "medianMs": 5000,
+      "p95Ms": 10000
+    },
+    "chromium.openNote": {
+      "medianMs": 1000,
+      "p95Ms": 3000
+    },
+    "chromium.switchNote": {
+      "medianMs": 2000,
+      "p95Ms": 5000
+    },
+    "chromium.editSave": {
+      "medianMs": 2000,
+      "p95Ms": 5000
+    },
+    "chromium.search": {
+      "medianMs": 2000,
+      "p95Ms": 5000
+    },
+    "chromium.conflictRestore": {
+      "medianMs": 3000,
+      "p95Ms": 8000
+    },
+    "chromium.ssePropagation": {
+      "medianMs": 3000,
+      "p95Ms": 8000
+    },
+    "chromium.watcherExternalEdit": {
+      "medianMs": 5000,
+      "p95Ms": 10000
+    },
+    "chromium.imagePath": {
+      "medianMs": 2000,
+      "p95Ms": 5000
+    },
+    "chromium.revisionRestore": {
+      "medianMs": 3000,
+      "p95Ms": 8000
+    },
+    "productionBundleBytes": {
+      "maxBytes": 850000
+    },
+    "catalogBytes": {
+      "maxBytes": 200000000
+    },
+    "serverRssBytes": {
+      "maxBytes": 800000000
+    },
+    "productionBundleGzipBytes": {
+      "maxBytes": 275000
+    }
+  },
+  "productionAssets": {
+    "rawJavaScriptBytes": {
+      "maxBytes": 1500000
+    },
+    "minifiedJavaScriptBytes": {
+      "maxBytes": 850000
+    },
+    "minifiedJavaScriptGzipBytes": {
+      "maxBytes": 275000
+    },
+    "stylesheetBytes": {
+      "maxBytes": 25000
+    },
+    "stylesheetGzipBytes": {
+      "maxBytes": 5000
+    }
+  },
+  "releaseBinaries": {
+    "x86_64-unknown-linux-musl": {
+      "maxBytes": 12000000
+    },
+    "aarch64-unknown-linux-musl": {
+      "maxBytes": 10000000
+    }
   }
 }
