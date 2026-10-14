@@ -1,9 +1,14 @@
 use std::collections::HashMap;
-use std::fs::{self, OpenOptions};
+use std::fs::{self, File, OpenOptions};
+use std::ffi::OsString;
+use std::io::{self, ErrorKind};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
-use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, params};
+use rusqlite::backup::Backup;
+use rusqlite::{Connection, OpenFlags, OptionalExtension, Transaction, TransactionBehavior, params};
+use rustix::fs::{AtFlags, Mode, OFlags, RenameFlags, openat, renameat_with, unlinkat};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tansu_webauthn::{AuthChallenge, AuthenticationFinish, RegChallenge, StoredCredential};
@@ -207,6 +212,7 @@ pub struct AuthStore {
     session_ttl_secs: u64,
     recent_verification_secs: u64,
     active_leases: Arc<Mutex<HashMap<Vec<u8>, ActiveLease>>>,
+    _process_lock: File,
 }
 
 impl AuthStore {
@@ -216,9 +222,16 @@ impl AuthStore {
         session_ttl_secs: u64,
         recent_verification_secs: u64,
     ) -> Result<Self, AuthError> {
-        let path = secure_auth_directory(state_directory.as_ref())?.join("auth.db");
+        let directory = secure_auth_directory(state_directory.as_ref())?;
+        let process_lock = acquire_process_lock(&directory)?;
+        let path = directory.join("auth.db");
         secure_file(&path)?;
-        let connection = Connection::open(&path).map_err(storage)?;
+        validate_database_sidecars(&path)?;
+        let connection = Connection::open_with_flags(
+            &path,
+            OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NOFOLLOW,
+        )
+        .map_err(storage)?;
         connection.execute_batch(
             "PRAGMA journal_mode = WAL;
              PRAGMA synchronous = FULL;
@@ -259,6 +272,7 @@ impl AuthStore {
             session_ttl_secs,
             recent_verification_secs,
             active_leases: Arc::new(Mutex::new(HashMap::new())),
+            _process_lock: process_lock,
         })
     }
 
@@ -535,6 +549,335 @@ impl AuthStore {
     pub fn session_cookie(&self, material: &SessionMaterial) -> String {
         format!("__Host-tansu_session={}; HttpOnly; Secure; Path=/; SameSite=Strict", material.cookie_value)
     }
+
+    /// Creates a SQLite backup at a path that does not already exist.
+    /// Requires exclusive access to the auth state directory.
+    pub fn backup_to(
+        state_directory: impl AsRef<Path>,
+        backup_path: impl AsRef<Path>,
+    ) -> Result<(), AuthError> {
+        let database_path = existing_auth_database(state_directory.as_ref())?;
+        let directory = database_path.parent().expect("auth database parent exists");
+        let _process_lock = acquire_process_lock(directory)?;
+        validate_database_sidecars(&database_path)?;
+        let source = Connection::open_with_flags(
+            &database_path,
+            OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NOFOLLOW,
+        )
+            .map_err(storage)?;
+        let (temporary, file) = create_temporary_database(directory)?;
+        drop(file);
+        let mut destination_database = Connection::open_with_flags(&temporary.path, OpenFlags::SQLITE_OPEN_READ_WRITE)
+            .map_err(storage)?;
+        copy_database(&source, &mut destination_database)?;
+        verify_database(&destination_database)?;
+        set_delete_journal(&destination_database)?;
+        drop(destination_database);
+        File::open(&temporary.path).map_err(storage)?.sync_all().map_err(storage)?;
+        publish_new_database(&temporary, backup_path.as_ref())
+    }
+
+    /// Replaces auth state from a validated backup and clears transient auth state.
+    /// Requires exclusive access to the auth state directory.
+    pub fn restore_from_backup(
+        state_directory: impl AsRef<Path>,
+        backup_path: impl AsRef<Path>,
+    ) -> Result<(), AuthError> {
+        let directory = secure_auth_directory(state_directory.as_ref())?;
+        let _process_lock = acquire_process_lock(&directory)?;
+        let database_path = directory.join("auth.db");
+        ensure_regular_file_if_present(&database_path, "auth database")?;
+        let backup_path = backup_path.as_ref();
+        let (backup_directory, backup_name) = open_user_file_parent(backup_path)?;
+        let source_fd = openat(
+            &backup_directory,
+            backup_name,
+            OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+            Mode::empty(),
+        )
+        .map_err(storage)?;
+        let mut backup_file = File::from(source_fd);
+        if !backup_file.metadata().map_err(storage)?.is_file() {
+            return Err(AuthError::InvalidRequest("auth backup must be a regular file".into()));
+        }
+        let (source_snapshot, mut source_copy) = create_temporary_database(&directory)?;
+        io::copy(&mut backup_file, &mut source_copy).map_err(storage)?;
+        source_copy.sync_all().map_err(storage)?;
+        drop(source_copy);
+        let source = Connection::open_with_flags(
+            &source_snapshot.path,
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NOFOLLOW,
+        )
+            .map_err(storage)?;
+        let (temporary, file) = create_temporary_database(&directory)?;
+        drop(file);
+        let mut destination_database = Connection::open_with_flags(&temporary.path, OpenFlags::SQLITE_OPEN_READ_WRITE)
+            .map_err(storage)?;
+        copy_database(&source, &mut destination_database)?;
+        verify_database(&destination_database)?;
+        destination_database.execute_batch(
+            "BEGIN IMMEDIATE;
+             DELETE FROM sessions;
+             DELETE FROM enrollment_capabilities;
+             DELETE FROM ceremonies;
+             COMMIT;",
+        ).map_err(storage)?;
+        verify_database(&destination_database)?;
+        set_delete_journal(&destination_database)?;
+        drop(destination_database);
+        File::open(&temporary.path).map_err(storage)?.sync_all().map_err(storage)?;
+        checkpoint_database_for_replacement(&database_path)?;
+        remove_database_sidecars(&database_path)?;
+        File::open(&directory).map_err(storage)?.sync_all().map_err(storage)?;
+        fs::rename(&temporary.path, &database_path).map_err(storage)?;
+        File::open(&directory).map_err(storage)?.sync_all().map_err(storage)?;
+        Ok(())
+    }
+}
+
+struct TemporaryDatabase {
+    path: PathBuf,
+}
+
+impl Drop for TemporaryDatabase {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.path);
+    }
+}
+
+struct TemporaryOutput {
+    directory: File,
+    name: OsString,
+}
+
+impl Drop for TemporaryOutput {
+    fn drop(&mut self) {
+        let _ = unlinkat(&self.directory, self.name.as_os_str(), AtFlags::empty());
+    }
+}
+
+fn existing_auth_database(state_directory: &Path) -> Result<PathBuf, AuthError> {
+    let directory = secure_auth_directory(state_directory)?;
+    let database_path = directory.join("auth.db");
+    ensure_regular_file_if_present(&database_path, "auth database")?;
+    Ok(database_path)
+}
+
+fn acquire_process_lock(directory: &Path) -> Result<File, AuthError> {
+    let directory = File::open(directory).map_err(storage)?;
+    let descriptor = openat(
+        &directory,
+        "auth.lock",
+        OFlags::RDWR | OFlags::CREATE | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+        Mode::RUSR | Mode::WUSR,
+    )
+    .map_err(storage)?;
+    let lock = File::from(descriptor);
+    if !lock.metadata().map_err(storage)?.is_file() {
+        return Err(AuthError::InvalidRequest("auth lock must be a regular file".into()));
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        lock.set_permissions(fs::Permissions::from_mode(0o600)).map_err(storage)?;
+    }
+    lock.try_lock().map_err(|error| {
+        AuthError::Storage(format!("auth state is already in use or cannot be locked: {error}"))
+    })?;
+    Ok(lock)
+}
+
+fn open_user_file_parent(path: &Path) -> Result<(File, OsString), AuthError> {
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    let directory = File::open(parent).map_err(storage)?;
+    if !directory.metadata().map_err(storage)?.is_dir() {
+        return Err(AuthError::InvalidRequest("auth backup parent must be a directory".into()));
+    }
+    let name = path
+        .file_name()
+        .ok_or_else(|| AuthError::InvalidRequest("auth backup path needs a file name".into()))?
+        .to_os_string();
+    Ok((directory, name))
+}
+
+fn ensure_regular_file_if_present(path: &Path, description: &str) -> Result<(), AuthError> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => {
+            Err(AuthError::InvalidRequest(format!("{description} must be a regular file")))
+        }
+        Ok(_) => Ok(()),
+        Err(error) if error.kind() == ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(storage(error)),
+    }
+}
+
+fn create_temporary_database(parent: &Path) -> Result<(TemporaryDatabase, File), AuthError> {
+    for _ in 0..8 {
+        let path = parent.join(format!(".tansu-auth-{}", random_token()?));
+        let mut options = OpenOptions::new();
+        options.read(true).write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        match options.open(&path) {
+            Ok(file) => {
+                let temporary = TemporaryDatabase { path };
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    file.set_permissions(fs::Permissions::from_mode(0o600)).map_err(storage)?;
+                }
+                return Ok((temporary, file));
+            }
+            Err(error) if error.kind() == ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(storage(error)),
+        }
+    }
+    Err(AuthError::Storage("could not allocate an auth database temp file".into()))
+}
+
+fn create_temporary_output(directory: &File) -> Result<(TemporaryOutput, File), AuthError> {
+    for _ in 0..8 {
+        let name = OsString::from(format!(".tansu-auth-{}", random_token()?));
+        match openat(
+            directory,
+            name.as_os_str(),
+            OFlags::WRONLY | OFlags::CREATE | OFlags::EXCL | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+            Mode::RUSR | Mode::WUSR,
+        ) {
+            Ok(descriptor) => {
+                let output = File::from(descriptor);
+                let guard = TemporaryOutput {
+                    directory: directory.try_clone().map_err(storage)?,
+                    name,
+                };
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    output.set_permissions(fs::Permissions::from_mode(0o600)).map_err(storage)?;
+                }
+                return Ok((guard, output));
+            }
+            Err(error) if error == rustix::io::Errno::EXIST => continue,
+            Err(error) => return Err(storage(error)),
+        }
+    }
+    Err(AuthError::Storage("could not allocate an auth backup temp file".into()))
+}
+
+fn copy_database(source: &Connection, destination: &mut Connection) -> Result<(), AuthError> {
+    let backup = Backup::new(source, destination).map_err(storage)?;
+    backup
+        .run_to_completion(64, Duration::from_millis(25), None)
+        .map_err(storage)
+}
+
+fn verify_database(connection: &Connection) -> Result<(), AuthError> {
+    let result: String = connection
+        .query_row("PRAGMA quick_check", [], |row| row.get(0))
+        .map_err(storage)?;
+    if result == "ok" {
+        Ok(())
+    } else {
+        Err(AuthError::Storage("auth database integrity check failed".into()))
+    }
+}
+
+fn set_delete_journal(connection: &Connection) -> Result<(), AuthError> {
+    let mode: String = connection
+        .query_row("PRAGMA journal_mode = DELETE", [], |row| row.get(0))
+        .map_err(storage)?;
+    if mode.eq_ignore_ascii_case("delete") {
+        Ok(())
+    } else {
+        Err(AuthError::Storage("auth database could not leave WAL mode".into()))
+    }
+}
+
+fn publish_new_database(temporary: &TemporaryDatabase, destination: &Path) -> Result<(), AuthError> {
+    let (destination_parent, destination_name) = open_user_file_parent(destination)?;
+    let (output_temporary, mut output_file) = create_temporary_output(&destination_parent)?;
+    let mut source_file = File::open(&temporary.path).map_err(storage)?;
+    if !source_file.metadata().map_err(storage)?.is_file() {
+        return Err(AuthError::InvalidRequest("auth backup staging file must be regular".into()));
+    }
+    io::copy(&mut source_file, &mut output_file).map_err(storage)?;
+    output_file.sync_all().map_err(storage)?;
+    drop(output_file);
+    renameat_with(
+        &output_temporary.directory,
+        output_temporary.name.as_os_str(),
+        &destination_parent,
+        destination_name.as_os_str(),
+        RenameFlags::NOREPLACE,
+    )
+    .map_err(storage)?;
+    destination_parent.sync_all().map_err(storage)
+}
+
+fn checkpoint_database_for_replacement(path: &Path) -> Result<(), AuthError> {
+    validate_database_sidecars(path)?;
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => {
+            return Err(AuthError::InvalidRequest("auth database must be a regular file".into()));
+        }
+        Ok(_) => {}
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(storage(error)),
+    }
+    let connection = Connection::open_with_flags(
+        path,
+        OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NOFOLLOW,
+    )
+        .map_err(storage)?;
+    let busy: i64 = connection
+        .query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |row| row.get(0))
+        .map_err(storage)?;
+    if busy != 0 {
+        return Err(AuthError::Storage("auth database is busy; stop Tansu before restoring".into()));
+    }
+    set_delete_journal(&connection)?;
+    drop(connection);
+    Ok(())
+}
+
+fn remove_database_sidecars(path: &Path) -> Result<(), AuthError> {
+    validate_database_sidecars(path)?;
+    for suffix in ["-wal", "-shm"] {
+        let mut sidecar = path.as_os_str().to_os_string();
+        sidecar.push(suffix);
+        let sidecar = PathBuf::from(sidecar);
+        match fs::symlink_metadata(&sidecar) {
+            Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => {
+                return Err(AuthError::InvalidRequest("auth database sidecar must be a regular file".into()));
+            }
+            Ok(_) => fs::remove_file(sidecar).map_err(storage)?,
+            Err(error) if error.kind() == ErrorKind::NotFound => {}
+            Err(error) => return Err(storage(error)),
+        }
+    }
+    Ok(())
+}
+
+fn validate_database_sidecars(path: &Path) -> Result<(), AuthError> {
+    for suffix in ["-wal", "-shm"] {
+        let mut sidecar = path.as_os_str().to_os_string();
+        sidecar.push(suffix);
+        match fs::symlink_metadata(PathBuf::from(sidecar)) {
+            Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => {
+                return Err(AuthError::InvalidRequest("auth database sidecar must be a regular file".into()));
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == ErrorKind::NotFound => {}
+            Err(error) => return Err(storage(error)),
+        }
+    }
+    Ok(())
 }
 
 fn bind_auth_identity(connection: &Connection, policy: &AuthPolicy) -> Result<(), AuthError> {
@@ -869,6 +1212,119 @@ mod tests {
     }
 
     #[test]
+    fn later_credentials_require_recent_owner_verification() {
+        let (_root, store) = store();
+        let (capability, _) = store.create_enrollment_capability(10, 30).unwrap();
+        let state = RegChallenge { challenge: "first".into(), user_id: "owner".into(), username: "owner".into() };
+        let first = store.begin_registration(&state, Some(&capability), None, 11, 30).unwrap();
+        let owner_session = store.finish_registration(&first.id, 12, |_| Ok(credential(1))).unwrap().unwrap();
+        let later = RegChallenge { challenge: "later".into(), user_id: "owner".into(), username: "owner".into() };
+
+        assert!(matches!(store.begin_registration(&later, None, None, 13, 30), Err(AuthError::Unauthorized)));
+        assert!(matches!(store.begin_registration(&later, None, Some(&owner_session.cookie_value), 313, 30), Err(AuthError::Unauthorized)));
+
+        let ticket = store.begin_registration(&later, None, Some(&owner_session.cookie_value), 312, 30).unwrap();
+        assert!(store.finish_registration(&ticket.id, 312, |_| Ok(credential(2))).unwrap().is_none());
+        assert_eq!(store.credentials().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn backup_includes_committed_wal_state_and_restore_discards_live_tokens() {
+        let root = tempfile::tempdir().unwrap();
+        let state_directory = root.path().join("auth");
+        let backup_directory = root.path().join("backups");
+        fs::create_dir(&backup_directory).unwrap();
+        let backup_path = backup_directory.join("auth.db");
+        let policy = AuthPolicy::authenticated("https://notes.example.com", "example.com", "Tansu").unwrap();
+        let store = AuthStore::open(&state_directory, policy.clone(), 3600, 300).unwrap();
+        let (capability, _) = store.create_enrollment_capability(10, 30).unwrap();
+        let state = RegChallenge { challenge: "first".into(), user_id: "owner".into(), username: "owner".into() };
+        let first = store.begin_registration(&state, Some(&capability), None, 11, 30).unwrap();
+        let owner_session = store.finish_registration(&first.id, 12, |_| Ok(credential(1))).unwrap().unwrap();
+        let pending = store.begin_registration(&state, None, Some(&owner_session.cookie_value), 13, 30).unwrap();
+        assert!(AuthStore::backup_to(&state_directory, &backup_path).is_err());
+        assert!(AuthStore::restore_from_backup(&state_directory, &backup_path).is_err());
+        let wal_reader = Connection::open_with_flags(
+            state_directory.join("auth.db"),
+            OpenFlags::SQLITE_OPEN_READ_WRITE,
+        ).unwrap();
+        wal_reader.execute_batch("BEGIN;").unwrap();
+        let _: i64 = wal_reader.query_row("SELECT COUNT(*) FROM credentials", [], |row| row.get(0)).unwrap();
+        drop(store);
+        let wal_path = state_directory.join("auth.db-wal");
+        assert!(fs::metadata(&wal_path).unwrap().len() > 0);
+
+        AuthStore::backup_to(&state_directory, &backup_path).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(fs::metadata(&backup_path).unwrap().permissions().mode() & 0o777, 0o600);
+        }
+        drop(wal_reader);
+        assert!(AuthStore::backup_to(&state_directory, &backup_path).is_err());
+
+        let live = AuthStore::open(&state_directory, policy.clone(), 3600, 300).unwrap();
+        assert!(AuthStore::backup_to(&state_directory, root.path().join("busy.db")).is_err());
+        assert!(AuthStore::restore_from_backup(&state_directory, &backup_path).is_err());
+        live.finish_registration(&pending.id, 14, |_| Ok(credential(2))).unwrap();
+        drop(live);
+
+        AuthStore::restore_from_backup(&state_directory, &backup_path).unwrap();
+        let restored = AuthStore::open(&state_directory, policy, 3600, 300).unwrap();
+        let credentials = restored.credentials().unwrap();
+        assert_eq!(credentials.len(), 1);
+        assert_eq!(credentials[0].cred_id, vec![1]);
+        assert!(restored.validate_request(request(
+            "notes.example.com",
+            Some("https://notes.example.com"),
+            RequestAction::Read,
+            Some(&owner_session.cookie_value),
+            None,
+            SessionRequirement::Required,
+            15,
+        )).is_err());
+        let connection = restored.connection.lock().unwrap();
+        for table in ["sessions", "enrollment_capabilities", "ceremonies"] {
+            let count: i64 = connection
+                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| row.get(0))
+                .unwrap();
+            assert_eq!(count, 0);
+        }
+    }
+
+    #[test]
+    fn auth_process_lock_child() {
+        let Some(state_directory) = std::env::var_os("TANSU_AUTH_LOCK_CHILD_STATE") else {
+            return;
+        };
+        assert!(AuthStore::open(
+            PathBuf::from(state_directory),
+            AuthPolicy::loopback_development(),
+            3600,
+            300,
+        ).is_err());
+    }
+
+    #[test]
+    fn auth_process_lock_blocks_another_process() {
+        let root = tempfile::tempdir().unwrap();
+        let state_directory = root.path().join("auth");
+        let _store = AuthStore::open(
+            &state_directory,
+            AuthPolicy::loopback_development(),
+            3600,
+            300,
+        ).unwrap();
+
+        let status = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "auth::tests::auth_process_lock_child"])
+            .env("TANSU_AUTH_LOCK_CHILD_STATE", &state_directory)
+            .status()
+            .unwrap();
+        assert!(status.success());
+    }
+
+    #[test]
     fn authenticated_mode_rejects_non_https_and_unrelated_rp_ids() {
         assert!(AuthPolicy::authenticated("http://notes.example.com", "example.com", "Tansu").is_err());
         assert!(AuthPolicy::authenticated("https://notes.example.com", "elsewhere.test", "Tansu").is_err());
@@ -929,5 +1385,116 @@ mod tests {
         symlink(external.join("outside.db"), &linked_database).unwrap();
         assert!(AuthStore::open(&real_directory, AuthPolicy::loopback_development(), 60, 10).is_err());
         assert!(!external.join("outside.db").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn restore_rejects_backup_path_replaced_with_symlink() {
+        use std::os::unix::fs::symlink;
+        let root = tempfile::tempdir().unwrap();
+        let state_directory = root.path().join("auth");
+        let backup_directory = root.path().join("backups");
+        fs::create_dir(&backup_directory).unwrap();
+        let policy = AuthPolicy::authenticated("https://notes.example.com", "example.com", "Tansu").unwrap();
+        let store = AuthStore::open(&state_directory, policy.clone(), 3600, 300).unwrap();
+        store.create_enrollment_capability(1, 60).unwrap();
+        drop(store);
+        let valid_backup = backup_directory.join("valid.db");
+        AuthStore::backup_to(&state_directory, &valid_backup).unwrap();
+        let replaced_path = backup_directory.join("replaced.db");
+        fs::write(&replaced_path, b"replaceable path").unwrap();
+        fs::remove_file(&replaced_path).unwrap();
+        symlink(&valid_backup, &replaced_path).unwrap();
+        let original_backup = fs::read(&valid_backup).unwrap();
+
+        assert!(AuthStore::restore_from_backup(&state_directory, &replaced_path).is_err());
+        assert_eq!(fs::read(&valid_backup).unwrap(), original_backup);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn backup_never_overwrites_existing_or_symlink_destination() {
+        use std::os::unix::fs::symlink;
+        let root = tempfile::tempdir().unwrap();
+        let state_directory = root.path().join("auth");
+        let backup_directory = root.path().join("backups");
+        fs::create_dir(&backup_directory).unwrap();
+        let policy = AuthPolicy::authenticated("https://notes.example.com", "example.com", "Tansu").unwrap();
+        let store = AuthStore::open(&state_directory, policy, 3600, 300).unwrap();
+        store.create_enrollment_capability(1, 60).unwrap();
+        drop(store);
+
+        let existing = backup_directory.join("existing.db");
+        fs::write(&existing, b"preserve").unwrap();
+        assert!(AuthStore::backup_to(&state_directory, &existing).is_err());
+        assert_eq!(fs::read(&existing).unwrap(), b"preserve");
+
+        let target = backup_directory.join("target.db");
+        fs::write(&target, b"preserve target").unwrap();
+        let linked = backup_directory.join("linked.db");
+        symlink(&target, &linked).unwrap();
+        assert!(AuthStore::backup_to(&state_directory, &linked).is_err());
+        assert_eq!(fs::read(&target).unwrap(), b"preserve target");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn auth_database_sidecars_reject_symlinks_before_sqlite_opens_them() {
+        use std::os::unix::fs::symlink;
+        let root = tempfile::tempdir().unwrap();
+        let state_directory = root.path().join("auth");
+        fs::create_dir(&state_directory).unwrap();
+        let target = root.path().join("outside");
+        fs::write(&target, b"preserve sidecar target").unwrap();
+        symlink(&target, state_directory.join("auth.db-wal")).unwrap();
+
+        assert!(AuthStore::open(
+            &state_directory,
+            AuthPolicy::loopback_development(),
+            3600,
+            300,
+        ).is_err());
+        assert_eq!(fs::read(&target).unwrap(), b"preserve sidecar target");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn restore_rejects_sidecar_symlinks_and_clears_regular_sidecars() {
+        use std::os::unix::fs::symlink;
+        let root = tempfile::tempdir().unwrap();
+        let state_directory = root.path().join("auth");
+        let backup_directory = root.path().join("backups");
+        fs::create_dir(&backup_directory).unwrap();
+        let policy = AuthPolicy::authenticated("https://notes.example.com", "example.com", "Tansu").unwrap();
+        let store = AuthStore::open(&state_directory, policy, 3600, 300).unwrap();
+        store.create_enrollment_capability(1, 60).unwrap();
+        drop(store);
+        let clear_sidecars = || {
+            for suffix in ["-wal", "-shm"] {
+                let mut sidecar = state_directory.join("auth.db").into_os_string();
+                sidecar.push(suffix);
+                match fs::remove_file(PathBuf::from(sidecar)) {
+                    Ok(()) => {}
+                    Err(error) if error.kind() == ErrorKind::NotFound => {}
+                    Err(error) => panic!("{error}"),
+                }
+            }
+        };
+        clear_sidecars();
+        let backup = backup_directory.join("auth.db");
+        AuthStore::backup_to(&state_directory, &backup).unwrap();
+        clear_sidecars();
+        let target = root.path().join("outside");
+        fs::write(&target, b"preserve sidecar target").unwrap();
+        symlink(&target, state_directory.join("auth.db-wal")).unwrap();
+        assert!(AuthStore::restore_from_backup(&state_directory, &backup).is_err());
+        assert_eq!(fs::read(&target).unwrap(), b"preserve sidecar target");
+
+        fs::remove_file(state_directory.join("auth.db-wal")).unwrap();
+        fs::write(state_directory.join("auth.db-wal"), []).unwrap();
+        fs::write(state_directory.join("auth.db-shm"), []).unwrap();
+        AuthStore::restore_from_backup(&state_directory, &backup).unwrap();
+        assert!(!state_directory.join("auth.db-wal").exists());
+        assert!(!state_directory.join("auth.db-shm").exists());
     }
 }

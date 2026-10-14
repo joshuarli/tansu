@@ -6,11 +6,29 @@ use std::path::{Path, PathBuf};
 use serde::Deserialize;
 
 use crate::api_types::PathValidationReason;
+use crate::auth::AuthPolicy;
 use crate::{Error, Result};
 
 #[derive(Debug, Clone)]
 pub struct Config {
     pub vaults: Vec<VaultConfig>,
+    pub auth: Option<AuthConfig>,
+}
+
+#[derive(Debug, Clone)]
+pub struct AuthConfig {
+    policy: AuthPolicy,
+    state_directory: PathBuf,
+}
+
+impl AuthConfig {
+    pub fn policy(&self) -> &AuthPolicy {
+        &self.policy
+    }
+
+    pub fn state_directory(&self) -> &Path {
+        &self.state_directory
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -332,6 +350,7 @@ fn valid_opaque_id(value: &str) -> bool {
 #[derive(Debug, Deserialize)]
 struct RawConfig {
     vaults: Vec<RawVault>,
+    auth: Option<RawAuthConfig>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -340,6 +359,15 @@ struct RawVault {
     path: String,
     #[serde(default)]
     excluded_folders: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawAuthConfig {
+    mode: String,
+    external_origin: String,
+    rp_id: String,
+    rp_name: String,
+    state_directory: String,
 }
 
 pub fn default_config_path() -> Result<PathBuf> {
@@ -385,7 +413,51 @@ pub fn parse_config(text: &str) -> Result<Config> {
         })
         .collect::<Result<Vec<_>>>()?;
     validate_vaults(&vaults)?;
-    Ok(Config { vaults })
+    let auth = raw
+        .auth
+        .map(|auth| {
+            if auth.mode != "authenticated" {
+                return Err(Error::BadRequest(
+                    "auth mode must be 'authenticated'".to_string(),
+                ));
+            }
+            if auth.rp_name.trim().is_empty() {
+                return Err(Error::BadRequest("auth RP name cannot be empty".to_string()));
+            }
+            let directory = Path::new(&auth.state_directory);
+            if directory.components().count() != 1
+                || !matches!(directory.components().next(), Some(std::path::Component::Normal(_)))
+            {
+                return Err(Error::BadRequest(
+                    "auth state_directory must be one child directory name".to_string(),
+                ));
+            }
+            let policy = AuthPolicy::authenticated(&auth.external_origin, &auth.rp_id, &auth.rp_name)
+                .map_err(|error| Error::BadRequest(error.to_string()))?;
+            Ok(AuthConfig {
+                policy,
+                state_directory: data_root.join("identity").join(directory),
+            })
+        })
+        .transpose()?;
+    Ok(Config { vaults, auth })
+}
+
+pub fn prepare_auth_state_directory(auth: &AuthConfig) -> Result<()> {
+    let identity = auth
+        .state_directory
+        .parent()
+        .ok_or_else(|| Error::BadRequest("auth state directory needs an identity parent".to_string()))?;
+    let data_root = identity
+        .parent()
+        .ok_or_else(|| Error::BadRequest("auth identity needs a data root".to_string()))?;
+    fs::create_dir_all(data_root)?;
+    let metadata = fs::symlink_metadata(data_root)?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err(Error::BadRequest("application data root must be a real directory".to_string()));
+    }
+    ensure_real_directory(identity)?;
+    Ok(())
 }
 
 fn expand_tilde(path: &str) -> Result<PathBuf> {
@@ -478,6 +550,50 @@ mod tests {
         assert_eq!(config.vaults[0].name, "Main");
         assert!(config.vaults[0].path.ends_with("notes"));
         assert!(config.vaults[0].state_path.ends_with("tansu/Main"));
+        assert!(config.auth.is_none());
+    }
+
+    #[test]
+    fn parses_authenticated_config_under_stable_identity_directory() {
+        let config = parse_config(
+            "[[vaults]]\nname='Main'\npath='/notes'\n\
+             [auth]\nmode='authenticated'\nexternal_origin='https://notes.example.com'\n\
+             rp_id='example.com'\nrp_name='Tansu'\nstate_directory='auth'\n",
+        )
+        .unwrap();
+        let auth = config.auth.unwrap();
+        assert_eq!(
+            auth.policy().rp(),
+            Some(("example.com", "https://notes.example.com", "Tansu"))
+        );
+        assert!(auth.state_directory().ends_with("tansu/identity/auth"));
+    }
+
+    #[test]
+    fn rejects_incomplete_or_unsafe_authenticated_config() {
+        let prefix = "[[vaults]]\nname='Main'\npath='/notes'\n[auth]\nmode='authenticated'\nexternal_origin='https://notes.example.com'\nrp_id='example.com'\nrp_name='Tansu'\n";
+        let missing_directory = parse_config(prefix).unwrap_err();
+        assert!(missing_directory.to_string().contains("state_directory"));
+
+        let parent_directory = parse_config(&format!("{prefix}state_directory='../auth'\n"))
+            .unwrap_err();
+        assert!(parent_directory.to_string().contains("one child directory"));
+
+        let wrong_mode = parse_config(
+            "[[vaults]]\nname='Main'\npath='/notes'\n\
+             [auth]\nmode='loopback'\nexternal_origin='https://notes.example.com'\n\
+             rp_id='example.com'\nrp_name='Tansu'\nstate_directory='auth'\n",
+        )
+        .unwrap_err();
+        assert!(wrong_mode.to_string().contains("auth mode"));
+
+        let wrong_origin = parse_config(
+            "[[vaults]]\nname='Main'\npath='/notes'\n\
+             [auth]\nmode='authenticated'\nexternal_origin='http://notes.example.com'\n\
+             rp_id='example.com'\nrp_name='Tansu'\nstate_directory='auth'\n",
+        )
+        .unwrap_err();
+        assert!(wrong_origin.to_string().contains("HTTPS"));
     }
 
     #[test]

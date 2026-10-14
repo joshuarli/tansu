@@ -1186,6 +1186,7 @@ mod tests {
                 state_path,
                 excluded_folders: Vec::new(),
             }],
+            auth: None,
         }).unwrap();
         let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
         let address = listener.local_addr().unwrap();

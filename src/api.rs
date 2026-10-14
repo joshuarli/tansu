@@ -559,6 +559,7 @@ mod tests {
             _root: root,
             config: Config {
                 vaults: config_vaults,
+                auth: None,
             },
         }
     }

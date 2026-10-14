@@ -32,6 +32,29 @@ dev and e2e log stream.
 `make test-e2e-chromium`, `make test-e2e-firefox`, and
 `make test-e2e-webkit`.
 
+## Authenticated-mode administration
+
+Authenticated mode is configured through `[auth]` in the config file described
+in [Configuration](configuration.md). `make dev` keeps its loopback behavior
+when that section is absent. With authenticated mode configured, run
+`tansu2 auth enroll` before starting the server to print the expiring,
+single-use first-registration capability. Stop the server before local auth
+commands; an exclusive OS file lock also rejects commands while the server is
+running.
+
+Create and restore passkey backups with:
+
+```sh
+tansu2 auth backup /path/to/auth-backup.db
+tansu2 auth restore /path/to/auth-backup.db
+```
+
+Backup creates a consistent SQLite file and refuses to overwrite its path.
+Restore validates the file, restores credentials, and clears sessions,
+enrollment capabilities, and pending ceremonies. These commands do not back up
+vault notes or history; see [Security](security.md) for path and recovery
+details.
+
 ## Build
 
 `deno task build` creates fingerprinted frontend bundles and a manifest under
