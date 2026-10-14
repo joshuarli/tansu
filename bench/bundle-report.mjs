@@ -51,7 +51,7 @@ const moduleSizes = inputPaths.map((path) => ({
   sourceBytes: minified.inputs[path]?.bytes ?? raw.inputs[path]?.bytes ?? 0,
   rawOutputBytes: raw.metadata.inputs[path]?.bytesInOutput ?? 0,
   minifiedOutputBytes: minified.metadata.inputs[path]?.bytesInOutput ?? 0,
-})).sort((left, right) =>
+})).toSorted((left, right) =>
   right.minifiedOutputBytes - left.minifiedOutputBytes || left.path.localeCompare(right.path)
 );
 

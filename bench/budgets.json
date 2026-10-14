@@ -60,9 +60,6 @@
     },
     "serverRssBytes": {
       "maxBytes": 800000000
-    },
-    "productionBundleGzipBytes": {
-      "maxBytes": 275000
     }
   },
   "productionAssets": {

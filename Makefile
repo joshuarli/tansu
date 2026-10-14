@@ -89,13 +89,19 @@ test-package:
 	TMPDIR="$(CURDIR)/.work/tmp" python3 scripts/test-package.py target/release/$(NAME)
 
 bench:
-	node bench/integrated-bench.mjs --browser=chromium --warmups=2 --runs=5
-	node bench/note-cache-bench.mjs --runs=9 --delay=200
-	MD_WYSIWYG_BENCH=1 deno task test web/ts/editor/tests/large-note-bench.test.ts
+	mkdir -p "$(CURDIR)/.work/tmp"
+	TMPDIR="$(CURDIR)/.work/tmp" node bench/integrated-bench.mjs --browser=chromium --warmups=2 --runs=5
+	TMPDIR="$(CURDIR)/.work/tmp" node bench/note-cache-bench.mjs --runs=9 --delay=200
+	TMPDIR="$(CURDIR)/.work/tmp" MD_WYSIWYG_BENCH=1 deno task test web/ts/editor/tests/large-note-bench.test.ts
 
 bench-full:
-	node bench/integrated-bench.mjs --browser=chromium,firefox,webkit --warmups=5 --runs=20
-	node bench/note-cache-bench.mjs --runs=20 --delay=200
-	MD_WYSIWYG_BENCH=1 deno task test web/ts/editor/tests/large-note-bench.test.ts
+	mkdir -p "$(CURDIR)/.work/tmp"
+	TMPDIR="$(CURDIR)/.work/tmp" node bench/integrated-bench.mjs --browser=chromium,firefox,webkit --warmups=5 --runs=20
+	TMPDIR="$(CURDIR)/.work/tmp" node bench/note-cache-bench.mjs --runs=20 --delay=200
+	TMPDIR="$(CURDIR)/.work/tmp" MD_WYSIWYG_BENCH=1 deno task test web/ts/editor/tests/large-note-bench.test.ts
 
-.PHONY: audit bench bench-full build-linux-musl-aarch64 build-linux-musl-both build-linux-musl-docker build-linux-musl-x86_64 ci coverage coverage-html coverage-rs coverage-ts dev dev-config check lint test-package types types-check ts test test-ts test-e2e test-rs
+bench-long-session:
+	mkdir -p "$(CURDIR)/.work/tmp"
+	TMPDIR="$(CURDIR)/.work/tmp" node bench/long-session.mjs
+
+.PHONY: audit bench bench-full bench-long-session build-linux-musl-aarch64 build-linux-musl-both build-linux-musl-docker build-linux-musl-x86_64 ci coverage coverage-html coverage-rs coverage-ts dev dev-config check lint test-package types types-check ts test test-ts test-e2e test-rs

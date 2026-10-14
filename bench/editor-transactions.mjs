@@ -108,7 +108,7 @@ try {
           `captured ${transactionSamples.length} transactions; expected ${TRANSACTIONS_PER_ROUND}`,
         );
       }
-      typingRoundP95.push(percentile([...transactionSamples].sort((a, b) => a - b), 0.95));
+      typingRoundP95.push(percentile([...transactionSamples].toSorted((a, b) => a - b), 0.95));
       snapshotSamples.push(await page.evaluate(() => window.tansuEditorHarness.snapshot().elapsedMs));
     }
 
@@ -146,7 +146,7 @@ try {
 }
 
 function summarize(values) {
-  const sorted = [...values].sort((left, right) => left - right);
+  const sorted = values.toSorted((left, right) => left - right);
   return {
     minMs: round(sorted[0]),
     medianMs: round(percentile(sorted, 0.5)),

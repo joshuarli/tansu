@@ -1,5 +1,6 @@
 import { execFileSync, spawn } from "node:child_process";
-import { mkdir, mkdtemp, readdir, stat, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import net from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -8,11 +9,13 @@ import { fileURLToPath } from "node:url";
 import { chromium, firefox, webkit } from "playwright";
 
 import { createTestFixture } from "../scripts/test-fixture.mjs";
+import { canonicalSourceHash } from "../web/ts/save-delta.ts";
 import { directorySize } from "./directory-size.mjs";
+import { stopProcessGroup } from "./process-group.mjs";
 
 const REPO_ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const BENCH_DIR = join(REPO_ROOT, "bench");
-const RESULTS_DIR = join(BENCH_DIR, "results");
+const RESULTS_DIR = join(REPO_ROOT, ".work", "tmp", "bench-results");
 
 const args = parseArgs(process.argv.slice(2));
 const warmups = Number(args.warmups ?? 2);
@@ -29,29 +32,38 @@ async function main() {
   await mkdir(RESULTS_DIR, { recursive: true });
 
   const root = await mkdtemp(join(tmpdir(), "tansu2-bench-"));
-  const fixture = await createBenchmarkFixture(root);
-  const port = await freePort();
-  const baseUrl = `http://127.0.0.1:${port}`;
-  const serverStart = performance.now();
-  const server = spawn(
-    "cargo",
-    ["run", "--quiet", "--bin", "tansu2", "--", "--port", String(port)],
-    {
-      cwd: REPO_ROOT,
-      env: { ...process.env, XDG_CONFIG_HOME: fixture.configHome, XDG_DATA_HOME: fixture.dataHome },
-      stdio: ["ignore", "pipe", "pipe"],
-    },
-  );
-
-  const results = {
-    generatedAt: new Date().toISOString(),
-    config: { warmups, runs, browsers },
-    metrics: {},
-  };
-
+  let server;
   try {
-    await waitForReady(`${baseUrl}/api/health`);
+    const fixture = await createBenchmarkFixture(root);
+    const port = await freePort();
+    const baseUrl = `http://127.0.0.1:${port}`;
+    const serverStart = performance.now();
+    server = spawn(
+      "cargo",
+      ["run", "--quiet", "--bin", "tansu2", "--", "--port", String(port)],
+      {
+        cwd: REPO_ROOT,
+        env: { ...process.env, XDG_CONFIG_HOME: fixture.configHome, XDG_DATA_HOME: fixture.dataHome },
+        stdio: ["ignore", "pipe", "pipe"],
+        detached: true,
+      },
+    );
+
+    const results = {
+      generatedAt: new Date().toISOString(),
+      config: { warmups, runs, browsers },
+      metrics: {},
+    };
+    await waitForReady(`${baseUrl}/api/v2/health`);
     results.metrics.coldStartup = [performance.now() - serverStart];
+    const globalBootstrap = await fetchJson(`${baseUrl}/api/v2/bootstrap`);
+    const vault = globalBootstrap.vaults.find((item) => item.name === "One");
+    if (vault === undefined) throw new Error("benchmark fixture has no vault One");
+    const identity = { serverInstanceId: globalBootstrap.serverInstanceId, vaultId: vault.vaultId };
+    const vaultBootstrap = await vaultJson(baseUrl, identity, "/bootstrap");
+    const first = vaultBootstrap.notes.find((note) => note.path === "one.md");
+    const second = vaultBootstrap.notes.find((note) => note.path === "search.md");
+    if (first === undefined || second === undefined) throw new Error("benchmark fixture is missing its seeded notes");
 
     for (const name of browsers) {
       const type = browserTypes[name];
@@ -60,7 +72,7 @@ async function main() {
       }
       const browser = await type.launch();
       try {
-        results.metrics[name] = await runBrowserBenchmarks(browser, baseUrl, fixture);
+        results.metrics[name] = await runBrowserBenchmarks(browser, baseUrl, fixture, identity, first, second);
       } finally {
         await browser.close();
       }
@@ -70,10 +82,7 @@ async function main() {
       await fileSize(join(REPO_ROOT, "web", "static", "app.js")),
     ];
     results.metrics.catalogBytes = [await directorySize(join(fixture.dataHome, "tansu"))];
-    const rss = server.pid === undefined ? null : rssBytes(server.pid);
-    if (rss !== null) {
-      results.metrics.serverRssBytes = [rss];
-    }
+    results.metrics.serverRssBytes = [processTreeRssBytes(server.pid)];
 
     const summary = summarizeResults(results);
     if (checkBudgets) {
@@ -83,174 +92,116 @@ async function main() {
     await writeFile(output, `${JSON.stringify({ summary, raw: results }, null, 2)}\n`, "utf8");
     printSummary(summary, output);
   } finally {
-    server.kill();
+    if (server !== undefined) await stopProcessGroup(server);
+    await rm(root, { recursive: true, force: true });
   }
 }
 
-async function runBrowserBenchmarks(browser, baseUrl, fixture) {
+async function runBrowserBenchmarks(browser, baseUrl, fixture, identity, first, second) {
   const page = await browser.newPage();
   const out = {};
   try {
-    const bootstrap = await fetchJson(`${baseUrl}/api/bootstrap`, { vault: 0 });
-    const first = bootstrap.notes[0];
-    const second = bootstrap.notes[1] ?? first;
-
     out.warmStartup = await measure(async () => {
-      await fetchJson(`${baseUrl}/api/health`);
+      const response = await fetch(`${baseUrl}/api/v2/health`);
+      requireOk(response);
     });
     out.bootstrap = await measure(async () => {
-      await fetchJson(`${baseUrl}/api/bootstrap`, { vault: 0 });
+      await vaultJson(baseUrl, identity, "/bootstrap");
     });
+    let activeNote = first;
     out.firstEditorInteractive = await measure(async () => {
       await page.goto(baseUrl);
       await page.waitForSelector(".main");
-      await page.locator(".note-row").first().click();
-      await page.waitForSelector(".app-editor");
+      await page.locator(`.note-row[title="${cssEscape(first.path)}"]`).first().click();
+      await page.waitForSelector(".cm-editor");
+      activeNote = first;
     });
     out.openNote = await measure(async () => {
-      await fetchJson(`${baseUrl}/api/notes/${encodeURIComponent(first.noteId)}`, { vault: 0 });
+      await vaultJson(baseUrl, identity, `/notes/${encodeURIComponent(first.noteId)}`);
     });
     out.switchNote = await measure(async () => {
+      const target = activeNote.noteId === first.noteId ? second : first;
       await page
-        .locator(`.note-row[title="${cssEscape(second.path)}"]`)
+        .locator(`.note-row[title="${cssEscape(target.path)}"]`)
         .first()
         .click();
-      await page.locator(`.tab.active[title="${cssEscape(second.title)}"]`).waitFor();
+      await page.locator(`.tab.active[title="${cssEscape(target.title)}"]`).waitFor();
+      activeNote = target;
     });
     out.editSave = await measure(async () => {
-      const document = await fetchJson(`${baseUrl}/api/notes/${encodeURIComponent(first.noteId)}`, {
-        vault: 0,
-      });
-      await fetchJson(`${baseUrl}/api/notes/${encodeURIComponent(first.noteId)}`, {
-        method: "PUT",
-        vault: 0,
-        body: {
-          content: `${document.content}\nbench ${Date.now()}\n`,
-          baseSeq: document.meta.seq,
-          baseHash: document.meta.contentHash,
-          checkpoint: false,
-        },
-      });
+      const document = await vaultJson(baseUrl, identity, `/notes/${encodeURIComponent(first.noteId)}`);
+      await saveNote(baseUrl, identity, first.noteId, document.meta, `${document.content}\nbench ${randomUUID()}\n`);
     });
     out.search = await measure(async () => {
-      await fetchJson(`${baseUrl}/api/search?q=GlobalFoundries`, { vault: 0 });
+      await vaultJson(baseUrl, identity, "/search", {
+        method: "POST",
+        body: { query: "GlobalFoundries", mode: "default", limit: 20, overlays: [] },
+      });
     });
     out.conflictRestore = await measure(async () => {
-      const document = await fetchJson(`${baseUrl}/api/notes/${encodeURIComponent(first.noteId)}`, {
-        vault: 0,
+      const base = await vaultJson(baseUrl, identity, `/notes/${encodeURIComponent(first.noteId)}`);
+      await saveNote(baseUrl, identity, first.noteId, base.meta, `${base.content}\ncurrent ${randomUUID()}\n`);
+      const current = await vaultJson(baseUrl, identity, `/notes/${encodeURIComponent(first.noteId)}`);
+      const conflict = await saveNote(baseUrl, identity, first.noteId, base.meta, `${base.content}\nstale ${randomUUID()}\n`);
+      if (conflict.outcome.state !== "conflict") throw new Error("stale benchmark save did not conflict");
+      const draftId = conflict.outcome.draft.draftId;
+      await vaultJson(baseUrl, identity, `/notes/${encodeURIComponent(first.noteId)}/conflicts/${draftId}/restore`, {
+        method: "POST",
+        body: { mutationId: randomUUID(), precondition: precondition(current.meta) },
       });
-      await fetchJson(`${baseUrl}/api/notes/${encodeURIComponent(first.noteId)}`, {
-        method: "PUT",
-        vault: 0,
-        body: {
-          content: `${document.content}\ncurrent ${Date.now()}\n`,
-          baseSeq: document.meta.seq,
-          baseHash: document.meta.contentHash,
-          checkpoint: false,
-        },
-      });
-      const conflict = await fetchJson(`${baseUrl}/api/notes/${encodeURIComponent(first.noteId)}`, {
-        method: "PUT",
-        vault: 0,
-        allowError: true,
-        body: {
-          content: `${document.content}\nstale ${Date.now()}\n`,
-          baseSeq: document.meta.seq,
-          baseHash: document.meta.contentHash,
-          checkpoint: false,
-        },
-      });
-      const draftId = conflict.error.draft.draftId;
-      await fetchJson(
-        `${baseUrl}/api/notes/${encodeURIComponent(first.noteId)}/conflicts/${draftId}/restore`,
-        {
-          method: "POST",
-          vault: 0,
-        },
-      );
     });
+    let eventCursor = 0;
     out.ssePropagation = await measure(async () => {
-      await page.evaluate(
-        () =>
-          new Promise((resolve, reject) => {
-            const source = new EventSource("/events?vault=0");
-            const timer = setTimeout(() => {
-              source.close();
-              reject(new Error("SSE timeout"));
-            }, 5000);
-            source.addEventListener("open", () => {
-              void fetch("/api/notes", {
-                method: "POST",
-                headers: { "Content-Type": "application/json", "X-Tansu-Vault": "0" },
-                body: JSON.stringify({
-                  path: `sse-${Date.now()}.md`,
-                  content: "# SSE\n\nbench\n",
-                  source: null,
-                }),
-              });
-            });
-            source.addEventListener("message", (event) => {
-              const payload = JSON.parse(event.data);
-              if (payload.kind === "note_changed") {
-                clearTimeout(timer);
-                source.close();
-                resolve(null);
-              }
-            });
-          }),
-      );
+      const document = await vaultJson(baseUrl, identity, `/notes/${encodeURIComponent(first.noteId)}`);
+      const stream = await openEvents(baseUrl, identity, eventCursor);
+      try {
+        const change = waitForNoteChange(stream.reader, eventCursor, first.noteId, document.meta.revision + 1);
+        await saveNote(baseUrl, identity, first.noteId, document.meta, `${document.content}\nsse ${randomUUID()}\n`);
+        const event = await change;
+        eventCursor = event.eventVersion;
+      } finally {
+        await stream.close();
+      }
     });
     out.watcherExternalEdit = await measure(async () => {
-      const path = join(fixture.vaultOne, "external-bench.md");
+      const pathName = `external-bench-${randomUUID()}.md`;
+      const path = join(fixture.vaultOne, pathName);
       await writeFile(path, `# External\n\n${Date.now()}\n`, "utf8");
       await poll(async () => {
-        const latest = await fetchJson(`${baseUrl}/api/bootstrap`, { vault: 0 });
-        return latest.notes.some((note) => note.path === "external-bench.md");
+        const latest = await vaultJson(baseUrl, identity, "/bootstrap");
+        return latest.notes.some((note) => note.path === pathName);
       });
     });
     out.imagePath = await measure(async () => {
-      const response = await fetch(
-        `${baseUrl}/api/assets?name=${encodeURIComponent("z-images/sample.webp")}&vault=0`,
-      );
-      if (!response.ok) {
-        throw new Error(`asset request failed: ${response.status}`);
-      }
-      const blob = await response.blob();
-      const upload = await fetch(`${baseUrl}/api/images`, {
+      const assetUrl = `${baseUrl}/api/v2/vaults/${encodeURIComponent(identity.vaultId)}/assets?name=${encodeURIComponent("z-images/sample.webp")}`;
+      const response = await fetch(assetUrl, { headers: identityHeaders(identity) });
+      requireOk(response);
+      const bytes = new Uint8Array(await response.arrayBuffer());
+      const upload = await vaultRequest(baseUrl, identity, "/images", {
         method: "POST",
-        headers: { "Content-Type": "image/webp", "X-Tansu-Vault": "0" },
-        body: blob,
+        headers: { "Content-Type": "image/webp", "X-Tansu-Mutation-Id": randomUUID() },
+        body: bytes,
       });
-      if (!upload.ok) {
-        throw new Error(`image upload failed: ${upload.status}`);
-      }
+      requireOk(upload);
+      const created = await upload.json();
+      const stored = await fetch(
+        `${baseUrl}/api/v2/vaults/${encodeURIComponent(identity.vaultId)}/assets?name=${encodeURIComponent(created.name)}`,
+        { headers: identityHeaders(identity) },
+      );
+      requireOk(stored);
+      await stored.arrayBuffer();
     });
     out.revisionRestore = await measure(async () => {
-      const document = await fetchJson(`${baseUrl}/api/notes/${encodeURIComponent(first.noteId)}`, {
-        vault: 0,
+      const document = await vaultJson(baseUrl, identity, `/notes/${encodeURIComponent(first.noteId)}`);
+      const revision = await vaultJson(baseUrl, identity, `/notes/${encodeURIComponent(first.noteId)}/revisions`)
+        .then((items) => items.find((item) => item.sourceHash === first.sourceHash));
+      if (revision === undefined) throw new Error("benchmark note has no original revision");
+      await saveNote(baseUrl, identity, first.noteId, document.meta, `${document.content}\nrevision ${randomUUID()}\n`);
+      const current = await vaultJson(baseUrl, identity, `/notes/${encodeURIComponent(first.noteId)}`);
+      await vaultJson(baseUrl, identity, `/notes/${encodeURIComponent(first.noteId)}/revisions/${revision.revision}/restore`, {
+        method: "POST",
+        body: { mutationId: randomUUID(), precondition: precondition(current.meta) },
       });
-      const saved = await fetchJson(`${baseUrl}/api/notes/${encodeURIComponent(first.noteId)}`, {
-        method: "PUT",
-        vault: 0,
-        body: {
-          content: `${document.content}\nrevision ${Date.now()}\n`,
-          baseSeq: document.meta.seq,
-          baseHash: document.meta.contentHash,
-          checkpoint: true,
-        },
-      });
-      const revisions = await fetchJson(
-        `${baseUrl}/api/notes/${encodeURIComponent(first.noteId)}/revisions`,
-        { vault: 0 },
-      );
-      const revision = revisions.find((item) => item.eventId > 0) ?? revisions[0];
-      await fetchJson(
-        `${baseUrl}/api/notes/${encodeURIComponent(saved.meta.noteId)}/revisions/${revision.eventId}/restore`,
-        {
-          method: "POST",
-          vault: 0,
-        },
-      );
     });
     return out;
   } finally {
@@ -275,23 +226,96 @@ async function createBenchmarkFixture(root) {
   return await createTestFixture(root, { copyVaults: true });
 }
 
-async function fetchJson(url, options = {}) {
-  const headers = new Headers(options.headers);
-  headers.set("Accept", "application/json");
-  if (options.vault !== undefined) {
-    headers.set("X-Tansu-Vault", String(options.vault));
-  }
-  let body;
-  if (options.body !== undefined) {
+async function fetchJson(url) {
+  const response = await fetch(url, { headers: { Accept: "application/json" } });
+  if (!response.ok) throw new Error(`request failed: ${response.status}`);
+  return await response.json();
+}
+
+function identityHeaders(identity) {
+  return new Headers({ "X-Tansu-Server-Instance": identity.serverInstanceId });
+}
+
+async function vaultRequest(baseUrl, identity, path, options = {}) {
+  const headers = identityHeaders(identity);
+  new Headers(options.headers).forEach((value, key) => headers.set(key, value));
+  let body = options.body;
+  if (body !== undefined && !(body instanceof Uint8Array) && typeof body !== "string") {
     headers.set("Content-Type", "application/json");
-    body = JSON.stringify(options.body);
+    body = JSON.stringify(body);
   }
-  const response = await fetch(url, { method: options.method ?? "GET", headers, body });
-  const data = await response.json();
-  if (!response.ok && !options.allowError) {
-    throw new Error(`request failed: ${response.status} ${JSON.stringify(data)}`);
+  return await fetch(`${baseUrl}/api/v2/vaults/${encodeURIComponent(identity.vaultId)}${path}`, {
+    ...options,
+    headers,
+    body,
+  });
+}
+
+async function vaultJson(baseUrl, identity, path, options = {}) {
+  const response = await vaultRequest(baseUrl, identity, path, options);
+  const body = await response.json();
+  if (!response.ok) throw new Error(`request failed: ${response.status} ${JSON.stringify(body)}`);
+  return body;
+}
+
+async function saveNote(baseUrl, identity, noteId, meta, content) {
+  return await vaultJson(baseUrl, identity, `/notes/${encodeURIComponent(noteId)}`, {
+    method: "PUT",
+    body: {
+      mutationId: randomUUID(),
+      precondition: precondition(meta),
+      content,
+      sourceHash: await canonicalSourceHash(content),
+    },
+  });
+}
+
+function precondition(meta) {
+  return {
+    baseRevision: meta.revision,
+    baseSourceHash: meta.sourceHash,
+    baseDiskHash: meta.diskHash,
+  };
+}
+
+async function openEvents(baseUrl, identity, eventVersion) {
+  const response = await vaultRequest(baseUrl, identity, `/events?after=${eventVersion}`, {
+    headers: { Accept: "text/event-stream" },
+  });
+  requireOk(response);
+  if (response.body === null) throw new Error("event stream has no body");
+  const reader = response.body.getReader();
+  return { reader, close: () => reader.cancel() };
+}
+
+async function waitForNoteChange(reader, afterEventVersion, noteId, minimumRevision) {
+  let lastEventVersion = afterEventVersion;
+  let buffer = "";
+  const decoder = new TextDecoder();
+  while (true) {
+    const chunk = await reader.read();
+    if (chunk.done) throw new Error("event stream closed before note change");
+    buffer += decoder.decode(chunk.value, { stream: true });
+    const frames = buffer.split("\n\n");
+    buffer = frames.pop() ?? "";
+    for (const frame of frames) {
+      const line = frame.split("\n").find((item) => item.startsWith("data: "));
+      if (line === undefined) continue;
+      const event = JSON.parse(line.slice(6));
+      if (event.eventVersion <= lastEventVersion) continue;
+      lastEventVersion = event.eventVersion;
+      if (
+        event.update?.kind === "noteChanged" && event.update.note?.noteId === noteId &&
+        event.update.note.revision >= minimumRevision
+      ) {
+        return event;
+      }
+    }
   }
-  return data;
+}
+
+function requireOk(response) {
+  if (!response.ok) throw new Error(`request failed: ${response.status}`);
 }
 
 async function waitForReady(url) {
@@ -398,15 +422,31 @@ async function fileSize(path) {
   return (await stat(path)).size;
 }
 
-function rssBytes(pid) {
-  try {
-    const output = execFileSync("ps", ["-o", "rss=", "-p", String(pid)], {
-      encoding: "utf8",
-    }).trim();
-    return Number(output) * 1024;
-  } catch {
-    return null;
+function processTreeRssBytes(rootPid) {
+  const output = execFileSync("ps", ["-Ao", "pid=,ppid=,rss="], { encoding: "utf8" });
+  const parentByPid = new Map();
+  const rssByPid = new Map();
+  for (const line of output.split("\n")) {
+    const [pid, parent, rss] = line.trim().split(/\s+/).map(Number);
+    if (Number.isFinite(pid) && Number.isFinite(parent) && Number.isFinite(rss)) {
+      parentByPid.set(pid, parent);
+      rssByPid.set(pid, rss);
+    }
   }
+  let total = 0;
+  const pending = [rootPid];
+  const seen = new Set();
+  while (pending.length > 0) {
+    const pid = pending.pop();
+    if (pid === undefined || seen.has(pid)) continue;
+    seen.add(pid);
+    total += rssByPid.get(pid) ?? 0;
+    for (const [child, parent] of parentByPid) {
+      if (parent === pid) pending.push(child);
+    }
+  }
+  if (total === 0) throw new Error(`fixture server process ${rootPid} was not found`);
+  return total * 1024;
 }
 
 function cssEscape(value) {

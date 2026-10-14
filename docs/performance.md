@@ -18,3 +18,11 @@ conflict drafts are durable state and are not disposable caches.
 
 Run the focused benchmarks with `make bench`. Run the wider browser and sample
 set with `make bench-full`. Both targets are defined in the root `Makefile`.
+Run `make bench-long-session` for 20 rounds that open and close notes, edit and
+undo, search, and preview an image. The runner delays note and search requests
+and fails one note load and one search request. It clears browser resource
+timing entries before each forced-GC heap sample, then records DOM element
+count, live editor views, editor DOM mounts and removals, event stream count,
+server RSS, queue capacities, and overflow count at idle checkpoints under
+`.work/tmp/bench-results`. Search queue occupancy is not exposed; the runner
+checks the public dirty/degraded state and recorded overflow events.
