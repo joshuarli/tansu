@@ -1503,6 +1503,46 @@ describe("v2 desktop shell", () => {
     await app.dispose();
   });
 
+  it("shows a retry action after an initial note load failure", async () => {
+    const note = noteMeta("note-1", "one.md", "One");
+    const client = configureVault([note], legacySession([
+      { noteId: note.noteId, title: note.title, path: note.path, cursorOffset: null, sourceMode: false },
+    ], note.noteId));
+    client.openNote.mockRejectedValueOnce(new Error("connection refused"))
+      .mockResolvedValueOnce(documentFor(note, "# One\n"));
+    const { app, root } = mountApp();
+
+    await app.boot();
+    await until(() => root.querySelector(".unavailable-state") !== null);
+    expect(root.querySelector(".unavailable-state")?.textContent).toContain("Server unavailable");
+    expect(client.openNote).toHaveBeenCalledTimes(1);
+
+    root.querySelector<HTMLButtonElement>('[title="Retry note load"]')?.click();
+    await until(() => editorMock.instances.at(-1)?.getSnapshot()?.source === "# One\n");
+    expect(editorMock.instances.at(-1)?.getSnapshot()?.source).toBe("# One\n");
+    expect(client.openNote).toHaveBeenCalledTimes(2);
+    await app.dispose();
+  });
+
+  it("locks the shell when a note retry requires authentication", async () => {
+    const note = noteMeta("note-1", "one.md", "One");
+    const client = configureVault([note], legacySession([
+      { noteId: note.noteId, title: note.title, path: note.path, cursorOffset: null, sourceMode: false },
+    ], note.noteId));
+    client.openNote.mockRejectedValueOnce(new Error("connection refused"))
+      .mockRejectedValueOnce(new V2ApiError("Authentication required", 401, { code: "auth_required" }));
+    const { app, root } = mountApp();
+
+    await app.boot();
+    await until(() => root.querySelector(".unavailable-state") !== null);
+    root.querySelector<HTMLButtonElement>('[title="Retry note load"]')?.click();
+    await until(() => root.querySelector(".auth-gate") !== null);
+
+    expect(root.querySelector(".auth-gate")?.textContent).toContain("Unlock your notes");
+    expect(root.querySelector(".unavailable-state")).toBeNull();
+    await app.dispose();
+  });
+
   it("boots through the public entry point using v2 services", async () => {
     const client = configureVault([]);
     const previous = {

@@ -331,6 +331,19 @@ describe("view rendering", () => {
     expect(snippet.querySelector("mark")?.textContent).toBe("quote");
     expect(snippet.querySelector("tag")).toBeNull();
   });
+
+  it("does not show a detached note outline when no tab is active", () => {
+    const actions = actionSpies();
+    actions.outline.mockReturnValue({
+      headings: [{ level: 1, line: 1, text: "Previous note", from: 0, to: 15 }],
+      complete: true,
+    });
+
+    const root = render(baseState(), actions);
+
+    expect(root.querySelector(".outline-list")?.textContent).toBe("No headings");
+    expect(actions.outline).not.toHaveBeenCalled();
+  });
 });
 
 function render(state: State, actions = actionSpies()): HTMLElement {

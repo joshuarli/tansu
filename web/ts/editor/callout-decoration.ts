@@ -23,7 +23,11 @@ class CalloutTitle extends WidgetType {
   override toDOM(): HTMLElement {
     const element = document.createElement("span");
     element.className = `tansu-callout-title tansu-callout-title-${this.type}`;
-    element.textContent = this.icon === "" ? this.title : `${this.icon} ${this.title}`;
+    element.textContent = this.icon === ""
+      ? this.title
+      : this.title === ""
+      ? this.icon
+      : `${this.icon} ${this.title}`;
     return element;
   }
 }
@@ -52,12 +56,13 @@ function calloutDecorations(state: EditorState, options: CalloutOptions): Decora
     const header = line.text.match(/^ {0,3}>[ \t]?\[!(\w+)\](?:[ \t]+(.*))?$/);
     if (header) {
       const type = header[1]!.toLowerCase();
-      const title = header[2]?.trim() || titleFromType(type);
+      const title = header[2]?.trim();
+      const displayTitle = title === undefined || title === "" ? titleFromType(type) : "";
       const marker = header[0].indexOf(`[!${header[1]}]`);
       ranges.push(
         Decoration.line({ attributes: { class: `tansu-callout tansu-callout-${type}` } }).range(line.from),
         Decoration.replace({
-          widget: new CalloutTitle(type, title, options.icons[type] ?? ""),
+          widget: new CalloutTitle(type, displayTitle, options.icons[type] ?? ""),
         }).range(line.from + marker, line.from + marker + header[1]!.length + 3),
       );
       calloutType = type;

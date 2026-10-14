@@ -200,7 +200,8 @@ describe("CodeMirror editor sessions", () => {
     const source = "> [!note] Existing title\n> Existing body\n\nplain paragraph";
     const { container, view } = mountEditor(source);
     const title = container.querySelector<HTMLElement>(".tansu-callout-title");
-    expect(title?.textContent).toBe("📝 Existing title");
+    expect(title?.textContent).toBe("📝");
+    expect(container.querySelector(".cm-line.tansu-callout")?.textContent).toBe("📝 Existing title");
     expect(container.querySelector(".cm-line.tansu-callout-body")).not.toBeNull();
 
     view.dispatch({
@@ -209,7 +210,8 @@ describe("CodeMirror editor sessions", () => {
       annotations: Transaction.userEvent.of("input.type"),
     });
 
-    expect(container.querySelector(".tansu-callout-title")?.textContent).toBe("📝 Existing title");
+    expect(container.querySelector(".tansu-callout-title")?.textContent).toBe("📝");
+    expect(container.querySelector(".cm-line.tansu-callout")?.textContent).toBe("📝 Existing title");
     expect(container.querySelector(".cm-line.tansu-callout-body")).not.toBeNull();
   });
 

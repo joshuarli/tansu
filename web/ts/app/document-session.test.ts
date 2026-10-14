@@ -57,6 +57,28 @@ describe("document sessions", () => {
     expect(() => session.loaded(document(2, "# Later\n", 2))).toThrow(InvalidSessionTransitionError);
   });
 
+  it("loads an initially unavailable note when the server becomes reachable", () => {
+    const session = new DocumentSession(identity, 1, workspace, sessionServices());
+    session.markUnavailable(new Error("connection refused"));
+
+    expect(session.state.status).toBe("unavailable");
+    expect(session.reconcile(document(1, "# One\n", 1))).toBe("reloaded");
+    expect(session.state.status).toBe("clean");
+    if (session.state.status === "clean") expect(session.state.draft.source).toBe("# One\n");
+  });
+
+  it("resumes a checkpointed draft when the canonical base is unchanged", () => {
+    const session = new DocumentSession(identity, 1, workspace, sessionServices());
+    session.loaded(document(1, "# One\n", 1));
+    session.edit("# Local draft\n", { anchor: 4, head: 4 });
+    session.markUnavailable(new Error("connection refused"));
+
+    expect(session.state.status).toBe("unavailable");
+    expect(session.reconcile(document(1, "# One\n", 1))).toBe("unchanged");
+    expect(session.state.status).toBe("dirty");
+    if (session.state.status === "dirty") expect(session.state.draft.source).toBe("# Local draft\n");
+  });
+
   it("serializes saves and coalesces edits against the acknowledged base", async () => {
     const requests: Array<{
       envelope: SaveEnvelope;

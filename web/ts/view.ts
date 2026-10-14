@@ -302,7 +302,9 @@ function renderSidebar(state: State, actions: ViewActions): HTMLElement {
     if (state.searchHits !== null && state.searchHits.length === 0) results.append(span("No matches", "empty-outline"));
     sidebar.append(section("Search", results));
   }
-  const outline = state.outlineCollapsed ? { headings: [], complete: true } : actions.outline();
+  const outline = state.outlineCollapsed || activeTab(state) === undefined
+    ? { headings: [], complete: true }
+    : actions.outline();
   const outlineList = el("div", "outline-list");
   for (const heading of outline.headings) {
     const item = button(
@@ -416,7 +418,38 @@ function renderMain(state: State, actions: ViewActions): HTMLElement {
   if (active === undefined) {
     workspace.append(emptyState(actions), renderEditorMount(true));
   } else if (loadedDraft(active) === null) {
-    workspace.append(el("div", "loading", "Loading"), renderEditorMount(true));
+    const unavailable = active.kind === "saved" && active.session?.state.status === "unavailable"
+      ? active.session.state
+      : null;
+    if (unavailable === null) {
+      workspace.append(el("div", "loading", "Loading"));
+    } else {
+      const unresolved = unavailable.reason.kind === "unresolved";
+      const state = el(
+        "div",
+        "empty-state unavailable-state",
+        el("h1", "empty-title", unresolved ? "Note needs recovery" : "Server unavailable"),
+        el(
+          "p",
+          "",
+          unresolved
+            ? "The vault cannot load this note because its stored content needs recovery."
+            : "The server could not load this note. Retry when the vault is available.",
+        ),
+      );
+      if (!unresolved && active.kind === "saved") {
+        state.append(
+          button(
+            "Retry",
+            "Retry note load",
+            () => actions.dispatch({ type: "note.retry", noteId: active.noteId }),
+            "primary-button",
+          ),
+        );
+      }
+      workspace.append(state);
+    }
+    workspace.append(renderEditorMount(true));
   } else {
     if (!reading) {
       workspace.append(editorToolbar(actions));
@@ -469,6 +502,22 @@ function renderMain(state: State, actions: ViewActions): HTMLElement {
           span("This note is missing from the vault. Your checkpoint remains recoverable."),
           button("Export draft", "Export draft", () => actions.dispatch({ type: "draft.export" }), "text-button"),
           button("Recreate note", "Recreate note from draft", () => actions.dispatch({ type: "draft.recreate" }), "text-button"),
+        ),
+      );
+    }
+    if (active.kind === "saved" && active.session?.state.status === "unavailable" &&
+      active.session.state.reason.kind !== "unresolved") {
+      workspace.append(
+        el(
+          "div",
+          "unavailable-banner",
+          span("The server is unavailable. Your latest edits remain in local recovery."),
+          button(
+            "Retry",
+            "Retry note load",
+            () => actions.dispatch({ type: "note.retry", noteId: active.noteId }),
+            "text-button",
+          ),
         ),
       );
     }

@@ -781,6 +781,41 @@ export class TansuApp {
     if (tab !== undefined) await this.activateTab({ kind: "saved", noteId: tab.noteId });
   }
 
+  private async retryNote(id: ReturnType<typeof toNoteId>): Promise<void> {
+    const tab = tabById(this.state, id);
+    const session = tab?.kind === "saved" ? tab.session : null;
+    if (tab?.kind !== "saved" || session === null || session.state.status !== "unavailable" ||
+      session.state.reason.kind === "unresolved" ||
+      this.identity === null || this.vaultClient === null) return;
+    if (session.state.draft === null) {
+      session.close();
+      tab.session = null;
+      await this.loadSavedTab(tab);
+      return;
+    }
+    const identity = this.identity;
+    const client = this.vaultClient;
+    try {
+      const document = await client.openNote(id);
+      if (!this.isCurrentTab(tab, identity, client) || tab.session !== session) return;
+      tab.doc = document;
+      tab.selection = selectionWithin(tab.selection, document.content.length);
+      const result = session.reconcile(document);
+      if (result === "reloaded" && tab.editorSession !== null) {
+        this.editor?.reloadIfClean(tab.editorSession, document.content);
+      }
+      this.render();
+    } catch (error) {
+      if (!this.isCurrentTab(tab, identity, client) || tab.session !== session) return;
+      if (error instanceof V2ApiError && error.kind?.code === "auth_required") {
+        await this.lockForAuthentication();
+        return;
+      }
+      session.markUnavailable(error);
+      throw error;
+    }
+  }
+
   private async openLocalDraft(id: LocalDraftId): Promise<void> {
     let tab = this.state.tabs.find((candidate) => candidate.kind === "local-draft" && candidate.localDraftId === id);
     if (tab === undefined && this.identity !== null) {
@@ -1542,6 +1577,10 @@ export class TansuApp {
       }
       case "note.open": {
         this.runAsync(this.openNote(event.noteId), "Open failed");
+        return;
+      }
+      case "note.retry": {
+        this.runAsync(this.retryNote(event.noteId), "Retry failed");
         return;
       }
       case "localDraft.open": {

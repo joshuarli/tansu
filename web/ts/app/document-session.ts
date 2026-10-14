@@ -175,7 +175,10 @@ export class DocumentSession {
   }
 
   loaded(document: V2NoteDocument, selection: Selection = null): void {
-    this.requireStatus("loading", "load");
+    if (this.current.status !== "loading" &&
+      !(this.current.status === "unavailable" && this.current.draft === null)) {
+      throw new InvalidSessionTransitionError(this.current.status, "load");
+    }
     if (document.meta.noteId !== this.identity.noteId) {
       throw new SessionProtocolError("Loaded document note identity does not match the session");
     }
@@ -410,9 +413,11 @@ export class DocumentSession {
     if (document.meta.noteId !== this.identity.noteId) {
       throw new SessionProtocolError("Reconciled document note identity does not match the session");
     }
-    if (this.current.status === "loading" ||
-      this.current.status === "unavailable" && this.current.draft === null ||
-      this.current.status === "auth-locked") {
+    if (this.current.status === "unavailable" && this.current.draft === null) {
+      this.loaded(document);
+      return "reloaded";
+    }
+    if (this.current.status === "loading" || this.current.status === "auth-locked") {
       return "unchanged";
     }
     if (this.current.status === "conflict") {
@@ -432,6 +437,9 @@ export class DocumentSession {
     const baseMatches = canonicalBase.revision === state.base.revision &&
       canonicalBase.sourceHash === state.base.sourceHash && canonicalBase.diskHash === state.base.diskHash;
     if (baseMatches) {
+      if (state.status === "unavailable") {
+        return this.resumeUnavailable(state, document, canonicalBase);
+      }
       this.set({ ...state, title: document.meta.title, path: document.meta.path } as DocumentSessionState);
       return "unchanged";
     }
@@ -439,6 +447,9 @@ export class DocumentSession {
       return "unchanged";
     }
     if (canonicalBase.sourceHash === state.base.sourceHash) {
+      if (state.status === "unavailable") {
+        return this.resumeUnavailable(state, document, canonicalBase);
+      }
       this.set({
         ...state,
         acceptedRevision: canonicalBase.revision,
@@ -501,6 +512,37 @@ export class DocumentSession {
       storage: state.storage,
     });
     return "conflict";
+  }
+
+  private resumeUnavailable(
+    state: Extract<DocumentSessionState, { status: "unavailable" }> & { draft: DirtyDraft },
+    document: V2NoteDocument,
+    canonicalBase: SessionBase,
+  ): "unchanged" | "reloaded" {
+    const fields = {
+      identity: state.identity,
+      generation: state.generation,
+      acceptedRevision: canonicalBase.revision,
+      base: canonicalBase,
+      title: document.meta.title,
+      titleDraft: state.titleDraft,
+      titleRevision: state.titleRevision,
+      titleMutationId: state.titleMutationId,
+      path: document.meta.path,
+      storage: state.storage,
+    };
+    const sourceMatches = state.draft.source === document.content;
+    if (sourceMatches) {
+      this.set({ ...fields, status: "clean", draft: { ...state.draft, mutationId: null } });
+      this.clearCheckpoint(state.draft.localRevision, state.draft.mutationId);
+    } else {
+      this.set({ ...fields, status: "dirty", draft: state.draft });
+    }
+    if (state.titleDraft !== null) {
+      const current = this.loadedState("checkpoint a title while retrying");
+      this.checkpoint(current.base, current.draft, "structural");
+    }
+    return sourceMatches ? "reloaded" : "unchanged";
   }
 
   applyAcceptedMutation(document: V2NoteDocument, expectedLocalRevision: number): boolean {

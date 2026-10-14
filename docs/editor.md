@@ -55,6 +55,9 @@ maps an opaque vault-local asset name to a URL. Dragging the resize handle
 replaces only that image construct in one undoable transaction. Widths stay
 between 48 and 2,400 pixels.
 
+The editor shares the shell's system font and color tokens. Wide Markdown tables
+keep each cell on one line and scroll horizontally inside the editor.
+
 Callouts use `> [!type] Title`. The adapter decorates valid headers and leaves
 malformed syntax as authored Markdown. Frontmatter remains in the document.
 

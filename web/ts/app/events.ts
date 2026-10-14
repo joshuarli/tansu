@@ -75,6 +75,7 @@ export type ViewEvent =
   | { type: "tab.activate"; tab: TabIdentity }
   | { type: "tab.close"; tab: TabIdentity }
   | { type: "note.open"; noteId: NoteId }
+  | { type: "note.retry"; noteId: NoteId }
   | { type: "localDraft.open"; localDraftId: LocalDraftId }
   | { type: "note.rename"; noteId?: NoteId }
   | { type: "note.delete"; noteId?: NoteId }
