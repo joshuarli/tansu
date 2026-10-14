@@ -1,6 +1,16 @@
 # Tansu2 desktop redesign campaign
 
-**Status:** winding down — 2026-10-14. Finish only the O5 item already in progress; start no new items.
+**Status:** paused 2026-10-14. The campaign is frozen after O5; resume only on an explicit user request.
+
+## Handoff
+
+- **Resume:** “Resume `TANSU2_DESKTOP_CAMPAIGN.md` at the next remaining item.” Continue on `master` in `~/d/tansu2`; first run `git status --short --branch`.
+- **State:** The campaign is on `master` per the owner's later steering; never push. This winddown landed O5 as `f4fbbe3`. P0, I1, and P2 gates are logged. O1, O2, O3's writer bound, O4's bundle report, and O5 are implemented. O2 is `e5357ec`. Its valid pre/post-gate transaction medians/p95 (50/250/1024 KiB) were 0.8/2.3, 1.5/1.8, 4.7/5 ms before and 0.6/1.4, 0.9/1.2, 1.9/2.0 ms after. Warm-open p95 was 24.8/39.2/123.5 ms before and 25/40.3/130 ms after; the 1 MiB increase was 5.3%, below the 15% gate. O5's deterministic runner produced and inspected 208 screenshots in `.work/tmp/visual-review`.
+- **Open lanes:** None. All campaign lane branches are merged or deleted.
+- **Retained worktrees:** None. `git worktree list` contains only the root checkout.
+- **Not started or incomplete, in order:** Finish O4's final stripped-size and cold-start measurements after the latest code, including both musl targets; complete O6; record the P3 phase gate; finish Z1's liveness audit (including stale V1/`.app-editor` assumptions in the Makefile benchmark scripts); run Z2 ultrareview; run Z3 final suites and report. No decision is needed to resume. WebAuthn redistribution rights remain an owner decision before distribution.
+- **Known red:** Redistribution rights for `crates/tansu-webauthn` remain unresolved in `crates/tansu-webauthn/UPSTREAM.md`; do not claim distribution readiness. The old `make bench` scripts still appear to use retired V1 routes/editor selectors and have not been revalidated after cutover.
+- **Verified:** O5's 208-shot visual runner passed; focused app/session/view/editor tests passed 112/112; `deno task typecheck`, scoped Oxlint, and `git diff --check` passed. The main checkout was clean at `f4fbbe3` before this handoff. `git worktree list` showed only the root; no unmerged or campaign lane branches remained. A stale visual-review server started by this campaign was stopped; the final process scan found no campaign build, test, browser, or server process. The clean-environment resume command was rehearsed. The host is macOS, so `df -T` was unavailable; `df -h .work` showed `.work` on `/System/Volumes/Data` with 48 GiB available, not a temporary filesystem.
 **Prepared:** 2026-10-14 against `1ecf383` on `master`; work from the actual checkout.
 **Target:** `~/d/tansu2`. **Read-only references:** `~/d/ferrisearch` @ `039b6b2` (search core), `~/d/laputa-systems/laputa/mirror/webauthn-minimal` @ laputa `ef53ce3` (WebAuthn), `~/d/tansu` (optional visual reference). The campaign must run without any of them present after vendoring.
 
@@ -27,8 +37,8 @@
 - **Parity before optimization.** Until phase P3, time budgets are measured and logged, never gating. Structural gates (section 6) apply from the first item that touches the path.
 - **Fix on the way, in its own commit,** what is egregious: a loop command over 120 s; a typing transaction over 100 ms of main-thread work on a 50 KB note; a vault search over 1 s on the 2,500-note corpus; a regression over 3x against the P0 baseline; a baseline-red test that blocks the item. Record anything else seen and leave it.
 - **Failing item:** find the cause before retrying (`root-cause`). Three attempts, then park with a finding.
-- **Commits** (owner decision): lanes and the integrator commit on branch `campaign/desktop-redesign` from worktrees `.work/wt/<lane>`; each is a Conventional Commit scoped to the workstream (`feat(search): ...`); the item ID goes in the body. `master` is never committed to.
-- **Working state** lives under `.work/` (ignored through `.git/info/exclude`). Scratch is `.work/tmp`; set `TMPDIR` to it. Never `/tmp`. Fixture roots, test servers, config and data dirs are created there.
+- **Commits:** the owner's later instruction superseded the planned campaign branch and worktree integration: continue directly on `master`, use Conventional Commits, and never push.
+- **Working state** lives under `.work/` (ignored through `.git/info/exclude`). Put scratch, fixture roots, test servers, and temporary config/data directories under `.work/tmp`; set `TMPDIR` to that directory.
 - **Code comments:** none, except an external-protocol quirk, a lint-required comment, or a legal header. Vendored upstream files stay verbatim, comments included. Files adapted from Ferrisearch and webauthn-minimal lose their prose comments on adoption. Comments never cite this document.
 - **Bookkeeping:** this document's two logs are the ledger. No per-file hashes, corpus fingerprints, status files, or evidence directories. Check the thing itself.
 - **Width.** Machine: 10 cores, 32 GB. P1 runs up to five implementation lanes (SRV, SEA, NET, EDT, APP), each in its own worktree and `CARGO_TARGET_DIR` under that worktree (kache shares compilation). Budget about 4 GB per lane. Browser suites (Playwright) run only in the integrator's scratch worktree, one engine at a time. The coordinator writes no feature code while lanes run, merges one lane at a time (rebase, fast-forward, run the touched areas' checks from a scratch worktree), then `git worktree remove` and `git branch -d` for merged lanes.
@@ -44,6 +54,7 @@
 | Date | Decision |
 | --- | --- |
 | 2026-10-14 | Commit on `campaign/desktop-redesign`, never push, never touch `master`. |
+| 2026-10-14 | Owner steering superseded the branch plan: continue directly on `master`; never push. |
 | 2026-10-14 | `z-images/` is the only asset directory. No legacy `images/` resolver, no HEIC inventory. A reference outside `z-images/` renders an unresolved-asset tile and stays editable source. |
 | 2026-10-14 | Passkeys use a vendored, hardened `webauthn-minimal` (not `webauthn-rs`). Profile: one configured RP, one owner, several credentials, ES256/P-256, attestation `none`, `userVerification: required` enforced in both finish methods (fixed policy, no setting). Hardening list in N2. |
 | 2026-10-14 | Plain TypeScript. No SolidJS, React, Preact, Effect, signals library, virtual DOM, or framework. |
@@ -372,7 +383,8 @@ The startup image render, delete-modal close, and external watcher event asserti
 
 2026-10-14 | I1 | All nine V2 server browser cases passed in Chromium, Firefox, and WebKit, including open, edit, save, search, rename, restart, conflict recovery, revision restore, image paste, delta save, and watcher reconciliation.
 2026-10-14 | P2 | Rust and TypeScript coverage passed unchanged gates (87.04%/84.75% lines/functions and 90%/88.88%); lint, typecheck, workspace tests, Chromium/Firefox/WebKit suites, auth virtual-authenticator checks, and package smoke passed. Both musl artifacts passed the no-NEEDED linkage check; x86_64 was rebuilt at the phase head and is 11 MiB stripped.
+2026-10-14 | WINDDOWN | Paused after O5. O6, final O4 measurements, the P3 gate, Z1 liveness audit, Z2 review, and Z3 final verification remain; WebAuthn redistribution rights are unresolved.
 
 # For the owner afterwards
 
-Read the Contract changes list the executor appends at Z3; the Decision log; the dropped-test reasons for the retired editor; the ferrisearch differential goldens' intentional-difference list; the `webauthn-minimal` hardening commits (consider upstreaming them to laputa); the unavailable-hardware list (real Safari, hardware authenticators). Cherry-pick from `campaign/desktop-redesign`.
+Read the Contract changes list the executor appends at Z3; the Decision log; the dropped-test reasons for the retired editor; the ferrisearch differential goldens' intentional-difference list; the `webauthn-minimal` hardening commits (consider upstreaming them to laputa); the unavailable-hardware list (real Safari, hardware authenticators). Continue from `master`.
