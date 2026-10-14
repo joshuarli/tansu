@@ -23,15 +23,6 @@ Next: 21
 - **Effort:** M
 - **Design:** `docs/rfcs/0001-webauthn-counter-policy.md`
 
-### TNS-7 · P2 · Recover baseline snapshots after interrupted imports
-
-- **Area:** Data recovery
-- **Where:** `src/reconcile.rs:155-172`, `src/reconcile.rs:460-472`
-- **Problem:** First scan commits a note row before writing its baseline snapshot. If snapshot creation fails or the process stops between those operations, the next scan sees matching visible bytes but marks the note unresolved because the snapshot is missing.
-- **Recommendation:** Write and sync the snapshot before inserting the row, or rebuild a missing snapshot from visible bytes when their source hash matches.
-- **Fix with:** durable-state
-- **Effort:** S
-
 ### TNS-8 · P2 · Persist watcher events with reconciled changes
 
 - **Area:** Event freshness

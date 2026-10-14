@@ -4,7 +4,7 @@ use std::io::ErrorKind;
 use std::path::Path;
 
 use crate::api_types::{ApiErrorKind, NoteEventKind, NoteEventSource, UnresolvedReason};
-use crate::catalog::{Catalog, InsertNote, NoteRow};
+use crate::catalog::{Catalog, InsertNote, NoteRow, generate_note_id};
 use crate::history::{self, SourceDocument};
 use crate::paths::{
     normalize_note_path, path_key, read_visible_bytes, write_visible_note_bytes_atomic,
@@ -160,7 +160,14 @@ pub fn reconcile_vault(
             continue;
         }
         let parsed = parse_markdown(&file.path, &file.source);
-        let note_id = catalog.insert_note(InsertNote {
+        let note_id = generate_note_id();
+        history::write_snapshot_bytes(
+            state_root,
+            &note_id,
+            &file.source_hash,
+            &file.disk_bytes,
+        )?;
+        catalog.insert_note_with_id(&note_id, InsertNote {
             path: &file.path,
             path_key: &file.path_key,
             title: &parsed.title,
@@ -171,12 +178,6 @@ pub fn reconcile_vault(
             source: NoteEventSource::External,
             unresolved: None,
         })?;
-        history::write_snapshot_bytes(
-            state_root,
-            &note_id,
-            &file.source_hash,
-            &file.disk_bytes,
-        )?;
     }
     Ok(())
 }
@@ -577,6 +578,28 @@ mod tests {
     use crate::api_types::{NoteEventKind, NoteEventSource};
 
     use super::*;
+
+    #[test]
+    fn interrupted_baseline_import_recovers_snapshot_on_retry() {
+        let dir = tempfile::tempdir().unwrap();
+        let bytes = b"# Imported\n\ncontent\n";
+        fs::write(dir.path().join("Imported.md"), bytes).unwrap();
+        let state_root = dir.path().join("state");
+        let mut catalog = Catalog::open(&state_root.join("vault.db")).unwrap();
+
+        crate::failure_point::inject(
+            crate::failure_point::FailurePoint::SnapshotWritePermissionDenied,
+        );
+        assert!(reconcile_vault(dir.path(), &state_root, &mut catalog, &[]).is_err());
+
+        reconcile_vault(dir.path(), &state_root, &mut catalog, &[]).unwrap();
+
+        let note = catalog.live_notes().unwrap().remove(0);
+        assert_eq!(
+            history::read_snapshot_bytes(&state_root, &note.note_id, &note.content_hash).unwrap(),
+            bytes
+        );
+    }
 
     #[test]
     fn case_fold_collision_preserves_exact_live_path_and_is_idempotent() {
