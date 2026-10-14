@@ -146,7 +146,7 @@ describe("real server harness", () => {
       startupRequests.filter((request) => request.startsWith(`GET /api/v2/vaults/${vaultOneId}/notes/`)).length,
     ).toBeLessThanOrEqual(3);
     await page.locator('.note-row[title="visual.md"]').click();
-    await page.waitForSelector('.cm-content img[data-wiki-image="z-images/sample.webp"]');
+    await page.waitForSelector('.cm-content img[data-image-name="z-images/sample.webp"]');
     await page.close();
   });
 
@@ -296,7 +296,7 @@ describe("real server harness", () => {
     const title = `SSE ${randomUUID()}`;
     const pathMarker = title.slice(4).toLowerCase();
     await page.evaluate(async (args) => {
-      const response = await fetch(`/api/v2/vaults/${args.vaultId}/events?after=0`, {
+      const response = await fetch(`/api/v2/vaults/${args.vaultId}/events`, {
         headers: { "X-Tansu-Server-Instance": args.serverInstanceId },
       });
       if (!response.ok || response.body === null) throw new Error(`event stream failed: ${response.status}`);
@@ -341,7 +341,7 @@ describe("real server harness", () => {
     const page = await newLoggedPage();
     await page.goto(baseUrl);
     const eventPromise = page.evaluate(async (args) => {
-      const response = await fetch(`/api/v2/vaults/${args.vaultId}/events?after=0`, {
+      const response = await fetch(`/api/v2/vaults/${args.vaultId}/events`, {
         headers: { "X-Tansu-Server-Instance": args.serverInstanceId },
       });
       if (!response.ok || response.body === null) throw new Error(`event stream failed: ${response.status}`);
