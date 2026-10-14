@@ -27,9 +27,16 @@ pub fn reconcile_vault(
             .or_default()
             .push(file);
     }
+    let live_paths = catalog
+        .live_notes()?
+        .into_iter()
+        .map(|note| note.path)
+        .collect::<HashSet<_>>();
     for records in seen_keys.values_mut() {
         records.sort_by(|left, right| left.path.cmp(&right.path));
         if records.len() > 1 {
+            let live_path_index = primary_record_index(records, &live_paths);
+            records.swap(0, live_path_index);
             for record in records.iter().skip(1) {
                 insert_unresolved(state_root, catalog, record, UnresolvedReason::CaseFoldCollision)?;
             }
@@ -420,7 +427,9 @@ fn insert_unresolved(
     record: &FileRecord,
     reason: UnresolvedReason,
 ) -> Result<()> {
-    if catalog.note_by_path_key(&record.path_key)?.is_some() {
+    if catalog.live_path_exists(&record.path)?
+        || catalog.unresolved_path_exists(&record.path, reason.clone())?
+    {
         return Ok(());
     }
     let parsed = parse_markdown(&record.path, &record.source);
@@ -444,6 +453,13 @@ fn insert_unresolved(
         )?;
     }
     Ok(())
+}
+
+fn primary_record_index(records: &[FileRecord], live_paths: &HashSet<String>) -> usize {
+    records
+        .iter()
+        .position(|record| live_paths.contains(&record.path))
+        .unwrap_or(0)
 }
 
 fn apply_visible_version(
@@ -561,6 +577,67 @@ mod tests {
     use crate::api_types::{NoteEventKind, NoteEventSource};
 
     use super::*;
+
+    #[test]
+    fn case_fold_collision_preserves_exact_live_path_and_is_idempotent() {
+        let dir = tempfile::tempdir().unwrap();
+        let original_bytes = b"# Original\n\ncanonical\n";
+        fs::write(dir.path().join("a.md"), original_bytes).unwrap();
+        let state_root = dir.path().join("state");
+        let mut catalog = Catalog::open(&state_root.join("vault.db")).unwrap();
+        reconcile_vault(dir.path(), &state_root, &mut catalog, &[]).unwrap();
+        let original = catalog.live_notes().unwrap().remove(0);
+        let collision_source = "# Collision\n\nother\n";
+        let collision_bytes = collision_source.as_bytes();
+        let collision = FileRecord {
+            path: "A.md".to_string(),
+            path_key: path_key("A.md"),
+            source_hash: history::source_hash(collision_source),
+            legacy_hash: history::legacy_content_hash(collision_source),
+            legacy_v2_hash: history::legacy_source_hash_v2(collision_source),
+            disk_hash: history::disk_hash(collision_bytes),
+            source: collision_source.to_string(),
+            disk_bytes: collision_bytes.to_vec(),
+            unresolved: Some(UnresolvedReason::CaseFoldCollision),
+        };
+        let canonical = walk_markdown(dir.path(), &state_root, &[]).unwrap().remove(0);
+        let candidates = [collision.clone(), canonical];
+        assert_eq!(
+            primary_record_index(&candidates, &HashSet::from([original.path.clone()])),
+            1
+        );
+        insert_unresolved(
+            &state_root,
+            &mut catalog,
+            &collision,
+            UnresolvedReason::CaseFoldCollision,
+        )
+        .unwrap();
+        insert_unresolved(
+            &state_root,
+            &mut catalog,
+            &collision,
+            UnresolvedReason::CaseFoldCollision,
+        )
+        .unwrap();
+
+        let live = catalog.live_notes().unwrap();
+        assert_eq!(live.len(), 1);
+        assert_eq!(live[0].note_id, original.note_id);
+        assert_eq!(live[0].path, "a.md");
+        assert_eq!(live[0].content_hash, original.content_hash);
+        assert_eq!(fs::read(dir.path().join("a.md")).unwrap(), original_bytes);
+        let rows = catalog.all_rows().unwrap();
+        assert_eq!(rows.len(), 2);
+        assert!(rows.iter().any(|row| {
+            row.meta.path == "A.md"
+                && row.unresolved_reason.as_deref() == Some("case_fold_collision")
+        }));
+
+        reconcile_vault(dir.path(), &state_root, &mut catalog, &[]).unwrap();
+
+        assert_eq!(catalog.all_rows().unwrap().len(), 2);
+    }
 
     #[test]
     fn missing_or_corrupt_current_snapshots_mark_notes_unresolved() {

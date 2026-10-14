@@ -23,15 +23,6 @@ Next: 21
 - **Effort:** M
 - **Design:** `docs/rfcs/0001-webauthn-counter-policy.md`
 
-### TNS-6 · P2 · Reconcile case-fold collisions by exact path
-
-- **Area:** Vault reconciliation
-- **Where:** `src/reconcile.rs:30-42`, `src/reconcile.rs:55-61`, `src/reconcile.rs:417-445`, `src/catalog.rs:771-775`
-- **Problem:** Collision insertion checks for any live note with the shared path key. If a collision is added beside an existing note, the live note suppresses the unresolved record and reconciliation can apply the lexically first file's bytes to that note. Unresolved-only paths are also inserted again on each reconciliation.
-- **Recommendation:** Match unresolved records by exact path and reason, preserving the live note and making repeated reconciliation idempotent.
-- **Fix with:** durable-state
-- **Effort:** M
-
 ### TNS-7 · P2 · Recover baseline snapshots after interrupted imports
 
 - **Area:** Data recovery

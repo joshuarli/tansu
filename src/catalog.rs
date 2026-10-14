@@ -776,6 +776,30 @@ impl Catalog {
         Ok(row.map(|row| row.meta))
     }
 
+    pub(crate) fn live_path_exists(&self, path: &str) -> Result<bool> {
+        self.conn
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM notes WHERE path=?1 AND tombstoned=0 AND unresolved_reason IS NULL)",
+                params![path],
+                |row| row.get(0),
+            )
+            .map_err(Into::into)
+    }
+
+    pub(crate) fn unresolved_path_exists(
+        &self,
+        path: &str,
+        reason: UnresolvedReason,
+    ) -> Result<bool> {
+        self.conn
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM notes WHERE path=?1 AND tombstoned=0 AND unresolved_reason=?2)",
+                params![path, unresolved_reason(reason)],
+                |row| row.get(0),
+            )
+            .map_err(Into::into)
+    }
+
     pub fn live_notes(&self) -> Result<Vec<NoteMeta>> {
         let mut stmt = self.conn.prepare(
             "SELECT note_id, path, title, tags_json, seq, content_hash, visible_hash, updated_at_ms, tombstoned, unresolved_reason FROM notes WHERE tombstoned=0 AND unresolved_reason IS NULL ORDER BY path COLLATE NOCASE",
