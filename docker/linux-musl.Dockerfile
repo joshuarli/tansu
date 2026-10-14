@@ -12,6 +12,7 @@ RUN apk add --no-cache \
   clang22 \
   curl \
   file \
+  gcc \
   lld22 \
   llvm22 \
   musl-dev \
