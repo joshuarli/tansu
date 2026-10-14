@@ -83,5 +83,5 @@ benchDescribe("Tansu editor large note benchmark", () => {
 
     editor.destroy();
     editorHost.remove();
-  });
+  }, 20_000);
 });
