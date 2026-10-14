@@ -2,5 +2,7 @@
 
 The Playwright e2e suite runs against Chromium, Firefox, and WebKit. Browser
 versions are pinned in `package.json`. The frontend bundle targets `ESNext`.
+The project verifies these three engines in its e2e suites. It does not publish
+a compatibility guarantee for other browsers or versions.
 
 Image paste requires `createImageBitmap` and `OffscreenCanvas`.

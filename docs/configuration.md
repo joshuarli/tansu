@@ -21,10 +21,13 @@ path = "~/work-notes"
 Tansu2 expands `~` and `~/` at the start of a vault path. Nested vault paths
 and duplicate app-state directories are rejected.
 
-Tansu2 stores each vault's catalog, history, search index, session, and settings
-under `tansu/<vault-name>` in `XDG_DATA_HOME`. If `XDG_DATA_HOME` is unset, it
-uses `~/.local/share/tansu/<vault-name>`. Choose a data home outside your vaults
-to keep app state separate from note files.
+Tansu2 stores app state under `tansu/` in `XDG_DATA_HOME`. If `XDG_DATA_HOME`
+is unset, it uses `~/.local/share/tansu/`. The `identity/` directory contains
+the server ID and vault-root mapping. Each vault's catalog, revision snapshots,
+and derived search index live under `vaults/<vaultId>/`. Vault IDs follow the
+canonical vault root, so renaming a vault in the config does not move its state.
+Choose a data home outside your vaults to keep app state separate from note
+files. Back up the data home with the vaults. See [Deployment](deployment.md).
 
 ## Authenticated mode
 
@@ -44,6 +47,9 @@ All five fields are required. The origin must use HTTPS, and the RP ID must
 match the origin host or be one of its parent domains. Tansu2 stores passkeys
 under `tansu/identity/<state_directory>` in `XDG_DATA_HOME`; the value must be
 one directory name. The auth directory is private to the server account.
+`external_origin` must be the exact HTTPS URL that browsers use. For Tailscale
+Serve, use the machine's HTTPS tailnet DNS name and set `rp_id` to that hostname
+or a parent domain allowed by WebAuthn.
 
 Create the first registration capability while the server is stopped:
 

@@ -1,11 +1,11 @@
 # Migration
 
 Tansu2 scans Markdown files in a configured vault and assigns durable `noteId`s
-in app-managed state. Back up an existing vault before the first run.
+in app-managed state. Back up both the vault and app data before the first run.
 
 ## Before the first run
 
-1. Back up the vault.
+1. Stop Tansu2 and back up the vault, app data directory, and config file.
 2. Read [Configuration](configuration.md) and add the vault.
 3. Check that the vault is not nested inside another configured vault.
 4. Confirm Markdown files are UTF-8 and no paths differ only by letter case.
@@ -20,13 +20,27 @@ a search document when indexing succeeds. Titles come from the first H1 or
 filename stem. The parser reads tags from tags-only frontmatter. It leaves other
 frontmatter in document content.
 
-Tansu2 does not write hidden IDs into Markdown files. It stores catalog, history,
-and search state in the configured data directory. See
-[Configuration](configuration.md) for the path.
+Tansu2 does not write hidden IDs into Markdown files. It stores the catalog and
+revision snapshots under `tansu/vaults/<vaultId>/` in the configured data
+directory. The search index is derived state. See
+[Configuration](configuration.md) for the data path.
 
-If the vault contains earlier Tansu2 state in `.tansu/` and app-managed state
-has no `vault.db`, startup copies that state to the app data directory. This
-does not import revision or settings formats from other note applications.
+A baseline scan reads Markdown and writes app metadata. It does not rewrite
+visible files or add hidden IDs.
+
+On first startup, Tansu2 assigns a stable ID to each canonical vault root and
+copies any prior app state into the new ID-based directory when needed. It also
+copies legacy `.tansu/` state when that directory has a `vault.db` and no app
+catalog exists. These copies do not remove the old state. Keep your backup until
+you confirm the notes, history, and settings are present. This does not import
+revision or settings formats from other note applications.
+
+The new catalog may not be readable by an older Tansu2 build. To roll back,
+stop the server and restore the matching app data and config backup along with
+the old binary. The Markdown files remain ordinary vault files, but restoring
+only app data or only vault files can leave catalog and file contents out of
+sync. Never point an older build at state changed by a newer build without a
+verified backup.
 
 ## Unresolved files
 

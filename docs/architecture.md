@@ -1,8 +1,9 @@
 # Architecture
 
 Tansu2 is a Rust server, a static TypeScript frontend, and an in-repo Markdown
-editor. Markdown files remain ordinary files in each vault. App-managed state
-uses the XDG data path. See [Configuration](configuration.md).
+editor. Markdown files remain ordinary files in each vault. The server stores
+catalog and revision state in the XDG data path, keyed by stable vault ID. See
+[Configuration](configuration.md).
 
 ## Data integrity
 
@@ -10,6 +11,7 @@ uses the XDG data path. See [Configuration](configuration.md).
 - `path_key` is the normalized live-path uniqueness key.
 - Each accepted content-changing write has a full recoverable snapshot.
 - A stale save preserves canonical content and creates a conflict draft.
+- Mutations within one vault stay serialized by its operation mutex.
 - Search is derived state. Indexing failure cannot fail an accepted write.
 - Watcher events request reconciliation instead of making semantic edits.
 - Bootstrap returns note metadata, not all note bodies.
@@ -46,14 +48,20 @@ is canceled. The CLI maps process termination signals into the same token.
 
 ## Writes and recovery
 
-Content writes canonicalize Markdown and maintain a compressed snapshot,
-catalog state, and visible Markdown file. Delta saves reconstruct the candidate
-from an exact base snapshot, verify the submitted final hash, and use the same
-recoverable write path. Startup repair uses catalog and history state to finish
-interrupted writes conservatively.
+The editor source uses LF line endings. Content writes maintain a compressed
+snapshot, catalog state, and visible Markdown file. Delta saves reconstruct the
+candidate from an exact base snapshot, verify the submitted final hash, and use
+the same recoverable write path. Startup repair uses catalog and history state
+to finish interrupted writes conservatively.
 
 Create, save, import, restore, delete, rename, and conflict recovery all keep
 history under `noteId`, not the current path.
+
+The server rechecks the visible file against the saved disk hash before a
+content-changing write. The vault mutex serializes Tansu2 operations, but the
+recheck and file replacement are not an atomic compare-and-swap. A process that
+writes the file between those steps, or through an open descriptor, can race
+Tansu2. Use one writer per vault when that race matters.
 
 ## Reconciliation
 
@@ -76,9 +84,11 @@ identity.
 - The V2 API client validates network responses and scopes vault calls by stable
   server and vault identities.
 - Workspace state stores tabs, closed tabs, selection, scroll position, mode,
-  pins, and recents in browser IndexedDB.
+  pins, and recents in browser IndexedDB. IndexedDB is browser-local and is not
+  encrypted by Tansu2.
 - Saved-note drafts and local-note drafts use separate journal records in
-  browser IndexedDB.
+  browser IndexedDB. Recovery covers the latest successfully journaled
+  checkpoint, not every keystroke. Browser storage can be cleared or evicted.
 - The editor records its owning tab and session so a vault switch cannot sync
   old editor content into a new tab with the same `noteId`.
 
@@ -86,3 +96,13 @@ identity.
 mode, undo/redo, formatting, paste handling, and extensions. The app owns note
 lifecycle, persistence, assets, settings, tabs, and session state. See
 [Editor](editor.md) for editor-specific behavior.
+
+## Filesystem coordination
+
+The operation mutex coordinates requests handled by one server process. Hash
+checks detect many edits made by other processes before a mutation starts, but
+they do not lock the vault against editors, sync clients, or scripts. A
+non-cooperating writer can change a file after the final check and before
+replacement. Open descriptors can also write after a path-based check. Startup
+reconciliation detects some resulting mismatches; it cannot make those races
+impossible.

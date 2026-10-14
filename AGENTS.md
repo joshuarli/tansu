@@ -23,5 +23,6 @@ Commands: frontend build `deno task build`, fixture app `make dev`, check `make 
 - Development and fixtures: [development](docs/development.md), [fixtures](docs/fixtures.md)
 - Browser support and performance: [browser support](docs/browser-support.md), [performance](docs/performance.md)
 - Editor behavior: [editor](docs/editor.md)
+- Security and deployment: [security](docs/security.md), [deployment](docs/deployment.md)
 - Logging and backlog: [logging](docs/logging.md), [logging backlog](docs/logging-backlog.md)
 - Deferred features: [product backlog](docs/product-backlog.md)

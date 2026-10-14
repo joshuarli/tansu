@@ -44,6 +44,9 @@ selects a vault-root path. `./` and `../` paths resolve from the current note's
 directory. A bare basename resolves only when it matches one note. Ambiguous
 targets remain unresolved.
 
+Renaming a note changes its path and keeps its `noteId`. Tansu2 does not rewrite
+Markdown links that mention the old path.
+
 Wiki images use `![[name]]` or `![[name|320]]`. The configured URL resolver
 maps an opaque vault-local asset name to a URL. Dragging the resize handle
 replaces only that image construct in one undoable transaction. Widths stay

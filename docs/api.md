@@ -112,6 +112,8 @@ the server rechecks the visible file against `baseDiskHash`; an external change
 creates a conflict draft instead of being overwritten. These checks do not
 provide compare-and-swap against a non-cooperating writer between the final
 check and replace.
+The server serializes mutations within each vault. It does not coordinate with
+other processes that write the same files.
 
 Example full save:
 

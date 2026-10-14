@@ -54,6 +54,8 @@ Restore validates the file, restores credentials, and clears sessions,
 enrollment capabilities, and pending ceremonies. These commands do not back up
 vault notes or history; see [Security](security.md) for path and recovery
 details.
+See [Deployment](deployment.md) for Tailscale Serve setup, full backup scope,
+passkey recovery limits, and rollback guidance.
 
 ## Build
 
