@@ -13,19 +13,27 @@ are mutable metadata. None of these IDs are stored in Markdown.
 Every `/api/v2` response and SSE stream includes `X-Tansu-Api-Version: 2` and
 `X-Tansu-Build-Id: <build-id>`. `GET /api/v2/bootstrap` is the entry point and
 returns `serverInstanceId` and the configured `vaultId` values. Every later v2
-request sends `X-Tansu-Server-Instance: <serverInstanceId>`; a mismatch fails
-before a vault lookup or mutation. A client keys notes by
+vault request sends `X-Tansu-Server-Instance: <serverInstanceId>`; a mismatch
+fails before a vault lookup or mutation. Health and authentication routes can
+run before bootstrap and do not require that header. A client keys notes by
 `(serverInstanceId, vaultId, noteId)` and private browser state by that tuple
 plus its workspace ID.
 
 All vault routes use `/api/v2/vaults/:vaultId`. There is no active-vault index
-header. The v2 API is the contract for the campaign implementation; until its
-handlers land, valid v2 routes return the typed `not_implemented` error.
+header. Authenticated deployments require a session for bootstrap and vault
+routes. `GET /api/v2/health` is public, but still validates `Host` and rejects
+a supplied `Origin` that differs from the configured origin.
 
 | Method | Path | Purpose |
 | --- | --- | --- |
 | `GET` | `/api/v2/health` | Health |
 | `GET` | `/api/v2/bootstrap` | Server identity and vault list |
+| `POST` | `/api/v2/auth/login/options` | Start passkey login |
+| `POST` | `/api/v2/auth/login/finish` | Finish the one-time login ceremony |
+| `POST` | `/api/v2/auth/enrollment/options` | Start initial enrollment or recent-owner credential registration |
+| `POST` | `/api/v2/auth/enrollment/finish` | Finish the one-time registration ceremony |
+| `GET` | `/api/v2/auth/session` | Read the authenticated session |
+| `POST` | `/api/v2/auth/logout` | Revoke the session |
 | `GET` | `/api/v2/vaults/:vaultId/bootstrap` | Vault metadata, note metadata, settings and search status |
 | `GET` | `/api/v2/vaults/:vaultId/notes` | List note metadata |
 | `GET` | `/api/v2/vaults/:vaultId/notes/:noteId` | Read source and metadata |
@@ -47,10 +55,14 @@ handlers land, valid v2 routes return the typed `not_implemented` error.
 | `GET` | `/api/v2/vaults/:vaultId/assets?name=...` | Read one vault-local image |
 | `GET` | `/api/v2/vaults/:vaultId/events?after=:eventVersion` | Subscribe to vault events |
 
-Legacy index routes selected with `X-Tansu-Vault` return
-`api_version_unsupported`; they never redirect an index to a v2 vault ID.
-Browser session state, pins, and recents are client-local in v2. Clients keep
-pins and recents in their private workspace state.
+`/api/v2/bootstrap` returns only server identity and vault IDs. A vault
+bootstrap may include `legacyWorkspace`, a one-time import seed containing the
+old server-side session, pins, and recents. The app imports it only when no
+private workspace exists. New session state, pins, and recents are client-local
+in v2.
+
+Legacy `/api/` routes return `api_version_unsupported` before dispatch. They do
+not interpret `X-Tansu-Vault` or mutate a default vault.
 The browser stores workspace and draft data in IndexedDB without encryption.
 Passkeys do not encrypt that data.
 
@@ -167,25 +179,46 @@ server.
 
 SSE IDs are monotonically increasing `eventVersion` values scoped to a vault
 and do not decrease across restarts with the same server identity. Reconnect
-with `after` set to the last event ID. The server replays retained
-events or sends `resyncRequired: true`; clients then fetch the vault bootstrap
+with `after` set to the last event ID. The URL's `after` value takes precedence
+over `Last-Event-ID`. The server replays retained events or sends
+`resyncRequired: true`; clients then fetch the vault bootstrap
 and notes again. Each event also has a typed update. Resync status is derived
 from the update variant, so a normal event cannot serialize with
 `resyncRequired: true`.
+
+### Authentication
+
+In authenticated mode, Host is required for every request and any supplied
+Origin must exactly match the configured HTTPS origin. State-changing requests
+also require that Origin. Bootstrap, note, settings, search, quick-open, asset,
+and event routes require a session. `GET /api/v2/health` is public. Login
+ceremonies and ticket-bound finishes are available before a session; initial
+enrollment also requires its one-time capability.
+
+Enrollment after the first credential requires a recently verified owner
+session and its CSRF token. State-changing requests send `X-Tansu-CSRF` with the
+value readable from the session-bound `__Host-tansu_csrf` cookie. The cookie is
+Secure, SameSite=Strict, and scoped to `/`; logout clears it with the HttpOnly
+session cookie.
+
+`GET /api/v2/auth/session` returns `authenticated`, `verifiedAt`, and
+`expiresAt` for the current session. It is available before bootstrap so the
+app can determine whether to show login.
 
 ### Errors
 
 Errors use `V2ApiErrorResponse` and a `code` discriminator. Error fields use
 camel case. `api_version_unsupported` is returned for retired index routes;
-`not_implemented` marks v2 handlers that have not landed yet.
+`not_implemented` marks an unknown route or method.
 
 | HTTP status | Codes |
 | --- | --- |
-| `400` | `bad_request`, `path_invalid`, `source_hash_mismatch`, `disk_hash_mismatch` |
+| `400` | `bad_request`, `path_invalid`, `source_hash_mismatch` |
+| `408` | `bad_request` for a timed-out request body |
 | `401` | `auth_required` |
 | `403` | `forbidden`, `csrf_rejected`, `origin_rejected` |
-| `404` | `vault_not_found`, `note_not_found`, `unresolved_note` |
-| `409` | `api_version_unsupported`, `path_collision`, `save_conflict`, `mutation_id_reuse`, `server_instance_mismatch` |
+| `404` | `vault_not_found`, `note_not_found`, `revision_not_found`, `conflict_draft_not_found`, `asset_not_found` |
+| `409` | `api_version_unsupported`, `disk_hash_mismatch`, `path_collision`, `save_conflict`, `mutation_id_reuse`, `server_instance_mismatch`, `unresolved_note` |
 | `413` | `request_too_large` |
 | `429` | `rate_limited` |
 | `501` | `not_implemented` |

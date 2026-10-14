@@ -129,7 +129,7 @@ impl Default for Settings {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionState {
     pub open_tabs: Vec<SessionTab>,
@@ -137,7 +137,7 @@ pub struct SessionState {
     pub closed_tabs: Vec<SessionTab>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionTab {
     pub note_id: String,
@@ -359,6 +359,15 @@ pub struct V2VaultBootstrapResponse {
     pub notes: Vec<V2NoteMeta>,
     pub settings: Settings,
     pub search_status: SearchStatus,
+    pub legacy_workspace: Option<LegacyWorkspace>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct LegacyWorkspace {
+    pub session: SessionState,
+    pub pinned_note_ids: Vec<String>,
+    pub recent_note_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -747,6 +756,19 @@ pub enum V2ApiErrorKind {
     },
     NoteNotFound {
         note_id: String,
+    },
+    RevisionNotFound {
+        note_id: String,
+        #[ts(type = "number")]
+        revision: i64,
+    },
+    ConflictDraftNotFound {
+        note_id: String,
+        #[ts(type = "number")]
+        draft_id: i64,
+    },
+    AssetNotFound {
+        name: String,
     },
     SaveConflict {
         current: Box<V2NoteDocument>,

@@ -1,4 +1,7 @@
 import type {
+  LegacyWorkspace,
+  SessionState,
+  SessionTab,
   Settings,
   V2ApiErrorKind,
   V2ApiErrorResponse,
@@ -317,6 +320,45 @@ export function decodeV2VaultBootstrap(value: unknown): V2VaultBootstrapResponse
     notes: decodeV2NoteMetaArray(field(body, "notes")),
     settings: decodeSettings(field(body, "settings")),
     searchStatus: decodeSearchStatus(field(body, "searchStatus")),
+    legacyWorkspace: decodeLegacyWorkspace(field(body, "legacyWorkspace")),
+  };
+}
+
+function decodeLegacyWorkspace(value: unknown): LegacyWorkspace | null {
+  if (value === null) {
+    return null;
+  }
+  const body = record(value, "legacy workspace");
+  return {
+    session: decodeSessionState(field(body, "session")),
+    pinnedNoteIds: array(field(body, "pinnedNoteIds"), "pinnedNoteIds").map((noteId) =>
+      nonEmptyString(noteId, "pinned note ID")
+    ),
+    recentNoteIds: array(field(body, "recentNoteIds"), "recentNoteIds").map((noteId) =>
+      nonEmptyString(noteId, "recent note ID")
+    ),
+  };
+}
+
+function decodeSessionState(value: unknown): SessionState {
+  const body = record(value, "session state");
+  const activeNoteId = field(body, "activeNoteId");
+  return {
+    openTabs: array(field(body, "openTabs"), "openTabs").map(decodeSessionTab),
+    activeNoteId: activeNoteId === null ? null : nonEmptyString(activeNoteId, "active note ID"),
+    closedTabs: array(field(body, "closedTabs"), "closedTabs").map(decodeSessionTab),
+  };
+}
+
+function decodeSessionTab(value: unknown): SessionTab {
+  const body = record(value, "session tab");
+  const cursorOffset = field(body, "cursorOffset");
+  return {
+    noteId: nonEmptyString(field(body, "noteId"), "note ID"),
+    title: string(field(body, "title"), "title"),
+    path: nonEmptyString(field(body, "path"), "path"),
+    cursorOffset: cursorOffset === null ? null : integer(cursorOffset, "cursorOffset"),
+    sourceMode: boolean(field(body, "sourceMode"), "sourceMode"),
   };
 }
 
@@ -401,6 +443,20 @@ export function decodeV2ApiErrorResponse(value: unknown): V2ApiErrorResponse {
     }
     case "note_not_found": {
       decoded["noteId"] = nonEmptyString(field(error, "noteId"), "noteId");
+      break;
+    }
+    case "revision_not_found": {
+      decoded["noteId"] = nonEmptyString(field(error, "noteId"), "noteId");
+      decoded["revision"] = positiveSafeInteger(field(error, "revision"), "revision");
+      break;
+    }
+    case "conflict_draft_not_found": {
+      decoded["noteId"] = nonEmptyString(field(error, "noteId"), "noteId");
+      decoded["draftId"] = positiveSafeInteger(field(error, "draftId"), "draftId");
+      break;
+    }
+    case "asset_not_found": {
+      decoded["name"] = nonEmptyString(field(error, "name"), "name");
       break;
     }
     case "save_conflict": {

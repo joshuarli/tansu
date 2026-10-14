@@ -6,6 +6,7 @@ import {
   createV2ApiClient,
   decodeV2NoteMeta,
   decodeV2ServerEvent,
+  decodeV2VaultBootstrap,
   isRetryableV2Error,
   type V2Transport,
 } from "./v2-api.ts";
@@ -15,6 +16,27 @@ const sourceHash = hash("a");
 const diskHash = hash("b", "sha256:");
 
 describe("v2 API client", () => {
+  it("decodes the one-time legacy workspace import seed", () => {
+    const bootstrap = decodeV2VaultBootstrap({
+      vault: { vaultId: "vault-1", name: "Notes" },
+      notes: [],
+      settings: settings(),
+      searchStatus: { dirty: false, degraded: false },
+      legacyWorkspace: {
+        session: {
+          openTabs: [{ noteId: "note-1", title: "Note", path: "note.md", cursorOffset: 2, sourceMode: false }],
+          activeNoteId: "note-1",
+          closedTabs: [],
+        },
+        pinnedNoteIds: ["note-1"],
+        recentNoteIds: ["note-1"],
+      },
+    });
+
+    expect(bootstrap.legacyWorkspace?.session.activeNoteId).toBe("note-1");
+    expect(bootstrap.legacyWorkspace?.pinnedNoteIds).toStrictEqual(["note-1"]);
+  });
+
   it("uses stable identity headers and routes all note operations through v2", async () => {
     const note = noteMeta("note/id");
     const responses = [
@@ -167,6 +189,7 @@ describe("v2 API client", () => {
           notes: [],
           settings: settings(),
           searchStatus: { dirty: false, degraded: false },
+          legacyWorkspace: null,
         });
       }
       if (path.endsWith("/notes")) {

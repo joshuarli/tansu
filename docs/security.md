@@ -2,7 +2,7 @@
 
 ## Server identity
 
-Authenticated mode requires an HTTPS external origin and an RP ID that matches that origin. The server checks `Host` and `Origin` on every request and requires the session CSRF token on state-changing requests. It does not enable cross-origin access.
+Authenticated mode requires an HTTPS external origin and an RP ID that matches that origin. Every request checks `Host`; a supplied `Origin` must exactly match the configured origin. State-changing requests require the configured `Origin`, an authenticated session, and its CSRF token, except login ceremonies and initial enrollment, which are bound to server-side one-time tickets or the enrollment capability. `GET /api/v2/health` is public but still checks Host and any supplied Origin. The server does not enable cross-origin access.
 
 WebAuthn credentials are bound to the configured origin and RP ID. Changing either value clears the stored credentials, sessions, enrollment capabilities, and pending ceremonies in one database transaction. The owner must enroll new credentials after that change.
 
@@ -10,7 +10,9 @@ WebAuthn credentials are bound to the configured origin and RP ID. Changing eith
 
 The first credential requires a random, expiring enrollment capability. Only its hash is stored, and finishing the first registration consumes it. Later registrations require a recently verified session. Ceremony state stays on the server, expires, and is consumed in the same transaction as a successful or failed finish.
 
-Sessions use random opaque tokens stored as hashes. The browser cookie is host-scoped, `HttpOnly`, `Secure`, and `SameSite=Strict`; a separate session-bound token protects state-changing requests. Logout revokes the session and closes its open event streams. Sessions and streams also stop at expiry.
+Sessions use random opaque tokens stored as hashes. The session cookie is `__Host-tansu_session`, `HttpOnly`, `Secure`, and `SameSite=Strict`. A second session-bound cookie, `__Host-tansu_csrf`, is Secure, SameSite=Strict, scoped to `/`, and readable by same-origin JavaScript so a reload or second tab can send its value as `X-Tansu-CSRF`. The server checks that header against the session's stored token hash. Logout revokes the session, clears both cookies, and closes its open event streams. Sessions and streams also stop at expiry.
+
+`POST /api/v2/auth/login/options` and `/login/finish` perform passkey login. They check Host and Origin, but ignore a stale session cookie so an expired session can log in again. `POST /api/v2/auth/enrollment/options` starts either first enrollment with the one-time capability or later credential registration with a recently verified owner session and CSRF token. Both enrollment finish routes require the single-use ceremony ID. `GET /api/v2/auth/session` requires a valid session and returns its verification and expiry times. `POST /api/v2/auth/logout` requires a valid session, configured Origin, and CSRF token.
 
 Auth data belongs in a private state directory outside search indexes and caches. The directory is restricted to its owner and the database file is owner-readable and writable. `AuthStore` does not choose that directory; server configuration must supply it.
 

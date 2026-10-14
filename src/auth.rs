@@ -18,6 +18,8 @@ use tokio::sync::watch;
 pub enum AuthError {
     InvalidRequest(String),
     Unauthorized,
+    OriginRejected,
+    CsrfRejected,
     Expired,
     CeremonyUsed,
     Storage(String),
@@ -29,6 +31,8 @@ impl std::fmt::Display for AuthError {
         match self {
             Self::InvalidRequest(message) | Self::Storage(message) | Self::WebAuthn(message) => f.write_str(message),
             Self::Unauthorized => f.write_str("authentication required"),
+            Self::OriginRejected => f.write_str("request origin rejected"),
+            Self::CsrfRejected => f.write_str("CSRF token rejected"),
             Self::Expired => f.write_str("authentication state expired"),
             Self::CeremonyUsed => f.write_str("ceremony already used"),
         }
@@ -91,25 +95,25 @@ impl AuthPolicy {
         match self {
             Self::Authenticated { external_origin, host: expected_host, .. } => {
                 if !host.eq_ignore_ascii_case(expected_host) || origin.is_some_and(|origin| origin != external_origin) {
-                    return Err(AuthError::Unauthorized);
+                    return Err(AuthError::OriginRejected);
                 }
                 if state_changing && origin != Some(external_origin) {
-                    return Err(AuthError::Unauthorized);
+                    return Err(AuthError::OriginRejected);
                 }
             }
             Self::LoopbackDevelopment => {
                 if !is_loopback_host(&host.to_ascii_lowercase()) {
-                    return Err(AuthError::Unauthorized);
+                    return Err(AuthError::OriginRejected);
                 }
                 let Some(origin) = origin else {
                     if state_changing {
-                        return Err(AuthError::Unauthorized);
+                        return Err(AuthError::OriginRejected);
                     }
                     return Ok(());
                 };
-                let (scheme, origin_host) = split_origin(origin)?;
+                let (scheme, origin_host) = split_origin(origin).map_err(|_| AuthError::OriginRejected)?;
                 if scheme != "http" || !is_loopback_host(&origin_host) || !host.eq_ignore_ascii_case(&origin_host) {
-                    return Err(AuthError::Unauthorized);
+                    return Err(AuthError::OriginRejected);
                 }
             }
         }
@@ -299,10 +303,10 @@ impl AuthStore {
             return Err(AuthError::Unauthorized);
         }
         if state_changing {
-            let csrf_token = request.csrf_token.ok_or(AuthError::Unauthorized)?;
-            let csrf_hash = token_hash(csrf_token)?;
+            let csrf_token = request.csrf_token.ok_or(AuthError::CsrfRejected)?;
+            let csrf_hash = token_hash(csrf_token).map_err(|_| AuthError::CsrfRejected)?;
             if !constant_time_eq(&csrf_hash, &session.csrf_hash) {
-                return Err(AuthError::Unauthorized);
+                return Err(AuthError::CsrfRejected);
             }
         }
         Ok(Some(VerifiedSession {

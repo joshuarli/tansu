@@ -3,8 +3,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 
 use crate::api_types::{
-    ConflictDraftMeta, NoteEventKind, NoteEventSource, NoteMeta, RevisionMeta, SearchStatus,
-    SessionState, Settings, UnresolvedReason,
+    ConflictDraftMeta, LegacyWorkspace, NoteEventKind, NoteEventSource, NoteMeta, RevisionMeta,
+    SearchStatus, SessionState, Settings, UnresolvedReason,
 };
 use crate::{Error, Result};
 
@@ -939,6 +939,25 @@ impl Catalog {
             Some(value) => Ok(serde_json::from_str(&value).unwrap_or_else(|_| default_session())),
             None => Ok(default_session()),
         }
+    }
+
+    pub fn legacy_workspace(&self) -> Result<Option<LegacyWorkspace>> {
+        let session = self.session()?;
+        let pinned_note_ids = self.pinned()?;
+        let recent_note_ids = self.recent()?;
+        if session.open_tabs.is_empty()
+            && session.active_note_id.is_none()
+            && session.closed_tabs.is_empty()
+            && pinned_note_ids.is_empty()
+            && recent_note_ids.is_empty()
+        {
+            return Ok(None);
+        }
+        Ok(Some(LegacyWorkspace {
+            session,
+            pinned_note_ids,
+            recent_note_ids,
+        }))
     }
 
     pub fn save_session(&mut self, session: &SessionState) -> Result<()> {

@@ -9,6 +9,7 @@ use std::thread;
 
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use rusqlite::ErrorCode;
+use serde::de::DeserializeOwned;
 
 use crate::api_types::{
     ApiErrorKind, BootstrapResponse, CreateNoteRequest, NoteDocument, NoteEventKind,
@@ -20,7 +21,9 @@ use crate::api_types::{
     V2QuickOpenRequest, V2QuickOpenResponse, V2RenameNoteRequest, V2SearchHit,
     V2SearchHitIdentity, V2SearchMode, V2SearchOverlay, V2SearchRequest, V2SearchResponse,
     V2SourceRange, V2ExcerptRange, V2OverlayCoverage,
-    V2RestoreConflictRequest, V2RestoreRevisionRequest, V2SaveNoteDeltaRequest,
+    V2RestoreConflictRequest, V2RestoreRevisionRequest, V2RevisionDocument, V2RevisionMeta,
+    V2ConflictDraftDocument, V2SettingsRequest, V2SettingsResponse, V2ImageUploadResponse,
+    V2SaveNoteDeltaRequest,
     V2SaveNoteRequest, V2ServerEvent, V2ServerEventUpdate, V2VaultBootstrapResponse,
     V2VaultMeta, VaultEntry, UnresolvedReason,
 };
@@ -131,8 +134,40 @@ fn validate_mutation_id(mutation_id: &str) -> V2Result<()> {
     Ok(())
 }
 
-fn v2_request_hash<T: serde::Serialize>(request: &T) -> V2Result<String> {
-    Ok(history::disk_hash(&serde_json::to_vec(request)?))
+fn v2_request_hash<T: serde::Serialize>(kind: &str, target: Option<&str>, request: &T) -> V2Result<String> {
+    Ok(history::disk_hash(&serde_json::to_vec(&(kind, target, request))?))
+}
+
+fn v2_existing_result<T: DeserializeOwned>(
+    catalog: &mut Catalog,
+    mutation_id: &str,
+    payload_hash: &str,
+) -> V2Result<Option<T>> {
+    let Some(record) = catalog.mutation(mutation_id)? else {
+        return Ok(None);
+    };
+    if record.payload_hash != payload_hash {
+        return Err(V2VaultError::Api(V2ApiErrorKind::MutationIdReuse {
+            mutation_id: mutation_id.to_string(),
+        }));
+    }
+    match record.state.as_str() {
+        "prepared" => {
+            catalog.clear_prepared_mutation(mutation_id)?;
+            Ok(None)
+        }
+        "accepted" => {
+            let result = record.result_json.ok_or_else(|| {
+                Error::Internal(format!("mutation {mutation_id} has no result"))
+            })?;
+            Ok(Some(serde_json::from_str(&result)?))
+        }
+        _ => Err(Error::Internal(format!(
+            "mutation {mutation_id} has unsupported state {}",
+            record.state
+        ))
+        .into()),
+    }
 }
 
 fn v2_existing_mutation(
@@ -232,6 +267,14 @@ fn v2_accepted_response(
     V2MutationResponse {
         mutation_id: mutation_id.to_string(),
         outcome: V2MutationOutcome::Accepted { result },
+    }
+}
+
+fn v2_image_upload_response(mutation_id: &str, name: &str) -> V2ImageUploadResponse {
+    V2ImageUploadResponse {
+        mutation_id: mutation_id.to_string(),
+        name: name.to_string(),
+        markdown: format!("![[{name}]]"),
     }
 }
 
@@ -810,12 +853,264 @@ impl VaultRuntime {
             notes,
             settings: catalog.settings()?,
             search_status: catalog.search_status()?,
+            legacy_workspace: catalog.legacy_workspace()?,
+        })
+    }
+
+    pub fn v2_list_revisions(&self, note_id: &str) -> V2Result<Vec<V2RevisionMeta>> {
+        let _op = self.lock_op();
+        let catalog = self.lock_catalog();
+        let row = catalog.note_row_by_id(note_id)?.ok_or_else(|| {
+            V2VaultError::Api(V2ApiErrorKind::NoteNotFound {
+                note_id: note_id.to_string(),
+            })
+        })?;
+        if row.tombstoned {
+            return Err(V2VaultError::Api(V2ApiErrorKind::NoteNotFound {
+                note_id: note_id.to_string(),
+            }));
+        }
+        Ok(catalog
+            .revisions(note_id)?
+            .into_iter()
+            .map(|revision| V2RevisionMeta {
+                revision: revision.event_id,
+                note_id: revision.note_id,
+                kind: revision.kind,
+                source: revision.source,
+                source_hash: revision.content_hash,
+                created_at_ms: revision.created_at_ms,
+            })
+            .collect())
+    }
+
+    pub fn v2_open_revision(&self, note_id: &str, revision_id: i64) -> V2Result<V2RevisionDocument> {
+        let _op = self.lock_op();
+        let catalog = self.lock_catalog();
+        let row = catalog.note_row_by_id(note_id)?.ok_or_else(|| {
+            V2VaultError::Api(V2ApiErrorKind::NoteNotFound {
+                note_id: note_id.to_string(),
+            })
+        })?;
+        if row.tombstoned {
+            return Err(V2VaultError::Api(V2ApiErrorKind::NoteNotFound {
+                note_id: note_id.to_string(),
+            }));
+        }
+        let revision = catalog
+            .revision(note_id, revision_id)?
+            .filter(|revision| revision.content_hash.is_some())
+            .ok_or_else(|| {
+                V2VaultError::Api(V2ApiErrorKind::RevisionNotFound {
+                    note_id: note_id.to_string(),
+                    revision: revision_id,
+                })
+            })?;
+        let source_hash = revision.content_hash.as_deref().expect("revision hash was checked");
+        let content = history::read_snapshot(&self.state_root, note_id, source_hash)?;
+        Ok(V2RevisionDocument {
+            revision: V2RevisionMeta {
+                revision: revision.event_id,
+                note_id: revision.note_id,
+                kind: revision.kind,
+                source: revision.source,
+                source_hash: revision.content_hash,
+                created_at_ms: revision.created_at_ms,
+            },
+            content,
+        })
+    }
+
+    pub fn v2_open_conflict_draft(
+        &self,
+        note_id: &str,
+        draft_id: i64,
+    ) -> V2Result<V2ConflictDraftDocument> {
+        let _op = self.lock_op();
+        let catalog = self.lock_catalog();
+        let draft = catalog.conflict_draft(note_id, draft_id)?.ok_or_else(|| {
+            V2VaultError::Api(V2ApiErrorKind::ConflictDraftNotFound {
+                note_id: note_id.to_string(),
+                draft_id,
+            })
+        })?;
+        let content = history::read_conflict_draft(
+            &self.state_root,
+            note_id,
+            draft.draft_id,
+            &draft.content_hash,
+        )?;
+        Ok(V2ConflictDraftDocument {
+            draft: crate::api_types::V2ConflictDraftMeta {
+                draft_id: draft.draft_id,
+                note_id: draft.note_id,
+                base_revision: draft.base_seq,
+                base_source_hash: draft.base_hash,
+                source_hash: draft.content_hash,
+                created_at_ms: draft.created_at_ms,
+            },
+            content,
+        })
+    }
+
+    pub fn v2_settings(&self) -> V2Result<Settings> {
+        self.settings().map_err(V2VaultError::Internal)
+    }
+
+    pub fn v2_save_settings(&self, request: V2SettingsRequest) -> V2Result<V2SettingsResponse> {
+        validate_mutation_id(&request.mutation_id)?;
+        let payload_hash = v2_request_hash("settings", None, &request)?;
+        let _op = self.lock_op();
+        let mut catalog = self.lock_catalog();
+        if let Some(response) =
+            v2_existing_result::<V2SettingsResponse>(&mut catalog, &request.mutation_id, &payload_hash)?
+        {
+            return Ok(response);
+        }
+        catalog.prepare_mutation(MutationIntent {
+            mutation_id: &request.mutation_id,
+            payload_hash: &payload_hash,
+            kind: "settings",
+            note_id: None,
+            path: None,
+            old_path: None,
+            expected_disk_hash: None,
+            source_hash: None,
+            disk_hash: None,
+        })?;
+        catalog.save_settings(&request.settings)?;
+        let response = V2SettingsResponse {
+            mutation_id: request.mutation_id.clone(),
+            settings: request.settings,
+        };
+        catalog.complete_noop_mutation(
+            &request.mutation_id,
+            &serde_json::to_string(&response)?,
+        )?;
+        drop(catalog);
+        self.enqueue_search(SearchJob::Rebuild);
+        let status = self.search.lock().expect("search mutex poisoned").search_status();
+        self.record_v2_event(V2ServerEventUpdate::SearchChanged {
+            dirty: status.dirty,
+            degraded: status.degraded,
+        })?;
+        self.broadcast(ServerEventKind::SearchChanged, Vec::new());
+        Ok(response)
+    }
+
+    pub fn v2_upload_image(&self, mutation_id: &str, bytes: &[u8]) -> V2Result<V2ImageUploadResponse> {
+        validate_mutation_id(mutation_id)?;
+        if bytes.is_empty() {
+            return Err(V2VaultError::Api(V2ApiErrorKind::BadRequest {
+                message: "image body is empty".to_string(),
+            }));
+        }
+        let body_hash = history::disk_hash(bytes);
+        let payload_hash = v2_request_hash("image_upload", None, &body_hash)?;
+        let _op = self.lock_op();
+        let mut catalog = self.lock_catalog();
+        if let Some(record) = catalog.mutation(mutation_id)? {
+            if record.payload_hash != payload_hash {
+                return Err(V2VaultError::Api(V2ApiErrorKind::MutationIdReuse {
+                    mutation_id: mutation_id.to_string(),
+                }));
+            }
+            match record.state.as_str() {
+                "accepted" => {
+                    let result = record.result_json.ok_or_else(|| {
+                        Error::Internal(format!("mutation {mutation_id} has no result"))
+                    })?;
+                    return Ok(serde_json::from_str(&result)?);
+                }
+                "prepared" => {
+                    let name = record.path.as_deref().ok_or_else(|| {
+                        Error::Internal(format!("image mutation {mutation_id} has no asset path"))
+                    })?;
+                    match self.read_asset(name) {
+                        Ok(existing) if existing == bytes => {
+                            let response = v2_image_upload_response(mutation_id, name);
+                            catalog.complete_noop_mutation(
+                                mutation_id,
+                                &serde_json::to_string(&response)?,
+                            )?;
+                            return Ok(response);
+                        }
+                        Ok(_) => {
+                            return Err(Error::Internal(format!(
+                                "image mutation {mutation_id} asset contents changed"
+                            ))
+                            .into());
+                        }
+                        Err(Error::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {
+                            catalog.clear_prepared_mutation(mutation_id)?;
+                        }
+                        Err(error) => return Err(V2VaultError::Internal(error)),
+                    }
+                }
+                _ => {
+                    return Err(Error::Internal(format!(
+                        "image mutation {mutation_id} has unsupported state {}",
+                        record.state
+                    ))
+                    .into());
+                }
+            }
+        }
+        let digest = history::disk_hash(mutation_id.as_bytes());
+        let name = format!("z-images/image-{}.webp", digest.trim_start_matches("sha256:"));
+        catalog.prepare_mutation(MutationIntent {
+            mutation_id,
+            payload_hash: &payload_hash,
+            kind: "image_upload",
+            note_id: None,
+            path: Some(&name),
+            old_path: None,
+            expected_disk_hash: None,
+            source_hash: None,
+            disk_hash: Some(&body_hash),
+        })?;
+        write_vault_asset_new(&self.root, &name, bytes)?;
+        let response = v2_image_upload_response(mutation_id, &name);
+        catalog.complete_noop_mutation(mutation_id, &serde_json::to_string(&response)?)?;
+        drop(catalog);
+        if self.logs.enabled() {
+            self.logs.server_event(
+                LogLevel::Info,
+                "asset.upload",
+                None,
+                fields([(
+                    "asset",
+                    serde_json::json!({
+                        "name": name,
+                        "bytes": bytes.len(),
+                        "vault": self.index,
+                    }),
+                )]),
+            );
+        }
+        Ok(response)
+    }
+
+    pub fn v2_read_asset(&self, name: &str) -> V2Result<Vec<u8>> {
+        self.read_asset(name).map_err(|error| match error {
+            Error::Io(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                V2VaultError::Api(V2ApiErrorKind::AssetNotFound {
+                    name: name.to_string(),
+                })
+            }
+            Error::BadRequest(message) => V2VaultError::Api(V2ApiErrorKind::BadRequest { message }),
+            error => V2VaultError::Internal(error),
         })
     }
 
     pub fn v2_open_note(&self, note_id: &str) -> V2Result<V2NoteDocument> {
         let _op = self.lock_op();
         let mut catalog = self.lock_catalog();
+        if catalog.note_row_by_id(note_id)?.is_none() {
+            return Err(V2VaultError::Api(V2ApiErrorKind::NoteNotFound {
+                note_id: note_id.to_string(),
+            }));
+        }
         reconcile_note_before_write(&self.root, &self.state_root, &mut catalog, note_id)?;
         let row = catalog.note_row_by_id(note_id)?.ok_or_else(|| {
             V2VaultError::Api(V2ApiErrorKind::NoteNotFound {
@@ -868,7 +1163,7 @@ impl VaultRuntime {
                 received: request.source_hash,
             }));
         }
-        let payload_hash = v2_request_hash(&request)?;
+        let payload_hash = v2_request_hash("save", Some(note_id), &request)?;
         self.v2_save_source(
             note_id,
             &request.mutation_id,
@@ -886,7 +1181,7 @@ impl VaultRuntime {
         request: V2SaveNoteDeltaRequest,
     ) -> V2Result<V2MutationResponse> {
         validate_mutation_id(&request.mutation_id)?;
-        let payload_hash = v2_request_hash(&request)?;
+        let payload_hash = v2_request_hash("save_delta", Some(note_id), &request)?;
         {
             let _op = self.lock_op();
             let mut catalog = self.lock_catalog();
@@ -947,7 +1242,7 @@ impl VaultRuntime {
         request: V2RestoreRevisionRequest,
     ) -> V2Result<V2MutationResponse> {
         validate_mutation_id(&request.mutation_id)?;
-        let payload_hash = v2_request_hash(&(event_id, &request))?;
+        let payload_hash = v2_request_hash("restore_revision", Some(note_id), &(event_id, &request))?;
         let source_hash = {
             let _op = self.lock_op();
             let mut catalog = self.lock_catalog();
@@ -985,7 +1280,7 @@ impl VaultRuntime {
         request: V2RestoreConflictRequest,
     ) -> V2Result<V2MutationResponse> {
         validate_mutation_id(&request.mutation_id)?;
-        let payload_hash = v2_request_hash(&(draft_id, &request))?;
+        let payload_hash = v2_request_hash("restore_conflict", Some(note_id), &(draft_id, &request))?;
         let draft = {
             let _op = self.lock_op();
             let mut catalog = self.lock_catalog();
@@ -1228,7 +1523,7 @@ impl VaultRuntime {
         let path = normalize_note_path(&request.path).map_err(|reason| {
             V2VaultError::Api(V2ApiErrorKind::PathInvalid { reason })
         })?;
-        let payload_hash = v2_request_hash(&request)?;
+        let payload_hash = v2_request_hash("create", None, &request)?;
         let _op = self.lock_op();
         let mut catalog = self.lock_catalog();
         if let Some(response) =
@@ -1325,7 +1620,7 @@ impl VaultRuntime {
         validate_mutation_id(&request.mutation_id)?;
         let path = normalize_note_path(&request.path)
             .map_err(|reason| V2VaultError::Api(V2ApiErrorKind::PathInvalid { reason }))?;
-        let payload_hash = v2_request_hash(&request)?;
+        let payload_hash = v2_request_hash("rename", Some(note_id), &request)?;
         let _op = self.lock_op();
         let mut catalog = self.lock_catalog();
         if let Some(response) =
@@ -1490,7 +1785,7 @@ impl VaultRuntime {
         request: V2DeleteNoteRequest,
     ) -> V2Result<V2MutationResponse> {
         validate_mutation_id(&request.mutation_id)?;
-        let payload_hash = v2_request_hash(&request)?;
+        let payload_hash = v2_request_hash("delete", Some(note_id), &request)?;
         let _op = self.lock_op();
         let mut catalog = self.lock_catalog();
         if let Some(response) =
@@ -1701,7 +1996,6 @@ impl VaultRuntime {
         })
     }
 
-    #[cfg(test)]
     fn record_v2_event(&self, update: V2ServerEventUpdate) -> Result<V2EventEnvelope> {
         let payload_json = serde_json::to_string(&update)?;
         let version = self

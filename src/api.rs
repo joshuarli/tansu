@@ -1,13 +1,246 @@
 use crate::api_types::{
     ApiErrorKind, ApiErrorResponse, CreateNoteRequest, RenameNoteRequest, SaveNoteDeltaRequest,
-    SaveNoteRequest, SessionState, Settings,
+    SaveNoteRequest, SessionState, Settings, V2ApiErrorKind, V2ApiErrorResponse,
+    V2CreateNoteRequest, V2DeleteNoteRequest, V2RenameNoteRequest, V2RestoreConflictRequest,
+    V2RestoreRevisionRequest, V2SaveNoteDeltaRequest, V2SaveNoteRequest, V2SearchRequest,
+    V2QuickOpenRequest, V2SettingsRequest,
 };
 use crate::app::App;
 use crate::http::{HttpRequest, HttpResponse};
 use crate::search::DEFAULT_SEARCH_LIMIT;
+use crate::vault::V2VaultError;
 use crate::{Error, Result};
 
 pub const API_VERSION: u32 = 1;
+
+pub fn handle_v2_api(app: &App, request: &HttpRequest, request_id: &str) -> HttpResponse {
+    match dispatch_v2_api(app, request) {
+        Ok(response) => response,
+        Err(error) => v2_vault_error_response(error, request_id),
+    }
+}
+
+pub(crate) fn v2_api_error_response(error: V2ApiErrorKind, request_id: &str) -> HttpResponse {
+    let response = V2ApiErrorResponse { error };
+    HttpResponse::json(v2_api_error_status(&response.error), &response)
+        .unwrap_or_else(|_| HttpResponse::text(500, &format!("internal serialization error: {request_id}")))
+}
+
+fn v2_vault_error_response(error: V2VaultError, request_id: &str) -> HttpResponse {
+    let error = match error {
+        V2VaultError::Api(error) => error,
+        V2VaultError::Internal(Error::BadRequest(message)) => V2ApiErrorKind::BadRequest { message },
+        V2VaultError::Internal(_) => V2ApiErrorKind::Internal {
+            request_id: request_id.to_string(),
+        },
+    };
+    v2_api_error_response(error, request_id)
+}
+
+fn v2_api_error_status(error: &V2ApiErrorKind) -> u16 {
+    match error {
+        V2ApiErrorKind::VaultNotFound { .. }
+        | V2ApiErrorKind::NoteNotFound { .. }
+        | V2ApiErrorKind::RevisionNotFound { .. }
+        | V2ApiErrorKind::ConflictDraftNotFound { .. }
+        | V2ApiErrorKind::AssetNotFound { .. } => 404,
+        V2ApiErrorKind::PathInvalid { .. }
+        | V2ApiErrorKind::SourceHashMismatch { .. }
+        | V2ApiErrorKind::BadRequest { .. } => 400,
+        V2ApiErrorKind::ServerInstanceMismatch { .. }
+        | V2ApiErrorKind::ApiVersionUnsupported { .. }
+        | V2ApiErrorKind::MutationIdReuse { .. }
+        | V2ApiErrorKind::PathCollision { .. }
+        | V2ApiErrorKind::SaveConflict { .. }
+        | V2ApiErrorKind::UnresolvedNote { .. }
+        | V2ApiErrorKind::DiskHashMismatch { .. } => 409,
+        V2ApiErrorKind::RequestTooLarge { .. } => 413,
+        V2ApiErrorKind::AuthRequired => 401,
+        V2ApiErrorKind::Forbidden
+        | V2ApiErrorKind::CsrfRejected
+        | V2ApiErrorKind::OriginRejected => 403,
+        V2ApiErrorKind::RateLimited { .. } => 429,
+        V2ApiErrorKind::NotImplemented => 501,
+        V2ApiErrorKind::Internal { .. } => 500,
+    }
+}
+
+pub(crate) fn validate_v2_server_instance(
+    app: &App,
+    headers: &[(String, String)],
+) -> std::result::Result<(), V2ApiErrorKind> {
+    let values = headers
+        .iter()
+        .filter(|(name, _)| name.eq_ignore_ascii_case("x-tansu-server-instance"))
+        .map(|(_, value)| value.as_str())
+        .collect::<Vec<_>>();
+    let received = match values.as_slice() {
+        [received] => *received,
+        [] => "",
+        _ => "<multiple>",
+    };
+    if received == app.server_instance_id() {
+        return Ok(());
+    }
+    let mut received = received.to_string();
+    if received.len() > 256 {
+        let mut boundary = 256;
+        while !received.is_char_boundary(boundary) {
+            boundary -= 1;
+        }
+        received.truncate(boundary);
+    }
+    Err(V2ApiErrorKind::ServerInstanceMismatch {
+        expected: app.server_instance_id().to_string(),
+        received,
+    })
+}
+
+fn dispatch_v2_api(app: &App, request: &HttpRequest) -> std::result::Result<HttpResponse, V2VaultError> {
+    let path = request.path.split_once('?').map_or(request.path.as_str(), |(path, _)| path);
+    if path == "/api/v2/health" {
+        return v2_json(200, &serde_json::json!({ "ok": true, "apiVersion": 2 }), "health");
+    }
+    if path == "/api/v2/bootstrap" {
+        return v2_json(200, &app.v2_bootstrap(), "bootstrap");
+    }
+    validate_v2_server_instance(app, &request.headers).map_err(V2VaultError::Api)?;
+    let rest = path.strip_prefix("/api/v2/vaults/").ok_or_else(|| {
+        V2VaultError::Api(V2ApiErrorKind::NotImplemented)
+    })?;
+    let (vault_id, route) = rest.split_once('/').ok_or_else(|| {
+        V2VaultError::Api(V2ApiErrorKind::NotImplemented)
+    })?;
+    let vault_id = decode_path_segment(vault_id).map_err(V2VaultError::Api)?;
+    let vault = app.vault_by_id(&vault_id).map_err(|_| {
+        V2VaultError::Api(V2ApiErrorKind::VaultNotFound { vault_id: vault_id.clone() })
+    })?;
+    let decoded_parts = route
+        .split('/')
+        .map(decode_path_segment)
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(V2VaultError::Api)?;
+    let parts = decoded_parts.iter().map(String::as_str).collect::<Vec<_>>();
+    let method = request.method.as_str();
+    match (method, parts.as_slice()) {
+        ("GET", ["bootstrap"]) => v2_json(200, &vault.v2_vault_bootstrap()?, "vault bootstrap"),
+        ("GET", ["notes"]) => v2_json(200, &vault.v2_notes()?, "note list"),
+        ("GET", ["notes", note_id]) => v2_json(200, &vault.v2_open_note(note_id)?, "note document"),
+        ("POST", ["notes"]) => {
+            let body = parse_v2_body::<V2CreateNoteRequest>(&request.body)?;
+            v2_json(201, &vault.v2_create_note(body)?, "created note")
+        }
+        ("PUT", ["notes", note_id]) => {
+            let body = parse_v2_body::<V2SaveNoteRequest>(&request.body)?;
+            v2_json(200, &vault.v2_save_note(note_id, body)?, "saved note")
+        }
+        ("PATCH", ["notes", note_id]) => {
+            let body = parse_v2_body::<V2SaveNoteDeltaRequest>(&request.body)?;
+            v2_json(200, &vault.v2_save_note_delta(note_id, body)?, "saved note delta")
+        }
+        ("POST", ["notes", note_id, "rename"]) => {
+            let body = parse_v2_body::<V2RenameNoteRequest>(&request.body)?;
+            v2_json(200, &vault.v2_rename_note(note_id, body)?, "renamed note")
+        }
+        ("DELETE", ["notes", note_id]) => {
+            let body = parse_v2_body::<V2DeleteNoteRequest>(&request.body)?;
+            v2_json(200, &vault.v2_delete_note(note_id, body)?, "deleted note")
+        }
+        ("GET", ["notes", note_id, "revisions"]) => {
+            v2_json(200, &vault.v2_list_revisions(note_id)?, "revision list")
+        }
+        ("GET", ["notes", note_id, "revisions", revision]) => {
+            v2_json(200, &vault.v2_open_revision(note_id, parse_v2_id(revision)?)?, "revision")
+        }
+        ("POST", ["notes", note_id, "revisions", revision, "restore"]) => {
+            let body = parse_v2_body::<V2RestoreRevisionRequest>(&request.body)?;
+            v2_json(200, &vault.v2_restore_revision(note_id, parse_v2_id(revision)?, body)?, "restored revision")
+        }
+        ("GET", ["notes", note_id, "conflicts", draft_id]) => {
+            v2_json(200, &vault.v2_open_conflict_draft(note_id, parse_v2_id(draft_id)?)?, "conflict draft")
+        }
+        ("POST", ["notes", note_id, "conflicts", draft_id, "restore"]) => {
+            let body = parse_v2_body::<V2RestoreConflictRequest>(&request.body)?;
+            v2_json(200, &vault.v2_restore_conflict(note_id, parse_v2_id(draft_id)?, body)?, "restored conflict")
+        }
+        ("GET", ["settings"]) => v2_json(200, &vault.v2_settings()?, "settings"),
+        ("PUT", ["settings"]) => {
+            let body = parse_v2_body::<V2SettingsRequest>(&request.body)?;
+            v2_json(200, &vault.v2_save_settings(body)?, "saved settings")
+        }
+        ("POST", ["search"]) => {
+            let body = parse_v2_body::<V2SearchRequest>(&request.body)?;
+            v2_json(200, &vault.v2_search(body)?, "search results")
+        }
+        ("POST", ["quick-open"]) => {
+            let body = parse_v2_body::<V2QuickOpenRequest>(&request.body)?;
+            v2_json(200, &vault.v2_quick_open(body)?, "quick-open results")
+        }
+        ("POST", ["images"]) => {
+            if request_header(request, "content-type")?.as_deref() != Some("image/webp") {
+                return Err(V2VaultError::Api(V2ApiErrorKind::BadRequest {
+                    message: "image upload requires Content-Type: image/webp".to_string(),
+                }));
+            }
+            let mutation_id = request_header(request, "x-tansu-mutation-id")?.ok_or_else(|| {
+                V2VaultError::Api(V2ApiErrorKind::BadRequest {
+                    message: "missing X-Tansu-Mutation-Id".to_string(),
+                })
+            })?;
+            v2_json(201, &vault.v2_upload_image(&mutation_id, &request.body)?, "uploaded image")
+        }
+        ("GET", ["assets"]) => {
+            let name = query_param(&request.path, "name")?.ok_or_else(|| {
+                V2VaultError::Api(V2ApiErrorKind::BadRequest {
+                    message: "missing asset name".to_string(),
+                })
+            })?;
+            Ok(HttpResponse::bytes(200, "image/webp", vault.v2_read_asset(&name)?))
+        }
+        _ => Err(V2VaultError::Api(V2ApiErrorKind::NotImplemented)),
+    }
+}
+
+fn v2_json<T: serde::Serialize>(status: u16, value: &T, operation: &str) -> std::result::Result<HttpResponse, V2VaultError> {
+    HttpResponse::json(status, value).map_err(|error| {
+        V2VaultError::Internal(Error::Internal(format!("could not serialize {operation}: {error}")))
+    })
+}
+
+fn parse_v2_body<T: serde::de::DeserializeOwned>(body: &[u8]) -> std::result::Result<T, V2VaultError> {
+    serde_json::from_slice(body).map_err(|error| {
+        V2VaultError::Api(V2ApiErrorKind::BadRequest { message: error.to_string() })
+    })
+}
+
+fn parse_v2_id(value: &str) -> std::result::Result<i64, V2VaultError> {
+    value.parse().map_err(|_| {
+        V2VaultError::Api(V2ApiErrorKind::BadRequest {
+            message: "resource id must be a signed integer".to_string(),
+        })
+    })
+}
+
+pub(crate) fn decode_path_segment(value: &str) -> std::result::Result<String, V2ApiErrorKind> {
+    let decoded = percent_decode_bytes(value, false)?;
+    if decoded.contains('/') || decoded.contains('\\') || decoded.is_empty() {
+        return Err(V2ApiErrorKind::BadRequest {
+            message: "invalid path segment".to_string(),
+        });
+    }
+    Ok(decoded)
+}
+
+fn request_header(request: &HttpRequest, name: &str) -> std::result::Result<Option<String>, V2VaultError> {
+    let mut values = request.headers.iter().filter(|(header, _)| header.eq_ignore_ascii_case(name));
+    let value = values.next().map(|(_, value)| value.clone());
+    if values.next().is_some() {
+        return Err(V2VaultError::Api(V2ApiErrorKind::BadRequest {
+            message: format!("duplicate {name} header"),
+        }));
+    }
+    Ok(value)
+}
 
 pub fn handle_api(app: &App, request: &HttpRequest) -> Result<HttpResponse> {
     let vault_index = query_param(&request.path, "vault")?
@@ -178,13 +411,17 @@ fn query_param(path: &str, key: &str) -> Result<Option<String>> {
     let Some(query) = path.split_once('?').map(|(_, query)| query) else {
         return Ok(None);
     };
+    let mut found = None;
     for pair in query.split('&') {
         let (name, value) = pair.split_once('=').unwrap_or((pair, ""));
         if name == key {
-            return percent_decode(value).map(Some);
+            if found.is_some() {
+                return Err(Error::BadRequest(format!("duplicate query parameter {key}")));
+            }
+            found = Some(percent_decode(value)?);
         }
     }
-    Ok(None)
+    Ok(found)
 }
 
 fn parse_i64(value: &str) -> Result<i64> {
@@ -194,24 +431,36 @@ fn parse_i64(value: &str) -> Result<i64> {
 }
 
 fn percent_decode(value: &str) -> Result<String> {
-    let mut out = String::new();
-    let mut chars = value.as_bytes().iter().copied();
-    while let Some(byte) = chars.next() {
+    percent_decode_bytes(value, true).map_err(|error| match error {
+        V2ApiErrorKind::BadRequest { message } => Error::BadRequest(message),
+        _ => unreachable!(),
+    })
+}
+
+fn percent_decode_bytes(value: &str, plus_as_space: bool) -> std::result::Result<String, V2ApiErrorKind> {
+    let mut decoded = Vec::with_capacity(value.len());
+    let bytes = value.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        let byte = bytes[index];
         if byte == b'%' {
-            let hi = chars.next();
-            let lo = chars.next();
-            if let (Some(hi), Some(lo)) = (hi, lo)
-                && let Ok(hex) = std::str::from_utf8(&[hi, lo])
-                && let Ok(decoded) = u8::from_str_radix(hex, 16)
-            {
-                out.push(decoded as char);
-                continue;
+            if index + 2 >= bytes.len() {
+                return Err(V2ApiErrorKind::BadRequest { message: "invalid percent encoding".to_string() });
             }
-            return Err(Error::BadRequest("invalid percent encoding".to_string()));
+            let hex = std::str::from_utf8(&bytes[index + 1..index + 3]).ok();
+            let decoded_byte = hex.and_then(|hex| u8::from_str_radix(hex, 16).ok()).ok_or_else(|| {
+                V2ApiErrorKind::BadRequest { message: "invalid percent encoding".to_string() }
+            })?;
+            decoded.push(decoded_byte);
+            index += 3;
+            continue;
         }
-        out.push(if byte == b'+' { ' ' } else { byte as char });
+        decoded.push(if plus_as_space && byte == b'+' { b' ' } else { byte });
+        index += 1;
     }
-    Ok(out)
+    String::from_utf8(decoded).map_err(|_| V2ApiErrorKind::BadRequest {
+        message: "query parameter is not valid UTF-8".to_string(),
+    })
 }
 
 #[cfg(test)]
@@ -250,6 +499,201 @@ mod tests {
 
         let bad = api_error_response(Error::BadRequest("bad".to_string()));
         assert_eq!(bad.status(), 400);
+    }
+
+    #[test]
+    fn v2_routes_check_server_vault_note_and_revision_identities() {
+        let fixture = app_fixture(&[("One", &[("one.md", "# One\n")])]);
+        let app = fixture.app();
+        let server_id = app.server_instance_id().to_string();
+        let vault_id = app.v2_bootstrap().vaults[0].vault_id.clone();
+
+        let bootstrap = handle_v2_api(&app, &v2_request("GET", "/api/v2/bootstrap", None, &[], &[]), "req-1");
+        assert_eq!(bootstrap.status(), 200);
+        let bootstrap_body: crate::api_types::V2BootstrapResponse = serde_json::from_slice(bootstrap.body()).unwrap();
+        assert_eq!(bootstrap_body.server_instance_id, server_id);
+
+        let mismatch = handle_v2_api(
+            &app,
+            &v2_request(
+                "GET",
+                "/api/v2/vaults/missing/bootstrap",
+                Some("old-server"),
+                &[],
+                &[],
+            ),
+            "req-2",
+        );
+        assert_eq!(mismatch.status(), 409);
+        assert!(String::from_utf8_lossy(mismatch.body()).contains("server_instance_mismatch"));
+
+        let unknown_vault = handle_v2_api(
+            &app,
+            &v2_request("GET", "/api/v2/vaults/missing/bootstrap", Some(&server_id), &[], &[]),
+            "req-3",
+        );
+        assert_eq!(unknown_vault.status(), 404);
+        assert!(String::from_utf8_lossy(unknown_vault.body()).contains("vault_not_found"));
+
+        let note_id = app.vault(0).unwrap().v2_notes().unwrap()[0].note_id.clone();
+        let missing_note = handle_v2_api(
+            &app,
+            &v2_request(
+                "GET",
+                &format!("/api/v2/vaults/{vault_id}/notes/missing"),
+                Some(&server_id),
+                &[],
+                &[],
+            ),
+            "req-4",
+        );
+        assert_eq!(missing_note.status(), 404);
+        assert!(String::from_utf8_lossy(missing_note.body()).contains("note_not_found"));
+
+        let missing_revision = handle_v2_api(
+            &app,
+            &v2_request(
+                "GET",
+                &format!("/api/v2/vaults/{vault_id}/notes/{note_id}/revisions/999999"),
+                Some(&server_id),
+                &[],
+                &[],
+            ),
+            "req-5",
+        );
+        assert_eq!(missing_revision.status(), 404);
+        assert!(String::from_utf8_lossy(missing_revision.body()).contains("revision_not_found"));
+
+        let route_gap = handle_v2_api(
+            &app,
+            &v2_request(
+                "GET",
+                &format!("/api/v2/vaults/{vault_id}/unimplemented"),
+                Some(&server_id),
+                &[],
+                &[],
+            ),
+            "req-6",
+        );
+        assert_eq!(route_gap.status(), 501);
+        assert!(String::from_utf8_lossy(route_gap.body()).contains("not_implemented"));
+    }
+
+    #[test]
+    fn v2_mutations_replay_and_asset_routes_use_typed_responses() {
+        let fixture = app_fixture(&[("One", &[])]);
+        let app = fixture.app();
+        let server_id = app.server_instance_id().to_string();
+        let vault_id = app.v2_bootstrap().vaults[0].vault_id.clone();
+        let content = "# Created\n";
+        let create = crate::api_types::V2CreateNoteRequest {
+            mutation_id: "mutation-create".to_string(),
+            path: "created.md".to_string(),
+            content: content.to_string(),
+            source_hash: crate::history::source_hash(content),
+        };
+        let body = serde_json::to_vec(&create).unwrap();
+        let path = format!("/api/v2/vaults/{vault_id}/notes");
+        let created = handle_v2_api(
+            &app,
+            &v2_request("POST", &path, Some(&server_id), &body, &[]),
+            "req-create",
+        );
+        assert_eq!(created.status(), 201);
+        let first_response = created.body().to_vec();
+        let retry = handle_v2_api(
+            &app,
+            &v2_request("POST", &path, Some(&server_id), &body, &[]),
+            "req-retry",
+        );
+        assert_eq!(retry.body(), first_response);
+
+        let changed_content = "# Changed\n";
+        let changed = crate::api_types::V2CreateNoteRequest {
+            mutation_id: create.mutation_id.clone(),
+            path: create.path.clone(),
+            content: changed_content.to_string(),
+            source_hash: crate::history::source_hash(changed_content),
+        };
+        let reuse = handle_v2_api(
+            &app,
+            &v2_request("POST", &path, Some(&server_id), &serde_json::to_vec(&changed).unwrap(), &[]),
+            "req-reuse",
+        );
+        assert_eq!(reuse.status(), 409);
+        assert!(String::from_utf8_lossy(reuse.body()).contains("mutation_id_reuse"));
+
+        let settings_body = serde_json::to_vec(&crate::api_types::V2SettingsRequest {
+            mutation_id: "mutation-settings".to_string(),
+            settings: crate::api_types::Settings::default(),
+        }).unwrap();
+        let settings_path = format!("/api/v2/vaults/{vault_id}/settings");
+        let settings = handle_v2_api(
+            &app,
+            &v2_request("PUT", &settings_path, Some(&server_id), &settings_body, &[]),
+            "req-settings",
+        );
+        assert_eq!(settings.status(), 200);
+        let settings_retry = handle_v2_api(
+            &app,
+            &v2_request("PUT", &settings_path, Some(&server_id), &settings_body, &[]),
+            "req-settings-retry",
+        );
+        assert_eq!(settings_retry.body(), settings.body());
+
+        let image_headers = [
+            ("Content-Type".to_string(), "image/webp".to_string()),
+            ("X-Tansu-Mutation-Id".to_string(), "mutation-image".to_string()),
+        ];
+        let image_path = format!("/api/v2/vaults/{vault_id}/images");
+        let image_bytes = b"opaque webp bytes";
+        let image = handle_v2_api(
+            &app,
+            &v2_request("POST", &image_path, Some(&server_id), image_bytes, &image_headers),
+            "req-image",
+        );
+        assert_eq!(image.status(), 201);
+        let image_retry = handle_v2_api(
+            &app,
+            &v2_request("POST", &image_path, Some(&server_id), image_bytes, &image_headers),
+            "req-image-retry",
+        );
+        assert_eq!(image_retry.body(), image.body());
+        let image_reuse = handle_v2_api(
+            &app,
+            &v2_request("POST", &image_path, Some(&server_id), b"different bytes", &image_headers),
+            "req-image-reuse",
+        );
+        assert_eq!(image_reuse.status(), 409);
+        assert!(String::from_utf8_lossy(image_reuse.body()).contains("mutation_id_reuse"));
+        let uploaded: crate::api_types::V2ImageUploadResponse = serde_json::from_slice(image.body()).unwrap();
+        let asset_path = format!("/api/v2/vaults/{vault_id}/assets?name={}", uploaded.name.replace('/', "%2F"));
+        let asset = handle_v2_api(
+            &app,
+            &v2_request("GET", &asset_path, Some(&server_id), &[], &[]),
+            "req-asset",
+        );
+        assert_eq!(asset.body(), image_bytes);
+        assert_eq!(asset.content_type(), "image/webp");
+    }
+
+    fn v2_request(
+        method: &str,
+        path: &str,
+        server_instance_id: Option<&str>,
+        body: &[u8],
+        extra_headers: &[(String, String)],
+    ) -> HttpRequest {
+        let mut headers = extra_headers.to_vec();
+        if let Some(server_instance_id) = server_instance_id {
+            headers.push(("X-Tansu-Server-Instance".to_string(), server_instance_id.to_string()));
+        }
+        HttpRequest {
+            method: method.to_string(),
+            path: path.to_string(),
+            headers,
+            body: body.to_vec(),
+        }
     }
 
     #[test]

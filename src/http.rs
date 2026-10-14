@@ -20,11 +20,12 @@ use tokio::sync::{Semaphore, mpsc, watch};
 use tokio::task::JoinSet;
 use tokio::time::{Instant as TokioInstant, timeout};
 
-use crate::api::{api_error_response, handle_api};
+use crate::api::{decode_path_segment, handle_v2_api, validate_v2_server_instance, v2_api_error_response};
+use crate::api_types::V2ApiErrorKind;
 use crate::app::App;
 use crate::auth::{
     AuthError, AuthPolicy, AuthRequestContext, AuthStore, RequestAction, SessionLease,
-    SessionRequirement,
+    SessionRequirement, VerifiedSession,
 };
 use crate::embedded_assets;
 use crate::logging::{IncomingLogBatch, LogLevel, fields};
@@ -43,6 +44,7 @@ const MAX_SSE_REPLAY_BYTES: usize = 2 * 1024 * 1024;
 const MAX_SSE_EVENT_BYTES: usize = 128 * 1024;
 const MAX_SSE_SOURCE_QUEUE: usize = 64;
 const SSE_BODY_QUEUE: usize = 4;
+const API_BUILD_ID: &str = concat!(env!("CARGO_PKG_NAME"), "-", env!("CARGO_PKG_VERSION"));
 
 type HttpBody = BoxBody<Bytes, Infallible>;
 
@@ -214,12 +216,47 @@ struct ServerState {
 struct RequestAuthorization {
     stream: Option<StreamAuthorization>,
     session_cookie: Option<String>,
+    verified_session: Option<VerifiedSession>,
 }
 
+#[derive(Clone, Copy)]
 enum BodyError {
     TooLarge,
     TimedOut,
     Malformed,
+}
+
+fn is_v2_path(path: &str) -> bool {
+    path == "/api/v2" || path.starts_with("/api/v2/")
+}
+
+fn request_id_from_headers(headers: &HeaderMap) -> String {
+    if let Ok(Some(value)) = single_header(headers, "X-Tansu-Request-ID") {
+        let value = value.chars().filter(|character| !character.is_control()).take(128).collect::<String>();
+        if !value.is_empty() {
+            return value;
+        }
+    }
+    format!("srv-{:016x}", fastrand::u64(..))
+}
+
+fn body_error_response(error: BodyError, headers: &HeaderMap, limits: TransportLimits) -> HttpResponse {
+    let status = match error {
+        BodyError::TimedOut => Some(408),
+        _ => None,
+    };
+    let error = match error {
+        BodyError::TooLarge => V2ApiErrorKind::RequestTooLarge {
+            limit_bytes: limits.max_body_bytes.min(u32::MAX as usize) as u32,
+        },
+        BodyError::TimedOut => V2ApiErrorKind::BadRequest { message: "request body timed out".to_string() },
+        BodyError::Malformed => V2ApiErrorKind::BadRequest { message: "invalid request body".to_string() },
+    };
+    let mut response = v2_api_error_response(error, &request_id_from_headers(headers));
+    if let Some(status) = status {
+        response.status = status;
+    }
+    response
 }
 
 pub fn serve(app: App, port: u16) -> Result<()> {
@@ -381,25 +418,79 @@ async fn write_overloaded(stream: &mut tokio::net::TcpStream) -> io::Result<()> 
 }
 
 async fn handle_request(request: Request<Incoming>, state: ServerState) -> Response<HttpBody> {
+    let is_v2 = is_v2_path(request.uri().path());
+    let mut response = handle_request_inner(request, state).await;
+    if is_v2 {
+        add_v2_protocol_headers(&mut response);
+    }
+    response
+}
+
+fn add_v2_protocol_headers(response: &mut Response<HttpBody>) {
+    response.headers_mut().insert("X-Tansu-Api-Version", "2".parse().expect("valid header value"));
+    response.headers_mut().insert("X-Tansu-Build-Id", API_BUILD_ID.parse().expect("valid header value"));
+}
+
+async fn handle_request_inner(request: Request<Incoming>, state: ServerState) -> Response<HttpBody> {
     let (parts, body) = request.into_parts();
     let path = parts.uri.to_string();
     let request_headers = parts.headers.clone();
-    let Some(access) = authorize_request(&parts.method, &parts.uri, &request_headers, &state.services) else {
-        return HttpResponse::text(401, "unauthorized").with_no_store().into_hyper();
+    if parts.uri.path() == "/events" {
+        return v2_api_error_response(
+            V2ApiErrorKind::ApiVersionUnsupported {
+                requested_version: Some(1),
+                supported_version: 2,
+            },
+            &request_id_from_headers(&request_headers),
+        ).with_no_store().into_hyper();
+    }
+    if parts.uri.path().starts_with("/api/")
+        && !is_v2_path(parts.uri.path())
+        && !parts.uri.path().starts_with("/api/dev/logs")
+    {
+        let response = v2_api_error_response(
+            V2ApiErrorKind::ApiVersionUnsupported {
+                requested_version: Some(1),
+                supported_version: 2,
+            },
+            &request_id_from_headers(&request_headers),
+        );
+        return response.with_no_store().into_hyper();
+    }
+    let access = match authorize_request(&parts.method, &parts.uri, &request_headers, &state.services) {
+        Ok(access) => access,
+        Err(error) => {
+            return v2_api_error_response(error, &request_id_from_headers(&request_headers))
+                .with_no_store()
+                .into_hyper();
+        }
     };
 
     if let Some(vault_id) = event_vault_id(&parts.uri) {
         if parts.method != Method::GET {
-            return HttpResponse::text(405, "method not allowed").with_no_store().into_hyper();
+            return v2_api_error_response(
+                V2ApiErrorKind::BadRequest { message: "events only supports GET".to_string() },
+                &request_id_from_headers(&request_headers),
+            ).with_no_store().into_hyper();
         }
-        return event_response(&request_headers, vault_id, access, &state).await;
+        return event_response(&parts.uri, &request_headers, vault_id, access, &state).await;
     }
 
     if parts.uri.path().starts_with("/api/v2/auth/") {
         let Some(auth) = &state.services.auth else {
-            return HttpResponse::text(404, "not found").with_no_store().into_hyper();
+            return v2_api_error_response(V2ApiErrorKind::NotImplemented, &request_id_from_headers(&request_headers))
+                .with_no_store().into_hyper();
         };
-        return handle_auth_route(&parts.method, &parts.uri, &request_headers, body, auth.clone(), access.session_cookie.as_deref(), state).await;
+        return handle_auth_route(
+            &parts.method,
+            &parts.uri,
+            &request_headers,
+            body,
+            auth.clone(),
+            access.session_cookie.as_deref(),
+            access.verified_session,
+            state,
+        ).await;
     }
 
     let is_api = path.starts_with("/api/");
@@ -414,13 +505,14 @@ async fn handle_request(request: Request<Incoming>, state: ServerState) -> Respo
     }
 
     let Ok(worker_slot) = state.blocking_requests.clone().try_acquire_owned() else {
-        return HttpResponse::text(503, "server busy").with_no_store().into_hyper();
+        return v2_api_error_response(
+            V2ApiErrorKind::RateLimited { retry_after_ms: 100 },
+            &request_id_from_headers(&request_headers),
+        ).with_no_store().into_hyper();
     };
     let body = match collect_body(body, &request_headers, state.limits).await {
         Ok(body) => body,
-        Err(BodyError::TooLarge) => return HttpResponse::text(413, "request body too large").with_no_store().into_hyper(),
-        Err(BodyError::TimedOut) => return HttpResponse::text(408, "request body timed out").with_no_store().into_hyper(),
-        Err(BodyError::Malformed) => return HttpResponse::text(400, "invalid request body").with_no_store().into_hyper(),
+        Err(error) => return body_error_response(error, &request_headers, state.limits).with_no_store().into_hyper(),
     };
     let request = HttpRequest {
         method: parts.method.to_string(),
@@ -432,16 +524,20 @@ async fn handle_request(request: Request<Incoming>, state: ServerState) -> Respo
     };
     let app = state.app.clone();
     let started = Instant::now();
+    let request_id_value = request_id(&request).unwrap_or_else(|| "request".to_string());
+    let request_id_for_worker = request_id_value.clone();
     let result = tokio::task::spawn_blocking(move || {
         let _worker_slot = worker_slot;
-        let request_id = request_id(&request);
         let response = route(&app, &request);
-        log_request(&app, &request, &response, request_id, started.elapsed().as_millis());
+        log_request(&app, &request, &response, Some(request_id_for_worker), started.elapsed().as_millis());
         response.with_no_store()
     }).await;
     match result {
         Ok(response) => response.into_hyper(),
-        Err(error) => HttpResponse::text(500, &format!("request worker failed: {error}")).with_no_store().into_hyper(),
+        Err(_) => v2_api_error_response(
+            V2ApiErrorKind::Internal { request_id: request_id_value.clone() },
+            &request_id_value,
+        ).with_no_store().into_hyper(),
     }
 }
 
@@ -496,26 +592,37 @@ async fn handle_auth_route(
     body: Incoming,
     auth: Arc<AuthStore>,
     session_cookie: Option<&str>,
+    verified_session: Option<VerifiedSession>,
     state: ServerState,
 ) -> Response<HttpBody> {
+    let request_id = request_id_from_headers(headers);
     let Ok(worker_slot) = state.blocking_requests.clone().try_acquire_owned() else {
-        return HttpResponse::text(503, "server busy").with_no_store().into_hyper();
+        return v2_api_error_response(V2ApiErrorKind::RateLimited { retry_after_ms: 100 }, &request_id)
+            .with_no_store().into_hyper();
     };
     let body = match collect_body(body, headers, state.limits).await {
         Ok(body) => body,
-        Err(BodyError::TooLarge) => return HttpResponse::text(413, "request body too large").with_no_store().into_hyper(),
-        Err(BodyError::TimedOut) => return HttpResponse::text(408, "request body timed out").with_no_store().into_hyper(),
-        Err(BodyError::Malformed) => return HttpResponse::text(400, "invalid request body").with_no_store().into_hyper(),
+        Err(error) => return body_error_response(error, headers, state.limits).with_no_store().into_hyper(),
     };
     let method = method.to_string();
     let path = uri.path().to_string();
     let session_cookie = session_cookie.map(str::to_string);
+    let request_id_for_worker = request_id.clone();
     match tokio::task::spawn_blocking(move || {
         let _worker_slot = worker_slot;
-        handle_auth_route_sync(&method, &path, &body, &auth, session_cookie.as_deref())
+        handle_auth_route_sync(
+            &method,
+            &path,
+            &body,
+            &auth,
+            session_cookie.as_deref(),
+            verified_session,
+            &request_id_for_worker,
+        )
     }).await {
         Ok(response) => response.with_no_store().into_hyper(),
-        Err(error) => HttpResponse::text(500, &format!("authentication worker failed: {error}")).with_no_store().into_hyper(),
+        Err(_) => v2_api_error_response(V2ApiErrorKind::Internal { request_id: request_id.clone() }, &request_id)
+            .with_no_store().into_hyper(),
     }
 }
 
@@ -525,46 +632,57 @@ fn handle_auth_route_sync(
     body: &[u8],
     auth: &AuthStore,
     session_cookie: Option<&str>,
+    verified_session: Option<VerifiedSession>,
+    request_id: &str,
 ) -> HttpResponse {
-    if method == "GET" && path == "/api/v2/auth/status" {
-        return HttpResponse::json(200, &serde_json::json!({ "authenticated": session_cookie.is_some() }))
-            .unwrap_or_else(|error| HttpResponse::text(500, &error.to_string()));
+    if method == "GET" && path == "/api/v2/auth/session" {
+        let Some(session) = verified_session else {
+            return auth_error(AuthError::Unauthorized, request_id);
+        };
+        return HttpResponse::json(200, &serde_json::json!({
+            "authenticated": true,
+            "verifiedAt": session.verified_at,
+            "expiresAt": session.expires_at,
+        })).unwrap_or_else(|_| v2_api_error_response(
+            V2ApiErrorKind::Internal { request_id: request_id.to_string() },
+            request_id,
+        ));
     }
     let Some((rp_id, origin, rp_name)) = auth.policy().rp() else {
-        return auth_error(AuthError::InvalidRequest("passkeys are disabled in loopback development mode".into()));
+        return auth_error(AuthError::InvalidRequest("passkeys are disabled in loopback development mode".into()), request_id);
     };
     let rp = RelyingParty::new(rp_id, origin, rp_name);
     match (method, path) {
         ("POST", "/api/v2/auth/enrollment/options") => {
             let start: RegistrationStart = match serde_json::from_slice(body) {
                 Ok(start) => start,
-                Err(error) => return auth_error(AuthError::InvalidRequest(error.to_string())),
+                Err(error) => return auth_error(AuthError::InvalidRequest(error.to_string()), request_id),
             };
             let (options, state) = match rp.start_registration("tansu2-owner-v1", "Tansu Owner") {
                 Ok(options) => options,
-                Err(error) => return auth_error(AuthError::WebAuthn(error.to_string())),
+                Err(error) => return auth_error(AuthError::WebAuthn(error.to_string()), request_id),
             };
             let now = match unix_time_seconds() {
                 Ok(now) => now,
-                Err(error) => return HttpResponse::text(500, &error.to_string()),
+                Err(_) => return v2_internal_error(request_id),
             };
             match auth.begin_registration(&state, start.capability.as_deref(), session_cookie, now, 300) {
                 Ok(ticket) => HttpResponse::json(200, &serde_json::json!({
                     "ceremonyId": ticket.id,
                     "expiresAt": ticket.expires_at,
                     "publicKey": options,
-                })).unwrap_or_else(|error| HttpResponse::text(500, &error.to_string())),
-                Err(error) => auth_error(error),
+                })).unwrap_or_else(|_| v2_internal_error(request_id)),
+                Err(error) => auth_error(error, request_id),
             }
         }
         ("POST", "/api/v2/auth/enrollment/finish") => {
             let finish: CeremonyFinish<RegistrationResponse> = match serde_json::from_slice(body) {
                 Ok(finish) => finish,
-                Err(error) => return auth_error(AuthError::InvalidRequest(error.to_string())),
+                Err(error) => return auth_error(AuthError::InvalidRequest(error.to_string()), request_id),
             };
             let now = match unix_time_seconds() {
                 Ok(now) => now,
-                Err(error) => return HttpResponse::text(500, &error.to_string()),
+                Err(_) => return v2_internal_error(request_id),
             };
             match auth.finish_registration(&finish.ceremony_id, now, |challenge| {
                 rp.finish_registration(&finish.credential, challenge)
@@ -573,46 +691,47 @@ fn handle_auth_route_sync(
                 Ok(session) => {
                     let csrf = session.as_ref().map(|session| session.csrf_token.as_str());
                     let mut response = HttpResponse::json(200, &serde_json::json!({ "ok": true, "csrfToken": csrf }))
-                        .unwrap_or_else(|error| HttpResponse::text(500, &error.to_string()));
+                        .unwrap_or_else(|_| v2_internal_error(request_id));
                     if let Some(session) = session {
                         response = response.with_header("Set-Cookie", &auth.session_cookie(&session));
+                        response = response.with_header("Set-Cookie", &csrf_cookie(&session.csrf_token));
                     }
                     response
                 }
-                Err(error) => auth_error(error),
+                Err(error) => auth_error(error, request_id),
             }
         }
         ("POST", "/api/v2/auth/login/options") => {
             let credentials = match auth.credentials() {
                 Ok(credentials) if !credentials.is_empty() && credentials.len() <= 32 => credentials,
-                Ok(_) => return auth_error(AuthError::Unauthorized),
-                Err(error) => return auth_error(error),
+                Ok(_) => return auth_error(AuthError::Unauthorized, request_id),
+                Err(error) => return auth_error(error, request_id),
             };
             let (options, state) = match rp.start_authentication(&credentials, b"tansu2-owner-v1") {
                 Ok(options) => options,
-                Err(error) => return auth_error(AuthError::WebAuthn(error.to_string())),
+                Err(error) => return auth_error(AuthError::WebAuthn(error.to_string()), request_id),
             };
             let now = match unix_time_seconds() {
                 Ok(now) => now,
-                Err(error) => return HttpResponse::text(500, &error.to_string()),
+                Err(_) => return v2_internal_error(request_id),
             };
             match auth.begin_authentication(&state, now, 300) {
                 Ok(ticket) => HttpResponse::json(200, &serde_json::json!({
                     "ceremonyId": ticket.id,
                     "expiresAt": ticket.expires_at,
                     "publicKey": options,
-                })).unwrap_or_else(|error| HttpResponse::text(500, &error.to_string())),
-                Err(error) => auth_error(error),
+                })).unwrap_or_else(|_| v2_internal_error(request_id)),
+                Err(error) => auth_error(error, request_id),
             }
         }
         ("POST", "/api/v2/auth/login/finish") => {
             let finish: CeremonyFinish<AuthenticationResponse> = match serde_json::from_slice(body) {
                 Ok(finish) => finish,
-                Err(error) => return auth_error(AuthError::InvalidRequest(error.to_string())),
+                Err(error) => return auth_error(AuthError::InvalidRequest(error.to_string()), request_id),
             };
             let now = match unix_time_seconds() {
                 Ok(now) => now,
-                Err(error) => return HttpResponse::text(500, &error.to_string()),
+                Err(_) => return v2_internal_error(request_id),
             };
             match auth.finish_authentication(&finish.ceremony_id, now, |challenge, credentials| {
                 let mut last_error = AuthError::Unauthorized;
@@ -625,34 +744,50 @@ fn handle_auth_route_sync(
                 Err(last_error)
             }) {
                 Ok(session) => HttpResponse::json(200, &serde_json::json!({ "ok": true, "csrfToken": session.csrf_token }))
-                    .unwrap_or_else(|error| HttpResponse::text(500, &error.to_string()))
-                    .with_header("Set-Cookie", &auth.session_cookie(&session)),
-                Err(error) => auth_error(error),
+                    .unwrap_or_else(|_| v2_internal_error(request_id))
+                    .with_header("Set-Cookie", &auth.session_cookie(&session))
+                    .with_header("Set-Cookie", &csrf_cookie(&session.csrf_token)),
+                Err(error) => auth_error(error, request_id),
             }
         }
         ("POST", "/api/v2/auth/logout") => {
-            let Some(session_cookie) = session_cookie else { return auth_error(AuthError::Unauthorized); };
+            let Some(session_cookie) = session_cookie else { return auth_error(AuthError::Unauthorized, request_id); };
             match auth.revoke_session(session_cookie) {
                 Ok(()) => HttpResponse::json(200, &serde_json::json!({ "ok": true }))
-                    .unwrap_or_else(|error| HttpResponse::text(500, &error.to_string()))
-                    .with_header("Set-Cookie", "__Host-tansu_session=; HttpOnly; Secure; Path=/; SameSite=Strict; Max-Age=0"),
-                Err(error) => auth_error(error),
+                    .unwrap_or_else(|_| v2_internal_error(request_id))
+                    .with_header("Set-Cookie", "__Host-tansu_session=; HttpOnly; Secure; Path=/; SameSite=Strict; Max-Age=0")
+                    .with_header("Set-Cookie", "__Host-tansu_csrf=; Secure; Path=/; SameSite=Strict; Max-Age=0"),
+                Err(error) => auth_error(error, request_id),
             }
         }
-        _ => HttpResponse::text(404, "not found"),
+        _ => v2_api_error_response(V2ApiErrorKind::NotImplemented, request_id),
     }
 }
 
-fn auth_error(error: AuthError) -> HttpResponse {
-    let status = match error {
-        AuthError::InvalidRequest(_) | AuthError::WebAuthn(_) => 400,
-        AuthError::Unauthorized => 401,
-        AuthError::Expired => 410,
-        AuthError::CeremonyUsed => 409,
-        AuthError::Storage(_) => 500,
-    };
-    HttpResponse::json(status, &serde_json::json!({ "error": error.to_string() }))
-        .unwrap_or_else(|_| HttpResponse::text(500, "authentication error"))
+fn csrf_cookie(token: &str) -> String {
+    format!("__Host-tansu_csrf={token}; Secure; Path=/; SameSite=Strict")
+}
+
+fn v2_internal_error(request_id: &str) -> HttpResponse {
+    v2_api_error_response(
+        V2ApiErrorKind::Internal { request_id: request_id.to_string() },
+        request_id,
+    )
+}
+
+fn auth_error(error: AuthError, request_id: &str) -> HttpResponse {
+    v2_api_error_response(auth_error_kind(error, request_id), request_id)
+}
+
+fn auth_error_kind(error: AuthError, request_id: &str) -> V2ApiErrorKind {
+    match error {
+        AuthError::InvalidRequest(message) | AuthError::WebAuthn(message) => V2ApiErrorKind::BadRequest { message },
+        AuthError::Unauthorized => V2ApiErrorKind::AuthRequired,
+        AuthError::OriginRejected => V2ApiErrorKind::OriginRejected,
+        AuthError::CsrfRejected => V2ApiErrorKind::CsrfRejected,
+        AuthError::Expired | AuthError::CeremonyUsed => V2ApiErrorKind::Forbidden,
+        AuthError::Storage(_) => V2ApiErrorKind::Internal { request_id: request_id.to_string() },
+    }
 }
 
 fn authorize_request(
@@ -660,36 +795,61 @@ fn authorize_request(
     uri: &hyper::Uri,
     headers: &HeaderMap,
     services: &ServerServices,
-) -> Option<RequestAuthorization> {
+) -> std::result::Result<RequestAuthorization, V2ApiErrorKind> {
     let Some(auth) = &services.auth else {
-        return Some(RequestAuthorization { stream: None, session_cookie: None });
+        return Ok(RequestAuthorization { stream: None, session_cookie: None, verified_session: None });
     };
-    let host = single_header(headers, HOST.as_str()).ok()??;
-    let origin = single_header(headers, ORIGIN.as_str()).ok()?;
-    let cookie_header = single_header(headers, COOKIE.as_str()).ok()?;
-    let session_cookie = match parse_session_cookie(cookie_header) {
-        Ok(cookie) => cookie,
-        Err(_) => return None,
-    };
-    let csrf = single_header(headers, "X-Tansu-CSRF").ok()?;
+    let host = single_header(headers, HOST.as_str())
+        .map_err(|()| V2ApiErrorKind::OriginRejected)?
+        .ok_or(V2ApiErrorKind::OriginRejected)?;
+    let origin = single_header(headers, ORIGIN.as_str()).map_err(|()| V2ApiErrorKind::OriginRejected)?;
+    let cookie_header = single_header(headers, COOKIE.as_str()).map_err(|()| V2ApiErrorKind::AuthRequired)?;
+    let session_cookie = parse_session_cookie(cookie_header).map_err(|_| V2ApiErrorKind::AuthRequired)?;
+    let csrf = single_header(headers, "X-Tansu-CSRF").map_err(|()| V2ApiErrorKind::CsrfRejected)?;
     let state_changing = !matches!(*method, Method::GET | Method::HEAD | Method::OPTIONS);
     let authenticated_mode = matches!(auth.policy(), AuthPolicy::Authenticated { .. });
     let event_stream = event_vault_id(uri).is_some();
-    let auth_route = is_public_auth_route(method, uri.path());
-    let require_session = authenticated_mode && (uri.path().starts_with("/api/") || event_stream) && !auth_route;
-    let now = unix_time_seconds().ok()?;
-    let verified = auth.validate_request(AuthRequestContext {
+    let ceremony_route = is_ceremony_route(method, uri.path());
+    let login_route = is_login_ceremony_route(method, uri.path());
+    let public_health_route = *method == Method::GET && uri.path() == "/api/v2/health";
+    let ignore_session = login_route || public_health_route;
+    let require_session = authenticated_mode
+        && (uri.path().starts_with("/api/") || event_stream)
+        && !ceremony_route
+        && !public_health_route;
+    let now = unix_time_seconds().map_err(|_| V2ApiErrorKind::Internal {
+        request_id: request_id_from_headers(headers),
+    })?;
+    let action = if state_changing { RequestAction::StateChange } else { RequestAction::Read };
+    let session_requirement = if require_session { SessionRequirement::Required } else { SessionRequirement::Optional };
+    let (verified, effective_session_cookie) = match auth.validate_request(AuthRequestContext {
         host,
         origin,
-        action: if state_changing { RequestAction::StateChange } else { RequestAction::Read },
-        session_cookie: session_cookie.as_deref(),
-        csrf_token: csrf,
-        session_requirement: if require_session { SessionRequirement::Required } else { SessionRequirement::Optional },
+        action,
+        session_cookie: if ignore_session { None } else { session_cookie.as_deref() },
+        csrf_token: if ignore_session { None } else { csrf },
+        session_requirement,
         now,
-    }).ok()?;
+    }) {
+        Ok(verified) => (verified, if ignore_session { None } else { session_cookie }),
+        Err(AuthError::Unauthorized) if ceremony_route && !login_route => {
+            let verified = auth.validate_request(AuthRequestContext {
+                host,
+                origin,
+                action,
+                session_cookie: None,
+                csrf_token: None,
+                session_requirement: SessionRequirement::Optional,
+                now,
+            }).map_err(|error| auth_error_kind(error, &request_id_from_headers(headers)))?;
+            (verified, None)
+        }
+        Err(error) => return Err(auth_error_kind(error, &request_id_from_headers(headers))),
+    };
     let stream = if authenticated_mode && event_stream {
-        let cookie = session_cookie.as_deref()?;
-        let lease = auth.session_lease(cookie, now).ok()?;
+        let cookie = effective_session_cookie.as_deref().ok_or(V2ApiErrorKind::AuthRequired)?;
+        let lease = auth.session_lease(cookie, now)
+            .map_err(|error| auth_error_kind(error, &request_id_from_headers(headers)))?;
         Some(StreamAuthorization {
             expires_at: lease.expires_at,
             revoked: lease.revoked.clone(),
@@ -699,9 +859,9 @@ fn authorize_request(
         None
     };
     if require_session && verified.is_none() {
-        return None;
+        return Err(V2ApiErrorKind::AuthRequired);
     }
-    Some(RequestAuthorization { stream, session_cookie })
+    Ok(RequestAuthorization { stream, session_cookie: effective_session_cookie, verified_session: verified })
 }
 
 fn single_header<'a>(headers: &'a HeaderMap, name: &'static str) -> std::result::Result<Option<&'a str>, ()> {
@@ -713,13 +873,19 @@ fn single_header<'a>(headers: &'a HeaderMap, name: &'static str) -> std::result:
     value.map(|value| value.to_str().map_err(|_| ())).transpose()
 }
 
-fn is_public_auth_route(method: &Method, path: &str) -> bool {
+fn is_ceremony_route(method: &Method, path: &str) -> bool {
     matches!((method, path),
-        (&Method::GET, "/api/v2/auth/status")
-        | (&Method::POST, "/api/v2/auth/login/options")
+        (&Method::POST, "/api/v2/auth/login/options")
         | (&Method::POST, "/api/v2/auth/login/finish")
         | (&Method::POST, "/api/v2/auth/enrollment/options")
         | (&Method::POST, "/api/v2/auth/enrollment/finish")
+    )
+}
+
+fn is_login_ceremony_route(method: &Method, path: &str) -> bool {
+    matches!((method, path),
+        (&Method::POST, "/api/v2/auth/login/options")
+        | (&Method::POST, "/api/v2/auth/login/finish")
     )
 }
 
@@ -739,43 +905,41 @@ fn parse_session_cookie(cookie_header: Option<&str>) -> std::result::Result<Opti
 
 fn event_vault_id(uri: &hyper::Uri) -> Option<String> {
     let path = uri.path();
-    if path == "/events" {
-        return uri.query()?.split('&').find_map(|part| {
-            let (key, value) = part.split_once('=')?;
-            (key == "vault").then(|| value.to_string())
-        });
-    }
     let rest = path.strip_prefix("/api/v2/vaults/")?;
     let (vault_id, route) = rest.split_once('/')?;
-    (route == "events" && !vault_id.is_empty()).then(|| vault_id.to_string())
+    if route != "events" {
+        return None;
+    }
+    decode_path_segment(vault_id).ok()
 }
 
 async fn event_response(
+    uri: &hyper::Uri,
     headers: &HeaderMap,
     vault_id: String,
     authorization: RequestAuthorization,
     state: &ServerState,
 ) -> Response<HttpBody> {
+    let request_id = request_id_from_headers(headers);
+    if is_v2_path(uri.path()) {
+        if let Err(error) = validate_v2_server_instance(&state.app, &header_pairs(headers)) {
+            return v2_api_error_response(error, &request_id).with_no_store().into_hyper();
+        }
+    }
     let Some(source) = &state.services.events else {
-        return HttpResponse::text(404, "events unavailable").with_no_store().into_hyper();
+        return v2_api_error_response(V2ApiErrorKind::NotImplemented, &request_id)
+            .with_no_store().into_hyper();
     };
-    let last_event_id = match single_header(headers, "Last-Event-ID") {
-        Ok(value) => value,
-        Err(()) => return HttpResponse::text(400, "invalid Last-Event-ID").with_no_store().into_hyper(),
-    };
-    let after_event_version = match last_event_id {
-        Some(value) => match value.parse::<u64>().ok() {
-            Some(version) => Some(version),
-            None => return HttpResponse::text(400, "invalid Last-Event-ID").with_no_store().into_hyper(),
-        },
-        None => None,
+    let after_event_version = match event_after_version(uri, headers) {
+        Ok(version) => version,
+        Err(error) => return v2_api_error_response(error, &request_id).with_no_store().into_hyper(),
     };
     let subscription = match source.subscribe(&vault_id, after_event_version) {
         Ok(subscription) => subscription,
-        Err(error) => return HttpResponse::text(500, &error).with_no_store().into_hyper(),
+        Err(_) => return v2_internal_error(&request_id).with_no_store().into_hyper(),
     };
     if subscription.events.capacity() > MAX_SSE_SOURCE_QUEUE {
-        return HttpResponse::text(500, "event source queue exceeds transport limit").with_no_store().into_hyper();
+        return v2_internal_error(&request_id).with_no_store().into_hyper();
     }
     let body = sse_body(subscription, state.shutdown.clone(), authorization.stream, state.limits.connection_duration);
     Response::builder()
@@ -788,6 +952,42 @@ async fn event_response(
         .header("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'")
         .body(body)
         .expect("valid SSE response")
+}
+
+fn header_pairs(headers: &HeaderMap) -> Vec<(String, String)> {
+    headers.iter().map(|(name, value)| {
+        (name.as_str().to_string(), String::from_utf8_lossy(value.as_bytes()).to_string())
+    }).collect()
+}
+
+fn event_after_version(
+    uri: &hyper::Uri,
+    headers: &HeaderMap,
+) -> std::result::Result<Option<u64>, V2ApiErrorKind> {
+    let mut query_after = None;
+    if let Some(query) = uri.query() {
+        for pair in query.split('&') {
+            let (name, value) = pair.split_once('=').unwrap_or((pair, ""));
+            if name == "after" {
+                if query_after.is_some() {
+                    return Err(V2ApiErrorKind::BadRequest { message: "duplicate after parameter".to_string() });
+                }
+                query_after = Some(value.parse::<u64>().map_err(|_| {
+                    V2ApiErrorKind::BadRequest { message: "invalid after event version".to_string() }
+                })?);
+            }
+        }
+    }
+    if query_after.is_some() {
+        return Ok(query_after);
+    }
+    match single_header(headers, "Last-Event-ID") {
+        Ok(None) => Ok(None),
+        Ok(Some(value)) => value.parse::<u64>().map(Some).map_err(|_| {
+            V2ApiErrorKind::BadRequest { message: "invalid Last-Event-ID".to_string() }
+        }),
+        Err(()) => Err(V2ApiErrorKind::BadRequest { message: "duplicate Last-Event-ID".to_string() }),
+    }
 }
 
 fn sse_body(
@@ -1001,8 +1201,18 @@ fn route(app: &App, request: &HttpRequest) -> HttpResponse {
     if request.path.starts_with("/api/dev/logs") {
         return handle_dev_logs(app, request);
     }
+    if is_v2_path(&request.path) {
+        let request_id = request_id(request).unwrap_or_else(|| "request".to_string());
+        return handle_v2_api(app, request, &request_id).with_no_store();
+    }
     if request.path.starts_with("/api/") {
-        return handle_api(app, request).unwrap_or_else(api_error_response);
+        return v2_api_error_response(
+            V2ApiErrorKind::ApiVersionUnsupported {
+                requested_version: Some(1),
+                supported_version: 2,
+            },
+            &request_id(request).unwrap_or_else(|| "request".to_string()),
+        ).with_no_store();
     }
     serve_static_path(&request.path).unwrap_or_else(|error| {
         if matches!(error, Error::NotFound(_)) {
@@ -1152,9 +1362,205 @@ mod tests {
     }
 
     #[test]
+    fn all_v2_transport_responses_receive_version_and_build_headers() {
+        let mut response = HttpResponse::json(401, &serde_json::json!({ "error": "auth_required" }))
+            .unwrap()
+            .with_no_store()
+            .into_hyper();
+        add_v2_protocol_headers(&mut response);
+        assert_eq!(response.headers()["X-Tansu-Api-Version"], "2");
+        assert_eq!(response.headers()["X-Tansu-Build-Id"], API_BUILD_ID);
+    }
+
+    #[test]
+    fn hyper_response_preserves_both_auth_cookies() {
+        let response = HttpResponse::json(200, &serde_json::json!({ "ok": true }))
+            .unwrap()
+            .with_header("Set-Cookie", "__Host-tansu_session=session")
+            .with_header("Set-Cookie", "__Host-tansu_csrf=csrf")
+            .into_hyper();
+        let cookies = response.headers().get_all("Set-Cookie").iter().collect::<Vec<_>>();
+        assert_eq!(cookies.len(), 2);
+        assert!(cookies.iter().any(|cookie| cookie.as_bytes().starts_with(b"__Host-tansu_session=")));
+        assert!(cookies.iter().any(|cookie| cookie.as_bytes().starts_with(b"__Host-tansu_csrf=")));
+    }
+
+    #[test]
     fn parses_session_cookie_once_and_rejects_duplicates() {
         assert_eq!(parse_session_cookie(Some("other=x; __Host-tansu_session=abc" )).unwrap(), Some("abc".into()));
         assert!(parse_session_cookie(Some("__Host-tansu_session=a; __Host-tansu_session=b")).is_err());
+    }
+
+    #[test]
+    fn readable_csrf_cookie_survives_reload_and_logout_clears_both_cookies() {
+        let (_root, auth, session) = authenticated_test_session();
+        let auth = Arc::new(auth);
+        let csrf_set_cookie = csrf_cookie(&session.csrf_token);
+        assert!(csrf_set_cookie.contains("Secure; Path=/; SameSite=Strict"));
+        assert!(!csrf_set_cookie.contains("HttpOnly"));
+        let browser_cookie = csrf_set_cookie.split(';').next().unwrap();
+        let (name, csrf_token) = browser_cookie.split_once('=').unwrap();
+        assert_eq!(name, "__Host-tansu_csrf");
+        let cookie_header = format!(
+            "__Host-tansu_session={}; {browser_cookie}",
+            session.cookie_value,
+        );
+
+        let mut headers = HeaderMap::new();
+        headers.insert(HOST, "notes.example.com".parse().unwrap());
+        headers.insert(ORIGIN, "https://notes.example.com".parse().unwrap());
+        headers.insert(COOKIE, cookie_header.parse().unwrap());
+        headers.insert("X-Tansu-CSRF", csrf_token.parse().unwrap());
+        let services = ServerServices { auth: Some(auth.clone()), events: None };
+        let access = authorize_request(
+            &Method::POST,
+            &"/api/v2/vaults/vault-1/settings".parse().unwrap(),
+            &headers,
+            &services,
+        ).unwrap();
+        assert!(access.verified_session.is_some());
+
+        headers.remove("X-Tansu-CSRF");
+        assert!(matches!(
+            authorize_request(
+                &Method::POST,
+                &"/api/v2/vaults/vault-1/settings".parse().unwrap(),
+                &headers,
+                &services,
+            ),
+            Err(V2ApiErrorKind::CsrfRejected)
+        ));
+
+        let response = handle_auth_route_sync(
+            "POST",
+            "/api/v2/auth/logout",
+            &[],
+            &auth,
+            Some(&session.cookie_value),
+            access.verified_session,
+            "request-test",
+        );
+        let cookies = response.headers.iter()
+            .filter(|(header, _)| header.eq_ignore_ascii_case("set-cookie"))
+            .map(|(_, value)| value.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(cookies.len(), 2);
+        assert!(cookies.iter().any(|value| value.starts_with("__Host-tansu_session=") && value.contains("Max-Age=0")));
+        assert!(cookies.iter().any(|value| value.starts_with("__Host-tansu_csrf=") && value.contains("Max-Age=0")));
+    }
+
+    #[test]
+    fn auth_session_route_is_available_before_bootstrap_and_requires_a_session() {
+        let (_root, auth, session) = authenticated_test_session();
+        let auth = Arc::new(auth);
+        let services = ServerServices { auth: Some(auth.clone()), events: None };
+        let mut headers = HeaderMap::new();
+        headers.insert(HOST, "notes.example.com".parse().unwrap());
+        headers.insert(ORIGIN, "https://notes.example.com".parse().unwrap());
+        assert!(authorize_request(
+            &Method::GET,
+            &"/api/v2/health".parse().unwrap(),
+            &headers,
+            &services,
+        ).is_ok());
+        headers.insert(ORIGIN, "https://attacker.example".parse().unwrap());
+        assert!(matches!(
+            authorize_request(
+                &Method::GET,
+                &"/api/v2/health".parse().unwrap(),
+                &headers,
+                &services,
+            ),
+            Err(V2ApiErrorKind::OriginRejected)
+        ));
+        headers.insert(ORIGIN, "https://notes.example.com".parse().unwrap());
+        assert!(matches!(
+            authorize_request(
+                &Method::GET,
+                &"/api/v2/auth/session".parse().unwrap(),
+                &headers,
+                &services,
+            ),
+            Err(V2ApiErrorKind::AuthRequired)
+        ));
+        let bootstrap_access = authorize_request(
+            &Method::GET,
+            &"/api/v2/bootstrap".parse().unwrap(),
+            &headers,
+            &services,
+        );
+        assert!(matches!(bootstrap_access, Err(V2ApiErrorKind::AuthRequired)));
+
+        let mut request_headers = headers;
+        request_headers.insert(COOKIE, format!("__Host-tansu_session={}", session.cookie_value).parse().unwrap());
+        let access = authorize_request(
+            &Method::GET,
+            &"/api/v2/auth/session".parse().unwrap(),
+            &request_headers,
+            &services,
+        ).unwrap();
+        let session_response = handle_auth_route_sync(
+            "GET",
+            "/api/v2/auth/session",
+            &[],
+            &auth,
+            Some(&session.cookie_value),
+            access.verified_session,
+            "request-test",
+        );
+        assert_eq!(session_response.status(), 200);
+        let body: serde_json::Value = serde_json::from_slice(session_response.body()).unwrap();
+        assert_eq!(body["authenticated"], true);
+        assert!(body["expiresAt"].as_u64().is_some());
+    }
+
+    #[test]
+    fn stale_session_cookie_does_not_block_passkey_login_recovery() {
+        let (_root, auth, session) = authenticated_test_session();
+        auth.revoke_session(&session.cookie_value).unwrap();
+        let services = ServerServices { auth: Some(Arc::new(auth)), events: None };
+        let mut headers = HeaderMap::new();
+        headers.insert(HOST, "notes.example.com".parse().unwrap());
+        headers.insert(ORIGIN, "https://notes.example.com".parse().unwrap());
+        headers.insert(
+            COOKIE,
+            format!("__Host-tansu_session={}", session.cookie_value).parse().unwrap(),
+        );
+
+        for path in ["/api/v2/auth/login/options", "/api/v2/auth/login/finish"] {
+            let access = authorize_request(
+                &Method::POST,
+                &path.parse().unwrap(),
+                &headers,
+                &services,
+            ).unwrap();
+            assert!(access.session_cookie.is_none());
+            assert!(access.verified_session.is_none());
+        }
+    }
+
+    #[test]
+    fn enrollment_options_allow_initial_capability_and_require_csrf_for_owner_session() {
+        let (_root, auth, session) = authenticated_test_session();
+        let auth = Arc::new(auth);
+        let services = ServerServices { auth: Some(auth), events: None };
+        let uri = "/api/v2/auth/enrollment/options".parse().unwrap();
+        let mut headers = HeaderMap::new();
+        headers.insert(HOST, "notes.example.com".parse().unwrap());
+        headers.insert(ORIGIN, "https://notes.example.com".parse().unwrap());
+
+        let initial_enrollment = authorize_request(&Method::POST, &uri, &headers, &services).unwrap();
+        assert!(initial_enrollment.verified_session.is_none());
+
+        headers.insert(COOKIE, format!("__Host-tansu_session={}", session.cookie_value).parse().unwrap());
+        assert!(matches!(
+            authorize_request(&Method::POST, &uri, &headers, &services),
+            Err(V2ApiErrorKind::CsrfRejected)
+        ));
+
+        headers.insert("X-Tansu-CSRF", session.csrf_token.parse().unwrap());
+        let owner_registration = authorize_request(&Method::POST, &uri, &headers, &services).unwrap();
+        assert!(owner_registration.verified_session.is_some());
     }
 
     #[test]
@@ -1171,6 +1577,50 @@ mod tests {
         headers.append("Last-Event-ID", "5".parse().unwrap());
         headers.append("Last-Event-ID", "6".parse().unwrap());
         assert!(single_header(&headers, "Last-Event-ID").is_err());
+    }
+
+    #[test]
+    fn event_query_after_takes_precedence_over_last_event_id() {
+        let mut headers = HeaderMap::new();
+        headers.insert("Last-Event-ID", "5".parse().unwrap());
+        let uri = "/api/v2/vaults/vault%2D1/events?after=7".parse().unwrap();
+        assert_eq!(event_vault_id(&uri).as_deref(), Some("vault-1"));
+        assert_eq!(event_after_version(&uri, &headers).unwrap(), Some(7));
+
+        let uri = "/api/v2/vaults/vault-1/events".parse().unwrap();
+        assert_eq!(event_after_version(&uri, &headers).unwrap(), Some(5));
+
+        let duplicate = "/api/v2/vaults/vault-1/events?after=4&after=5".parse().unwrap();
+        assert!(matches!(
+            event_after_version(&duplicate, &headers),
+            Err(V2ApiErrorKind::BadRequest { .. })
+        ));
+    }
+
+    #[test]
+    fn legacy_api_requests_fail_with_version_error_before_mutating() {
+        let root = tempfile::tempdir().unwrap();
+        let vault_path = root.path().join("vault");
+        let state_path = root.path().join("state");
+        std::fs::create_dir_all(&vault_path).unwrap();
+        let app = App::new(Config {
+            vaults: vec![VaultConfig {
+                name: "Test".into(),
+                path: vault_path.clone(),
+                state_path,
+                excluded_folders: Vec::new(),
+            }],
+            auth: None,
+        }).unwrap();
+        let response = route(&app, &HttpRequest {
+            method: "POST".to_string(),
+            path: "/api/notes".to_string(),
+            headers: vec![("X-Tansu-Vault".to_string(), "0".to_string())],
+            body: br##"{"path":"legacy.md","content":"# Legacy"}"##.to_vec(),
+        });
+        assert_eq!(response.status(), 409);
+        assert!(String::from_utf8_lossy(response.body()).contains("api_version_unsupported"));
+        assert!(!vault_path.join("legacy.md").exists());
     }
 
     #[test]
@@ -1210,14 +1660,14 @@ mod tests {
 
         let mut oversized = TcpStream::connect(address).unwrap();
         oversized.set_read_timeout(Some(Duration::from_secs(1))).unwrap();
-        oversized.write_all(b"POST /api/notes HTTP/1.1\r\nHost: localhost\r\nContent-Length: 9\r\n\r\n").unwrap();
+        oversized.write_all(b"POST /api/v2/vaults/vault-1/notes HTTP/1.1\r\nHost: localhost\r\nContent-Length: 9\r\n\r\n").unwrap();
         let mut oversized_response = String::new();
         oversized.read_to_string(&mut oversized_response).unwrap();
         assert!(oversized_response.starts_with("HTTP/1.1 413"));
 
         let mut slow = TcpStream::connect(address).unwrap();
         slow.set_read_timeout(Some(Duration::from_secs(1))).unwrap();
-        slow.write_all(b"POST /api/notes HTTP/1.1\r\nHost: localhost\r\nContent-Length: 2\r\n\r\na").unwrap();
+        slow.write_all(b"POST /api/v2/vaults/vault-1/notes HTTP/1.1\r\nHost: localhost\r\nContent-Length: 2\r\n\r\na").unwrap();
         let mut slow_response = String::new();
         slow.read_to_string(&mut slow_response).unwrap();
         assert!(slow_response.starts_with("HTTP/1.1 408"));
@@ -1298,14 +1748,15 @@ mod tests {
             3600,
             300,
         ).unwrap();
-        let (capability, _) = auth.create_enrollment_capability(10, 30).unwrap();
+        let now = unix_time_seconds().unwrap();
+        let (capability, _) = auth.create_enrollment_capability(now, 300).unwrap();
         let challenge = tansu_webauthn::RegChallenge {
             challenge: "challenge".into(),
             user_id: "owner".into(),
             username: "owner".into(),
         };
-        let ticket = auth.begin_registration(&challenge, Some(&capability), None, 11, 30).unwrap();
-        let session = auth.finish_registration(&ticket.id, 12, |_| Ok(tansu_webauthn::StoredCredential {
+        let ticket = auth.begin_registration(&challenge, Some(&capability), None, now + 1, 300).unwrap();
+        let session = auth.finish_registration(&ticket.id, now + 2, |_| Ok(tansu_webauthn::StoredCredential {
             cred_id: vec![1],
             aaguid: [0; 16],
             x: [0; 32],

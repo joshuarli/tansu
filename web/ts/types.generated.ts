@@ -65,7 +65,9 @@ export type V2VaultMeta = { vaultId: string, name: string, };
 
 export type V2BootstrapResponse = { apiVersion: number, serverInstanceId: string, vaults: Array<V2VaultMeta>, };
 
-export type V2VaultBootstrapResponse = { vault: V2VaultMeta, notes: Array<V2NoteMeta>, settings: Settings, searchStatus: SearchStatus, };
+export type V2VaultBootstrapResponse = { vault: V2VaultMeta, notes: Array<V2NoteMeta>, settings: Settings, searchStatus: SearchStatus, legacyWorkspace: LegacyWorkspace | null, };
+
+export type LegacyWorkspace = { session: SessionState, pinnedNoteIds: Array<string>, recentNoteIds: Array<string>, };
 
 export type V2NoteMeta = { noteId: string, path: string, title: string, tags: Array<string>, revision: number, sourceHash: string, diskHash: string, sourceHashFormatVersion: number, diskHashFormatVersion: number, updatedAtMs: number, };
 
@@ -135,5 +137,5 @@ export type V2ServerEvent = { eventVersion: number, resyncRequired: boolean, upd
 
 export type V2ApiErrorResponse = { error: V2ApiErrorKind, };
 
-export type V2ApiErrorKind = { "code": "api_version_unsupported", requestedVersion: number | null, supportedVersion: number, } | { "code": "vault_not_found", vaultId: string, } | { "code": "server_instance_mismatch", expected: string, received: string, } | { "code": "mutation_id_reuse", mutationId: string, } | { "code": "path_invalid", reason: PathValidationReason, } | { "code": "path_collision", path: string, } | { "code": "note_not_found", noteId: string, } | { "code": "save_conflict", current: V2NoteDocument, draft: V2ConflictDraftMeta, } | { "code": "unresolved_note", noteId: string, reason: UnresolvedReason, } | { "code": "source_hash_mismatch", expected: string, received: string, } | { "code": "disk_hash_mismatch", expected: string, received: string, } | { "code": "request_too_large", limitBytes: number, } | { "code": "auth_required" } | { "code": "forbidden" } | { "code": "csrf_rejected" } | { "code": "origin_rejected" } | { "code": "rate_limited", retryAfterMs: number, } | { "code": "not_implemented" } | { "code": "bad_request", message: string, } | { "code": "internal", requestId: string, };
+export type V2ApiErrorKind = { "code": "api_version_unsupported", requestedVersion: number | null, supportedVersion: number, } | { "code": "vault_not_found", vaultId: string, } | { "code": "server_instance_mismatch", expected: string, received: string, } | { "code": "mutation_id_reuse", mutationId: string, } | { "code": "path_invalid", reason: PathValidationReason, } | { "code": "path_collision", path: string, } | { "code": "note_not_found", noteId: string, } | { "code": "revision_not_found", noteId: string, revision: number, } | { "code": "conflict_draft_not_found", noteId: string, draftId: number, } | { "code": "asset_not_found", name: string, } | { "code": "save_conflict", current: V2NoteDocument, draft: V2ConflictDraftMeta, } | { "code": "unresolved_note", noteId: string, reason: UnresolvedReason, } | { "code": "source_hash_mismatch", expected: string, received: string, } | { "code": "disk_hash_mismatch", expected: string, received: string, } | { "code": "request_too_large", limitBytes: number, } | { "code": "auth_required" } | { "code": "forbidden" } | { "code": "csrf_rejected" } | { "code": "origin_rejected" } | { "code": "rate_limited", retryAfterMs: number, } | { "code": "not_implemented" } | { "code": "bad_request", message: string, } | { "code": "internal", requestId: string, };
 

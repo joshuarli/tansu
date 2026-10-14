@@ -42,6 +42,7 @@ fn main() {
     push::<V2VaultMeta>(&mut output);
     push::<V2BootstrapResponse>(&mut output);
     push::<V2VaultBootstrapResponse>(&mut output);
+    push::<LegacyWorkspace>(&mut output);
     push::<V2NoteMeta>(&mut output);
     push::<V2NoteDocument>(&mut output);
     push::<V2NotePrecondition>(&mut output);
