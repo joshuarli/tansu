@@ -348,6 +348,7 @@ fn valid_opaque_id(value: &str) -> bool {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RawConfig {
     vaults: Vec<RawVault>,
     auth: Option<RawAuthConfig>,
@@ -362,6 +363,7 @@ struct RawVault {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RawAuthConfig {
     mode: String,
     external_origin: String,
@@ -567,6 +569,25 @@ mod tests {
             Some(("example.com", "https://notes.example.com", "Tansu"))
         );
         assert!(auth.state_directory().ends_with("tansu/identity/auth"));
+    }
+
+    #[test]
+    fn rejects_misspelled_authentication_settings() {
+        let misspelled_table = parse_config(
+            "[[vaults]]\nname='Main'\npath='/notes'\n\
+             [auh]\nmode='authenticated'\nexternal_origin='https://notes.example.com'\n\
+             rp_id='example.com'\nrp_name='Tansu'\nstate_directory='auth'\n",
+        )
+        .unwrap_err();
+        assert!(misspelled_table.to_string().contains("unknown field"));
+
+        let misspelled_field = parse_config(
+            "[[vaults]]\nname='Main'\npath='/notes'\n\
+             [auth]\nmode='authenticated'\nexternal_origin='https://notes.example.com'\n\
+             rp_id='example.com'\nrp_nam='Tansu'\nstate_directory='auth'\n",
+        )
+        .unwrap_err();
+        assert!(misspelled_field.to_string().contains("unknown field"));
     }
 
     #[test]

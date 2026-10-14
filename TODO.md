@@ -3,15 +3,6 @@
 Prefix: TNS
 Next: 21
 
-### TNS-1 · P2 · Reject misspelled authentication settings
-
-- **Area:** Security configuration
-- **Where:** `src/config.rs:350-370`, `src/config.rs:416-443`, `src/main.rs:48-70`
-- **Problem:** Unknown TOML fields are ignored. A typo such as `[auh]` leaves `auth` unset, and startup constructs the server without an `AuthStore`, silently disabling authentication when the listener is exposed through a proxy.
-- **Recommendation:** Reject unknown fields in the top-level config and nested security tables, and test a misspelled auth table.
-- **Fix with:** none
-- **Effort:** S
-
 ### TNS-2 · P2 · Bound pending authentication ceremonies
 
 - **Area:** Authentication storage
