@@ -758,6 +758,10 @@ impl VaultRuntime {
         catalog.clear_unrecoverable_prepared_mutations()?;
         repair_pending_mutations(&config.path, &config.state_path, &mut catalog)?;
         reconcile_vault(&config.path, &config.state_path, &mut catalog, &excluded)?;
+        if catalog.watcher_reconcile_pending()? {
+            let payload_json = serde_json::to_string(&V2ServerEventUpdate::ResyncRequired)?;
+            catalog.append_watcher_resync_event(&payload_json, EVENT_REPLAY_LIMIT)?;
+        }
         let notes = catalog.live_notes()?;
         let mut search = SearchIndex::open(&config.state_path);
         if search.rebuild(&config.path, &notes).is_err() {
@@ -1995,7 +1999,10 @@ impl VaultRuntime {
         let too_new = after.is_some_and(|after| after > current);
         let replay_too_large = current.saturating_sub(after.unwrap_or(0))
             > EVENT_SUBSCRIBER_CAPACITY as u64;
-        let resync_required = too_old || too_new || replay_too_large;
+        let resync_required = catalog.watcher_reconcile_pending()?
+            || too_old
+            || too_new
+            || replay_too_large;
         let replay = if resync_required {
                 queue.seed(event_envelope(
                 current,
@@ -2051,6 +2058,15 @@ impl VaultRuntime {
         let version = self
             .lock_catalog()
             .append_vault_event(&payload_json, EVENT_REPLAY_LIMIT)?;
+        self.broadcast_v2_event(version, update)
+    }
+
+    fn record_watcher_resync_event(&self) -> Result<V2EventEnvelope> {
+        let update = V2ServerEventUpdate::ResyncRequired;
+        let payload_json = serde_json::to_string(&update)?;
+        let version = self
+            .lock_catalog()
+            .append_watcher_resync_event(&payload_json, EVENT_REPLAY_LIMIT)?;
         self.broadcast_v2_event(version, update)
     }
 
@@ -3100,6 +3116,8 @@ impl VaultRuntime {
     fn reconcile_from_watcher(&self) -> Result<()> {
         let _op = self.lock_op();
         let mut catalog = self.lock_catalog();
+        let pending_resync = catalog.watcher_reconcile_pending()?;
+        catalog.mark_watcher_reconcile_pending()?;
         let before = catalog
             .all_rows()?
             .into_iter()
@@ -3139,7 +3157,11 @@ impl VaultRuntime {
         let changed = !deleted.is_empty() || !changed_v2_notes.is_empty();
         drop(catalog);
         self.enqueue_search(SearchJob::Rebuild);
-        if changed {
+        #[cfg(test)]
+        crate::failure_point::check(crate::failure_point::FailurePoint::WatcherReconciled)?;
+        if pending_resync {
+            self.record_watcher_resync_event()?;
+        } else if changed {
             for note_id in &deleted {
                 self.record_v2_event(V2ServerEventUpdate::NoteDeleted {
                     note_id: note_id.clone(),
@@ -3148,6 +3170,10 @@ impl VaultRuntime {
             for note in changed_v2_notes {
                 self.record_v2_event(V2ServerEventUpdate::VaultChanged { notes: vec![note] })?;
             }
+        }
+        if !pending_resync {
+            self.lock_catalog()
+                .clear_watcher_reconcile_pending()?;
         }
         self.broadcast(ServerEventKind::VaultChanged, deleted);
         if self.logs.enabled() {
@@ -4771,6 +4797,39 @@ mod tests {
             .unwrap();
         assert_eq!(deleted.payload["update"]["kind"], "noteDeleted");
         assert_eq!(deleted.payload["update"]["noteId"], note_id);
+    }
+
+    #[test]
+    fn watcher_reconciliation_crash_replays_resync_after_restart() {
+        let vault = test_vault();
+        let baseline = vault.subscribe_v2_events(None).unwrap().current_version;
+        let config = VaultConfig {
+            name: vault.name.clone(),
+            path: vault.root.clone(),
+            state_path: vault.state_root.clone(),
+            excluded_folders: Vec::new(),
+        };
+        fs::write(vault.root.join("outside.md"), "# Outside\n\nedit\n").unwrap();
+        crate::failure_point::inject(
+            crate::failure_point::FailurePoint::WatcherReconciled,
+        );
+        assert!(vault.reconcile_from_watcher().is_err());
+        let interrupted = vault.subscribe_v2_events(Some(baseline)).unwrap();
+        assert!(interrupted.resync_required);
+        assert!(interrupted.replay.is_empty());
+        drop(vault);
+
+        let restarted = VaultRuntime::open(
+            0,
+            &config,
+            LogHub::new(crate::logging::LogMode::Off),
+        )
+        .unwrap();
+        let replay = restarted.subscribe_v2_events(Some(baseline)).unwrap();
+
+        assert!(replay.replay.iter().any(|event| {
+            event.payload["update"]["kind"] == "resyncRequired"
+        }));
     }
 
     #[test]

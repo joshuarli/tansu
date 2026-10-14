@@ -194,6 +194,10 @@ impl Catalog {
             "INSERT OR IGNORE INTO vault_meta(key, value) VALUES('search_degraded', 'false')",
             [],
         )?;
+        self.conn.execute(
+            "INSERT OR IGNORE INTO vault_meta(key, value) VALUES('watcher_reconcile_pending', 'false')",
+            [],
+        )?;
         Ok(())
     }
 
@@ -705,6 +709,52 @@ impl Catalog {
     pub fn append_vault_event(&mut self, payload_json: &str, retain: usize) -> Result<u64> {
         let tx = self.conn.transaction()?;
         let event_version = append_vault_event_tx(&tx, payload_json, retain)?;
+        tx.commit()?;
+        Ok(event_version as u64)
+    }
+
+    pub(crate) fn watcher_reconcile_pending(&self) -> Result<bool> {
+        let value: String = self.conn.query_row(
+            "SELECT value FROM vault_meta WHERE key='watcher_reconcile_pending'",
+            [],
+            |row| row.get(0),
+        )?;
+        match value.as_str() {
+            "true" => Ok(true),
+            "false" => Ok(false),
+            _ => Err(Error::Internal(format!(
+                "invalid watcher reconciliation state {value}"
+            ))),
+        }
+    }
+
+    pub(crate) fn mark_watcher_reconcile_pending(&mut self) -> Result<()> {
+        self.conn.execute(
+            "UPDATE vault_meta SET value='true' WHERE key='watcher_reconcile_pending'",
+            [],
+        )?;
+        Ok(())
+    }
+
+    pub(crate) fn clear_watcher_reconcile_pending(&mut self) -> Result<()> {
+        self.conn.execute(
+            "UPDATE vault_meta SET value='false' WHERE key='watcher_reconcile_pending'",
+            [],
+        )?;
+        Ok(())
+    }
+
+    pub(crate) fn append_watcher_resync_event(
+        &mut self,
+        payload_json: &str,
+        retain: usize,
+    ) -> Result<u64> {
+        let tx = self.conn.transaction()?;
+        let event_version = append_vault_event_tx(&tx, payload_json, retain)?;
+        tx.execute(
+            "UPDATE vault_meta SET value='false' WHERE key='watcher_reconcile_pending'",
+            [],
+        )?;
         tx.commit()?;
         Ok(event_version as u64)
     }

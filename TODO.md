@@ -23,15 +23,6 @@ Next: 21
 - **Effort:** M
 - **Design:** `docs/rfcs/0001-webauthn-counter-policy.md`
 
-### TNS-8 · P2 · Persist watcher events with reconciled changes
-
-- **Area:** Event freshness
-- **Where:** `src/vault.rs:3110-3145`, `src/vault.rs:2049-2054`, `web/ts/app/v2-api.ts:986-998`
-- **Problem:** Watcher reconciliation commits catalog changes before appending replay events in separate transactions. A crash in between leaves an updated catalog with no event; restart reconciliation sees no change to publish, so connected clients can remain stale until another refresh.
-- **Recommendation:** Commit the event with reconciliation changes or persist a resync signal before reconciliation returns.
-- **Fix with:** durable-state
-- **Effort:** M
-
 ### TNS-9 · P2 · Reject symlinks during legacy state migration
 
 - **Area:** Filesystem security

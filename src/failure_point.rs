@@ -14,6 +14,7 @@ pub(crate) enum FailurePoint {
     CompletionCommitted,
     BeforeEventPublish,
     AfterEventPublish,
+    WatcherReconciled,
     ResponseReady,
 }
 
