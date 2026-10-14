@@ -12,7 +12,7 @@
 3. **D3 Search.** `crates/tansu-search` (Ferrisearch core) with source-range hits, quick-open, private unsaved-note overlay, durable warm-restart index.
 4. **D4 Sessions.** Per-document state machine, one in-flight save, recovery journal, per-browser workspace store, clean cache separated from drafts.
 5. **D5 UI.** Desktop surfaces, keyboard map, virtual-title rename.
-6. **D6 Transport and auth.** Hyper HTTP/1, bounded work, SSE resync, `crates/tansu-webauthn` passkeys, origin/CSRF/CSP.
+6. **D6 Transport and auth.** Runtime-neutral Hyper HTTP/1 and HTTP/2 prior knowledge, bounded work, SSE resync, `crates/tansu-webauthn` passkeys, origin/CSRF/CSP.
 7. **D7 Packaging.** Embedded fingerprinted assets, standalone binary, dry-run migration, deployment docs.
 8. **D8 Performance.** Section 6 targets measured against the frozen corpus.
 9. **D9 Docs and provenance.** Updated docs, vendored-code provenance, licenses.
@@ -48,7 +48,7 @@
 | 2026-10-14 | Plain TypeScript. No SolidJS, React, Preact, Effect, signals library, virtual DOM, or framework. |
 | 2026-10-14 | CodeMirror 6 plus vendored Atomic Editor `b6ed65f` (0.6.2, MIT), headless modules only. |
 | 2026-10-14 | Vendor Ferrisearch core as `crates/tansu-search`; SQLite catalog and Tantivy index both stay; per-vault mutations stay serialized. |
-| 2026-10-14 | Hyper 1 HTTP/1 plus narrow Tokio replaces `src/http.rs`; synchronous vault code stays on bounded blocking workers. |
+| 2026-10-14 | Pin the local Hyper and H2 futures-lite forks; accept HTTP/1 and prior-knowledge HTTP/2 without Tokio or h2c. Keep synchronous vault work on bounded blocking workers. |
 | 2026-10-14 | Title is the filename-derived virtual title; an existing H1 stays in the body; title edit is a rename, not a body edit. |
 | 2026-10-14 | Desktop first. iPhone/touch/virtual keyboard, PWA, service worker, offline sync are deferred. |
 | 2026-10-14 | Ferrisearch keeps its LGPL-3.0 notice (the LICENSE is FSF boilerplate with no holder line). No distribution happens in this campaign; relicensing is the owner's later call. |
@@ -59,7 +59,7 @@
 | --- | --- |
 | Convert the root to a Cargo workspace (`[workspace] members = ["crates/*"]`, root package stays `tansu2`). | Today `Cargo.toml` has no workspace; `crates/` needs one. `make coverage-rs` already says `--workspace`. |
 | Embedded assets are new work. | Today `src/http.rs:395-411` serves `web/` relative to the working directory; nothing is embedded. `deno task build` emits `web/dist/` plus a manifest; Rust embeds it through generated `include_bytes!` entries. No new crate unless it saves more than it costs; `cargo build` never runs Node. |
-| Dependencies: `hyper = { version = "1", default-features = false, features = ["server","http1"] }`, `hyper-util = { version = "0.1", default-features = false, features = ["tokio"] }`, `http-body-util = "0.1"`, `tokio = { version = "1", default-features = false, features = ["rt-multi-thread","net","sync","time"] }`, `nucleo-matcher = "0.3"`. Tantivy stays `0.26` with `mmap`, `lz4-compression`. | Validated by a probe build; no TLS stack, no second HTTP client, MPL-2.0 licenses pass `deny.toml`. A probe measured about +1.2 MB unstripped for hyper/tokio/nucleo. Gate: stripped release size and cold start recorded in P3. |
+| Dependencies: pinned Hyper and H2 futures-lite forks, `http-body-util`, and modular async-executor, async-io, async-net, async-lock, async-channel, blocking, event-listener, futures-io, futures-lite, futures-util, and ctrlc packages; no Tokio or upstream Hyper. `nucleo-matcher = "0.3"`. Tantivy stays `0.26` with `mmap`, `lz4-compression`. | The local forks provide HTTP/1 and HTTP/2 builders over futures I/O, avoiding a Tokio adapter. Measure the final stripped binary in O4. |
 | `webauthn-rs` is dropped. | It needs OpenSSL unconditionally (`openssl-sys` via `webauthn-rs-core`); the repo's musl Dockerfile has no perl/make/OpenSSL, and the closure grows 140 to 238 crates. |
 | Dev/loopback mode (no auth, loopback origins only) and authenticated mode (fixed HTTPS origin and RP ID) are the only two modes. No "no-auth tailnet" mode. | The draft hedged ("if retained"). Reversible by one config value later. |
 | Session tokens and enrollment capabilities come from the OS RNG (`getrandom`, already in the closure through graviola). `fastrand` (note IDs, request IDs) never mints a secret. | `src/catalog.rs:633` and `src/http.rs:275` use `fastrand`. |
@@ -167,7 +167,7 @@ Fixtures and e2e files (`tests/fixtures/**`, `web/ts/e2e/**`, `bench/**`) are ap
 
 **NET, one lane**
 
-- **N1 Hyper transport.** Replace `src/http.rs` (thread per connection, `src/http.rs:141`). Explicit header, body, duration, and queue limits; incremental bounded body reads; bounded blocking pool separate from I/O; SSE with `eventVersion`, bounded replay or `resyncRequired`, subscription release on disconnect; shutdown stops admission and ends streams. Prereq: none (transport only; route layer unchanged until G3 lands). Proof: transport tests for oversized, slow, and malformed requests.
+- **N1 Hyper transport.** Replace `src/http.rs` (thread per connection, `src/http.rs:141`) with the pinned futures-lite Hyper/H2 forks. Support HTTP/1 and HTTP/2 prior knowledge; reject h2c upgrades. Keep explicit header, body, duration, connection, and queue limits; incremental bounded body reads; bounded blocking pool separate from I/O; SSE with `eventVersion`, bounded replay or `resyncRequired`, subscription release on disconnect; cancellation stops admission and ends streams. Prereq: none (transport only; route layer unchanged until G3 lands). Proof: HTTP/1 and HTTP/2 transport tests plus oversized, slow, malformed, shutdown, and SSE lifecycle tests.
 - **N2 `crates/tansu-webauthn`.** Vendor `webauthn-minimal` (one 909-line `lib.rs`; deps `base64ct`, `ciborium`, `graviola`, `serde`, `serde_json`, `tracing`) with `UPSTREAM.md`, then harden. Required changes, each with a negative test:
   1. `userVerification: "required"` in both option sets; both finish methods reject a missing UV bit.
   2. Finish methods validate outer `type == "public-key"`, `id` equals decoded `rawId`, and at registration equals the credential ID in authenticator data; authentication takes the permitted credential set and expected owner handle in the ceremony state and rejects a mismatched `userHandle`.
@@ -210,7 +210,7 @@ Fixtures and e2e files (`tests/fixtures/**`, `web/ts/e2e/**`, `bench/**`) are ap
 - **O1 Corpus and harness.** Generated corpora with fixed seeds: the checked-in fixture vaults, about 2,500 notes, 10,000 notes, plus 50 KB, 250 KB, 1 MB stress notes with tables, images, Unicode. Time gates run only when `perf-gate-ready` exits 0 and again with `-1` right after; an overlapped run is discarded; if the host stays busy write "perf gate deferred: host busy" and do not call D8 done. Prefer CPU time, min of N, interleaved baseline and candidate.
 - **O2 Editor.** Targets in section 6. Optimize with maintained syntax and affected-range invalidation; no viewport-only rendering that leaves offscreen source unstyled or breaks selection.
 - **O3 Search.** Targets and memory with one active and several idle vaults.
-- **O4 Size.** esbuild metafile: raw, minified, gzip, per-module; no React/Solid/Effect; no duplicate CodeMirror; update `bench/budgets.json` to the measured bundle plus margin; stripped release size and cold start recorded for the hyper/tokio/nucleo addition.
+- **O4 Size.** esbuild metafile: raw, minified, gzip, per-module; no React/Solid/Effect; no duplicate CodeMirror; update `bench/budgets.json` to the measured bundle plus margin; stripped release size and cold start recorded for the selected search and runtime-neutral transport dependencies.
 - **O5 Visual polish.** Light neutral canvas, system fonts, 16-17 px body, 1.55-1.65 line height, 70-80 character measure, one accent, CSS variables shared by shell and editor, `prefers-reduced-motion`, visible focus. Deterministic Playwright scenarios (fixed source, locale, clock, viewport, real ready state, decoded images) at 1024, 1280, 1440, 1920 px and 200% zoom for every surface in A5, plus long text, image-heavy text, a wide table, a long fence, a narrow window. Inspect screenshots at normal scale and crops before recording baselines; no baseline of broken output.
 - **O6 Long session.** Repeated open/close/switch/edit/undo/search/image with delayed and failed requests; record DOM and editor instance counts, heap after a controlled idle point, subscriptions, server RSS, queue counts; look for sustained growth.
 
@@ -329,6 +329,7 @@ Append-only, one line per judgment call a reader would miss.
 2026-10-14 | INT | Keep the seeded-image, delete-modal, and watcher assertions live while their APP and SRV integration defects remain. Do not replace those user flows with API-only checks.
 2026-10-14 | INT | Publish watcher metadata only for added or changed notes, and report removals separately; a full-vault payload exceeded the SSE event bound and was converted into a resync.
 2026-10-14 | INT | Construct paste events with an explicitly attached `DataTransfer`; Firefox ignores `clipboardData` in synthetic `ClipboardEvent` initialization.
+2026-10-14 | N1 | Detect and replay the exact HTTP/2 prior-knowledge preface so Hyper enforces explicit H1 and H2 header limits without enabling h2c upgrades.
 
 # Campaign log
 

@@ -2,6 +2,8 @@
 
 Rust DTOs in `src/api_types.rs` are the source of truth. Generate TypeScript with
 `make types`; never edit `web/ts/types.generated.ts` by hand.
+The transport accepts HTTP/1 and cleartext HTTP/2 prior knowledge; it
+does not support h2c upgrades.
 
 ## Version 2
 

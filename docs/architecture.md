@@ -17,6 +17,14 @@ uses the XDG data path. See [Configuration](configuration.md).
 - Markdown files do not contain hidden Tansu IDs.
 - V1 `z-images/` assets are vault-local opaque files.
 
+## Server runtime
+
+The transport accepts HTTP/1 and HTTP/2 prior-knowledge connections. It uses
+pinned runtime-neutral Hyper and H2 forks with async-executor, async-io, and
+futures-lite I/O, and has no Tokio dependency. `serve_listener_with_shutdown`
+owns the executor and blocks the calling thread until its `CancellationToken`
+is canceled. The CLI maps process termination signals into the same token.
+
 ## Ownership
 
 | Area                    | Files                                                     |

@@ -1,5 +1,6 @@
+use std::any::Any;
 use std::convert::Infallible;
-use std::future::Future;
+use std::future::{pending, Future};
 use std::io;
 use std::net::TcpListener;
 use std::pin::Pin;
@@ -7,18 +8,22 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use http_body_util::{BodyExt, Full, combinators::BoxBody};
+use async_channel::Receiver;
+use async_executor::Executor;
+use async_lock::Semaphore;
+use async_net::{TcpListener as AsyncTcpListener, TcpStream};
+use async_io::Timer;
+use futures_lite::future;
+use futures_lite::io::{AsyncReadExt, AsyncWriteExt};
+use futures_util::stream::FuturesUnordered;
+use futures_util::{FutureExt, StreamExt};
+use http_body_util::{BodyExt, Full, StreamBody, combinators::UnsyncBoxBody};
 use hyper::body::{Bytes, Frame, Incoming};
 use hyper::header::{CACHE_CONTROL, CONTENT_LENGTH, CONTENT_TYPE, COOKIE, HOST, ORIGIN};
-use hyper::server::conn::http1;
+use hyper::server::conn::{http1, http2};
 use hyper::service::service_fn;
 use hyper::{HeaderMap, Method, Request, Response, StatusCode};
-use hyper_util::rt::TokioIo;
 use serde::{Deserialize, Serialize};
-use tokio::net::TcpListener as TokioTcpListener;
-use tokio::sync::{Semaphore, mpsc, watch};
-use tokio::task::JoinSet;
-use tokio::time::{Instant as TokioInstant, timeout};
 
 use crate::api::{decode_path_segment, handle_v2_api, validate_v2_server_instance, v2_api_error_response};
 use crate::api_types::V2ApiErrorKind;
@@ -30,7 +35,7 @@ use crate::auth::{
 use crate::embedded_assets;
 use crate::logging::{IncomingLogBatch, LogLevel, fields};
 use tansu_webauthn::{AuthenticationResponse, RegistrationResponse, RelyingParty};
-use crate::{Error, Result};
+use crate::{CancellationToken, Error, Result};
 
 const MAX_HEADER_BYTES: usize = 1024 * 1024;
 const MAX_HEADER_COUNT: usize = 64;
@@ -46,7 +51,9 @@ const MAX_SSE_SOURCE_QUEUE: usize = 64;
 const SSE_BODY_QUEUE: usize = 4;
 const API_BUILD_ID: &str = concat!(env!("CARGO_PKG_NAME"), "-", env!("CARGO_PKG_VERSION"));
 
-type HttpBody = BoxBody<Bytes, Infallible>;
+type HttpBody = UnsyncBoxBody<Bytes, Infallible>;
+type ConnectionError = Box<dyn std::error::Error + Send + Sync>;
+type ConnectionTaskResult = std::result::Result<Option<ConnectionError>, Box<dyn Any + Send>>;
 
 #[derive(Debug, Clone)]
 pub struct HttpRequest {
@@ -115,7 +122,7 @@ impl HttpResponse {
         for (name, value) in self.headers {
             builder = builder.header(name, value);
         }
-        builder.body(Full::new(Bytes::from(self.body)).boxed()).expect("valid fixed response")
+        builder.body(Full::new(Bytes::from(self.body)).boxed_unsync()).expect("valid fixed response")
     }
 
     #[cfg(test)]
@@ -171,7 +178,7 @@ pub enum EventSourceError {
 #[derive(Clone)]
 pub struct StreamAuthorization {
     pub expires_at: u64,
-    revoked: watch::Receiver<bool>,
+    revoked: CancellationToken,
     _lease: SessionLease,
 }
 
@@ -215,7 +222,8 @@ struct ServerState {
     app: App,
     services: ServerServices,
     blocking_requests: Arc<Semaphore>,
-    shutdown: watch::Receiver<bool>,
+    shutdown: CancellationToken,
+    executor: Arc<Executor<'static>>,
     limits: TransportLimits,
 }
 
@@ -282,91 +290,98 @@ pub fn serve_listener(app: App, listener: TcpListener) -> Result<()> {
 }
 
 fn serve_until_signal(app: App, listener: TcpListener, services: ServerServices) -> Result<()> {
-    let runtime = tokio::runtime::Builder::new_multi_thread().enable_all().build()
+    let shutdown = CancellationToken::new();
+    let signal = shutdown.clone();
+    ctrlc::try_set_handler(move || signal.cancel())
         .map_err(|error| Error::Internal(error.to_string()))?;
-    let (shutdown_sender, shutdown) = watch::channel(false);
-    runtime.block_on(async move {
-        let server = serve_listener_with_shutdown(app, listener, services, shutdown);
-        tokio::pin!(server);
-        tokio::select! {
-            result = &mut server => result,
-            signal = shutdown_signal() => {
-                signal.map_err(|error| Error::Internal(error.to_string()))?;
-                let _ = shutdown_sender.send(true);
-                server.await
-            }
-        }
-    })
+    serve_listener_with_shutdown(app, listener, services, shutdown)
 }
 
-async fn shutdown_signal() -> io::Result<()> {
-    #[cfg(unix)]
-    {
-        let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
-        tokio::select! {
-            result = tokio::signal::ctrl_c() => result,
-            _ = terminate.recv() => Ok(()),
-        }
-    }
-    #[cfg(not(unix))]
-    {
-        tokio::signal::ctrl_c().await
-    }
-}
-
-pub async fn serve_listener_with_shutdown(
+/// Blocks the calling thread while an owned executor serves requests until `shutdown` is canceled.
+pub fn serve_listener_with_shutdown(
     app: App,
     listener: TcpListener,
     services: ServerServices,
-    shutdown: watch::Receiver<bool>,
+    shutdown: CancellationToken,
 ) -> Result<()> {
-    serve_listener_with_limits(app, listener, services, shutdown, TransportLimits::default()).await
+    let executor = Arc::new(Executor::new());
+    let server_executor = executor.clone();
+    async_io::block_on(executor.run(serve_listener_with_limits(
+        app,
+        listener,
+        services,
+        shutdown,
+        server_executor,
+        TransportLimits::default(),
+    )))
 }
 
 async fn serve_listener_with_limits(
     app: App,
     listener: TcpListener,
     services: ServerServices,
-    mut shutdown: watch::Receiver<bool>,
+    shutdown: CancellationToken,
+    executor: Arc<Executor<'static>>,
     limits: TransportLimits,
 ) -> Result<()> {
     listener.set_nonblocking(true)?;
-    let listener = TokioTcpListener::from_std(listener)?;
+    let listener = AsyncTcpListener::try_from(listener)?;
     let state = ServerState {
         app,
         services,
         blocking_requests: Arc::new(Semaphore::new(limits.max_blocking_requests)),
         shutdown: shutdown.clone(),
+        executor: executor.clone(),
         limits,
     };
     let connection_slots = Arc::new(Semaphore::new(limits.max_connections));
-    let mut connections = JoinSet::new();
+    let mut connections = FuturesUnordered::new();
 
     loop {
-        tokio::select! {
-            accept_result = listener.accept() => {
-                let (stream, _) = accept_result?;
-                let Ok(slot) = connection_slots.clone().try_acquire_owned() else {
-                    let mut stream = stream;
-                    let _ = write_overloaded(&mut stream).await;
+        enum ListenerWake {
+            Accepted(io::Result<(TcpStream, std::net::SocketAddr)>),
+            Shutdown,
+            Connection(Option<ConnectionTaskResult>),
+        }
+
+        let completed = async {
+            if connections.is_empty() {
+                pending::<Option<ConnectionTaskResult>>().await
+            } else {
+                connections.next().await
+            }
+        };
+        let wake = future::race(
+            future::race(
+                listener.accept().map(ListenerWake::Accepted),
+                shutdown.cancelled().map(|()| ListenerWake::Shutdown),
+            ),
+            completed.map(ListenerWake::Connection),
+        ).await;
+        match wake {
+            ListenerWake::Accepted(Ok((mut stream, _))) => {
+                let Some(slot) = connection_slots.try_acquire_arc() else {
+                    if let Err(error) = write_overloaded(&mut stream).await {
+                        log_connection_error(&state.app, error.to_string());
+                    }
                     continue;
                 };
                 let state = state.clone();
-                let shutdown = shutdown.clone();
-                connections.spawn(async move {
+                let connection = async move {
                     let _slot = slot;
-                    handle_connection(stream, state, shutdown).await;
-                });
+                    handle_connection(stream, state).await
+                };
+                connections.push(executor.spawn(std::panic::AssertUnwindSafe(connection).catch_unwind()));
             }
-            _ = wait_for_shutdown(&mut shutdown) => break,
-            Some(result) = connections.join_next(), if !connections.is_empty() => {
-                result.map_err(|error| Error::Internal(format!("connection task failed: {error}")))?;
-            }
+            ListenerWake::Accepted(Err(error)) => return Err(Error::Io(error)),
+            ListenerWake::Shutdown => break,
+            ListenerWake::Connection(Some(result)) => report_connection_result(&state.app, result)?,
+            ListenerWake::Connection(None) => {}
         }
     }
 
-    while let Some(result) = connections.join_next().await {
-        result.map_err(|error| Error::Internal(format!("connection task failed: {error}")))?;
+    while let Some(result) = connections.next().await {
+        report_connection_result(&state.app, result)?;
     }
     Ok(())
 }
@@ -385,39 +400,181 @@ fn log_listen(app: &App, port: u16) {
     }
 }
 
-async fn handle_connection(
-    stream: tokio::net::TcpStream,
-    state: ServerState,
-    mut shutdown: watch::Receiver<bool>,
-) {
+fn log_connection_error(app: &App, error: String) {
+    if app.logs().enabled() {
+        app.logs().server_event(
+            LogLevel::Debug,
+            "http.connection",
+            None,
+            fields([("error", serde_json::json!(error))]),
+        );
+    }
+}
+
+fn report_connection_result(
+    app: &App,
+    result: ConnectionTaskResult,
+) -> Result<()> {
+    match result {
+        Ok(Some(error)) => log_connection_error(app, error.to_string()),
+        Ok(None) => {}
+        Err(payload) => return Err(connection_task_failure(payload)),
+    }
+    Ok(())
+}
+
+fn connection_task_failure(payload: Box<dyn Any + Send>) -> Error {
+    let message = payload.downcast_ref::<String>().map(String::as_str)
+        .or_else(|| payload.downcast_ref::<&str>().copied())
+        .unwrap_or("non-string panic payload");
+    Error::Internal(format!("connection task failed: {message}"))
+}
+
+async fn handle_connection(stream: TcpStream, state: ServerState) -> Option<ConnectionError> {
     let duration = state.limits.connection_duration;
-    let io = TokioIo::new(stream);
+    let shutdown = state.shutdown.clone();
+    let connection = async move { drive_connection(stream, state).await };
+    future::race(
+        future::race(
+            connection.map(|result| result.err()),
+            shutdown.cancelled().map(|()| None),
+        ),
+        FutureExt::map(Timer::after(duration), |_| None),
+    ).await
+}
+
+async fn drive_connection(mut stream: TcpStream, state: ServerState) -> std::result::Result<(), ConnectionError> {
+    let Some((prefix, protocol)) = connection_prefix(&mut stream).await? else {
+        return Ok(());
+    };
+    let io = PrefixedIo::new(stream, prefix);
+    let executor = ServerExecutor(state.executor.clone());
     let service = service_fn(move |request| {
         let state = state.clone();
         async move { Ok::<_, Infallible>(handle_request(request, state).await) }
     });
-    let mut http1 = http1::Builder::new();
-    http1.max_buf_size(MAX_HEADER_BYTES);
-    http1.max_headers(MAX_HEADER_COUNT);
-    http1.keep_alive(false);
-    let connection = http1.serve_connection(io, service);
-    tokio::pin!(connection);
-    tokio::select! {
-        _ = wait_for_shutdown(&mut shutdown) => {}
-        _ = timeout(duration, &mut connection) => {}
-    }
-}
-
-async fn wait_for_shutdown(shutdown: &mut watch::Receiver<bool>) {
-    loop {
-        if *shutdown.borrow_and_update() || shutdown.changed().await.is_err() {
-            return;
+    match protocol {
+        Protocol::Http1 => {
+            let mut builder = http1::Builder::new();
+            builder.max_buf_size(MAX_HEADER_BYTES);
+            builder.max_headers(MAX_HEADER_COUNT);
+            builder.keep_alive(false);
+            builder.serve_connection(io, service).await.map_err(|error| Box::new(error) as ConnectionError)
+        }
+        Protocol::Http2 => {
+            let mut builder = http2::Builder::new(executor);
+            builder.max_header_list_size(MAX_HEADER_BYTES as u32);
+            builder.max_concurrent_streams(32);
+            builder.serve_connection(io, service).await.map_err(|error| Box::new(error) as ConnectionError)
         }
     }
 }
 
-async fn write_overloaded(stream: &mut tokio::net::TcpStream) -> io::Result<()> {
-    use tokio::io::AsyncWriteExt;
+#[derive(Clone, Copy)]
+enum Protocol {
+    Http1,
+    Http2,
+}
+
+const HTTP2_PREFACE: &[u8] = b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n";
+
+async fn connection_prefix(stream: &mut TcpStream) -> io::Result<Option<(Vec<u8>, Protocol)>> {
+    let mut prefix = Vec::with_capacity(HTTP2_PREFACE.len());
+    while prefix.len() < HTTP2_PREFACE.len() {
+        let mut bytes = [0_u8; HTTP2_PREFACE.len()];
+        let read_len = HTTP2_PREFACE.len() - prefix.len();
+        let read = stream.read(&mut bytes[..read_len]).await?;
+        if read == 0 {
+            return Ok(None);
+        }
+        prefix.extend_from_slice(&bytes[..read]);
+        if !HTTP2_PREFACE.starts_with(&prefix) {
+            return Ok(Some((prefix, Protocol::Http1)));
+        }
+    }
+    Ok(Some((prefix, Protocol::Http2)))
+}
+
+struct PrefixedIo<T> {
+    stream: Pin<Box<T>>,
+    prefix: Vec<u8>,
+    offset: usize,
+}
+
+impl<T> PrefixedIo<T> {
+    fn new(stream: T, prefix: Vec<u8>) -> Self {
+        Self { stream: Box::pin(stream), prefix, offset: 0 }
+    }
+}
+
+impl<T: futures_io::AsyncRead> hyper::rt::Read for PrefixedIo<T> {
+    fn poll_read(
+        self: Pin<&mut Self>,
+        context: &mut Context<'_>,
+        mut buffer: hyper::rt::ReadBufCursor<'_>,
+    ) -> Poll<io::Result<()>> {
+        let this = self.get_mut();
+        let capacity = buffer.remaining();
+        if capacity == 0 {
+            return Poll::Ready(Ok(()));
+        }
+        let read = {
+            let target = buffer.initialize_unfilled();
+            if this.offset < this.prefix.len() {
+                let count = (this.prefix.len() - this.offset).min(target.len());
+                target[..count].copy_from_slice(&this.prefix[this.offset..this.offset + count]);
+                this.offset += count;
+                count
+            } else {
+                match futures_io::AsyncRead::poll_read(this.stream.as_mut(), context, target) {
+                    Poll::Ready(Ok(count)) => count,
+                    Poll::Ready(Err(error)) => return Poll::Ready(Err(error)),
+                    Poll::Pending => return Poll::Pending,
+                }
+            }
+        };
+        if read > capacity {
+            return Poll::Ready(Err(io::Error::new(io::ErrorKind::InvalidData, "AsyncRead returned more bytes than requested")));
+        }
+        unsafe {
+            // SAFETY: The initialized target region contains `read` bytes, and the bounds check proves the cursor has enough remaining capacity.
+            buffer.advance(read);
+        }
+        Poll::Ready(Ok(()))
+    }
+}
+
+impl<T: futures_io::AsyncWrite> hyper::rt::Write for PrefixedIo<T> {
+    fn poll_write(
+        self: Pin<&mut Self>,
+        context: &mut Context<'_>,
+        buffer: &[u8],
+    ) -> Poll<io::Result<usize>> {
+        futures_io::AsyncWrite::poll_write(self.get_mut().stream.as_mut(), context, buffer)
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<io::Result<()>> {
+        futures_io::AsyncWrite::poll_flush(self.get_mut().stream.as_mut(), context)
+    }
+
+    fn poll_shutdown(self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<io::Result<()>> {
+        futures_io::AsyncWrite::poll_close(self.get_mut().stream.as_mut(), context)
+    }
+}
+
+#[derive(Clone)]
+struct ServerExecutor(Arc<Executor<'static>>);
+
+impl<F> hyper::rt::Executor<F> for ServerExecutor
+where
+    F: Future<Output = ()> + Send + 'static,
+{
+    fn execute(&self, future: F) {
+        self.0.spawn(future).detach();
+    }
+}
+
+async fn write_overloaded(stream: &mut TcpStream) -> io::Result<()> {
     stream.write_all(
         b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\n\r\n",
     ).await
@@ -441,6 +598,25 @@ async fn handle_request_inner(request: Request<Incoming>, state: ServerState) ->
     let (parts, body) = request.into_parts();
     let path = parts.uri.to_string();
     let request_headers = parts.headers.clone();
+    let header_bytes = request_headers.iter().fold(0_usize, |size, (name, value)| {
+        size.saturating_add(name.as_str().len()).saturating_add(value.as_bytes().len())
+    });
+    if request_headers.len() > MAX_HEADER_COUNT || header_bytes > MAX_HEADER_BYTES {
+        let mut response = v2_api_error_response(
+            V2ApiErrorKind::RequestTooLarge {
+                limit_bytes: MAX_HEADER_BYTES.min(u32::MAX as usize) as u32,
+            },
+            &request_id_from_headers(&request_headers),
+        );
+        response.status = 431;
+        return response.with_no_store().into_hyper();
+    }
+    if requests_h2c_upgrade(&request_headers) {
+        return v2_api_error_response(
+            V2ApiErrorKind::BadRequest { message: "HTTP/2 upgrade is not supported".to_string() },
+            &request_id_from_headers(&request_headers),
+        ).with_no_store().into_hyper();
+    }
     if parts.uri.path() == "/events" {
         return v2_api_error_response(
             V2ApiErrorKind::ApiVersionUnsupported {
@@ -510,7 +686,7 @@ async fn handle_request_inner(request: Request<Incoming>, state: ServerState) ->
         }).into_hyper();
     }
 
-    let Ok(worker_slot) = state.blocking_requests.clone().try_acquire_owned() else {
+    let Some(worker_slot) = state.blocking_requests.try_acquire_arc() else {
         return v2_api_error_response(
             V2ApiErrorKind::RateLimited { retry_after_ms: 100 },
             &request_id_from_headers(&request_headers),
@@ -532,11 +708,13 @@ async fn handle_request_inner(request: Request<Incoming>, state: ServerState) ->
     let started = Instant::now();
     let request_id_value = request_id(&request).unwrap_or_else(|| "request".to_string());
     let request_id_for_worker = request_id_value.clone();
-    let result = tokio::task::spawn_blocking(move || {
+    let result = blocking::unblock(move || {
         let _worker_slot = worker_slot;
-        let response = route(&app, &request);
-        log_request(&app, &request, &response, Some(request_id_for_worker), started.elapsed().as_millis());
-        response.with_no_store()
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let response = route(&app, &request);
+            log_request(&app, &request, &response, Some(request_id_for_worker), started.elapsed().as_millis());
+            response.with_no_store()
+        }))
     }).await;
     match result {
         Ok(response) => response.into_hyper(),
@@ -545,6 +723,13 @@ async fn handle_request_inner(request: Request<Incoming>, state: ServerState) ->
             &request_id_value,
         ).with_no_store().into_hyper(),
     }
+}
+
+fn requests_h2c_upgrade(headers: &HeaderMap) -> bool {
+    headers.get_all(hyper::header::UPGRADE).iter()
+        .filter_map(|value| value.to_str().ok())
+        .flat_map(|value| value.split(','))
+        .any(|protocol| protocol.trim().split('/').next().is_some_and(|name| name.eq_ignore_ascii_case("h2c")))
 }
 
 async fn collect_body(
@@ -563,7 +748,7 @@ async fn collect_body(
             return Err(BodyError::TooLarge);
         }
     }
-    timeout(limits.request_body_duration, async move {
+    let read_body = async move {
         let mut bytes = Vec::new();
         while let Some(frame) = body.frame().await {
             let frame = frame.map_err(|_| BodyError::Malformed)?;
@@ -575,7 +760,11 @@ async fn collect_body(
             }
         }
         Ok(bytes)
-    }).await.map_err(|_| BodyError::TimedOut)?
+    };
+    future::race(
+        read_body,
+        FutureExt::map(Timer::after(limits.request_body_duration), |_| Err(BodyError::TimedOut)),
+    ).await
 }
 
 #[derive(Deserialize)]
@@ -602,7 +791,7 @@ async fn handle_auth_route(
     state: ServerState,
 ) -> Response<HttpBody> {
     let request_id = request_id_from_headers(headers);
-    let Ok(worker_slot) = state.blocking_requests.clone().try_acquire_owned() else {
+    let Some(worker_slot) = state.blocking_requests.try_acquire_arc() else {
         return v2_api_error_response(V2ApiErrorKind::RateLimited { retry_after_ms: 100 }, &request_id)
             .with_no_store().into_hyper();
     };
@@ -614,17 +803,19 @@ async fn handle_auth_route(
     let path = uri.path().to_string();
     let session_cookie = session_cookie.map(str::to_string);
     let request_id_for_worker = request_id.clone();
-    match tokio::task::spawn_blocking(move || {
+    match blocking::unblock(move || {
         let _worker_slot = worker_slot;
-        handle_auth_route_sync(
-            &method,
-            &path,
-            &body,
-            &auth,
-            session_cookie.as_deref(),
-            verified_session,
-            &request_id_for_worker,
-        )
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            handle_auth_route_sync(
+                &method,
+                &path,
+                &body,
+                &auth,
+                session_cookie.as_deref(),
+                verified_session,
+                &request_id_for_worker,
+            )
+        }))
     }).await {
         Ok(response) => response.with_no_store().into_hyper(),
         Err(_) => v2_api_error_response(V2ApiErrorKind::Internal { request_id: request_id.clone() }, &request_id)
@@ -1006,95 +1197,174 @@ fn event_after_version(
 
 fn sse_body(
     subscription: EventSubscription,
-    shutdown: watch::Receiver<bool>,
+    shutdown: CancellationToken,
     authorization: Option<StreamAuthorization>,
     max_duration: Duration,
 ) -> HttpBody {
     let EventSubscription {
-        mut replay,
+        replay,
         current_version,
         resync_required,
         mut events,
     } = subscription;
-    let (event_sender, mut events_receiver) = mpsc::channel::<EventEnvelope>(MAX_SSE_SOURCE_QUEUE);
-    let event_bridge = tokio::task::spawn_blocking(move || loop {
-        if event_sender.is_closed() {
-            return;
-        }
-        match events.recv_timeout(Duration::from_millis(250)) {
-            Ok(event) => {
-                if event_sender.blocking_send(event).is_err() {
-                    return;
-                }
-            }
-            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
-            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return,
-        }
-    });
-    let (sender, receiver) = mpsc::channel::<Bytes>(SSE_BODY_QUEUE);
-    let event_pump = tokio::spawn(async move {
-        let deadline = TokioInstant::now() + max_duration;
-        let mut heartbeat = tokio::time::interval(Duration::from_secs(15));
-        heartbeat.tick().await;
-        let mut replay_bytes = 0_usize;
-        let replay_valid = replay.len() <= MAX_SSE_REPLAY_EVENTS
-            && replay.iter().all(|event| {
-                event.payload.get("eventVersion").and_then(serde_json::Value::as_u64) == Some(event.event_version)
-                    && serde_json::to_vec(&event.payload).is_ok_and(|bytes| {
-                    replay_bytes = replay_bytes.saturating_add(bytes.len());
-                    bytes.len() <= MAX_SSE_EVENT_BYTES && replay_bytes <= MAX_SSE_REPLAY_BYTES
-                })
-            });
-        let mut stop = StreamStop {
-            shutdown,
-            authorization,
-            deadline,
-        };
-        if resync_required || !replay_valid {
-            let _ = send_sse_bytes(&sender, sse_resync_event(current_version), &mut stop).await;
-            return;
-        }
-        for event in replay.drain(..) {
-            let Some(bytes) = sse_event_bytes(&event) else {
-                let _ = send_sse_bytes(&sender, sse_resync_event(current_version), &mut stop).await;
-                return;
-            };
-            if !send_sse_bytes(&sender, bytes, &mut stop).await {
+    let (event_sender, receiver) = async_channel::bounded(SSE_BODY_QUEUE);
+    let (replay, resync) = sse_replay_frames(replay, current_version, resync_required);
+    let live = !resync;
+    let event_bridge = live.then(|| {
+        blocking::unblock(move || loop {
+            if event_sender.is_closed() {
                 return;
             }
-        }
-        loop {
-            tokio::select! {
-                _ = sender.closed() => return,
-                _ = wait_for_shutdown(&mut stop.shutdown) => return,
-                _ = wait_for_authorization_end(stop.authorization.as_ref()) => return,
-                _ = tokio::time::sleep_until(stop.deadline) => return,
-                _ = heartbeat.tick() => {
-                    if sender.try_send(Bytes::from_static(b": keep-alive\n\n")).is_err() {
+            match events.recv_timeout(Duration::from_millis(250)) {
+                Ok(event) => {
+                    if event_sender.send_blocking(event).is_err() {
                         return;
                     }
                 }
-                event = events_receiver.recv() => {
-                    let Some(event) = event else { return; };
-                    let Some(bytes) = sse_event_bytes(&event) else {
-                        let version = current_version.max(event.event_version);
-                        let _ = send_sse_bytes(&sender, sse_resync_event(version), &mut stop).await;
-                        return;
-                    };
-                    if !send_sse_bytes(&sender, bytes, &mut stop).await {
-                        return;
-                    }
-                }
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return,
             }
-        }
+        })
     });
-    ChannelBody { receiver, event_pump: Some(event_pump), event_bridge: Some(event_bridge) }.boxed()
+    let deadline = Instant::now() + max_duration;
+    let authorization_deadline = authorization.as_ref().map(|authorization| {
+        let now = unix_time_seconds().unwrap_or(u64::MAX);
+        let remaining = authorization.expires_at.saturating_sub(now);
+        Instant::now().checked_add(Duration::from_secs(remaining)).unwrap_or(deadline).min(deadline)
+    });
+    let state = SseBodyState {
+        replay,
+        receiver,
+        event_bridge,
+        shutdown,
+        authorization,
+        authorization_deadline,
+        deadline,
+        next_heartbeat: Instant::now() + Duration::from_secs(15),
+        live,
+        current_version,
+    };
+    StreamBody::new(futures_util::stream::unfold(state, |mut state| async move {
+        state.next().await.map(|bytes| (Ok(Frame::data(bytes)), state))
+    })).boxed_unsync()
 }
 
-struct StreamStop {
-    shutdown: watch::Receiver<bool>,
+fn sse_replay_frames(
+    replay: Vec<EventEnvelope>,
+    current_version: u64,
+    resync_required: bool,
+) -> (std::collections::VecDeque<Bytes>, bool) {
+    if resync_required || replay.len() > MAX_SSE_REPLAY_EVENTS {
+        return ([sse_resync_event(current_version)].into(), true);
+    }
+    let mut frames = std::collections::VecDeque::with_capacity(replay.len());
+    let mut total_bytes = 0_usize;
+    for event in replay {
+        let Some(bytes) = sse_event_bytes(&event) else {
+            return ([sse_resync_event(current_version.max(event.event_version))].into(), true);
+        };
+        total_bytes = total_bytes.saturating_add(bytes.len());
+        if total_bytes > MAX_SSE_REPLAY_BYTES {
+            return ([sse_resync_event(current_version)].into(), true);
+        }
+        frames.push_back(bytes);
+    }
+    (frames, false)
+}
+
+enum SseWake {
+    Event(std::result::Result<EventEnvelope, async_channel::RecvError>),
+    Shutdown,
+    Revoked,
+    Timer,
+}
+
+struct SseBodyState {
+    replay: std::collections::VecDeque<Bytes>,
+    receiver: Receiver<EventEnvelope>,
+    event_bridge: Option<blocking::Task<()>>,
+    shutdown: CancellationToken,
     authorization: Option<StreamAuthorization>,
-    deadline: TokioInstant,
+    authorization_deadline: Option<Instant>,
+    deadline: Instant,
+    next_heartbeat: Instant,
+    live: bool,
+    current_version: u64,
+}
+
+impl SseBodyState {
+    async fn next(&mut self) -> Option<Bytes> {
+        if let Some(frame) = self.replay.pop_front() {
+            return Some(frame);
+        }
+        if !self.live || self.shutdown.is_cancelled() {
+            self.close().await;
+            return None;
+        }
+        loop {
+            let now = Instant::now();
+            if now >= self.deadline || self.authorization_deadline.is_some_and(|deadline| now >= deadline) {
+                self.close().await;
+                return None;
+            }
+            let wake_at = self.authorization_deadline.unwrap_or(self.deadline)
+                .min(self.deadline)
+                .min(self.next_heartbeat);
+            let timer = FutureExt::map(Timer::at(wake_at), |_| SseWake::Timer);
+            let revoked = async {
+                match &self.authorization {
+                    Some(authorization) => authorization.revoked.cancelled().await,
+                    None => pending::<()>().await,
+                }
+                SseWake::Revoked
+            };
+            let wake = future::race(
+                future::race(
+                    self.receiver.recv().map(SseWake::Event),
+                    self.shutdown.cancelled().map(|()| SseWake::Shutdown),
+                ),
+                future::race(revoked, timer),
+            ).await;
+            match wake {
+                SseWake::Event(Ok(event)) => {
+                    if let Some(bytes) = sse_event_bytes(&event) {
+                        return Some(bytes);
+                    }
+                    self.live = false;
+                    return Some(sse_resync_event(self.current_version.max(event.event_version)));
+                }
+                SseWake::Event(Err(_)) | SseWake::Shutdown | SseWake::Revoked => {
+                    self.close().await;
+                    return None;
+                }
+                SseWake::Timer => {
+                    let now = Instant::now();
+                    if now >= self.deadline || self.authorization_deadline.is_some_and(|deadline| now >= deadline) {
+                        self.close().await;
+                        return None;
+                    }
+                    if now >= self.next_heartbeat {
+                        self.next_heartbeat = now + Duration::from_secs(15);
+                        return Some(Bytes::from_static(b": keep-alive\n\n"));
+                    }
+                }
+            }
+        }
+    }
+
+    async fn close(&mut self) {
+        self.live = false;
+        self.receiver.close();
+        if let Some(bridge) = self.event_bridge.take() {
+            bridge.await;
+        }
+    }
+}
+
+impl Drop for SseBodyState {
+    fn drop(&mut self) {
+        self.receiver.close();
+    }
 }
 
 fn sse_event_bytes(event: &EventEnvelope) -> Option<Bytes> {
@@ -1120,95 +1390,6 @@ fn sse_resync_event(event_version: u64) -> Bytes {
         "update": { "kind": "resyncRequired" },
     });
     Bytes::from(format!("id: {event_version}\nevent: resyncRequired\ndata: {payload}\n\n"))
-}
-
-async fn send_sse_bytes(sender: &mpsc::Sender<Bytes>, bytes: Bytes, stop: &mut StreamStop) -> bool {
-    tokio::select! {
-        result = sender.send(bytes) => result.is_ok(),
-        _ = sender.closed() => false,
-        _ = wait_for_shutdown(&mut stop.shutdown) => false,
-        _ = wait_for_authorization_end(stop.authorization.as_ref()) => false,
-        _ = tokio::time::sleep_until(stop.deadline) => false,
-    }
-}
-
-async fn wait_for_authorization_end(authorization: Option<&StreamAuthorization>) {
-    let Some(authorization) = authorization else {
-        std::future::pending::<()>().await;
-        return;
-    };
-    let now = unix_time_seconds().unwrap_or(u64::MAX);
-    let remaining = authorization.expires_at.saturating_sub(now);
-    let expiry = tokio::time::sleep(Duration::from_secs(remaining));
-    tokio::pin!(expiry);
-    let mut revoked = authorization.revoked.clone();
-    loop {
-        if *revoked.borrow_and_update() {
-            return;
-        }
-        tokio::select! {
-            _ = &mut expiry => return,
-            changed = revoked.changed() => {
-                if changed.is_err() {
-                    return;
-                }
-            }
-        }
-    }
-}
-
-struct ChannelBody {
-    receiver: mpsc::Receiver<Bytes>,
-    event_pump: Option<tokio::task::JoinHandle<()>>,
-    event_bridge: Option<tokio::task::JoinHandle<()>>,
-}
-
-impl Drop for ChannelBody {
-    fn drop(&mut self) {
-        if let Some(event_pump) = &self.event_pump {
-            event_pump.abort();
-        }
-        if let Some(event_bridge) = &self.event_bridge {
-            event_bridge.abort();
-        }
-    }
-}
-
-impl hyper::body::Body for ChannelBody {
-    type Data = Bytes;
-    type Error = Infallible;
-
-    fn poll_frame(mut self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Option<std::result::Result<Frame<Self::Data>, Self::Error>>> {
-        match self.receiver.poll_recv(context) {
-            Poll::Ready(Some(chunk)) => Poll::Ready(Some(Ok(Frame::data(chunk)))),
-            Poll::Ready(None) => {
-                if let Some(event_pump) = &mut self.event_pump {
-                    match Pin::new(event_pump).poll(context) {
-                        Poll::Pending => return Poll::Pending,
-                        Poll::Ready(result) => {
-                            self.event_pump = None;
-                            if let Err(error) = result {
-                                eprintln!("SSE event task failed: {error}");
-                            }
-                        }
-                    }
-                }
-                if let Some(event_bridge) = &mut self.event_bridge {
-                    match Pin::new(event_bridge).poll(context) {
-                        Poll::Pending => return Poll::Pending,
-                        Poll::Ready(result) => {
-                            self.event_bridge = None;
-                            if let Err(error) = result {
-                                eprintln!("SSE source task failed: {error}");
-                            }
-                        }
-                    }
-                }
-                Poll::Ready(None)
-            }
-            Poll::Pending => Poll::Pending,
-        }
-    }
 }
 
 fn route(app: &App, request: &HttpRequest) -> HttpResponse {
@@ -1348,6 +1529,30 @@ mod tests {
 
     use crate::config::{Config, VaultConfig};
 
+    fn spawn_server(
+        app: App,
+        listener: TcpListener,
+        services: ServerServices,
+        limits: TransportLimits,
+    ) -> (std::net::SocketAddr, CancellationToken, thread::JoinHandle<()>) {
+        let address = listener.local_addr().unwrap();
+        let shutdown = CancellationToken::new();
+        let server_shutdown = shutdown.clone();
+        let executor = Arc::new(Executor::new());
+        let server_executor = executor.clone();
+        let server = thread::spawn(move || {
+            async_io::block_on(executor.run(serve_listener_with_limits(
+                app,
+                listener,
+                services,
+                server_shutdown,
+                server_executor,
+                limits,
+            ))).unwrap();
+        });
+        (address, shutdown, server)
+    }
+
     #[test]
     fn embedded_static_assets_are_fingerprinted_and_confined() {
         let shell = serve_static_path("/").unwrap();
@@ -1384,6 +1589,14 @@ mod tests {
         add_v2_protocol_headers(&mut response);
         assert_eq!(response.headers()["X-Tansu-Api-Version"], "2");
         assert_eq!(response.headers()["X-Tansu-Build-Id"], API_BUILD_ID);
+    }
+
+    #[test]
+    fn connection_task_panics_keep_internal_error_context() {
+        assert!(matches!(
+            connection_task_failure(Box::new("broken connection")),
+            Error::Internal(message) if message.contains("broken connection")
+        ));
     }
 
     #[test]
@@ -1627,21 +1840,15 @@ mod tests {
         }).unwrap();
         let server_instance_id = app.server_instance_id().to_string();
         let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
-        let address = listener.local_addr().unwrap();
-        let (stop, shutdown) = watch::channel(false);
-        let server = thread::spawn(move || {
-            let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
-            runtime.block_on(serve_listener_with_limits(
-                app,
-                listener,
-                ServerServices {
-                    auth: None,
-                    events: Some(Arc::new(LookupErrorEventSource)),
-                },
-                shutdown,
-                TransportLimits::default(),
-            )).unwrap();
-        });
+        let (address, shutdown, server) = spawn_server(
+            app,
+            listener,
+            ServerServices {
+                auth: None,
+                events: Some(Arc::new(LookupErrorEventSource)),
+            },
+            TransportLimits::default(),
+        );
 
         let send = |vault_id: &str| {
             let mut stream = TcpStream::connect(address).unwrap();
@@ -1663,7 +1870,59 @@ mod tests {
         assert!(internal.starts_with("HTTP/1.1 500"), "{internal}");
         assert!(internal.contains("\"code\":\"internal\""), "{internal}");
 
-        stop.send(true).unwrap();
+        shutdown.cancel();
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn accepts_http2_prior_knowledge_requests() {
+        let root = tempfile::tempdir().unwrap();
+        let vault_path = root.path().join("vault");
+        std::fs::create_dir_all(&vault_path).unwrap();
+        let app = App::new(Config {
+            vaults: vec![VaultConfig {
+                name: "Test".into(),
+                path: vault_path,
+                state_path: root.path().join("state"),
+                excluded_folders: Vec::new(),
+            }],
+            auth: None,
+        }).unwrap();
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let (address, shutdown, server) = spawn_server(
+            app,
+            listener,
+            ServerServices::default(),
+            TransportLimits::default(),
+        );
+        let executor = Arc::new(Executor::new());
+        let connection_executor = executor.clone();
+        let (status, api_version, body) = async_io::block_on(executor.run(async move {
+            let stream = async_net::TcpStream::connect(address).await.unwrap();
+            let io = PrefixedIo::new(stream, Vec::new());
+            let (mut sender, connection) = hyper::client::conn::http2::handshake(
+                ServerExecutor(connection_executor.clone()),
+                io,
+            ).await.unwrap();
+            connection_executor.spawn(async move {
+                let _ = connection.await;
+            }).detach();
+            let request = Request::builder()
+                .method(Method::GET)
+                .uri("/api/v2/health")
+                .header(HOST, "localhost")
+                .body(Full::new(Bytes::new()))
+                .unwrap();
+            let response = sender.send_request(request).await.unwrap();
+            let status = response.status();
+            let api_version = response.headers()["X-Tansu-Api-Version"].clone();
+            let body = response.into_body().collect().await.unwrap().to_bytes();
+            (status, api_version, body)
+        }));
+        assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+        assert_eq!(api_version, "2");
+        assert!(std::str::from_utf8(&body).unwrap().contains("\"ok\":true"));
+        shutdown.cancel();
         server.join().unwrap();
     }
 
@@ -1709,24 +1968,18 @@ mod tests {
             auth: None,
         }).unwrap();
         let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
-        let address = listener.local_addr().unwrap();
-        let (stop, shutdown) = watch::channel(false);
-        let server = thread::spawn(move || {
-            let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
-            runtime.block_on(serve_listener_with_limits(
-                app,
-                listener,
-                ServerServices::default(),
-                shutdown,
-                TransportLimits {
-                    max_body_bytes: 8,
-                    max_connections: 4,
-                    max_blocking_requests: 1,
-                    request_body_duration: Duration::from_millis(60),
-                    connection_duration: Duration::from_secs(2),
-                },
-            )).unwrap();
-        });
+        let (address, shutdown, server) = spawn_server(
+            app,
+            listener,
+            ServerServices::default(),
+            TransportLimits {
+                max_body_bytes: 8,
+                max_connections: 4,
+                max_blocking_requests: 1,
+                request_body_duration: Duration::from_millis(60),
+                connection_duration: Duration::from_secs(2),
+            },
+        );
 
         let mut oversized = TcpStream::connect(address).unwrap();
         oversized.set_read_timeout(Some(Duration::from_secs(1))).unwrap();
@@ -1749,7 +2002,15 @@ mod tests {
         let _ = malformed.read_to_string(&mut malformed_response);
         assert!(malformed_response.starts_with("HTTP/1.1 400"));
 
-        stop.send(true).unwrap();
+        let mut h2c = TcpStream::connect(address).unwrap();
+        h2c.set_read_timeout(Some(Duration::from_secs(1))).unwrap();
+        h2c.write_all(b"GET /api/v2/health HTTP/1.1\r\nHost: localhost\r\nConnection: Upgrade, HTTP2-Settings\r\nUpgrade: h2c\r\nHTTP2-Settings: AAQAAP__\r\n\r\n").unwrap();
+        let mut h2c_response = String::new();
+        h2c.read_to_string(&mut h2c_response).unwrap();
+        assert!(h2c_response.starts_with("HTTP/1.1 400"), "{h2c_response}");
+        assert!(h2c_response.contains("bad_request"), "{h2c_response}");
+
+        shutdown.cancel();
         server.join().unwrap();
     }
 
@@ -1760,6 +2021,7 @@ mod tests {
         receiver: std::sync::mpsc::Receiver<EventEnvelope>,
         capacity: usize,
         dropped: Option<std::sync::mpsc::Sender<()>>,
+        started: Option<std::sync::mpsc::Sender<()>>,
     }
 
     impl EventSubscriptionStream for MockEventStream {
@@ -1771,6 +2033,9 @@ mod tests {
             &mut self,
             timeout: Duration,
         ) -> std::result::Result<EventEnvelope, std::sync::mpsc::RecvTimeoutError> {
+            if let Some(started) = self.started.take() {
+                let _ = started.send(());
+            }
             self.receiver.recv_timeout(timeout)
         }
     }
@@ -1794,7 +2059,7 @@ mod tests {
                 replay: Vec::new(),
                 current_version: 0,
                 resync_required: false,
-                events: Box::new(MockEventStream { receiver: events, capacity: 2, dropped: None }),
+                events: Box::new(MockEventStream { receiver: events, capacity: 2, dropped: None, started: None }),
             })
         }
     }
@@ -1861,17 +2126,16 @@ mod tests {
 
     #[test]
     fn sse_frames_source_replay_and_resync_payloads() {
-        let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
-        let (shutdown_sender, shutdown) = watch::channel(false);
+        let shutdown = CancellationToken::new();
         let (event_sender, events) = std::sync::mpsc::sync_channel(2);
         drop(event_sender);
-        let replay = runtime.block_on(async {
+        let replay = async_io::block_on(async {
             sse_body(
                 EventSubscription {
                     replay: vec![event(5), event(6)],
                     current_version: 6,
                     resync_required: false,
-                    events: Box::new(MockEventStream { receiver: events, capacity: 2, dropped: None }),
+                    events: Box::new(MockEventStream { receiver: events, capacity: 2, dropped: None, started: None }),
                 },
                 shutdown.clone(),
                 None,
@@ -1884,13 +2148,13 @@ mod tests {
         assert!(!replay.contains("\"event\":{\"kind\":\"ready\"}"));
 
         let (_event_sender, events) = std::sync::mpsc::sync_channel(2);
-        let resync = runtime.block_on(async {
+        let resync = async_io::block_on(async {
             sse_body(
                 EventSubscription {
                     replay: Vec::new(),
                     current_version: 8,
                     resync_required: true,
-                    events: Box::new(MockEventStream { receiver: events, capacity: 2, dropped: None }),
+                    events: Box::new(MockEventStream { receiver: events, capacity: 2, dropped: None, started: None }),
                 },
                 shutdown.clone(),
                 None,
@@ -1899,42 +2163,37 @@ mod tests {
         });
         let resync = String::from_utf8_lossy(&resync);
         assert!(resync.contains("id: 8\nevent: resyncRequired\ndata: {\"eventVersion\":8,\"resyncRequired\":true,\"update\":{\"kind\":\"resyncRequired\"}}"));
-        shutdown_sender.send(true).unwrap();
     }
 
     #[test]
     fn sse_disconnect_releases_the_source_subscription() {
-        let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
-        let (_shutdown_sender, shutdown) = watch::channel(false);
+        let shutdown = CancellationToken::new();
         let (_event_sender, events) = std::sync::mpsc::sync_channel(2);
         let (dropped_sender, dropped_receiver) = std::sync::mpsc::channel();
-        runtime.block_on(async {
-            let body = sse_body(
-                EventSubscription {
-                    replay: Vec::new(),
-                    current_version: 0,
-                    resync_required: false,
-                    events: Box::new(MockEventStream {
-                        receiver: events,
-                        capacity: 2,
-                        dropped: Some(dropped_sender),
-                    }),
-                },
-                shutdown,
-                None,
-                Duration::from_secs(2),
-            );
-            drop(body);
-            tokio::task::spawn_blocking(move || dropped_receiver.recv_timeout(Duration::from_secs(2)))
-                .await.unwrap().unwrap();
-        });
+        let body = sse_body(
+            EventSubscription {
+                replay: Vec::new(),
+                current_version: 0,
+                resync_required: false,
+                events: Box::new(MockEventStream {
+                    receiver: events,
+                    capacity: 2,
+                    dropped: Some(dropped_sender),
+                    started: None,
+                }),
+            },
+            shutdown,
+            None,
+            Duration::from_secs(2),
+        );
+        drop(body);
+        dropped_receiver.recv_timeout(Duration::from_secs(2)).unwrap();
     }
 
     #[test]
     fn open_sse_streams_close_on_session_revocation_and_expiry() {
-        let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
         let (_root, auth, session) = authenticated_test_session();
-        let (_shutdown_sender, shutdown) = watch::channel(false);
+        let shutdown = CancellationToken::new();
         let (_event_sender, events) = std::sync::mpsc::sync_channel(2);
         let lease = auth.session_lease(&session.cookie_value, 13).unwrap();
         let expiry = StreamAuthorization {
@@ -1942,13 +2201,13 @@ mod tests {
             revoked: lease.revoked.clone(),
             _lease: lease,
         };
-        let expired = runtime.block_on(async {
+        let expired = async_io::block_on(async {
             let body = sse_body(
                 EventSubscription {
                     replay: Vec::new(),
                     current_version: 0,
                     resync_required: false,
-                    events: Box::new(MockEventStream { receiver: events, capacity: 2, dropped: None }),
+                    events: Box::new(MockEventStream { receiver: events, capacity: 2, dropped: None, started: None }),
                 },
                 shutdown.clone(),
                 Some(expiry),
@@ -1959,56 +2218,69 @@ mod tests {
         assert!(expired.is_empty());
 
         let (_event_sender, events) = std::sync::mpsc::sync_channel(2);
+        let (started_sender, started_receiver) = std::sync::mpsc::channel();
         let lease = auth.session_lease(&session.cookie_value, 13).unwrap();
         let revocation = StreamAuthorization {
             expires_at: lease.expires_at,
             revoked: lease.revoked.clone(),
             _lease: lease,
         };
-        let revoked = runtime.block_on(async {
-            let body = sse_body(
-                EventSubscription {
-                    replay: Vec::new(),
-                    current_version: 0,
-                    resync_required: false,
-                    events: Box::new(MockEventStream { receiver: events, capacity: 2, dropped: None }),
-                },
-                shutdown.clone(),
-                Some(revocation),
-                Duration::from_secs(2),
-            );
-            let stream = tokio::spawn(body.collect());
-            tokio::task::yield_now().await;
+        let body = sse_body(
+            EventSubscription {
+                replay: Vec::new(),
+                current_version: 0,
+                resync_required: false,
+                events: Box::new(MockEventStream {
+                    receiver: events,
+                    capacity: 2,
+                    dropped: None,
+                    started: Some(started_sender),
+                }),
+            },
+            shutdown.clone(),
+            Some(revocation),
+            Duration::from_secs(2),
+        );
+        let executor = Executor::new();
+        let revoked = async_io::block_on(executor.run(async {
+            let stream = executor.spawn(body.collect());
+            blocking::unblock(move || started_receiver.recv_timeout(Duration::from_secs(2)))
+                .await.unwrap();
             auth.revoke_session(&session.cookie_value).unwrap();
-            tokio::time::timeout(Duration::from_secs(1), stream)
-                .await.unwrap().unwrap().unwrap().to_bytes()
-        });
+            stream.await.unwrap().to_bytes()
+        }));
         assert!(revoked.is_empty());
     }
 
     #[test]
     fn sse_stream_ends_when_server_shutdown_is_signaled() {
-        let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
-        let (shutdown_sender, shutdown) = watch::channel(false);
+        let shutdown = CancellationToken::new();
         let (_event_sender, events) = std::sync::mpsc::sync_channel(2);
-        let closed = runtime.block_on(async {
-            let body = sse_body(
-                EventSubscription {
-                    replay: Vec::new(),
-                    current_version: 0,
-                    resync_required: false,
-                    events: Box::new(MockEventStream { receiver: events, capacity: 2, dropped: None }),
-                },
-                shutdown,
-                None,
-                Duration::from_secs(2),
-            );
-            let stream = tokio::spawn(body.collect());
-            tokio::task::yield_now().await;
-            shutdown_sender.send(true).unwrap();
-            tokio::time::timeout(Duration::from_secs(1), stream)
-                .await.unwrap().unwrap().unwrap().to_bytes()
-        });
+        let (started_sender, started_receiver) = std::sync::mpsc::channel();
+        let body = sse_body(
+            EventSubscription {
+                replay: Vec::new(),
+                current_version: 0,
+                resync_required: false,
+                events: Box::new(MockEventStream {
+                    receiver: events,
+                    capacity: 2,
+                    dropped: None,
+                    started: Some(started_sender),
+                }),
+            },
+            shutdown.clone(),
+            None,
+            Duration::from_secs(2),
+        );
+        let executor = Executor::new();
+        let closed = async_io::block_on(executor.run(async {
+            let stream = executor.spawn(body.collect());
+            blocking::unblock(move || started_receiver.recv_timeout(Duration::from_secs(2)))
+                .await.unwrap();
+            shutdown.cancel();
+            stream.await.unwrap().to_bytes()
+        }));
         assert!(closed.is_empty());
     }
 }

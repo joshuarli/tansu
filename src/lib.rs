@@ -15,6 +15,8 @@ pub mod api_types;
 pub mod auth;
 pub mod app;
 pub mod catalog;
+mod cancellation;
+pub use cancellation::CancellationToken;
 pub mod config;
 pub mod history;
 pub mod http;

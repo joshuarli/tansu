@@ -12,7 +12,8 @@ use rusqlite::{Connection, OpenFlags, OptionalExtension, Transaction, Transactio
 use rustix::fs::{AtFlags, Mode, OFlags, RenameFlags, openat, renameat_with, unlinkat};
 use serde::{Deserialize, Serialize};
 use tansu_webauthn::{AuthChallenge, AuthenticationFinish, RegChallenge, StoredCredential};
-use tokio::sync::watch;
+
+use crate::CancellationToken;
 
 const AUTH_TOKEN_HASH_VERSION: i64 = 2;
 
@@ -166,12 +167,12 @@ pub struct CeremonyTicket {
 #[derive(Clone)]
 pub struct SessionLease {
     pub(crate) expires_at: u64,
-    pub(crate) revoked: watch::Receiver<bool>,
+    pub(crate) revoked: CancellationToken,
     _registration: Arc<LeaseRegistration>,
 }
 
 struct ActiveLease {
-    sender: watch::Sender<bool>,
+    revoked: CancellationToken,
     leases: usize,
 }
 
@@ -545,7 +546,7 @@ impl AuthStore {
             params![session_hash],
         ).map_err(storage)?;
         if let Some(active) = active_leases.get(&session_hash) {
-            let _ = active.sender.send(true);
+            active.revoked.cancel();
         }
         Ok(())
     }
@@ -559,13 +560,13 @@ impl AuthStore {
             return Err(AuthError::Unauthorized);
         }
         leases.entry(session_hash.clone()).or_insert_with(|| ActiveLease {
-            sender: watch::channel(false).0,
+            revoked: CancellationToken::new(),
             leases: 0,
         }).leases += 1;
-        let receiver = leases.get(&session_hash).expect("active lease inserted").sender.subscribe();
+        let revoked = leases.get(&session_hash).expect("active lease inserted").revoked.clone();
         Ok(SessionLease {
             expires_at: session.expires_at,
-            revoked: receiver,
+            revoked,
             _registration: Arc::new(LeaseRegistration {
                 session_hash,
                 active_leases: Arc::downgrade(&self.active_leases),
@@ -1234,10 +1235,10 @@ mod tests {
         let cookie = store.session_cookie(&session);
         assert!(cookie.contains("HttpOnly; Secure; Path=/; SameSite=Strict"));
         assert!(store.validate_request(request("notes.example.com", Some("https://notes.example.com"), RequestAction::StateChange, Some(&session.cookie_value), Some(&session.csrf_token), SessionRequirement::Required, 13)).unwrap().is_some());
-        let mut lease = store.session_lease(&session.cookie_value, 13).unwrap();
+        let lease = store.session_lease(&session.cookie_value, 13).unwrap();
         assert_eq!(lease.expires_at, 3612);
         store.revoke_session(&session.cookie_value).unwrap();
-        assert!(*lease.revoked.borrow_and_update());
+        assert!(lease.revoked.is_cancelled());
         assert!(store.validate_request(request("notes.example.com", Some("https://notes.example.com"), RequestAction::Read, Some(&session.cookie_value), None, SessionRequirement::Required, 14)).is_err());
     }
 
