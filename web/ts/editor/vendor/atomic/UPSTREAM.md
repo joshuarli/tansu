@@ -12,12 +12,13 @@ Imported from `src/`: `atomic-theme.ts`, `edit-helpers.ts`, `highlight.ts`,
 uses `markdown({ codeLanguages: [] })`.
 
 Local patches: `inline-preview.ts` checks the read-only facet before a task
-checkbox can dispatch a source edit. `table-widget.ts` resolves the edited
-cell's current source span and replaces only that span. `wiki-links.ts` skips
-`[[...]]` inside `![[...]]` image syntax. The included source files also use
-explicit type assertions and overrides needed by Tansu's stricter TypeScript
-options. Tansu rejects every unapproved document-changing transaction while
-read-only.
+checkbox can dispatch a source edit and maps existing whole-document
+decorations across syntax-safe edits in plain paragraphs. `table-widget.ts`
+resolves the edited cell's current source span and replaces only that span.
+`wiki-links.ts` skips `[[...]]` inside `![[...]]` image syntax. The included
+source files also use explicit type assertions and overrides needed by
+Tansu's stricter TypeScript options. Tansu rejects every unapproved
+document-changing transaction while read-only.
 
 To update, check out the recorded commit, compare each imported path, copy the
 closure and license, reapply the read-only, table-span, and wiki-image patches,

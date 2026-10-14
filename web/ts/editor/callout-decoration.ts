@@ -1,9 +1,11 @@
-import { StateField, type EditorState, type Extension, type Range } from "@codemirror/state";
+import { StateField, type EditorState, type Extension, type Range, type Transaction } from "@codemirror/state";
 import { Decoration, EditorView, WidgetType, type DecorationSet } from "@codemirror/view";
 
 type CalloutOptions = {
   icons: Readonly<Record<string, string>>;
 };
+
+const PLAIN_TEXT_EDIT = /^[\p{L}\p{N}\p{M} ]+$/u;
 
 class CalloutTitle extends WidgetType {
   constructor(
@@ -78,11 +80,40 @@ function titleFromType(type: string): string {
   return `${type[0]?.toUpperCase() ?? ""}${type.slice(1)}`;
 }
 
+function calloutDecorationCanMap(transaction: Transaction): boolean {
+  let hasChanges = false;
+  let safe = true;
+  transaction.changes.iterChanges((fromA, toA, fromB, _toB, inserted) => {
+    hasChanges = true;
+    const removed = transaction.startState.doc.sliceString(fromA, toA);
+    const added = inserted.toString();
+    if (
+      (removed.length !== 0 && !PLAIN_TEXT_EDIT.test(removed)) ||
+      (added.length !== 0 && !PLAIN_TEXT_EDIT.test(added)) ||
+      !calloutLineEditIsSafe(transaction.startState, fromA) ||
+      !calloutLineEditIsSafe(transaction.state, fromB)
+    ) safe = false;
+  });
+  return hasChanges && safe;
+}
+
+function calloutLineEditIsSafe(state: EditorState, position: number): boolean {
+  const line = state.doc.lineAt(position);
+  if (line.length === 0) return false;
+  const prefix = state.doc.sliceString(line.from, Math.min(line.from + 8, line.to));
+  if (/^ {0,3}>[ \t]?\[!/.test(prefix)) return false;
+  const blockPrefix = /^ {0,4}(?:>[ \t]?|`{3,}|~{3,})/.exec(prefix);
+  return blockPrefix === null || position >= line.from + blockPrefix[0].length;
+}
+
 export function calloutDecoration(options: CalloutOptions): Extension {
   const field = StateField.define({
     create: (state) => calloutDecorations(state, options),
-    update: (decorations, transaction) =>
-      transaction.docChanged ? calloutDecorations(transaction.state, options) : decorations.map(transaction.changes),
+    update: (decorations, transaction) => {
+      if (!transaction.docChanged) return decorations.map(transaction.changes);
+      if (calloutDecorationCanMap(transaction)) return decorations.map(transaction.changes);
+      return calloutDecorations(transaction.state, options);
+    },
     provide: (value) => EditorView.decorations.from(value),
   });
   return field;

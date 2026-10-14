@@ -27,7 +27,21 @@ export function renderStressNote(sizeBytes) {
   if (remainingBytes < 0) {
     throw new Error(`stress note structure exceeds requested size: ${sizeBytes}`);
   }
-  return `${prefix}${"x".repeat(remainingBytes)}`;
+  const lineCount = Math.ceil(remainingBytes / 81);
+  const paragraphCount = Math.ceil(lineCount / 4);
+  let remainingCharacters = remainingBytes - (lineCount + paragraphCount - 2);
+  const lines = [];
+  for (let index = 0; index < lineCount; index += 1) {
+    const reserved = lineCount - index - 1;
+    const lineBytes = Math.min(80, remainingCharacters - reserved);
+    lines.push("x".repeat(lineBytes));
+    remainingCharacters -= lineBytes;
+  }
+  const paragraphs = [];
+  for (let index = 0; index < lines.length; index += 4) {
+    paragraphs.push(lines.slice(index, index + 4).join("\n"));
+  }
+  return `${prefix}${paragraphs.join("\n\n")}`;
 }
 
 async function generateCorpus(seed = 0x5eed1234) {

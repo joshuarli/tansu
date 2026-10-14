@@ -25,6 +25,8 @@ describe("fixed-seed benchmark corpus", () => {
       assert.match(note, /\| Column A \| Column B \|/);
       assert.match(note, /!\[Stress image\]/);
       assert.match(note, /café 東京 🧭 Δοκιμή/);
+      assert.ok(note.split("\n").every((line) => line.length <= 80));
+      assert.ok(note.split("\n\n").length > 2);
     }
   });
 

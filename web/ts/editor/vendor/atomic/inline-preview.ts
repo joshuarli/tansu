@@ -58,6 +58,15 @@ function defaultOnLinkClick(url: string): void {
 }
 
 const FREEZE_TAIL_MS = 100;
+const PLAIN_PARAGRAPH_TEXT = /^[\p{L}\p{N}\p{M} ]*$/u;
+const PLAIN_TEXT_EDIT = /^[\p{L}\p{N}\p{M} ]+$/u;
+
+type PlainParagraphCache = {
+  doc: Text;
+  from: number;
+  to: number;
+  contentFrom: number;
+};
 
 // ---- freeze plumbing -----------------------------------------------------
 
@@ -394,23 +403,6 @@ function buildInlineDecorations(view: EditorView): DecorationSet {
     }
   }
 
-  // Decorate the whole parsed tree — not the current viewport — so
-  // that scrolling never needs to rebuild the decoration set. Prior
-  // design walked viewport-only and rebuilt on every scroll, which
-  // on iOS caused scroll-up momentum halts whenever new decorations
-  // were applied to lines at the top of the viewport (anchor
-  // conflict with the scroll animation). Cost: a one-shot whole-doc
-  // walk on every doc / selection / focus change instead of a
-  // smaller walk on every scroll.
-  //
-  // `ensureSyntaxTree(..., doc.length, ...)` guarantees the tree
-  // actually covers the whole doc before we walk it. Without this,
-  // for moderately long atoms the incremental parser's initial
-  // pass falls short of the end, we'd walk only a prefix, and
-  // content past that point renders as raw `##`/`**` forever —
-  // decorations don't rebuild on scroll anymore. Subsequent calls
-  // are near-free because ensureSyntaxTree short-circuits once the
-  // tree reaches the target.
   const tree =
     ensureSyntaxTree(state, state.doc.length, 200) ?? syntaxTree(state);
 
@@ -879,6 +871,7 @@ function indexOfUnconsumed(
 const inlinePreviewPlugin = ViewPlugin.fromClass(
   class {
     decorations: DecorationSet;
+    _plainParagraph: PlainParagraphCache | null = null;
 
     constructor(view: EditorView) {
       this.decorations = buildInlineDecorations(view);
@@ -889,21 +882,8 @@ const inlinePreviewPlugin = ViewPlugin.fromClass(
       const nextFrozen = update.state.field(previewFrozenField);
       const justUnfroze = prevFrozen && !nextFrozen;
 
-      // A doc change is unambiguous edit intent, so rebuild even while
-      // frozen. Returning the stale (pre-edit) decoration set here would
-      // hand CM6 ranges whose positions no longer match the document: a
-      // hidden `## ` replace can end up spanning the newly-typed text's
-      // line break ("Decorations that replace line breaks may not be
-      // specified via plugins"), and the stale positions corrupt the
-      // heightmap ("No tile at position …" → broken scrollIntoView). The
-      // freeze only needs to suppress the *selection*-driven reveal that
-      // makes a click jitter; typing should reveal syntax as normal.
       if (nextFrozen && !justUnfroze && !update.docChanged) return;
 
-      // Tree-growth effect: background parser advanced past where
-      // we last walked. For docs large enough that the initial
-      // parse didn't reach the end, later blocks (headings, lists,
-      // etc.) render as raw `##`/`**` until this fires.
       let treeGrew = false;
       for (const tr of update.transactions) {
         for (const effect of tr.effects) {
@@ -915,38 +895,126 @@ const inlinePreviewPlugin = ViewPlugin.fromClass(
         if (treeGrew) break;
       }
 
-      // Note: `update.viewportChanged` is intentionally NOT in this
-      // list. Scrolling alone must not rebuild decorations — doing
-      // so on iOS halts momentum whenever the rebuild produces new
-      // decorations for lines at the top of a scroll-up viewport
-      // (CM6 anchor conflict with the scroll animation). Walking
-      // the whole parsed tree on the remaining triggers means
-      // scroll-time cost is zero; the tree walk itself is
-      // single-digit ms for typical atoms.
-      // A read-only toggle (compartment reconfigure) changes neither
-      // doc nor selection nor focus, so detect the facet flip directly
-      // — otherwise reading mode wouldn't repaint into / out of the
-      // fully-rendered state.
       const readOnlyChanged =
         update.startState.facet(readOnlyFacet) !==
         update.state.facet(readOnlyFacet);
 
-      if (
+      const needsRebuild =
         justUnfroze ||
         update.docChanged ||
         update.selectionSet ||
         update.focusChanged ||
         treeGrew ||
-        readOnlyChanged
+        readOnlyChanged;
+      if (!needsRebuild) return;
+
+      if (
+        !justUnfroze &&
+        !treeGrew &&
+        !readOnlyChanged &&
+        this._canMapPlainParagraphDecorations(update)
       ) {
-        this.decorations = buildInlineDecorations(update.view);
+        if (update.docChanged) this.decorations = this.decorations.map(update.changes);
+        return;
       }
+
+      this.decorations = buildInlineDecorations(update.view);
+    }
+
+    _canMapPlainParagraphDecorations(update: ViewUpdate): boolean {
+      const cached = this._plainParagraph;
+      if (update.docChanged) {
+        let hasChanges = false;
+        let safe = cached?.doc === update.startState.doc;
+        update.changes.iterChanges((fromA, toA, _fromB, _toB, inserted) => {
+          hasChanges = true;
+          const removed = update.startState.doc.sliceString(fromA, toA);
+          const added = inserted.toString();
+          const containsSpace = removed.includes(" ") || added.includes(" ");
+          if (
+            cached === null ||
+            fromA < cached.from ||
+            toA > cached.to ||
+            (removed.length !== 0 && !PLAIN_TEXT_EDIT.test(removed)) ||
+            (added.length !== 0 && !PLAIN_TEXT_EDIT.test(added)) ||
+            (containsSpace && fromA <= cached.contentFrom)
+          ) safe = false;
+        });
+        if (safe && hasChanges && cached !== null) {
+          const from = update.changes.mapPos(cached.from, -1);
+          const to = update.changes.mapPos(cached.to, 1);
+          const contentFrom = update.changes.mapPos(cached.contentFrom, -1);
+          const tail = update.state.doc.sliceString(Math.max(from, to - 2), to);
+          const region = { from, to, contentFrom };
+          if (tail.endsWith("  ")) safe = false;
+          if (selectionFitsPlainParagraph(update.state, region)) {
+            if (safe) {
+              this._plainParagraph = { doc: update.state.doc, ...region };
+              return true;
+            }
+          }
+        }
+        this._plainParagraph = cacheSelectedPlainParagraph(update.state);
+        return false;
+      }
+
+      if (!update.selectionSet && !update.focusChanged) return false;
+      if (
+        cached?.doc === update.startState.doc &&
+        selectionFitsPlainParagraph(update.startState, cached) &&
+        selectionFitsPlainParagraph(update.state, cached)
+      ) return true;
+
+      this._plainParagraph = cacheSelectedPlainParagraph(update.state);
+      return false;
     }
   },
   {
     decorations: (v) => v.decorations,
   },
 );
+
+function selectionFitsPlainParagraph(
+  state: ViewUpdate["state"],
+  region: Pick<PlainParagraphCache, "from" | "to">,
+): boolean {
+  return state.selection.ranges.length === 1 &&
+    state.selection.main.empty &&
+    state.selection.main.from >= region.from &&
+    state.selection.main.to <= region.to;
+}
+
+function cacheSelectedPlainParagraph(state: ViewUpdate["state"]): PlainParagraphCache | null {
+  if (state.selection.ranges.length !== 1 || !state.selection.main.empty) return null;
+  const region = plainParagraphRange(state, state.selection.main.head);
+  return region === null ? null : { doc: state.doc, ...region };
+}
+
+function plainParagraphRange(
+  state: ViewUpdate["state"],
+  position: number,
+): Pick<PlainParagraphCache, "from" | "to" | "contentFrom"> | null {
+  const line = state.doc.lineAt(Math.min(position, state.doc.length));
+  if (!PLAIN_PARAGRAPH_TEXT.test(line.text) || line.text === "" || line.text.endsWith("  ")) return null;
+  const contentOffset = line.text.search(/\S/);
+  if (contentOffset < 0) return null;
+  const tree = syntaxTree(state);
+  const region = { from: line.from, to: line.to, contentFrom: line.from + contentOffset };
+  if (tree.length < line.to) return region;
+
+  for (
+    let node: SyntaxNode | null = tree.resolveInner(Math.min(position, line.to), -1);
+    node;
+    node = node.parent
+  ) {
+    if (node.name === "Paragraph") {
+      return node.parent?.name === "Document" && line.from >= node.from && line.to <= node.to
+        ? region
+        : null;
+    }
+  }
+  return null;
+}
 
 // CM6's drawSelection layer intentionally sits behind `.cm-content`. That is
 // normally ideal—the rectangle is behind the glyphs—but an opaque fenced-code

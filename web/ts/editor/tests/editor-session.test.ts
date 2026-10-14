@@ -159,6 +159,60 @@ describe("CodeMirror editor sessions", () => {
     expect(editor.getSnapshot()?.selection).toStrictEqual({ anchor: 3, head: 3 });
   });
 
+  it("keeps offscreen Markdown decorations through plain-text edits and rebuilds on syntax changes", () => {
+    const source = "# Heading\n\nplain text\n\n**bold**";
+    const { container, view } = mountEditor(source);
+    const headingLine = container.querySelector(".cm-line.cm-atomic-h1");
+    expect(headingLine).not.toBeNull();
+    expect(container.querySelectorAll(".cm-atomic-strong")).toHaveLength(1);
+
+    view.dispatch({
+      changes: { from: source.indexOf("plain") + 2, insert: "word" },
+      selection: { anchor: source.indexOf("plain") + 6 },
+      annotations: Transaction.userEvent.of("input.type"),
+    });
+
+    expect(container.querySelector(".cm-line.cm-atomic-h1")).toBe(headingLine);
+    expect(container.querySelectorAll(".cm-atomic-strong")).toHaveLength(1);
+    expect(view.state.doc.toString()).toBe("# Heading\n\nplwordain text\n\n**bold**");
+
+    view.dispatch({
+      changes: { from: source.indexOf("plain") + 6, insert: " " },
+      selection: { anchor: source.indexOf("plain") + 7 },
+      annotations: Transaction.userEvent.of("input.type"),
+    });
+
+    expect(container.querySelector(".cm-line.cm-atomic-h1")).toBe(headingLine);
+    expect(container.querySelectorAll(".cm-atomic-strong")).toHaveLength(1);
+    expect(view.state.doc.toString()).toBe("# Heading\n\nplword ain text\n\n**bold**");
+
+    const plainLineEnd = view.state.doc.toString().lastIndexOf("\n\n");
+    view.dispatch({
+      changes: { from: plainLineEnd, insert: " **new**" },
+      selection: { anchor: plainLineEnd + 8 },
+      annotations: Transaction.userEvent.of("input.type"),
+    });
+
+    expect(container.querySelectorAll(".cm-atomic-strong")).toHaveLength(2);
+  });
+
+  it("maps callout decorations across body text edits", () => {
+    const source = "> [!note] Existing title\n> Existing body\n\nplain paragraph";
+    const { container, view } = mountEditor(source);
+    const title = container.querySelector<HTMLElement>(".tansu-callout-title");
+    expect(title?.textContent).toBe("📝 Existing title");
+    expect(container.querySelector(".cm-line.tansu-callout-body")).not.toBeNull();
+
+    view.dispatch({
+      changes: { from: source.indexOf("Existing body"), insert: "Longer " },
+      selection: { anchor: source.indexOf("Existing body") + 7 },
+      annotations: Transaction.userEvent.of("input.type"),
+    });
+
+    expect(container.querySelector(".tansu-callout-title")?.textContent).toBe("📝 Existing title");
+    expect(container.querySelector(".cm-line.tansu-callout-body")).not.toBeNull();
+  });
+
   it("routes rich HTML through a sanitizer and leaves plain text to CodeMirror", () => {
     const { editor, view } = mountEditor("start end");
     editor.revealSelection({ anchor: 6, head: 6 });

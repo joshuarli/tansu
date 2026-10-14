@@ -38,6 +38,9 @@ controls dispatch edits. This blocks extension dispatches that bypass
 ## Markdown behavior
 
 The adapter keeps authored source while CodeMirror renders live decorations.
+Decorations cover the full document, including content outside the viewport.
+Word edits and caret moves in plain paragraphs map existing decorations; edits
+that can affect Markdown syntax rebuild them from the syntax tree.
 Enable wiki links with `createWikiLinkExtension()`. Wiki links resolve against
 the configured active-vault notes. A leading `/`
 selects a vault-root path. `./` and `../` paths resolve from the current note's
