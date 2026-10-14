@@ -357,17 +357,17 @@ describe("real server harness", () => {
         for (const frame of frames) {
           const data = frame.split("\n").find((line) => line.startsWith("data: "))?.slice(6);
           if (!data) continue;
-          const event = JSON.parse(data) as { update: { kind: string; note?: { path: string } } };
-          if (event.update.kind === "noteChanged" && event.update.note?.path.endsWith("outside.md")) {
+          const event = JSON.parse(data) as { update: { kind: string; notes?: { path: string }[] } };
+          if (event.update.kind === "vaultChanged" && event.update.notes?.some((note) => note.path.endsWith("outside.md"))) {
             await reader.cancel();
-            return event.update.kind;
+            return "vaultChanged";
           }
         }
       }
     }, { vaultId: vaultOneId, serverInstanceId });
     await new Promise((resolve) => setTimeout(resolve, 900));
     await writeFile(join(vaultOnePath, "outside.md"), "# Outside\n\nedit\n", "utf8");
-    await expect(eventPromise).resolves.toBe("noteChanged");
+    await expect(eventPromise).resolves.toBe("vaultChanged");
     await page.close();
   });
 

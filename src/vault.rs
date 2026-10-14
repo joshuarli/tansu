@@ -3046,10 +3046,11 @@ impl VaultRuntime {
         let _op = self.lock_op();
         let mut catalog = self.lock_catalog();
         let before = catalog
-            .live_notes()?
+            .all_rows()?
             .into_iter()
-            .map(|note| note.note_id)
-            .collect::<std::collections::HashSet<_>>();
+            .filter(|row| !row.tombstoned && row.unresolved_reason.is_none())
+            .map(|row| (row.meta.note_id.clone(), (row.meta, row.visible_hash)))
+            .collect::<HashMap<_, _>>();
         let settings = catalog.settings()?;
         reconcile_vault(
             &self.root,
@@ -3058,13 +3059,32 @@ impl VaultRuntime {
             &settings.excluded_folders,
         )?;
         let notes = catalog.live_notes()?;
-        let after = notes
+        let after = catalog
+            .all_rows()?
+            .into_iter()
+            .filter(|row| !row.tombstoned && row.unresolved_reason.is_none())
+            .map(|row| (row.meta.note_id.clone(), (row.meta, row.visible_hash)))
+            .collect::<HashMap<_, _>>();
+        let deleted = before
+            .keys()
+            .filter(|note_id| !after.contains_key(*note_id))
+            .cloned()
+            .collect::<Vec<_>>();
+        let changed = before != after;
+        let v2_notes = notes
             .iter()
-            .map(|note| note.note_id.clone())
-            .collect::<std::collections::HashSet<_>>();
-        let deleted = before.difference(&after).cloned().collect::<Vec<_>>();
+            .map(|note| {
+                let (_, visible_hash) = after
+                    .get(&note.note_id)
+                    .ok_or_else(|| Error::Internal("reconciled note metadata disappeared".to_string()))?;
+                Ok(v2_note_meta(note, visible_hash))
+            })
+            .collect::<Result<Vec<_>>>()?;
         drop(catalog);
         self.enqueue_search(SearchJob::Rebuild);
+        if changed {
+            self.record_v2_event(V2ServerEventUpdate::VaultChanged { notes: v2_notes })?;
+        }
         self.broadcast(ServerEventKind::VaultChanged, deleted);
         if self.logs.enabled() {
             self.logs.server_event(
@@ -4170,6 +4190,49 @@ mod tests {
             latest = Some(event);
         }
         assert!(latest.unwrap().payload["resyncRequired"].as_bool().unwrap());
+    }
+
+    #[test]
+    fn watcher_reconciliation_publishes_v2_vault_changes() {
+        let vault = test_vault();
+        let subscription = vault.subscribe_v2_events(None).unwrap();
+
+        vault.reconcile_from_watcher().unwrap();
+        assert!(matches!(
+            subscription.events.recv_timeout(Duration::from_millis(10)),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout)
+        ));
+
+        fs::write(vault.root.join("outside.md"), "# Outside\n\nedit\n").unwrap();
+        vault.reconcile_from_watcher().unwrap();
+        let added = subscription
+            .events
+            .recv_timeout(Duration::from_millis(100))
+            .unwrap();
+        assert_eq!(added.payload["update"]["kind"], "vaultChanged");
+        let added_note = added.payload["update"]["notes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|note| note["path"] == "outside.md")
+            .unwrap();
+        let source_hash = added_note["sourceHash"].as_str().unwrap();
+        let disk_hash = added_note["diskHash"].as_str().unwrap();
+
+        fs::write(vault.root.join("outside.md"), b"# Outside\r\n\r\nedit\r\n").unwrap();
+        vault.reconcile_from_watcher().unwrap();
+        let line_endings = subscription
+            .events
+            .recv_timeout(Duration::from_millis(100))
+            .unwrap();
+        let changed_note = line_endings.payload["update"]["notes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|note| note["path"] == "outside.md")
+            .unwrap();
+        assert_eq!(changed_note["sourceHash"], source_hash);
+        assert_ne!(changed_note["diskHash"], disk_hash);
     }
 
     #[test]
