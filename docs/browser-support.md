@@ -1,11 +1,11 @@
 # Browser support
 
-The Playwright e2e suite runs against Chromium, Firefox, and WebKit. Browser
-versions are pinned in `package.json`. The frontend bundle targets `ESNext`.
-The project verifies these three engines in its e2e suites. It does not publish
-a compatibility guarantee for other browsers or versions.
+The browser e2e suite covers Chromium, Firefox, and WebKit. Browser versions are
+pinned in `package.json`, and the frontend bundle targets `ESNext`. The suite
+does not test other browser engines.
 
-Image paste requires `createImageBitmap` and `OffscreenCanvas`.
+WebP clipboard images upload as-is. Other image types require
+`createImageBitmap` and `OffscreenCanvas` for conversion to WebP.
 
 Run `node bench/visual-review.mjs` to inspect deterministic Chromium screenshots
 at the supported desktop widths and 200% zoom. The copied fixture, generated

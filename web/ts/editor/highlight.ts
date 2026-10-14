@@ -1,6 +1,3 @@
-/// Minimal syntax highlighter for code blocks.
-/// Ported from ~/d/nerv/src/tui/highlight.rs — byte-by-byte highlighter.
-
 import { escapeHtml } from "./util.js";
 
 const Hl = {
@@ -19,23 +16,23 @@ const Hl = {
 type HlValue = (typeof Hl)[keyof typeof Hl];
 
 const hlClass: (string | null)[] = [
-  null, // Normal
-  "hl-kw", // Keyword
-  "hl-type", // Type
-  "hl-str", // String
-  "hl-cmt", // Comment
-  "hl-num", // Number
-  "hl-brk", // Bracket
-  "hl-op", // Operator
-  "hl-fn", // Function
-  "hl-const", // Constant
-  "hl-macro", // Macro
+  null,
+  "hl-kw",
+  "hl-type",
+  "hl-str",
+  "hl-cmt",
+  "hl-num",
+  "hl-brk",
+  "hl-op",
+  "hl-fn",
+  "hl-const",
+  "hl-macro",
 ];
 
 const State = {
   Normal: 0,
   BlockComment: 1,
-  MultiLineString: 2, // index stored separately
+  MultiLineString: 2,
 } as const;
 type StateValue = (typeof State)[keyof typeof State];
 
@@ -47,7 +44,7 @@ type HlState = {
 type Rules = {
   lineComment: string;
   blockComment: [string, string];
-  strings: [string, string, boolean][]; // [open, close, multiline]
+  strings: [string, string, boolean][];
   keywords: string[];
   types: string[];
   operators: string[];
@@ -58,34 +55,34 @@ type Rules = {
 
 function isSep(c: number): boolean {
   return (
-    c <= 0x20 || // whitespace/control
+    c <= 0x20 ||
     c === 0x2c ||
-    c === 0x2e || // , .
+    c === 0x2e ||
     c === 0x28 ||
-    c === 0x29 || // ( )
+    c === 0x29 ||
     c === 0x2b ||
-    c === 0x2d || // + -
+    c === 0x2d ||
     c === 0x2f ||
-    c === 0x2a || // / *
+    c === 0x2a ||
     c === 0x3d ||
-    c === 0x7e || // = ~
+    c === 0x7e ||
     c === 0x25 ||
-    c === 0x3c || // % <
+    c === 0x3c ||
     c === 0x3e ||
-    c === 0x5b || // > [
+    c === 0x5b ||
     c === 0x5d ||
-    c === 0x7b || // ] {
+    c === 0x7b ||
     c === 0x7d ||
-    c === 0x3b || // } ;
+    c === 0x3b ||
     c === 0x3a ||
-    c === 0x26 || // : &
+    c === 0x26 ||
     c === 0x7c ||
-    c === 0x21 || // | !
+    c === 0x21 ||
     c === 0x5e ||
-    c === 0x40 || // ^ @
+    c === 0x40 ||
     c === 0x23 ||
     c === 0x3f
-  ); // # ?
+  );
 }
 
 function isAlpha(c: number): boolean {
@@ -116,7 +113,6 @@ function startsWith(src: string, needle: string, pos: number): boolean {
   return true;
 }
 
-// Binary search on sorted keyword list
 function kwSearch(src: string, start: number, end: number, words: string[]): boolean {
   const len = end - start;
   let lo = 0,
@@ -148,12 +144,11 @@ function kwSearch(src: string, start: number, end: number, words: string[]): boo
 
 function buildHl(src: string, st: HlState, rules: Rules): Uint8Array {
   const len = src.length;
-  const hl = new Uint8Array(len); // filled with Normal (0)
+  const hl = new Uint8Array(len);
 
   let i = 0;
   let prevSep = true;
 
-  // Resume from multiline state
   if (st.state === State.BlockComment) {
     const [, close] = rules.blockComment;
     while (i < len) {
@@ -175,7 +170,6 @@ function buildHl(src: string, st: HlState, rules: Rules): Uint8Array {
     const [, close] = rules.strings[st.stringIdx]!;
     while (i < len) {
       if (src.codePointAt(i) === 0x5c && i + 1 < len) {
-        // backslash
         hl[i] = Hl.String;
         hl[i + 1] = Hl.String;
         i += 2;
@@ -201,13 +195,11 @@ function buildHl(src: string, st: HlState, rules: Rules): Uint8Array {
   const [blockOpen, blockClose] = rules.blockComment;
 
   while (i < len) {
-    // Line comment
     if (lineCom && startsWith(src, lineCom, i)) {
       hl.fill(Hl.Comment, i, len);
       st.state = State.Normal;
       return hl;
     }
-    // Block comment
     if (blockOpen && startsWith(src, blockOpen, i)) {
       const start = i;
       i += blockOpen.length;
@@ -229,7 +221,6 @@ function buildHl(src: string, st: HlState, rules: Rules): Uint8Array {
       }
       continue;
     }
-    // Strings
     let matched = false;
     for (let di = 0; di < rules.strings.length; di++) {
       const [open, close, multiline] = rules.strings[di]!;
@@ -239,7 +230,6 @@ function buildHl(src: string, st: HlState, rules: Rules): Uint8Array {
         let found = false;
         while (i < len) {
           if (src.codePointAt(i) === 0x5c && i + 1 < len) {
-            // backslash escape
             i += 2;
             continue;
           }
@@ -270,7 +260,6 @@ function buildHl(src: string, st: HlState, rules: Rules): Uint8Array {
 
     const c = src.codePointAt(i)!;
 
-    // Numbers
     if (
       rules.highlightNumbers &&
       prevSep &&
@@ -291,7 +280,6 @@ function buildHl(src: string, st: HlState, rules: Rules): Uint8Array {
       continue;
     }
 
-    // Keywords / types / identifiers
     if (prevSep && isAlpha(c)) {
       const start = i;
       i++;
@@ -311,27 +299,22 @@ function buildHl(src: string, st: HlState, rules: Rules): Uint8Array {
         prevSep = false;
         continue;
       }
-      // Bang macros (Rust)
       if (
         rules.highlightBangMacros &&
         i < len &&
-        src.codePointAt(i) === 0x21 && // !
+        src.codePointAt(i) === 0x21 &&
         (i + 1 >= len || src.codePointAt(i + 1) !== 0x3d)
       ) {
-        // not !=
         hl.fill(Hl.Macro, start, i + 1);
         i++;
         prevSep = true;
         continue;
       }
-      // Function calls
       if (rules.highlightFnCalls && i < len && src.codePointAt(i) === 0x28) {
-        // (
         hl.fill(Hl.Function, start, i);
         prevSep = true;
         continue;
       }
-      // UPPER_SNAKE_CASE constants
       if (i - start >= 2) {
         let allUpper = true;
         let hasLetter = false;
@@ -352,7 +335,6 @@ function buildHl(src: string, st: HlState, rules: Rules): Uint8Array {
       continue;
     }
 
-    // Operators
     matched = false;
     for (const op of rules.operators) {
       if (startsWith(src, op, i)) {
@@ -367,7 +349,6 @@ function buildHl(src: string, st: HlState, rules: Rules): Uint8Array {
       continue;
     }
 
-    // Brackets
     if (c === 0x28 || c === 0x29 || c === 0x5b || c === 0x5d || c === 0x7b || c === 0x7d) {
       hl[i] = Hl.Bracket;
     }
@@ -414,7 +395,6 @@ function applyHlHtml(src: string, hl: Uint8Array): string {
   return out;
 }
 
-/// Highlight a full code block (multi-line). Returns HTML with spans.
 export function highlightCode(code: string, lang: string): string {
   const rules = rulesForLang(lang);
   if (!rules) {
@@ -434,8 +414,6 @@ export function highlightCode(code: string, lang: string): string {
   return parts.join("");
 }
 
-// Language definitions (keywords sorted for binary search)
-// Keywords encoded as sorted space-separated strings, split at init time.
 function kw(s: string): string[] {
   return s.split(" ");
 }

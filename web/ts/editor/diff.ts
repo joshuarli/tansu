@@ -1,5 +1,3 @@
-/// Line-based diff with compact rendering, like git diff.
-
 import { DIFF_CONTEXT_LINES } from "./constants.js";
 import { escapeHtml, lcs } from "./util.js";
 
@@ -14,13 +12,11 @@ export type DiffHunk = {
   lines: DiffLine[];
 };
 
-/// Compute diff hunks between old and new text.
 export function computeDiff(oldText: string, newText: string): DiffHunk[] {
   const oldLines = oldText.split("\n");
   const newLines = newText.split("\n");
   const matches = lcs(oldLines, newLines);
 
-  // Build raw diff lines with original line numbers
   const raw: { type: "add" | "del" | "ctx"; text: string; oldNum: number; newNum: number }[] = [];
   let oi = 0;
   let ni = 0;
@@ -47,14 +43,12 @@ export function computeDiff(oldText: string, newText: string): DiffHunk[] {
     ni++;
   }
 
-  // Group into hunks with context lines
   return buildHunks(raw);
 }
 
 function buildHunks(
   raw: { type: "add" | "del" | "ctx"; text: string; oldNum: number; newNum: number }[],
 ): DiffHunk[] {
-  // Find ranges of changed lines, expand by CONTEXT
   const changed: boolean[] = raw.map((r) => r.type !== "ctx");
   const included: boolean[] = Array.from<boolean>({ length: raw.length }).fill(false);
 
@@ -95,7 +89,6 @@ function buildHunks(
   return hunks;
 }
 
-/// Render diff hunks as an HTML element.
 export function renderDiff(hunks: DiffHunk[]): HTMLElement {
   const container = document.createElement("div");
   container.className = "diff-view";

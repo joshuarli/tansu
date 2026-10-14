@@ -65,8 +65,6 @@ in v2.
 
 Legacy `/api/` routes return `api_version_unsupported` before dispatch. They do
 not interpret `X-Tansu-Vault` or mutate a default vault.
-The browser stores workspace and draft data in IndexedDB without encryption.
-Passkeys do not encrypt that data.
 
 ### Source and hashes
 
@@ -220,7 +218,7 @@ app can determine whether to show login.
 ### Errors
 
 Errors use `V2ApiErrorResponse` and a `code` discriminator. Error fields use
-camel case. `api_version_unsupported` is returned for retired index routes;
+camel case. `api_version_unsupported` is returned for retired `/api/` routes;
 `not_implemented` marks an unknown route or method.
 
 | HTTP status | Codes |

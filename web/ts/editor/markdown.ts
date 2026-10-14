@@ -1,8 +1,3 @@
-/// Markdown → HTML renderer. Supports the subset used in note-taking:
-/// headings, paragraphs, lists (ul/ol/task), blockquotes,
-/// fenced code blocks, tables, HR, and inline formatting.
-/// Callouts, wiki-links, and wiki-images are provided as extensions.
-
 import { CODE_FENCE_MARKER_LENGTH, LIST_INDENT_SPACES, MAX_HEADING_LEVEL } from "./constants.js";
 import type { MarkdownExtension } from "./extension.js";
 import { highlightCode } from "./highlight.js";
@@ -27,7 +22,7 @@ type Block =
 
 type ListItem = {
   text: string;
-  checked: boolean | null; // null = not a task item
+  checked: boolean | null;
   sourceStart: number;
   nested?: ListNode[];
 };
@@ -52,14 +47,12 @@ function parseBlocks(lines: string[]): Block[] {
   while (i < lines.length) {
     const line = lines[i]!;
 
-    // Blank line
     if (line.trim() === "") {
       blocks.push({ type: "blank" });
       i++;
       continue;
     }
 
-    // Fenced code block
     const fenceMatch = line.match(new RegExp(`^([\`~]{${CODE_FENCE_MARKER_LENGTH},})(.*)`));
     if (fenceMatch) {
       const fence = fenceMatch[1]!;
@@ -70,12 +63,11 @@ function parseBlocks(lines: string[]): Block[] {
         codeLines.push(lines[i]!);
         i++;
       }
-      i++; // skip closing fence
+      i++;
       blocks.push({ type: "code", lang, text: codeLines.join("\n") });
       continue;
     }
 
-    // Heading
     const headingMatch = line.match(new RegExp(`^(#{1,${MAX_HEADING_LEVEL}})\\s+(.*)`));
     if (headingMatch) {
       blocks.push({
@@ -88,21 +80,19 @@ function parseBlocks(lines: string[]): Block[] {
       continue;
     }
 
-    // HR
     if (/^(-{3,}|\*{3,}|_{3,})\s*$/.test(line)) {
       blocks.push({ type: "hr" });
       i++;
       continue;
     }
 
-    // Table: line starts with | and next line is a separator
     if (
       line.trimStart().startsWith("|") &&
       i + 1 < lines.length &&
       /^\|?[\s:]*-+[\s:]*(\|[\s:]*-+[\s:]*)*\|?\s*$/.test(lines[i + 1]!)
     ) {
       const headerCells = parseTableRow(line);
-      i += 2; // skip header + separator
+      i += 2;
       const rows: string[][] = [];
       while (i < lines.length && lines[i]!.trimStart().startsWith("|")) {
         rows.push(parseTableRow(lines[i]!));
@@ -112,7 +102,6 @@ function parseBlocks(lines: string[]): Block[] {
       continue;
     }
 
-    // List (unordered, ordered, or task)
     const listStart = parseListLine(line);
     if (listStart) {
       const parsed = parseList(lines, i, listStart.indent);
@@ -121,7 +110,6 @@ function parseBlocks(lines: string[]): Block[] {
       continue;
     }
 
-    // Bare task item: "[ ] foo" or "[x] foo"
     const taskStart = parseTaskLine(line);
     if (taskStart) {
       blocks.push({
@@ -134,7 +122,6 @@ function parseBlocks(lines: string[]): Block[] {
       continue;
     }
 
-    // Blockquote
     if (line.startsWith(">")) {
       const bqLines: string[] = [];
       while (
@@ -145,7 +132,6 @@ function parseBlocks(lines: string[]): Block[] {
         if (!lines[i]!.startsWith(">")) {
           break;
         }
-        // Strip the leading > and optional space
         bqLines.push(lines[i]!.replace(/^>\s?/, ""));
         i++;
       }
@@ -153,7 +139,6 @@ function parseBlocks(lines: string[]): Block[] {
       continue;
     }
 
-    // Paragraph: collect consecutive non-blank, non-special lines
     const paraLines: string[] = [];
     while (i < lines.length) {
       const l = lines[i]!;
@@ -284,7 +269,6 @@ function countIndent(indent: string): number {
 }
 
 function parseTableRow(line: string): string[] {
-  // Strip leading/trailing pipe and split
   let s = line.trim();
   if (s.startsWith("|")) {
     s = s.slice(1);
@@ -295,7 +279,6 @@ function parseTableRow(line: string): string[] {
   return s.split("|").map((c) => c.trim());
 }
 
-/// Find closing delimiter, skipping escaped characters.
 function findClosing(text: string, delim: string, start: number): number {
   for (let i = start; i < text.length; i++) {
     if (text[i] === "\\") {
@@ -324,12 +307,10 @@ function createRenderer(
   }
 
   function renderBlockquote(bqLines: string[]): string {
-    // Try extension hooks first
     for (const ext of extensions) {
       const result = ext.renderBlockquote?.(bqLines, renderLines);
       if (result !== null && result !== undefined) return result;
     }
-    // Regular blockquote: recursively parse inner content
     return `<blockquote>${renderLines(bqLines)}</blockquote>`;
   }
 
@@ -402,8 +383,6 @@ function createRenderer(
     }
   }
 
-  /// Inline rendering: handles bold, italic, strikethrough, code, highlight,
-  /// wiki-links, wiki-images, links, images, and escaped characters.
   function inline(text: string, baseOffset = 0): string {
     let out = "";
     let i = 0;
@@ -412,7 +391,6 @@ function createRenderer(
     while (i < len) {
       const ch = text[i]!;
 
-      // Escaped character
       if (ch === "\\" && i + 1 < len) {
         const next = text[i + 1]!;
         if ("\\`*_{}[]()#+-.!~=|".includes(next)) {
@@ -440,7 +418,6 @@ function createRenderer(
         continue;
       }
 
-      // Inline code (backtick) — no nesting
       if (ch === "`") {
         const end = text.indexOf("`", i + 1);
         if (end !== -1) {
@@ -458,7 +435,6 @@ function createRenderer(
         }
       }
 
-      // Image: ![alt](src)
       if (ch === "!" && text[i + 1] === "[") {
         const m = text.slice(i).match(/^!\[([^\]]*)\]\(([^)]+)\)/);
         if (m) {
@@ -479,7 +455,6 @@ function createRenderer(
         }
       }
 
-      // Link: [text](url)
       if (ch === "[") {
         const m = text.slice(i).match(/^\[([^\]]*)\]\(([^)]+)\)/);
         if (m) {
@@ -502,7 +477,6 @@ function createRenderer(
         }
       }
 
-      // Highlight: ==text==
       if (ch === "=" && text[i + 1] === "=") {
         const end = text.indexOf("==", i + 2);
         if (end !== -1) {
@@ -520,7 +494,6 @@ function createRenderer(
         }
       }
 
-      // Strikethrough: ~~text~~
       if (ch === "~" && text[i + 1] === "~") {
         const end = text.indexOf("~~", i + 2);
         if (end !== -1) {
@@ -538,7 +511,6 @@ function createRenderer(
         }
       }
 
-      // Bold: **text**
       if (ch === "*" && text[i + 1] === "*") {
         const end = text.indexOf("**", i + 2);
         if (end !== -1) {
@@ -556,7 +528,6 @@ function createRenderer(
         }
       }
 
-      // Italic: *text*
       if (ch === "*") {
         const end = findClosing(text, "*", i + 1);
         if (end !== -1) {
@@ -574,7 +545,6 @@ function createRenderer(
         }
       }
 
-      // Bare URL: http:// or https://
       if (
         ch === "h" &&
         (text.slice(i, i + 7) === "http://" || text.slice(i, i + 8) === "https://")
@@ -593,7 +563,6 @@ function createRenderer(
         continue;
       }
 
-      // Line break
       if (ch === "\n") {
         out += "<br>";
         i++;
@@ -606,7 +575,6 @@ function createRenderer(
         continue;
       }
 
-      // HTML special chars
       if (ch === "&") {
         out += "&amp;";
         i++;
@@ -623,7 +591,6 @@ function createRenderer(
         continue;
       }
 
-      // Extension inline hooks
       let claimed = false;
       for (const ext of extensions) {
         const result = ext.renderInline?.(text, i);
@@ -670,7 +637,6 @@ function createRenderer(
     renderMarkdownWithSelection(src: string, selStart: number, selEnd: number): string {
       const clampedStart = Math.max(0, Math.min(selStart, src.length));
       const clampedEnd = Math.max(clampedStart, Math.min(selEnd, src.length));
-      // Insert end sentinel first (higher offset) so inserting it doesn't shift the start offset.
       const withEnd = src.slice(0, clampedEnd) + SEL_END_SENTINEL + src.slice(clampedEnd);
       const withBoth =
         withEnd.slice(0, clampedStart) + SEL_START_SENTINEL + withEnd.slice(clampedStart);

@@ -20,8 +20,6 @@ export function isBlockTag(tagName: string): boolean {
   return BLOCK_TAGS.has(tagName);
 }
 
-/// Noncharacter codepoints used as in-band markers during rendering.
-/// FDD0–FDD2 are permanently reserved by Unicode and never appear in real text.
 export const CURSOR_SENTINEL = "﷐";
 export const SEL_START_SENTINEL = "﷑";
 export const SEL_END_SENTINEL = "﷒";
@@ -72,7 +70,6 @@ export function clampNodeOffset(node: Node, offset: number): number {
   return Math.min(offset, node.childNodes.length);
 }
 
-/// Compute LCS and return matching pairs [aIndex, bIndex].
 export function lcs(as: string[], bs: string[]): [number, number][] {
   const n = as.length;
   const m = bs.length;

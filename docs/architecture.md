@@ -96,13 +96,3 @@ identity.
 mode, undo/redo, formatting, paste handling, and extensions. The app owns note
 lifecycle, persistence, assets, settings, tabs, and session state. See
 [Editor](editor.md) for editor-specific behavior.
-
-## Filesystem coordination
-
-The operation mutex coordinates requests handled by one server process. Hash
-checks detect many edits made by other processes before a mutation starts, but
-they do not lock the vault against editors, sync clients, or scripts. A
-non-cooperating writer can change a file after the final check and before
-replacement. Open descriptors can also write after a path-based check. Startup
-reconciliation detects some resulting mismatches; it cannot make those races
-impossible.

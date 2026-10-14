@@ -1,6 +1,4 @@
 import { expect, afterAll, describe, beforeAll, it } from "vitest";
-/// Roundtrip tests: markdown → HTML → markdown.
-/// Verifies that domToMarkdown(renderMarkdown(md)) produces equivalent output.
 
 import type { MarkdownExtension } from "../extension.ts";
 import {
@@ -71,7 +69,6 @@ describe("roundtrip", () => {
     expect(roundtrip("a\nb\n\nc\nd")).toBe("a\nb\n\nc\nd");
   });
   it("text before heading keeps heading adjacency on roundtrip", () => {
-    // The serializer keeps paragraph/heading boundaries compact for editing.
     expect(roundtrip("intro\n## Heading")).toBe("intro\n## Heading");
   });
   it("text after heading is stable", () => {
@@ -241,7 +238,6 @@ describe("roundtrip", () => {
   });
 });
 
-// Deterministic LCG pseudo-random number generator — no external dependency.
 function lcg(seed: number): number {
   // eslint-disable-next-line unicorn/prefer-math-trunc -- >>> 0 wraps to uint32, Math.trunc() does not
   return (1_664_525 * seed + 1_013_904_223) >>> 0;
@@ -383,7 +379,6 @@ describe("fuzz roundtrip", () => {
   });
 
   it("mixed blank lines in paragraph sequences", () => {
-    // Patterns: single \n, double \n\n, and triple \n\n\n all roundtrip
     for (let i = 0; i < 30; i++) {
       let seed = lcg(i + 700);
       const w1 = pick(WORDS, seed);
@@ -391,7 +386,6 @@ describe("fuzz roundtrip", () => {
       const w2 = pick(WORDS, seed);
       seed = lcg(seed);
       const w3 = pick(WORDS, seed);
-      // Two blank lines between paragraphs (three newlines total)
       const md = `${w1}\n\n\n${w2}\n${w3}`;
       expect(roundtrip(md), `iteration ${i}: ${JSON.stringify(md)}`).toBe(md);
     }

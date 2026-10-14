@@ -1,21 +1,26 @@
 # Tansu2
 
-Tansu2 is a local Markdown note app. Notes stay as ordinary `.md` files in
-configured vaults. The catalog, revision history, search index, and settings
-live in the app-managed data directory described in
-[Configuration](docs/configuration.md).
+Tansu2 stores notes as ordinary Markdown files in configured vaults. It keeps
+the catalog, revision history, search index, and settings in app-managed data.
+See [Configuration](docs/configuration.md) for storage paths.
 
-## Availability
+## Get Tansu2
 
-This repository contains no end-user installer or standalone bundle. The server
-expects a `web/` directory in its working directory. With a compatible build,
-configure a vault, run `tansu2 --port 3000`, and open
-<http://127.0.0.1:3000>.
+There is no installer. When a GitHub release is published, it includes a
+standalone `tansu2` binary for macOS arm64, Linux x86_64 musl, and Linux arm64
+musl. The binary includes the web app and does not need a separate `web/`
+directory.
 
-See [Configuration](docs/configuration.md) for vault paths and storage locations.
+## Run Tansu2
+
+Configure at least one vault, then run `tansu2`. It listens on
+`http://127.0.0.1:3000` by default. Use `tansu2 --port PORT` to choose another
+port. The server listens on loopback; use [Deployment](docs/deployment.md) for
+remote access.
+
 Read [Migration](docs/migration.md) before opening an existing vault.
 
 ## Help and license
 
-The configuration and migration guides cover vault setup and first-run
-behavior. This checkout does not specify a software license.
+See [Configuration](docs/configuration.md) for vault setup. This checkout does
+not specify a software license.
