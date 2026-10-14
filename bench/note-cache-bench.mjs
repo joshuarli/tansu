@@ -7,9 +7,10 @@ import { fileURLToPath } from "node:url";
 
 import { chromium } from "playwright";
 
+import { requireTargetNote, targetNotePath } from "./note-cache-target.mjs";
+
 const REPO_ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const RESULTS_DIR = join(REPO_ROOT, "bench", "results");
-const TARGET_NOTE_PATH = "GlobalFoundries Is A Leading-Edge Foundry Despite Claims Otherwise.md";
 const SEARCH_QUERY = "GlobalFoundries";
 const args = parseArgs(process.argv.slice(2));
 const runs = Number(args.runs ?? 9);
@@ -26,6 +27,7 @@ async function main() {
       encoding: "utf8",
     }),
   );
+  await requireTargetNote(fixture.vaultOne);
   const port = await freePort();
   const baseUrl = `http://127.0.0.1:${port}`;
   const server = spawn(
@@ -92,7 +94,7 @@ async function measureMissOpen(browser, baseUrl, noteDelayMs) {
           .find((row) => row.getAttribute("title") === notePath)
           ?.click();
       },
-      TARGET_NOTE_PATH,
+      targetNotePath,
     );
   } finally {
     await context.close();
@@ -111,7 +113,7 @@ async function measureCachedRecent(browser, baseUrl, noteDelayMs) {
           .find((row) => row.getAttribute("title") === notePath)
           ?.click();
       },
-      TARGET_NOTE_PATH,
+      targetNotePath,
     );
   } finally {
     await context.close();
@@ -132,7 +134,7 @@ async function measureCachedSearch(browser, baseUrl, noteDelayMs) {
         const rows = [...document.querySelectorAll(".search-result-row")];
         rows.find((row) => row.textContent?.includes(notePath))?.click();
       },
-      TARGET_NOTE_PATH,
+      targetNotePath,
     );
   } finally {
     await context.close();
@@ -185,13 +187,18 @@ async function measureEditorAfterAction(page, action, actionArg = null) {
         if (document.querySelector(".app-editor")) {
           return Promise.resolve();
         }
-        return new Promise((resolve) => {
+        return new Promise((resolve, reject) => {
           const observer = new MutationObserver(() => {
             if (document.querySelector(".app-editor")) {
+              window.clearTimeout(timeout);
               observer.disconnect();
               resolve(null);
             }
           });
+          const timeout = window.setTimeout(() => {
+            observer.disconnect();
+            reject(new Error("editor did not open during cache benchmark"));
+          }, 10_000);
           observer.observe(document.body, { childList: true, subtree: true });
         });
       }
@@ -221,7 +228,7 @@ async function prewarmTarget(page, baseUrl) {
   await page.goto(baseUrl);
   await page.waitForSelector(".main");
   await page
-    .locator(`.note-row[title="${cssEscape(TARGET_NOTE_PATH)}"]`)
+    .locator(`.note-row[title="${cssEscape(targetNotePath)}"]`)
     .first()
     .click();
   await page.waitForSelector(".app-editor");

@@ -1,5 +1,6 @@
 import { cp, mkdir, rm, writeFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { tmpdir } from "node:os";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 
 const REPO_ROOT = resolve(import.meta.dirname, "..");
 const SOURCE_ROOT = join(REPO_ROOT, "tests", "fixtures", "test-vaults");
@@ -13,6 +14,12 @@ export async function createTestFixture(root, opts = {}) {
   const generatedVaultTwo = join(fixtureRoot, "vault-two");
   const vaultOne = copyVaults ? generatedVaultOne : join(SOURCE_ROOT, "vault-one");
   const vaultTwo = copyVaults ? generatedVaultTwo : join(SOURCE_ROOT, "vault-two");
+
+  if (copyVaults) {
+    for (const path of [fixtureRoot, configHome, dataHome, vaultOne, vaultTwo]) {
+      assertTestFixtureRoot(path);
+    }
+  }
 
   await rm(configHome, { recursive: true, force: true });
   await rm(dataHome, { recursive: true, force: true });
@@ -41,6 +48,19 @@ path = "${vaultTwo}"
   );
 
   return { configHome, dataHome, vaultOne, vaultTwo };
+}
+
+export function assertTestFixtureRoot(path) {
+  const candidate = resolve(path);
+  const allowedRoots = [join(REPO_ROOT, ".work"), tmpdir()].map((root) => resolve(root));
+  const allowed = allowedRoots.some((root) => {
+    const fromRoot = relative(root, candidate);
+    return fromRoot === "" ||
+      (fromRoot !== ".." && !fromRoot.startsWith(`..${sep}`) && !isAbsolute(fromRoot));
+  });
+  if (!allowed) {
+    throw new Error("test fixture roots must be under .work or the OS temporary directory");
+  }
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
