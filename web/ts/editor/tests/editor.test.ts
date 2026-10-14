@@ -241,6 +241,34 @@ describe("createEditor", () => {
     handle.destroy();
   });
 
+  it("keeps block handles aligned after native paragraph input", () => {
+    const handle = createEditor(container);
+    handle.setValue("hello\n\n- item\nkeep");
+    const paragraph = handle.contentEl.querySelector("p")!;
+    const textNode = paragraph.firstChild!;
+    textNode.textContent = "hello!";
+    const range = document.createRange();
+    range.setStart(textNode, 6);
+    range.collapse(true);
+    window.getSelection()!.removeAllRanges();
+    window.getSelection()!.addRange(range);
+
+    handle.contentEl.dispatchEvent(
+      new InputEvent("input", { bubbles: true, inputType: "insertText" }),
+    );
+
+    const listHandle = handle.contentEl.querySelector("ul .md-block-handle")!;
+    listHandle.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, cancelable: true }));
+    const clipboard = new DataTransfer();
+    handle.contentEl.dispatchEvent(
+      new ClipboardEvent("copy", { bubbles: true, cancelable: true, clipboardData: clipboard }),
+    );
+
+    expect(handle.getValue()).toBe("hello!\n\n- item\nkeep");
+    expect(clipboard.getData("text/plain")).toBe("- item\n");
+    handle.destroy();
+  });
+
   it("blocks beforeinput in a structural blank separator", () => {
     const handle = createEditor(container);
     handle.setValue("foo\n\nbar");

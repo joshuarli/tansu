@@ -60,7 +60,9 @@ line host receives `data-md-line-id` and `data-md-line-index`.
 
 Block ids may be regenerated after wholesale Markdown replacement. Editing logic
 must treat block grouping as derived and disposable; Markdown lines remain the
-source of truth.
+source of truth. After native input reconciles a line into the model, block
+metadata and gutter handle ids are refreshed on the existing DOM so each handle
+addresses a block in the current model.
 
 ## Selection
 

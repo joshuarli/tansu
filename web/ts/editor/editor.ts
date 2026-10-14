@@ -506,6 +506,7 @@ export function createEditor(container: HTMLElement, config: EditorConfig = {}):
     const pos = logicalPositionFromDom(range.startContainer, range.startOffset);
     const result = replaceLineText(state, lineIndex, text, pos?.column ?? text.length);
     state = result.state;
+    if (result.changed) annotateCurrentDom();
     return result.changed || result.renderHint.kind === "none";
   }
 
@@ -556,6 +557,7 @@ export function createEditor(container: HTMLElement, config: EditorConfig = {}):
       pos?.column ?? contentStart + content.length,
     );
     state = result.state;
+    if (result.changed) annotateCurrentDom();
     return result.changed || result.renderHint.kind === "none";
   }
 
@@ -673,6 +675,7 @@ export function createEditor(container: HTMLElement, config: EditorConfig = {}):
     const sel = window.getSelection();
     sel?.removeAllRanges();
     sel?.addRange(range);
+    annotateCurrentDom();
     updateActiveBlankVisibility();
   }
 

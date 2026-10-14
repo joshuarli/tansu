@@ -90,33 +90,23 @@ function annotateLineElement(el: HTMLElement, doc: EditorDoc, line: number): voi
 }
 
 function ensureBlockHandle(el: HTMLElement, blockId: string): void {
-  const existing = findOwnBlockHandle(el, blockId);
-  if (existing instanceof HTMLElement) {
-    existing.dataset["mdBlockHandle"] = blockId;
-    return;
-  }
   const host = blockHandleHost(el);
   if (host === null) return;
-  const handle = document.createElement("button");
-  handle.type = "button";
-  handle.className = "md-block-handle";
-  handle.contentEditable = "false";
-  handle.tabIndex = 0;
-  handle.ariaLabel = "Select block";
+  const handles = [...host.querySelectorAll<HTMLButtonElement>(":scope > .md-block-handle")];
+  let handle = handles[0];
+  if (handle === undefined) {
+    handle = document.createElement("button");
+    handle.type = "button";
+    handle.className = "md-block-handle";
+    handle.contentEditable = "false";
+    handle.tabIndex = 0;
+    handle.ariaLabel = "Select block";
+    host.append(handle);
+  }
+  for (const duplicate of handles.slice(1)) {
+    duplicate.remove();
+  }
   handle.dataset["mdBlockHandle"] = blockId;
-  host.append(handle);
-}
-
-function findOwnBlockHandle(el: HTMLElement, blockId: string): HTMLElement | null {
-  return (
-    el.querySelector<HTMLElement>(`:scope > .md-block-handle[data-md-block-handle="${blockId}"]`) ??
-    el.querySelector<HTMLElement>(
-      `:scope > li > .md-block-handle[data-md-block-handle="${blockId}"]`,
-    ) ??
-    el.querySelector<HTMLElement>(
-      `:scope > caption > .md-block-handle[data-md-block-handle="${blockId}"]`,
-    )
-  );
 }
 
 function blockHandleHost(el: HTMLElement): HTMLElement | null {
