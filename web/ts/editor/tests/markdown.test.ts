@@ -369,9 +369,9 @@ describe("inline branches", () => {
 
   it("standard image can resolve vault-local asset URLs without changing source", () => {
     const html = renderMarkdown("![alt text](z-images/photo.webp)", {
-      resolveImageUrl: (src) => `/api/assets?name=${encodeURIComponent(src)}&vault=1`,
+      resolveImageUrl: (src) => `/api/v2/vaults/vault-1/assets?name=${encodeURIComponent(src)}`,
     });
-    expect(html).toContain('src="/api/assets?name=z-images%2Fphoto.webp&amp;vault=1"');
+    expect(html).toContain('src="/api/v2/vaults/vault-1/assets?name=z-images%2Fphoto.webp"');
     expect(html).toContain('data-md-image-src="z-images/photo.webp"');
   });
 

@@ -1679,6 +1679,26 @@ mod tests {
     }
 
     #[test]
+    fn listener_with_shutdown_returns_for_a_cancelled_token() {
+        let root = tempfile::tempdir().unwrap();
+        let app = App::new(Config {
+            vaults: vec![VaultConfig {
+                name: "Test".to_string(),
+                path: root.path().join("vault"),
+                state_path: root.path().join("state"),
+                excluded_folders: Vec::new(),
+            }],
+            auth: None,
+        })
+        .unwrap();
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let shutdown = CancellationToken::new();
+        shutdown.cancel();
+
+        serve_listener_with_shutdown(app, listener, ServerServices::default(), shutdown).unwrap();
+    }
+
+    #[test]
     fn embedded_static_assets_are_fingerprinted_and_confined() {
         let shell = serve_static_path("/").unwrap();
         assert_eq!(shell.status(), 200);

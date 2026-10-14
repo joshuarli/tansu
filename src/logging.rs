@@ -764,7 +764,7 @@ mod tests {
                     "kind": "client.api",
                     "requestId": "cli-1",
                     "client": { "seq": 1, "url": "http://127.0.0.1:3000/" },
-                    "http": { "method": "GET", "path": "/api/bootstrap", "status": 200 }
+                    "http": { "method": "GET", "path": "/api/v2/bootstrap", "status": 200 }
                 }
             ]
         }))
@@ -777,7 +777,7 @@ mod tests {
         assert_eq!(event.source, LogSource::Client);
         assert_eq!(event.request_id.as_deref(), Some("cli-1"));
         assert_eq!(event.fields["client"]["seq"], Value::from(1));
-        assert_eq!(event.fields["http"]["path"], Value::from("/api/bootstrap"));
+        assert_eq!(event.fields["http"]["path"], Value::from("/api/v2/bootstrap"));
     }
 
     #[test]

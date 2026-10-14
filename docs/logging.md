@@ -29,7 +29,6 @@ These endpoints are available only when logging is enabled:
 | ------ | ---------------------- | ------------------------------- |
 | `POST` | `/api/dev/logs`        | Ingest browser or harness events |
 | `GET`  | `/api/dev/logs`        | Read the retained snapshot       |
-| `GET`  | `/api/dev/logs/stream` | Subscribe by SSE                 |
 
 Snapshots have the shape `{ "events": [] }`. These endpoints are excluded from
 normal request logging and are not part of the generated API types.

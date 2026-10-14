@@ -128,7 +128,7 @@ describe("serialize", () => {
     expect(
       domToMarkdown(
         html(
-          '<p><img src="/api/assets?name=z-images%2Fphoto.webp&amp;vault=1" data-md-image-src="z-images/photo.webp" alt="desc"></p>',
+          '<p><img src="/api/v2/vaults/vault-1/assets?name=z-images%2Fphoto.webp" data-md-image-src="z-images/photo.webp" alt="desc"></p>',
         ),
       ),
     ).toBe("![desc](z-images/photo.webp)");
@@ -196,7 +196,7 @@ describe("serialize", () => {
     expect(
       domToMarkdown(
         html(
-          '<h1>Visual Checkseeded note</h1><p data-md-blank="true">Inserted in blank line</p><p>This seeded note checks the editor layout, tabs, and quiet chrome.</p><p><img data-wiki-image="z-images/sample.webp" src="/api/assets?name=z-images%2Fsample.webp&amp;vault=0" alt="z-images/sample.webp" width="132"></p>',
+          '<h1>Visual Checkseeded note</h1><p data-md-blank="true">Inserted in blank line</p><p>This seeded note checks the editor layout, tabs, and quiet chrome.</p><p><img data-wiki-image="z-images/sample.webp" src="/api/v2/vaults/vault-1/assets?name=z-images%2Fsample.webp" alt="z-images/sample.webp" width="132"></p>',
         ),
         wikiImageOpts,
       ),

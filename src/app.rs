@@ -1,11 +1,7 @@
 use std::sync::Arc;
 
-use std::io::Write;
-use std::net::TcpStream;
-
-use crate::api_types::{V2BootstrapResponse, VaultEntry};
+use crate::api_types::V2BootstrapResponse;
 use crate::config::{Config, initialize_state_layout};
-use crate::http::HttpRequest;
 use crate::logging::{LogHub, LogLevel, fields};
 use crate::vault::{EventSubscription, VaultRuntime};
 use crate::{Error, Result};
@@ -19,7 +15,10 @@ pub struct App {
 
 impl App {
     pub fn new(config: Config) -> Result<Self> {
-        let logs = LogHub::from_env();
+        Self::from_config(config, LogHub::from_env())
+    }
+
+    fn from_config(config: Config, logs: LogHub) -> Result<Self> {
         let (server_instance_id, vault_configs) = initialize_state_layout(&config.vaults)?;
         let mut runtimes = Vec::new();
         for (index, vault) in vault_configs.iter().enumerate() {
@@ -51,13 +50,6 @@ impl App {
         Ok(app)
     }
 
-    pub fn vault(&self, index: usize) -> Result<Arc<VaultRuntime>> {
-        self.vaults
-            .get(index)
-            .cloned()
-            .ok_or_else(|| Error::BadRequest(format!("unknown vault index {index}")))
-    }
-
     pub fn vault_by_id(&self, vault_id: &str) -> Result<Arc<VaultRuntime>> {
         self.vaults
             .iter()
@@ -87,85 +79,45 @@ impl App {
             .subscribe_v2_events(after_event_version)
     }
 
-    pub fn vault_entries(&self) -> Vec<VaultEntry> {
-        self.vaults
-            .iter()
-            .map(|vault| VaultEntry {
-                index: vault.index,
-                name: vault.name.clone(),
-            })
-            .collect()
-    }
-
     pub fn logs(&self) -> &LogHub {
         &self.logs
     }
+}
 
-    pub fn handle_events(&self, request: &HttpRequest, stream: &mut TcpStream) -> Result<()> {
-        let vault_index = request
-            .path
-            .split_once('?')
-            .and_then(|(_, query)| {
-                query
-                    .split('&')
-                    .find_map(|pair| pair.split_once("vault=")?.1.parse().ok())
-            })
-            .unwrap_or(0);
-        let vault = self.vault(vault_index)?;
-        let rx = vault.subscribe()?;
-        if self.logs.enabled() {
-            self.logs.server_event(
-                LogLevel::Info,
-                "system.event",
-                None,
-                fields([
-                    (
-                        "system",
-                        serde_json::json!({ "component": "sse", "action": "connect" }),
-                    ),
-                    ("vault", serde_json::json!(vault_index)),
-                ]),
-            );
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::logging::LogMode;
+    use tempfile::TempDir;
+
+    fn config(root: &TempDir) -> Config {
+        Config {
+            vaults: vec![crate::config::VaultConfig {
+                name: "Notes".to_string(),
+                path: root.path().join("notes"),
+                state_path: root.path().join("state"),
+                excluded_folders: Vec::new(),
+            }],
+            auth: None,
         }
-        write!(
-            stream,
-            "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\nConnection: keep-alive\r\nX-Accel-Buffering: no\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\n\r\nretry: 2000\n\n"
-        )?;
-        for event in rx {
-            let json = serde_json::to_string(&event)?;
-            stream.write_all(format!("event: message\ndata: {json}\n\n").as_bytes())?;
-            stream.flush()?;
-        }
-        if self.logs.enabled() {
-            self.logs.server_event(
-                LogLevel::Info,
-                "system.event",
-                None,
-                fields([
-                    (
-                        "system",
-                        serde_json::json!({ "component": "sse", "action": "disconnect" }),
-                    ),
-                    ("vault", serde_json::json!(vault_index)),
-                ]),
-            );
-        }
-        Ok(())
     }
 
-    pub fn handle_log_stream(&self, stream: &mut TcpStream) -> Result<()> {
-        let Some(rx) = self.logs.subscribe() else {
-            return Err(Error::NotFound("dev logs".to_string()));
-        };
-        write!(
-            stream,
-            "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\nConnection: keep-alive\r\nX-Accel-Buffering: no\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\n\r\nretry: 2000\n\n"
-        )?;
-        for event in rx {
-            let json = serde_json::to_string(&event)?;
-            stream.write_all(format!("event: message\ndata: {json}\n\n").as_bytes())?;
-            stream.flush()?;
-        }
-        Ok(())
+    #[test]
+    fn app_records_startup_and_resolves_v2_event_subscriptions_by_vault_id() {
+        let root = tempfile::tempdir().unwrap();
+        let logs = LogHub::new(LogMode::Buffer);
+        let app = App::from_config(config(&root), logs.clone()).unwrap();
+        let startup = logs.snapshot();
+        assert!(startup.events.iter().any(|event| {
+            event.fields["system"]["component"] == "startup"
+                && event.fields["system"]["action"] == "app_open"
+        }));
+
+        let vault_id = app.v2_bootstrap().vaults[0].vault_id.clone();
+        let subscription = app.subscribe_v2_events(&vault_id, None).unwrap();
+        assert_eq!(subscription.current_version, 0);
+        assert!(subscription.replay.is_empty());
+        assert!(!subscription.resync_required);
+        assert!(app.subscribe_v2_events("missing", None).is_err());
     }
 }
