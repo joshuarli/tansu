@@ -1,6 +1,16 @@
 # RFC 0002: WebAuthn RP ID validation
 
-**Status:** Proposed
+**Status:** Accepted
+
+## Decision
+
+Use the maintained `psl` crate to reject RP IDs that are public suffixes while
+preserving valid parent-domain RP IDs. The crate embeds Mozilla's Public
+Suffix List, so validation does not depend on network access at runtime. Keep
+the dependency and list data current through normal dependency updates. The
+crate adds `psl-types` as its only transitive dependency; its code is MIT or
+Apache-2.0, and the list data is MPL-2.0, which the repository license policy
+allows.
 
 ## Problem
 
@@ -21,7 +31,6 @@ when a browser starts a passkey ceremony.
 
 ## Recommendation
 
-Use a maintained public suffix list, or exact-host validation if its dependency
-and binary-size cost exceeds the project's gates. Reject invalid values during
+Use a maintained public suffix list. Reject invalid values during
 configuration parsing and keep the documented RP ID rules aligned with the
 validator.

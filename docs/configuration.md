@@ -43,13 +43,11 @@ rp_name = "Tansu"
 state_directory = "auth"
 ```
 
-All five fields are required. The origin must use HTTPS, and the RP ID must
-match the origin host or be a registrable domain suffix of it. A public suffix
-such as `com` is invalid for WebAuthn. The current configuration validator
-checks only host suffixes; see [RFC 0002](rfcs/0002-webauthn-rp-id-validation.md)
-for the proposed validation rule. Tansu2 stores passkeys
-under `tansu/identity/<state_directory>` in `XDG_DATA_HOME`; the value must be
-one directory name. The auth directory is private to the server account.
+All five fields are required. The origin must use HTTPS. The RP ID must match
+the origin host or be a registrable domain suffix of it. A parent RP ID equal
+to a public suffix such as `com` or `co.uk` is rejected. Tansu2 stores
+passkeys under `tansu/identity/<state_directory>` in `XDG_DATA_HOME`; the value
+must be one directory name. The auth directory is private to the server account.
 `external_origin` must be the exact HTTPS URL that browsers use. For Tailscale
 Serve, use the machine's HTTPS tailnet DNS name and set `rp_id` to that hostname
 or a parent domain allowed by WebAuthn.

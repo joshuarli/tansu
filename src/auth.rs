@@ -70,8 +70,14 @@ impl AuthPolicy {
         }
         let rp_id = rp_id.to_ascii_lowercase();
         let hostname = host.split(':').next().unwrap_or(&host).trim_matches(['[', ']']);
-        if hostname != rp_id && !hostname.ends_with(&format!(".{rp_id}")) {
-            return Err(AuthError::InvalidRequest("RP ID must match the configured origin host".into()));
+        let exact_origin_host = hostname == rp_id;
+        let registrable_origin_suffix = hostname
+            .strip_suffix(&rp_id)
+            .is_some_and(|prefix| prefix.ends_with('.') && psl::domain_str(&rp_id).is_some());
+        if !exact_origin_host && !registrable_origin_suffix {
+            return Err(AuthError::InvalidRequest(
+                "RP ID must match the origin host or be a registrable domain suffix".into(),
+            ));
         }
         Ok(Self::Authenticated {
             external_origin: external_origin.to_string(),
@@ -1529,6 +1535,15 @@ mod tests {
         assert!(AuthPolicy::authenticated("https://notes.example.com", "elsewhere.test", "Tansu").is_err());
         let policy = AuthPolicy::authenticated("https://notes.example.com", "example.com", "Tansu").unwrap();
         assert_eq!(policy.rp(), Some(("example.com", "https://notes.example.com", "Tansu")));
+    }
+
+    #[test]
+    fn authenticated_mode_rejects_public_suffix_rp_ids() {
+        assert!(AuthPolicy::authenticated("https://notes.example.com", "com", "Tansu").is_err());
+        assert!(AuthPolicy::authenticated("https://notes.example.co.uk", "co.uk", "Tansu").is_err());
+        assert!(AuthPolicy::authenticated("https://notes.example.co.uk", "example.co.uk", "Tansu").is_ok());
+        assert!(AuthPolicy::authenticated("https://login.dev.example.com", "dev.example.com", "Tansu").is_ok());
+        assert!(AuthPolicy::authenticated("https://notes.example.com", "notes.example.com", "Tansu").is_ok());
     }
 
     #[test]

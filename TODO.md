@@ -3,16 +3,6 @@
 Prefix: TNS
 Next: 21
 
-### TNS-3 · P2 · Validate RP IDs against public suffix rules
-
-- **Area:** Authentication configuration
-- **Where:** `src/auth.rs:63-78`, `docs/configuration.md:46-53`
-- **Problem:** Validation accepts any host suffix, including `com`; WebAuthn clients reject a public suffix as an RP ID, so configuration succeeds but passkey ceremonies fail in the browser. The [WebAuthn RP ID rules](https://www.w3.org/TR/webauthn-3/#rp-id) require the ID to equal the origin's effective domain or be a registrable domain suffix.
-- **Recommendation:** Reject invalid RP IDs during configuration and select a maintained public-suffix source or a narrower supported RP ID rule.
-- **Fix with:** none
-- **Effort:** M
-- **Design:** `docs/rfcs/0002-webauthn-rp-id-validation.md`
-
 ### TNS-4 · P2 · Apply a policy to non-increasing passkey counters
 
 - **Area:** Authentication
