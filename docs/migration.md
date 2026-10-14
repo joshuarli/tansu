@@ -35,6 +35,18 @@ catalog exists. These copies do not remove the old state. Keep your backup until
 you confirm the notes, history, and settings are present. This does not import
 revision or settings formats from other note applications.
 
+## Run the state migration
+
+Stop Tansu2 before migrating. Preview the configured vaults and destination
+with `tansu2 migrate --dry-run /path/to/config.toml`. When the report is correct,
+run `tansu2 migrate /path/to/config.toml`. The command copies existing
+application state to a unique sibling backup before creating the stable
+vault-ID directories; it preserves the original state. Keep the backup until
+you have confirmed the app opens the expected notes, history, and settings.
+The migration command operates on the paths in the config, so run it as the
+same local account that owns those files and do not run it concurrently with
+other processes changing the config or app data.
+
 The new catalog may not be readable by an older Tansu2 build. To roll back,
 stop the server and restore the matching app data and config backup along with
 the old binary. The Markdown files remain ordinary vault files, but restoring
