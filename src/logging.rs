@@ -689,6 +689,72 @@ mod tests {
     }
 
     #[test]
+    fn bounds_nested_values_and_oversized_events() {
+        let hub = LogHub::new(LogMode::Buffer);
+        let mut nested = Map::new();
+        nested.insert(
+            "long-key-".to_string() + &"x".repeat(140),
+            Value::String("三".repeat(1000)),
+        );
+        nested.insert(
+            "items".to_string(),
+            Value::Array((0..40).map(Value::from).collect()),
+        );
+        let mut fields = Map::new();
+        fields.insert("nested".to_string(), Value::Object(nested));
+        for index in 0..10 {
+            fields.insert(
+                format!("large-{index}"),
+                Value::String("x".repeat(MAX_STRING_BYTES)),
+            );
+        }
+        hub.ingest(IncomingLogEvent {
+            source: LogSource::Harness,
+            level: LogLevel::Info,
+            kind: "k".repeat(140),
+            request_id: Some("r".repeat(140)),
+            fields,
+        });
+
+        let event = hub.snapshot().events.remove(0);
+        assert!(event.kind.len() <= 131);
+        assert!(event.request_id.as_deref().unwrap().len() <= 131);
+        assert!(event.fields.get("truncated").unwrap().as_bool().unwrap());
+        assert!(event.fields.get("summary").unwrap().as_str().unwrap().len() <= MAX_EVENT_BYTES / 2 + 3);
+
+        let nested_event = sanitize_map(Map::from_iter([(
+            "nested".to_string(),
+            Value::Object(Map::from_iter([
+                ("key-".to_string() + &"x".repeat(140), Value::String("三".repeat(1000))),
+                ("items".to_string(), Value::Array((0..40).map(Value::from).collect())),
+            ])),
+        )]));
+        let nested = nested_event["nested"].as_object().unwrap();
+        let (key, value) = nested.iter().find(|(key, _)| key.starts_with("key-")).unwrap();
+        assert!(key.len() <= 131);
+        assert_eq!(value.as_str().unwrap().len(), 2049);
+        assert_eq!(nested["items"].as_array().unwrap().len(), 32);
+    }
+
+    #[test]
+    fn off_mode_neither_stores_events_nor_subscribes() {
+        let hub = LogHub::new(LogMode::Off);
+        assert!(!hub.enabled());
+        assert!(hub.subscribe().is_none());
+        hub.server_event(LogLevel::Error, "system.event", None, Map::new());
+        assert!(hub.snapshot().events.is_empty());
+    }
+
+    #[test]
+    fn removes_subscribers_after_receivers_are_dropped() {
+        let hub = LogHub::new(LogMode::Buffer);
+        let receiver = hub.subscribe().unwrap();
+        drop(receiver);
+        hub.server_event(LogLevel::Info, "system.event", None, Map::new());
+        assert!(hub.inner.state.lock().unwrap().subscribers.is_empty());
+    }
+
+    #[test]
     fn accepts_structured_client_payload_fields() {
         let batch: IncomingLogBatch = serde_json::from_value(serde_json::json!({
             "events": [
@@ -721,5 +787,103 @@ mod tests {
             format_timestamp(1_717_777_777_123),
             "2024-06-07T16:29:37.123Z"
         );
+        assert_eq!(civil_from_days(-1), (1969, 12, 31));
+    }
+
+    #[test]
+    fn pretty_summaries_cover_log_event_shapes() {
+        let http = event(
+            "http.request",
+            serde_json::json!({
+                "http": {
+                    "method": "GET",
+                    "path": "/notes",
+                    "url": "https://notes.example/notes",
+                    "status": 200,
+                    "durationMs": 3,
+                    "vault": 2,
+                    "failure": "timeout"
+                },
+                "error": {"code": "io_error"}
+            }),
+        );
+        let http_summary = pretty_summary(&http);
+        for value in ["GET", "/notes", "200", "3ms", "vault=2", "timeout", "error=io_error"] {
+            assert!(http_summary.contains(value));
+        }
+
+        let note = event(
+            "note.save",
+            serde_json::json!({
+                "mutation": {"action": "save"},
+                "read": {"action": "open"},
+                "note": {"path": "A.md", "id": "n1", "vault": 1}
+            }),
+        );
+        let note_summary = pretty_summary(&note);
+        for value in ["action=save", "action=open", "path=A.md", "note=n1", "vault=1"] {
+            assert!(note_summary.contains(value));
+        }
+
+        let command = event("client.command", serde_json::json!({"command": {"id": "save", "action": "run"}}));
+        assert!(pretty_summary(&command).contains("cmd=save action=run"));
+        let editor = event("client.editor", serde_json::json!({"editor": {"action": "change", "sourceMode": true, "reading": false}}));
+        assert!(pretty_summary(&editor).contains("editor=change sourceMode=true reading=false"));
+        let search = event("search.query", serde_json::json!({"search": {"surface": "vault", "action": "submit", "hits": 4, "queryLength": 7}}));
+        assert!(pretty_summary(&search).contains("surface=vault action=submit hits=4 qlen=7"));
+        let system = event("system.event", serde_json::json!({"system": {"component": "watcher", "action": "restart"}}));
+        assert!(pretty_summary(&system).contains("watcher/restart"));
+        let client_error = event("client.error", serde_json::json!({"error": {"name": "TypeError", "message": "failed"}}));
+        assert!(pretty_summary(&client_error).contains("error=TypeError msg=failed"));
+        assert!(pretty_summary(&event("other", serde_json::json!({}))).is_empty());
+
+        let pretty_event = LogEvent {
+            seq: 1,
+            ts: 0,
+            source: LogSource::Harness,
+            level: LogLevel::Warn,
+            kind: "system.event".to_string(),
+            request_id: Some("req-1".to_string()),
+            fields: Map::new(),
+        };
+        assert!(pretty_payload(&pretty_event).is_empty());
+        assert!(pretty_payload(&event("other", serde_json::json!({"value": 1}))).contains("value"));
+        assert_eq!(compact_value(&serde_json::json!({"code": "blocked", "message": "ignored"})), "blocked");
+        assert_eq!(compact_value(&serde_json::json!({"message": "details"})), "details");
+        assert_eq!(compact_value(&serde_json::json!({"other": 1})), "{\"other\":1}");
+        assert_eq!(compact_value(&Value::String("plain".to_string())), "plain");
+        assert_eq!(compact_value(&Value::Bool(true)), "true");
+
+        for level in [LogLevel::Debug, LogLevel::Info, LogLevel::Warn, LogLevel::Error] {
+            assert!(!format_level(level).is_empty());
+            print_event(LogMode::Pretty, &LogEvent { level, ..pretty_event.clone() });
+        }
+        for source in [LogSource::Server, LogSource::Client, LogSource::Harness] {
+            assert!(!source_color(source).is_empty());
+            assert!(!log_source_label(source).is_empty());
+            print_event(LogMode::Json, &LogEvent { source, ..pretty_event.clone() });
+        }
+        assert_eq!(kind_color(LogLevel::Debug), GRAY);
+        assert_eq!(kind_color(LogLevel::Info), GRAY);
+        assert_eq!(kind_color(LogLevel::Warn), BOLD);
+        assert_eq!(kind_color(LogLevel::Error), BOLD);
+        assert_eq!(style_detail(LogLevel::Info, "detail"), color(DIM, "detail"));
+        assert_eq!(style_detail(LogLevel::Error, "detail"), "detail");
+        assert!(!LogMode::Off.prints());
+        assert!(!LogMode::Buffer.prints());
+        assert!(LogMode::Pretty.prints());
+        assert!(LogMode::Json.prints());
+    }
+
+    fn event(kind: &str, fields: Value) -> LogEvent {
+        LogEvent {
+            seq: 1,
+            ts: 0,
+            source: LogSource::Server,
+            level: LogLevel::Info,
+            kind: kind.to_string(),
+            request_id: None,
+            fields: fields.as_object().unwrap().clone(),
+        }
     }
 }

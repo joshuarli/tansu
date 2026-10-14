@@ -600,6 +600,144 @@ mod tests {
     }
 
     #[test]
+    fn v2_error_responses_keep_status_and_request_context() {
+        let cases = [
+            (V2ApiErrorKind::AssetNotFound { name: "x.webp".to_string() }, 404),
+            (V2ApiErrorKind::BadRequest { message: "bad input".to_string() }, 400),
+            (V2ApiErrorKind::MutationIdReuse { mutation_id: "m1".to_string() }, 409),
+            (V2ApiErrorKind::RequestTooLarge { limit_bytes: 16 }, 413),
+            (V2ApiErrorKind::AuthRequired, 401),
+            (V2ApiErrorKind::Forbidden, 403),
+            (V2ApiErrorKind::RateLimited { retry_after_ms: 10 }, 429),
+            (V2ApiErrorKind::NotImplemented, 501),
+            (V2ApiErrorKind::Internal { request_id: "request-1".to_string() }, 500),
+        ];
+
+        for (error, status) in cases {
+            assert_eq!(v2_api_error_response(error, "fallback").status(), status);
+        }
+
+        assert_eq!(
+            v2_vault_error_response(
+                V2VaultError::Internal(Error::BadRequest("invalid state".to_string())),
+                "request-2",
+            )
+            .status(),
+            400
+        );
+        let internal = v2_vault_error_response(
+            V2VaultError::Internal(Error::Internal("private detail".to_string())),
+            "request-3",
+        );
+        assert_eq!(internal.status(), 500);
+        assert!(String::from_utf8_lossy(internal.body()).contains("request-3"));
+        assert!(!String::from_utf8_lossy(internal.body()).contains("private detail"));
+    }
+
+    #[test]
+    fn v2_rejects_invalid_routes_bodies_and_image_headers() {
+        let fixture = app_fixture(&[("One", &[])]);
+        let app = fixture.app();
+        let server_id = app.server_instance_id().to_string();
+        let vault_id = app.v2_bootstrap().vaults[0].vault_id.clone();
+        let vault_path = format!("/api/v2/vaults/{vault_id}");
+
+        let no_server = validate_v2_server_instance(&app, &[]).unwrap_err();
+        assert!(matches!(no_server, V2ApiErrorKind::ServerInstanceMismatch { received, .. } if received.is_empty()));
+        let duplicate = validate_v2_server_instance(
+            &app,
+            &[
+                ("X-Tansu-Server-Instance".to_string(), server_id.clone()),
+                ("x-tansu-server-instance".to_string(), server_id.clone()),
+            ],
+        )
+        .unwrap_err();
+        assert!(matches!(duplicate, V2ApiErrorKind::ServerInstanceMismatch { received, .. } if received == "<multiple>"));
+        let long_unicode = "三".repeat(100);
+        let truncated = validate_v2_server_instance(
+            &app,
+            &[("X-Tansu-Server-Instance".to_string(), long_unicode)],
+        )
+        .unwrap_err();
+        assert!(matches!(truncated, V2ApiErrorKind::ServerInstanceMismatch { received, .. } if received.len() == 255));
+
+        for path in ["/api/v2/outside", &vault_path] {
+            let response = handle_v2_api(
+                &app,
+                &v2_request("GET", path, Some(&server_id), &[], &[]),
+                "request-route",
+            );
+            assert_eq!(response.status(), 501);
+        }
+        let invalid_segment = handle_v2_api(
+            &app,
+            &v2_request(
+                "GET",
+                &format!("{vault_path}/notes/%GG"),
+                Some(&server_id),
+                &[],
+                &[],
+            ),
+            "request-segment",
+        );
+        assert_eq!(invalid_segment.status(), 400);
+        let invalid_json = handle_v2_api(
+            &app,
+            &v2_request(
+                "POST",
+                &format!("{vault_path}/notes"),
+                Some(&server_id),
+                b"{",
+                &[],
+            ),
+            "request-json",
+        );
+        assert_eq!(invalid_json.status(), 400);
+        let invalid_revision = handle_v2_api(
+            &app,
+            &v2_request(
+                "GET",
+                &format!("{vault_path}/notes/missing/revisions/nope"),
+                Some(&server_id),
+                &[],
+                &[],
+            ),
+            "request-revision",
+        );
+        assert_eq!(invalid_revision.status(), 400);
+        let wrong_image_type = handle_v2_api(
+            &app,
+            &v2_request(
+                "POST",
+                &format!("{vault_path}/images"),
+                Some(&server_id),
+                b"webp",
+                &[],
+            ),
+            "request-image-type",
+        );
+        assert_eq!(wrong_image_type.status(), 400);
+        let missing_mutation_id = handle_v2_api(
+            &app,
+            &v2_request(
+                "POST",
+                &format!("{vault_path}/images"),
+                Some(&server_id),
+                b"webp",
+                &[("Content-Type".to_string(), "image/webp".to_string())],
+            ),
+            "request-image-id",
+        );
+        assert_eq!(missing_mutation_id.status(), 400);
+        let missing_asset_name = handle_v2_api(
+            &app,
+            &v2_request("GET", &format!("{vault_path}/assets"), Some(&server_id), &[], &[]),
+            "request-asset-name",
+        );
+        assert_eq!(missing_asset_name.status(), 400);
+    }
+
+    #[test]
     fn v2_mutations_replay_and_asset_routes_use_typed_responses() {
         let fixture = app_fixture(&[("One", &[])]);
         let app = fixture.app();
@@ -695,6 +833,401 @@ mod tests {
         );
         assert_eq!(asset.body(), image_bytes);
         assert_eq!(asset.content_type(), "image/webp");
+    }
+
+    #[test]
+    fn v2_read_routes_return_vault_note_revision_and_search_data() {
+        use crate::api_types::{
+            V2BootstrapResponse, V2NoteDocument, V2QuickOpenResponse, V2RevisionDocument,
+            V2RevisionMeta, V2SearchResponse, V2VaultBootstrapResponse,
+        };
+
+        let fixture = app_fixture(&[("One", &[("one.md", "# One\n\nalpha\n")])]);
+        let app = fixture.app();
+        let server_id = app.server_instance_id().to_string();
+        let vault_id = app.v2_bootstrap().vaults[0].vault_id.clone();
+        let bootstrap: V2BootstrapResponse = serde_json::from_slice(
+            handle_v2_api(&app, &v2_request("GET", "/api/v2/bootstrap", None, &[], &[]), "req")
+                .body(),
+        )
+        .unwrap();
+        assert_eq!(bootstrap.api_version, 2);
+        assert_eq!(bootstrap.vaults[0].vault_id, vault_id);
+
+        let vault_path = format!("/api/v2/vaults/{vault_id}");
+        let vault: V2VaultBootstrapResponse = serde_json::from_slice(
+            handle_v2_api(
+                &app,
+                &v2_request("GET", &format!("{vault_path}/bootstrap"), Some(&server_id), &[], &[]),
+                "req",
+            )
+            .body(),
+        )
+        .unwrap();
+        assert_eq!(vault.notes.len(), 1);
+        let note_id = vault.notes[0].note_id.clone();
+
+        let note: V2NoteDocument = serde_json::from_slice(
+            handle_v2_api(
+                &app,
+                &v2_request("GET", &format!("{vault_path}/notes/{note_id}"), Some(&server_id), &[], &[]),
+                "req",
+            )
+            .body(),
+        )
+        .unwrap();
+        assert_eq!(note.content, "# One\n\nalpha\n");
+
+        let revisions: Vec<V2RevisionMeta> = serde_json::from_slice(
+            handle_v2_api(
+                &app,
+                &v2_request(
+                    "GET",
+                    &format!("{vault_path}/notes/{note_id}/revisions"),
+                    Some(&server_id),
+                    &[],
+                    &[],
+                ),
+                "req",
+            )
+            .body(),
+        )
+        .unwrap();
+        let revision: V2RevisionDocument = serde_json::from_slice(
+            handle_v2_api(
+                &app,
+                &v2_request(
+                    "GET",
+                    &format!("{vault_path}/notes/{note_id}/revisions/{}", revisions[0].revision),
+                    Some(&server_id),
+                    &[],
+                    &[],
+                ),
+                "req",
+            )
+            .body(),
+        )
+        .unwrap();
+        assert_eq!(revision.content, note.content);
+
+        let settings = handle_v2_api(
+            &app,
+            &v2_request("GET", &format!("{vault_path}/settings"), Some(&server_id), &[], &[]),
+            "req",
+        );
+        assert_eq!(settings.status(), 200);
+        let saved_settings = handle_v2_api(
+            &app,
+            &v2_request(
+                "PUT",
+                &format!("{vault_path}/settings"),
+                Some(&server_id),
+                &serde_json::json!({
+                    "mutationId": "settings-route",
+                    "settings": crate::api_types::Settings::default()
+                })
+                .to_string()
+                .into_bytes(),
+                &[],
+            ),
+            "req",
+        );
+        assert_eq!(saved_settings.status(), 200);
+        let search: V2SearchResponse = serde_json::from_slice(
+            handle_v2_api(
+                &app,
+                &v2_request(
+                    "POST",
+                    &format!("{vault_path}/search"),
+                    Some(&server_id),
+                    br#"{"query":"alpha","mode":"default","limit":10,"overlays":[]}"#,
+                    &[],
+                ),
+                "req",
+            )
+            .body(),
+        )
+        .unwrap();
+        assert_eq!(search.hits.len(), 1);
+
+        let quick_open: V2QuickOpenResponse = serde_json::from_slice(
+            handle_v2_api(
+                &app,
+                &v2_request(
+                    "POST",
+                    &format!("{vault_path}/quick-open"),
+                    Some(&server_id),
+                    &serde_json::json!({
+                        "query": "",
+                        "pinnedNoteIds": [note_id],
+                        "recentNoteIds": [],
+                        "limit": 10
+                    })
+                    .to_string()
+                    .into_bytes(),
+                    &[],
+                ),
+                "req",
+            )
+            .body(),
+        )
+        .unwrap();
+        assert_eq!(quick_open.hits.len(), 1);
+        assert_eq!(quick_open.hits[0].note_id, note_id);
+    }
+
+    #[test]
+    fn v2_mutation_routes_save_restore_rename_and_delete_notes() {
+        use crate::api_types::{
+            V2ConflictDraftDocument, V2MutationOutcome, V2MutationResponse, V2NoteDocument,
+            V2RevisionMeta,
+        };
+
+        let fixture = app_fixture(&[("One", &[("one.md", "# One\n\nalpha\n")])]);
+        let app = fixture.app();
+        let server_id = app.server_instance_id().to_string();
+        let vault_id = app.v2_bootstrap().vaults[0].vault_id.clone();
+        let vault_path = format!("/api/v2/vaults/{vault_id}");
+        let note_id = app.vault(0).unwrap().v2_notes().unwrap()[0].note_id.clone();
+        let note_path = format!("{vault_path}/notes/{note_id}");
+        let original = app.vault(0).unwrap().v2_open_note(&note_id).unwrap();
+
+        let saved_content = "# One\n\nchanged\n";
+        let saved: V2MutationResponse = serde_json::from_slice(
+            handle_v2_api(
+                &app,
+                &v2_request(
+                    "PUT",
+                    &note_path,
+                    Some(&server_id),
+                    &serde_json::json!({
+                        "mutationId": "save-route",
+                        "precondition": v2_precondition(&original.meta),
+                        "content": saved_content,
+                        "sourceHash": crate::history::source_hash(saved_content)
+                    })
+                    .to_string()
+                    .into_bytes(),
+                    &[],
+                ),
+                "req",
+            )
+            .body(),
+        )
+        .unwrap();
+        let V2MutationOutcome::Accepted { result: Some(saved_meta) } = saved.outcome else {
+            panic!("save route did not accept the current note revision");
+        };
+
+        let delta_content = "# One\n\ndelta\n";
+        let delta: V2MutationResponse = serde_json::from_slice(
+            handle_v2_api(
+                &app,
+                &v2_request(
+                    "PATCH",
+                    &note_path,
+                    Some(&server_id),
+                    &serde_json::json!({
+                        "mutationId": "delta-route",
+                        "precondition": v2_precondition(&saved_meta),
+                        "sourceHash": crate::history::source_hash(delta_content),
+                        "edits": [{
+                            "start": {"line": 2, "character": 0},
+                            "end": {"line": 2, "character": 7},
+                            "text": "delta"
+                        }]
+                    })
+                    .to_string()
+                    .into_bytes(),
+                    &[],
+                ),
+                "req",
+            )
+            .body(),
+        )
+        .unwrap();
+        let V2MutationOutcome::Accepted { result: Some(_) } = delta.outcome else {
+            panic!("delta route did not accept the valid edit");
+        };
+
+        let stale_content = "# One\n\nstale\n";
+        let conflict: V2MutationResponse = serde_json::from_slice(
+            handle_v2_api(
+                &app,
+                &v2_request(
+                    "PUT",
+                    &note_path,
+                    Some(&server_id),
+                    &serde_json::json!({
+                        "mutationId": "conflict-route",
+                        "precondition": v2_precondition(&original.meta),
+                        "content": stale_content,
+                        "sourceHash": crate::history::source_hash(stale_content)
+                    })
+                    .to_string()
+                    .into_bytes(),
+                    &[],
+                ),
+                "req",
+            )
+            .body(),
+        )
+        .unwrap();
+        let V2MutationOutcome::Conflict { current, draft } = conflict.outcome else {
+            panic!("stale save did not return a recoverable conflict");
+        };
+        let draft_document: V2ConflictDraftDocument = serde_json::from_slice(
+            handle_v2_api(
+                &app,
+                &v2_request(
+                    "GET",
+                    &format!("{note_path}/conflicts/{}", draft.draft_id),
+                    Some(&server_id),
+                    &[],
+                    &[],
+                ),
+                "req",
+            )
+            .body(),
+        )
+        .unwrap();
+        assert_eq!(draft_document.content, stale_content);
+        let conflict_restored: V2MutationResponse = serde_json::from_slice(
+            handle_v2_api(
+                &app,
+                &v2_request(
+                    "POST",
+                    &format!("{note_path}/conflicts/{}/restore", draft.draft_id),
+                    Some(&server_id),
+                    &serde_json::json!({
+                        "mutationId": "restore-conflict-route",
+                        "precondition": v2_precondition(&current.meta)
+                    })
+                    .to_string()
+                    .into_bytes(),
+                    &[],
+                ),
+                "req",
+            )
+            .body(),
+        )
+        .unwrap();
+        assert!(matches!(
+            conflict_restored.outcome,
+            V2MutationOutcome::Accepted { .. }
+        ));
+
+        let revisions: Vec<V2RevisionMeta> = serde_json::from_slice(
+            handle_v2_api(
+                &app,
+                &v2_request(
+                    "GET",
+                    &format!("{vault_path}/notes/{note_id}/revisions"),
+                    Some(&server_id),
+                    &[],
+                    &[],
+                ),
+                "req",
+            )
+            .body(),
+        )
+        .unwrap();
+        let original_revision = revisions
+            .iter()
+            .find(|revision| revision.source_hash.as_deref() == Some(&original.meta.source_hash))
+            .unwrap();
+        let current_after_conflict: V2NoteDocument = serde_json::from_slice(
+            handle_v2_api(
+                &app,
+                &v2_request("GET", &note_path, Some(&server_id), &[], &[]),
+                "req",
+            )
+            .body(),
+        )
+        .unwrap();
+        let restored: V2MutationResponse = serde_json::from_slice(
+            handle_v2_api(
+                &app,
+                &v2_request(
+                    "POST",
+                    &format!("{vault_path}/notes/{note_id}/revisions/{}/restore", original_revision.revision),
+                    Some(&server_id),
+                    &serde_json::json!({
+                        "mutationId": "restore-route",
+                        "precondition": v2_precondition(&current_after_conflict.meta)
+                    })
+                    .to_string()
+                    .into_bytes(),
+                    &[],
+                ),
+                "req",
+            )
+            .body(),
+        )
+        .unwrap();
+        assert!(matches!(restored.outcome, V2MutationOutcome::Accepted { .. }));
+
+        let current: V2NoteDocument = serde_json::from_slice(
+            handle_v2_api(
+                &app,
+                &v2_request("GET", &note_path, Some(&server_id), &[], &[]),
+                "req",
+            )
+            .body(),
+        )
+        .unwrap();
+        let renamed: V2MutationResponse = serde_json::from_slice(
+            handle_v2_api(
+                &app,
+                &v2_request(
+                    "POST",
+                    &format!("{note_path}/rename"),
+                    Some(&server_id),
+                    &serde_json::json!({
+                        "mutationId": "rename-route",
+                        "precondition": v2_precondition(&current.meta),
+                        "path": "nested/renamed.md"
+                    })
+                    .to_string()
+                    .into_bytes(),
+                    &[],
+                ),
+                "req",
+            )
+            .body(),
+        )
+        .unwrap();
+        let V2MutationOutcome::Accepted { result: Some(renamed_meta) } = renamed.outcome else {
+            panic!("rename route did not accept the valid path");
+        };
+        assert_eq!(renamed_meta.path, "nested/renamed.md");
+
+        let deleted = handle_v2_api(
+            &app,
+            &v2_request(
+                "DELETE",
+                &note_path,
+                Some(&server_id),
+                &serde_json::json!({
+                    "mutationId": "delete-route",
+                    "precondition": v2_precondition(&renamed_meta)
+                })
+                .to_string()
+                .into_bytes(),
+                &[],
+            ),
+            "req",
+        );
+        assert_eq!(deleted.status(), 200);
+        assert!(!app.vault(0).unwrap().root.join("nested/renamed.md").exists());
+    }
+
+    fn v2_precondition(meta: &crate::api_types::V2NoteMeta) -> serde_json::Value {
+        serde_json::json!({
+            "baseRevision": meta.revision,
+            "baseSourceHash": meta.source_hash,
+            "baseDiskHash": meta.disk_hash
+        })
     }
 
     fn v2_request(

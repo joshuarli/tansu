@@ -79,4 +79,54 @@ describe("dev log client", () => {
 
     expect(fetch).toHaveBeenCalledTimes(1);
   });
+
+  it("captures browser errors and sends pending logs with a beacon on unload", async () => {
+    process.env["TANSU2_LOGS"] = "buffer";
+    const fetch = vi.fn(async () => ({ ok: true }));
+    const sendBeacon = vi.spyOn(navigator, "sendBeacon").mockReturnValue(true);
+    vi.stubGlobal("fetch", fetch);
+    const { installClientLogCapture } = await import("./dev-log.ts");
+    installClientLogCapture();
+
+    window.dispatchEvent(new ErrorEvent("error", { error: new Error("render failed"), message: "render failed" }));
+    const rejection = new Event("unhandledrejection");
+    Object.defineProperty(rejection, "reason", { value: "promise failed" });
+    window.dispatchEvent(rejection);
+    window.dispatchEvent(new Event("beforeunload"));
+
+    expect(sendBeacon).toHaveBeenCalledTimes(1);
+    const [path, body] = sendBeacon.mock.calls[0] ?? [];
+    expect(path).toBe("/api/dev/logs");
+    const payload = JSON.parse(await (body as Blob).text());
+    expect(payload.events).toHaveLength(2);
+    expect(payload.events[0]).toMatchObject({ error: { name: "Error", message: "render failed" } });
+    expect(payload.events[1]).toMatchObject({ error: { message: "promise failed", value: '"promise failed"' } });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("flushes full batches and falls back to keepalive fetch when a beacon is declined", async () => {
+    process.env["TANSU2_LOGS"] = "buffer";
+    vi.spyOn(navigator, "sendBeacon").mockReturnValue(false);
+    const fetch = vi.fn(async () => ({ ok: true }));
+    vi.stubGlobal("fetch", fetch);
+    const { logClientEvent, flushLogs } = await import("./dev-log.ts");
+
+    for (let index = 0; index < 32; index += 1) {
+      logClientEvent("debug", "system.batch", { index });
+    }
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(fetch).toHaveBeenCalledTimes(1);
+    const [, init] = fetch.mock.calls[0] as unknown as [string, RequestInit];
+    expect(JSON.parse(String(init.body)).events).toHaveLength(32);
+
+    logClientEvent("info", "system.unload");
+    flushLogs(true);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(fetch).toHaveBeenCalledTimes(2);
+    const [, unload] = fetch.mock.calls[1] as unknown as [string, RequestInit];
+    expect(unload.keepalive).toBeTruthy();
+  });
 });

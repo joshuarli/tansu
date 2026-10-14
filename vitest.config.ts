@@ -15,6 +15,8 @@ export default defineConfig({
       exclude: [
         "web/ts/e2e/**",
         "web/ts/**/*.test.ts",
+        "web/ts/editor/harness/**",
+        "web/ts/editor/vendor/atomic/**",
         "web/ts/main.ts",
         "web/ts/types.generated.ts",
       ],

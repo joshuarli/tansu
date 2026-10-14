@@ -5,6 +5,7 @@ import {
   V2ProtocolError,
   createV2ApiClient,
   decodeV2NoteMeta,
+  decodeV2MutationResponse,
   decodeV2ApiErrorResponse,
   decodeV2ServerEvent,
   decodeV2VaultBootstrap,
@@ -50,6 +51,39 @@ describe("v2 API client", () => {
     expect(new Headers(calls[2]?.init.headers).get("X-Tansu-CSRF")).toBeNull();
     expect(JSON.parse(String(calls[2]?.init.body))).toStrictEqual({ capability: "one-time-capability" });
     expect(calls.every((call) => call.init.credentials === "same-origin")).toBeTruthy();
+  });
+
+  it("sends the shared CSRF token when enrollment does not use a capability", async () => {
+    const previous = Object.getOwnPropertyDescriptor(globalThis, "document");
+    Object.defineProperty(globalThis, "document", {
+      configurable: true,
+      value: { cookie: "__Host-tansu_csrf=csrf-token" },
+    });
+    const calls: Array<{ path: string; init: RequestInit }> = [];
+    const api = createV2ApiClient({
+      fetch: (async (input: RequestInfo | URL, init?: RequestInit) => {
+        calls.push({ path: String(input), init: init ?? {} });
+        return jsonResponse(calls.length === 1
+          ? { ceremonyId: "enrollment-1", expiresAt: 10, publicKey: {} }
+          : { ok: true });
+      }) as typeof fetch,
+    });
+
+    try {
+      await api.auth.beginEnrollment();
+      await api.auth.logout();
+    } finally {
+      if (previous === undefined) delete (globalThis as { document?: unknown }).document;
+      else Object.defineProperty(globalThis, "document", previous);
+    }
+
+    expect(calls.map(({ path }) => path)).toStrictEqual([
+      "/api/v2/auth/enrollment/options",
+      "/api/v2/auth/logout",
+    ]);
+    expect(new Headers(at(calls, 0).init.headers).get("X-Tansu-CSRF")).toBe("csrf-token");
+    expect(new Headers(at(calls, 1).init.headers).get("X-Tansu-CSRF")).toBe("csrf-token");
+    expect(JSON.parse(String(at(calls, 0).init.body))).toStrictEqual({});
   });
 
   it("decodes the one-time legacy workspace import seed", () => {
@@ -222,6 +256,145 @@ describe("v2 API client", () => {
     expect(() => decodeV2ApiErrorResponse({})).toThrow(V2ProtocolError);
   });
 
+  it("decodes every server error discriminant with its typed details", () => {
+    const current = { meta: noteMeta("note-1"), content: "# Current\n" };
+    const draft = {
+      draftId: 1,
+      noteId: "note-1",
+      baseRevision: 1,
+      baseSourceHash: sourceHash,
+      sourceHash,
+      createdAtMs: 10,
+    };
+    const errors = [
+      { code: "api_version_unsupported", requestedVersion: null, supportedVersion: 2 },
+      { code: "vault_not_found", vaultId: "vault-1" },
+      { code: "server_instance_mismatch", expected: "server-1", received: "server-2" },
+      { code: "mutation_id_reuse", mutationId: "mutation-1" },
+      { code: "path_invalid", reason: "traversal" },
+      { code: "path_collision", path: "note.md" },
+      { code: "note_not_found", noteId: "note-1" },
+      { code: "revision_not_found", noteId: "note-1", revision: 1 },
+      { code: "conflict_draft_not_found", noteId: "note-1", draftId: 1 },
+      { code: "asset_not_found", name: "z-images/missing.webp" },
+      { code: "save_conflict", current, draft },
+      { code: "unresolved_note", noteId: "note-1", reason: "missing_snapshot" },
+      { code: "source_hash_mismatch", expected: sourceHash, received: hash("c") },
+      { code: "disk_hash_mismatch", expected: diskHash, received: hash("c", "blake3-v2:") },
+      { code: "request_too_large", limitBytes: 4096 },
+      { code: "auth_required" },
+      { code: "forbidden" },
+      { code: "csrf_rejected" },
+      { code: "origin_rejected" },
+      { code: "not_implemented" },
+      { code: "rate_limited", retryAfterMs: 50 },
+      { code: "bad_request", message: "Invalid request" },
+      { code: "internal", requestId: "request-1" },
+    ];
+
+    for (const error of errors) {
+      expect(decodeV2ApiErrorResponse({ error }).error.code).toBe(error.code);
+    }
+    expect(() => decodeV2ApiErrorResponse({ error: { code: "unrecognized" } })).toThrow(V2ProtocolError);
+  });
+
+  it("decodes accepted, pending, and conflict mutation outcomes", () => {
+    expect(decodeV2MutationResponse({
+      mutationId: "mutation-1",
+      outcome: { state: "accepted", result: noteMeta("note-1") },
+    }).outcome.state).toBe("accepted");
+    expect(decodeV2MutationResponse({
+      mutationId: "mutation-2",
+      outcome: { state: "pendingMaterialization", operationId: "operation-1" },
+    }).outcome).toMatchObject({ state: "pendingMaterialization", operationId: "operation-1" });
+    expect(decodeV2MutationResponse({
+      mutationId: "mutation-3",
+      outcome: {
+        state: "conflict",
+        current: { meta: noteMeta("note-1"), content: "# Current\n" },
+        draft: {
+          draftId: 1,
+          noteId: "note-1",
+          baseRevision: 1,
+          baseSourceHash: sourceHash,
+          sourceHash,
+          createdAtMs: 10,
+        },
+      },
+    }).outcome.state).toBe("conflict");
+  });
+
+  it("decodes each search hit identity and bounded overlay coverage", async () => {
+    const hits = [
+      {
+        identity: { kind: "canonical", noteId: "saved-1", revision: 2, sourceHash },
+        title: "Canonical",
+        path: "canonical.md",
+        score: 1,
+        excerpt: "one two",
+        excerptRanges: [{ startUtf16: 0, endUtf16: 3 }],
+        sourceRange: { startUtf16: 4, endUtf16: 7 },
+      },
+      {
+        identity: { kind: "savedOverlay", noteId: "saved-2", localRevision: 3, sourceHash },
+        title: "Saved draft",
+        path: "saved.md",
+        score: 2,
+        excerpt: "body",
+        excerptRanges: [],
+        sourceRange: null,
+      },
+      {
+        identity: { kind: "newLocalDraft", localId: "local-1", localRevision: 4, sourceHash },
+        title: "Local draft",
+        path: "",
+        score: 3,
+        excerpt: "local",
+        excerptRanges: [{ startUtf16: 0, endUtf16: 5 }],
+        sourceRange: null,
+      },
+    ];
+    const api = createV2ApiClient({
+      fetch: (async () => jsonResponse({ hits, overlayCoverage: { status: "partial", skippedNoteCount: 1 } })) as typeof fetch,
+    });
+
+    await expect(api.forVault("server-1", "vault-1").search({
+      query: "query",
+      mode: "default",
+      limit: 10,
+      overlays: [],
+    })).resolves.toMatchObject({ hits, overlayCoverage: { status: "partial", skippedNoteCount: 1 } });
+
+    const invalidRange = createV2ApiClient({
+      fetch: (async () => jsonResponse({
+        hits: [{ ...at(hits, 0), excerptRanges: [{ startUtf16: 2, endUtf16: 9 }] }],
+        overlayCoverage: { status: "complete" },
+      })) as typeof fetch,
+    });
+    await expect(invalidRange.forVault("server-1", "vault-1").search({
+      query: "query",
+      mode: "default",
+      limit: 10,
+      overlays: [],
+    })).rejects.toBeInstanceOf(V2ProtocolError);
+  });
+
+  it("decodes vault, note, deletion, and search server events", () => {
+    const events: V2ServerEvent[] = [
+      { eventVersion: 1, resyncRequired: false, update: { kind: "vaultChanged", notes: [noteMeta("note-1")] } },
+      { eventVersion: 2, resyncRequired: false, update: { kind: "noteChanged", note: noteMeta("note-1") } },
+      { eventVersion: 3, resyncRequired: false, update: { kind: "noteDeleted", noteId: "note-1" } },
+      { eventVersion: 4, resyncRequired: false, update: { kind: "searchChanged", dirty: true, degraded: false } },
+    ];
+
+    expect(events.map((event) => decodeV2ServerEvent(event).update.kind)).toStrictEqual([
+      "vaultChanged",
+      "noteChanged",
+      "noteDeleted",
+      "searchChanged",
+    ]);
+  });
+
   it("reports malformed and non-JSON HTTP errors as protocol failures", async () => {
     const headers = responseHeaders();
     const malformed = createV2ApiClient({
@@ -233,6 +406,38 @@ describe("v2 API client", () => {
       fetch: (async () => new Response("offline", { status: 500, headers })) as typeof fetch,
     });
     await expect(nonJson.forVault("server-1", "vault-1").listNotes()).rejects.toBeInstanceOf(V2ProtocolError);
+  });
+
+  it("rejects response identities and mutation ids that do not match the request", async () => {
+    await expect(vaultWithResponse({
+      vault: { vaultId: "vault-2", name: "Other" },
+      notes: [],
+      settings: settings(),
+      searchStatus: { dirty: false, degraded: false },
+      legacyWorkspace: null,
+    }).bootstrap()).rejects.toBeInstanceOf(V2ProtocolError);
+
+    await expect(vaultWithResponse({ meta: noteMeta("other-note"), content: "# Other\n" })
+      .openNote("note-1")).rejects.toBeInstanceOf(V2ProtocolError);
+    await expect(vaultWithResponse([revisionMeta("other-note", 1)]).listRevisions("note-1"))
+      .rejects.toBeInstanceOf(V2ProtocolError);
+    await expect(vaultWithResponse({ revision: revisionMeta("note-1", 2), content: "# Old\n" })
+      .openRevision("note-1", 1)).rejects.toBeInstanceOf(V2ProtocolError);
+    await expect(vaultWithResponse({ draft: { ...conflictMeta("note-1"), draftId: 8 }, content: "# Draft\n" })
+      .openConflictDraft("note-1", 7)).rejects.toBeInstanceOf(V2ProtocolError);
+
+    await expect(vaultWithResponse(mutationResponse("other-mutation"))
+      .createNote({ mutationId: "create-1", path: "new.md", content: "", sourceHash }))
+      .rejects.toBeInstanceOf(V2ProtocolError);
+    await expect(vaultWithResponse({ mutationId: "save-1", outcome: { state: "accepted", result: noteMeta("other-note") } })
+      .saveNote("note-1", { mutationId: "save-1", precondition: precondition(), content: "# Note\n", sourceHash }))
+      .rejects.toBeInstanceOf(V2ProtocolError);
+    await expect(vaultWithResponse({ mutationId: "settings-1", settings: settings() })
+      .saveSettings({ mutationId: "other-mutation", settings: settings() }))
+      .rejects.toBeInstanceOf(V2ProtocolError);
+    await expect(vaultWithResponse({ mutationId: "other-mutation", name: "z-images/a.webp", markdown: "![[a.webp]]" })
+      .uploadImage("image-1", new Blob(["image"], { type: "image/webp" })))
+      .rejects.toBeInstanceOf(V2ProtocolError);
   });
 
   it("reads the shared CSRF cookie for mutations and sends it with image uploads", async () => {
@@ -331,10 +536,87 @@ describe("v2 API client", () => {
     expect(at(fetchCalls, 3).path).toBe("/api/v2/vaults/vault-1/events?after=3");
     expect(new Headers(at(fetchCalls, 0).init.headers).get("X-Tansu-Server-Instance")).toBe("server-1");
   });
+
+  it("retries transport failures and ignores events at or before the current cursor", async () => {
+    const ready: V2ServerEvent = {
+      eventVersion: 2,
+      resyncRequired: false,
+      update: { kind: "ready" },
+    };
+    const fetchCalls: string[] = [];
+    const waits: number[] = [];
+    const fetcher = (async (input: RequestInfo | URL) => {
+      fetchCalls.push(String(input));
+      if (fetchCalls.length === 1) throw new TypeError("Connection reset");
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode([
+            `data: ${JSON.stringify({ ...ready, eventVersion: 1 })}\r\n\r\n`,
+            `data: ${JSON.stringify(ready)}\r\n\r\n`,
+          ].join("")));
+          controller.close();
+        },
+      });
+      return new Response(stream, { headers: responseHeaders("text/event-stream") });
+    }) as typeof fetch;
+    const api = createV2ApiClient({
+      fetch: fetcher,
+      wait: vi.fn(async (milliseconds) => {
+        waits.push(milliseconds);
+      }),
+    });
+    const events: V2ServerEvent[] = [];
+    const errors: unknown[] = [];
+    const subscription = api.forVault("server-1", "vault-1").connectEvents(1, {
+      onEvent: (event) => {
+        events.push(event);
+        subscription.close();
+      },
+      onResync: () => {},
+      onError: (error) => errors.push(error),
+    });
+    await until(() => events.length === 1);
+
+    expect(fetchCalls).toHaveLength(2);
+    expect(waits).toStrictEqual([1000]);
+    expect(errors).toHaveLength(1);
+    expect(events).toStrictEqual([ready]);
+  });
+
+  it("closes event streams after a non-retryable protocol failure", async () => {
+    const fetcher = (async () => new Response(
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode("data: not-json\n\n"));
+          controller.close();
+        },
+      }),
+      { headers: responseHeaders("text/event-stream") },
+    )) as typeof fetch;
+    const api = createV2ApiClient({ fetch: fetcher });
+    const errors: unknown[] = [];
+    const subscription = api.forVault("server-1", "vault-1").connectEvents(0, {
+      onEvent: () => {},
+      onResync: () => {},
+      onError: (error) => errors.push(error),
+    });
+    await until(() => errors.length === 1);
+    subscription.close();
+
+    expect(errors[0]).toBeInstanceOf(V2ProtocolError);
+    expect(isRetryableV2Error(errors[0])).toBeFalsy();
+  });
 });
 
 function jsonResponse(body: unknown, status = 200): Response {
   return Response.json(body, { status, headers: responseHeaders() });
+}
+
+function vaultWithResponse(body: unknown) {
+  const api = createV2ApiClient({
+    fetch: (async () => jsonResponse(body)) as typeof fetch,
+  });
+  return api.forVault("server-1", "vault-1");
 }
 
 function responseHeaders(contentType = "application/json"): HeadersInit {

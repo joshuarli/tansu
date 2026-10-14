@@ -3457,6 +3457,90 @@ mod tests {
     }
 
     #[test]
+    fn v2_create_rejects_invalid_source_and_colliding_paths() {
+        let vault = test_vault();
+        let invalid_id = V2CreateNoteRequest {
+            mutation_id: String::new(),
+            path: "valid.md".to_string(),
+            content: "# Valid\n".to_string(),
+            source_hash: history::source_hash("# Valid\n"),
+        };
+        assert!(matches!(
+            vault.v2_create_note(invalid_id),
+            Err(V2VaultError::Api(V2ApiErrorKind::BadRequest { .. }))
+        ));
+
+        let invalid_source = V2CreateNoteRequest {
+            mutation_id: "invalid-source".to_string(),
+            path: "valid.md".to_string(),
+            content: "# Valid\r\n".to_string(),
+            source_hash: history::source_hash("# Valid\r\n"),
+        };
+        assert!(matches!(
+            vault.v2_create_note(invalid_source),
+            Err(V2VaultError::Api(V2ApiErrorKind::BadRequest { .. }))
+        ));
+
+        let wrong_hash = V2CreateNoteRequest {
+            mutation_id: "wrong-source-hash".to_string(),
+            path: "valid.md".to_string(),
+            content: "# Valid\n".to_string(),
+            source_hash: history::source_hash("# Other\n"),
+        };
+        assert!(matches!(
+            vault.v2_create_note(wrong_hash),
+            Err(V2VaultError::Api(V2ApiErrorKind::SourceHashMismatch { .. }))
+        ));
+
+        let invalid_path = V2CreateNoteRequest {
+            mutation_id: "invalid-path".to_string(),
+            path: "../outside.md".to_string(),
+            content: "# Outside\n".to_string(),
+            source_hash: history::source_hash("# Outside\n"),
+        };
+        assert!(matches!(
+            vault.v2_create_note(invalid_path),
+            Err(V2VaultError::Api(V2ApiErrorKind::PathInvalid { .. }))
+        ));
+
+        let content = "# Existing\n";
+        vault
+            .v2_create_note(V2CreateNoteRequest {
+                mutation_id: "create-existing".to_string(),
+                path: "existing.md".to_string(),
+                content: content.to_string(),
+                source_hash: history::source_hash(content),
+            })
+            .unwrap();
+        let catalog_collision = vault.v2_create_note(V2CreateNoteRequest {
+            mutation_id: "catalog-collision".to_string(),
+            path: "existing.md".to_string(),
+            content: content.to_string(),
+            source_hash: history::source_hash(content),
+        });
+        assert!(matches!(
+            catalog_collision,
+            Err(V2VaultError::Api(V2ApiErrorKind::PathCollision { .. }))
+        ));
+
+        fs::write(vault.root.join("untracked.md"), "# Untracked\n").unwrap();
+        let disk_collision = vault.v2_create_note(V2CreateNoteRequest {
+            mutation_id: "disk-collision".to_string(),
+            path: "untracked.md".to_string(),
+            content: "# Untracked\n".to_string(),
+            source_hash: history::source_hash("# Untracked\n"),
+        });
+        assert!(matches!(
+            disk_collision,
+            Err(V2VaultError::Api(V2ApiErrorKind::PathCollision { .. }))
+        ));
+        assert_eq!(
+            fs::read(vault.root.join("untracked.md")).unwrap(),
+            b"# Untracked\n"
+        );
+    }
+
+    #[test]
     fn v2_search_returns_saved_overlay_identity_and_source_ranges() {
         let vault = test_vault_with_note("A.md", "# Moon\n\ncomet vintage\n");
         let meta = vault.lock_catalog().live_notes().unwrap().remove(0);

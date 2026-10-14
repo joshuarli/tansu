@@ -1529,6 +1529,131 @@ mod tests {
 
     use crate::config::{Config, VaultConfig};
 
+    #[test]
+    fn request_metadata_and_error_fields_preserve_transport_contracts() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "X-Tansu-Request-ID",
+            hyper::header::HeaderValue::from_bytes(b"req\tid").unwrap(),
+        );
+        assert_eq!(request_id_from_headers(&headers), "reqid");
+        headers.insert(
+            "X-Tansu-Request-ID",
+            hyper::header::HeaderValue::from_str(&"x".repeat(150)).unwrap(),
+        );
+        assert_eq!(request_id_from_headers(&headers), "x".repeat(128));
+        headers.insert("X-Tansu-Request-ID", hyper::header::HeaderValue::from_static(""));
+        assert!(request_id_from_headers(&headers).starts_with("srv-"));
+
+        let request = HttpRequest {
+            method: "GET".to_string(),
+            path: "/api/v2/health?vault=3".to_string(),
+            headers: vec![("X-Tansu-Vault".to_string(), "5".to_string())],
+            body: Vec::new(),
+        };
+        assert!(request_id(&request).unwrap().starts_with("srv-"));
+        assert_eq!(request_vault(&request), Some(3));
+        let mut identified = request.clone();
+        identified.headers.push(("X-Tansu-Request-ID".to_string(), "request-9".to_string()));
+        assert_eq!(request_id(&identified).as_deref(), Some("request-9"));
+        let header_vault = HttpRequest { path: "/api/v2/health".to_string(), ..request };
+        assert_eq!(request_vault(&header_vault), Some(5));
+
+        assert!(api_error_field(&HttpResponse::json(200, &serde_json::json!({"error": "ignored"})).unwrap()).is_null());
+        assert!(api_error_field(&HttpResponse::text(500, "broken")).is_null());
+        let malformed_json = HttpResponse {
+            status: 500,
+            content_type: "application/json; charset=utf-8".to_string(),
+            headers: Vec::new(),
+            body: b"{".to_vec(),
+        };
+        assert!(api_error_field(&malformed_json).is_null());
+        let response = v2_api_error_response(V2ApiErrorKind::NotImplemented, "request-id");
+        assert_eq!(api_error_field(&response)["code"], "not_implemented");
+    }
+
+    #[test]
+    fn body_errors_use_bounded_v2_responses() {
+        let mut headers = HeaderMap::new();
+        headers.insert("X-Tansu-Request-ID", "request-body".parse().unwrap());
+        let limits = TransportLimits {
+            max_body_bytes: 64,
+            ..TransportLimits::default()
+        };
+        for (error, status, expected) in [
+            (BodyError::TooLarge, 413, "request_too_large"),
+            (BodyError::TimedOut, 408, "bad_request"),
+            (BodyError::Malformed, 400, "bad_request"),
+        ] {
+            let response = body_error_response(error, &headers, limits);
+            assert_eq!(response.status(), status);
+            assert!(String::from_utf8_lossy(response.body()).contains(expected));
+        }
+    }
+
+    #[test]
+    fn route_handles_embedded_assets_and_disabled_development_logs() {
+        let root = tempfile::tempdir().unwrap();
+        let vault_path = root.path().join("vault");
+        std::fs::create_dir_all(&vault_path).unwrap();
+        let app = App::new(Config {
+            vaults: vec![VaultConfig {
+                name: "Test".into(),
+                path: vault_path,
+                state_path: root.path().join("state"),
+                excluded_folders: Vec::new(),
+            }],
+            auth: None,
+        })
+        .unwrap();
+
+        let shell = route(
+            &app,
+            &HttpRequest {
+                method: "GET".to_string(),
+                path: "/".to_string(),
+                headers: Vec::new(),
+                body: Vec::new(),
+            },
+        );
+        assert_eq!(shell.status(), 200);
+        let missing = route(
+            &app,
+            &HttpRequest {
+                method: "GET".to_string(),
+                path: "/missing".to_string(),
+                headers: Vec::new(),
+                body: Vec::new(),
+            },
+        );
+        assert_eq!(missing.status(), 404);
+        for method in ["GET", "POST", "DELETE"] {
+            let response = route(
+                &app,
+                &HttpRequest {
+                    method: method.to_string(),
+                    path: "/api/dev/logs".to_string(),
+                    headers: Vec::new(),
+                    body: Vec::new(),
+                },
+            );
+            assert_eq!(response.status(), 404);
+        }
+        log_request(
+            &app,
+            &HttpRequest {
+                method: "GET".to_string(),
+                path: "/api/v2/health".to_string(),
+                headers: Vec::new(),
+                body: Vec::new(),
+            },
+            &shell,
+            None,
+            0,
+        );
+        assert!(app.logs().snapshot().events.is_empty());
+    }
+
     fn spawn_server(
         app: App,
         listener: TcpListener,

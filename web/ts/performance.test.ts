@@ -30,6 +30,16 @@ describe("performance marks", () => {
     expect(mark).not.toHaveBeenCalled();
   });
 
+  it("does not schedule next-paint marks in production", () => {
+    process.env["NODE_ENV"] = "production";
+    const requestFrame = vi.fn();
+    vi.stubGlobal("requestAnimationFrame", requestFrame);
+
+    markNextPaint("tansu:paint");
+
+    expect(requestFrame).not.toHaveBeenCalled();
+  });
+
   it("uses a timer fallback for next-paint marks without requestAnimationFrame", () => {
     vi.useFakeTimers();
     process.env["NODE_ENV"] = "development";
@@ -41,5 +51,21 @@ describe("performance marks", () => {
 
     expect(mark).toHaveBeenCalledWith("tansu:test");
     vi.useRealTimers();
+  });
+
+  it("marks the next paint when the browser schedules an animation frame", () => {
+    process.env["NODE_ENV"] = "development";
+    const mark = vi.spyOn(performance, "mark");
+    let frame: FrameRequestCallback | undefined;
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      frame = callback;
+      return 1;
+    });
+
+    markNextPaint("tansu:paint");
+    expect(mark).not.toHaveBeenCalled();
+    frame?.(0);
+
+    expect(mark).toHaveBeenCalledWith("tansu:paint");
   });
 });

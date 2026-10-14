@@ -158,7 +158,7 @@ describe("real server harness", () => {
     await page.goto(baseUrl);
     await page.waitForSelector(".main");
     await page.keyboard.press(`${shortcutModifier()}+p`);
-    await page.waitForSelector(".search-panel .command-input");
+    await page.waitForSelector(".quick-open-panel .command-input");
     await page.keyboard.press("Escape");
     await page.waitForSelector(".search-panel", { state: "detached" });
     await page.keyboard.press(`${shortcutModifier()}+k`);
