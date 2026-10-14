@@ -176,19 +176,21 @@ export class DraftJournal {
   }
 
   async flushAll(): Promise<void> {
-    const keys = new Set([...this.pending.keys(), ...this.timers.keys(), ...this.writes.keys()]);
-    const tasks = [...keys].map((key) => {
-      const timer = this.timers.get(key);
-      if (timer !== undefined) {
-        clearTimeout(timer);
-        this.timers.delete(key);
+    while (this.pending.size > 0 || this.timers.size > 0 || this.writes.size > 0) {
+      const keys = new Set([...this.pending.keys(), ...this.timers.keys(), ...this.writes.keys()]);
+      const tasks = [...keys].map((key) => {
+        const timer = this.timers.get(key);
+        if (timer !== undefined) {
+          clearTimeout(timer);
+          this.timers.delete(key);
+        }
+        return this.flushKey(key);
+      });
+      const results = await Promise.allSettled(tasks);
+      const failed = results.find((result): result is PromiseRejectedResult => result.status === "rejected");
+      if (failed !== undefined) {
+        throw failed.reason;
       }
-      return this.flushKey(key);
-    });
-    const results = await Promise.allSettled(tasks);
-    const failed = results.find((result): result is PromiseRejectedResult => result.status === "rejected");
-    if (failed !== undefined) {
-      throw failed.reason;
     }
   }
 
@@ -292,10 +294,6 @@ export class DraftJournal {
       detach();
     }
     await this.flushAll();
-    for (const timer of this.timers.values()) {
-      clearTimeout(timer);
-    }
-    this.timers.clear();
   }
 
   private flushKey(key: string): Promise<boolean> {
