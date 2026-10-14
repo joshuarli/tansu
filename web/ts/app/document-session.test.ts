@@ -99,6 +99,38 @@ describe("document sessions", () => {
     expect(session.state.status).toBe("clean");
   });
 
+  it("propagates accepted-rename checkpoint clearing failures", async () => {
+    const services = sessionServices({
+      clearTitleCheckpoint: vi.fn(async () => {
+        throw new Error("storage blocked");
+      }),
+    });
+    const session = new DocumentSession(identity, 1, workspace, services);
+    session.loaded(document(1, "# One\n", 1));
+    session.editTitle("Renamed");
+    const titleState = session.state;
+    if (!("titleMutationId" in titleState) || titleState.titleMutationId === null) {
+      throw new Error("Rename did not produce a title mutation identity");
+    }
+
+    await expect(session.acceptRename(
+      { ...metadata(2, "# One\n", 2), title: "Renamed", path: "renamed.md" },
+      titleState.titleRevision,
+      titleState.titleMutationId,
+    )).rejects.toThrow("storage blocked");
+
+    expect(services.clearTitleCheckpoint).toHaveBeenCalledWith(
+      identity,
+      titleState.titleRevision,
+      titleState.titleMutationId,
+    );
+    expect(session.state.status).toBe("clean");
+    if (session.state.status === "clean") {
+      expect(session.state.title).toBe("Renamed");
+      expect(session.state.titleDraft).toBeNull();
+    }
+  });
+
   it("does not start a save for content that changed while its hash was pending", async () => {
     let resolveHash: ((hash: string) => void) | undefined;
     const hashSource = vi.fn((source: string) => source === "# First\n"
@@ -155,6 +187,29 @@ describe("document sessions", () => {
     }
     expect(session.exportSource()).toBe("# Recovered\n");
     expect(services.save).not.toHaveBeenCalled();
+  });
+
+  it("clears the exact recovered checkpoint after an accepted restore", () => {
+    const services = sessionServices();
+    const session = new DocumentSession(identity, 4, workspace, services);
+    session.recover(document(2, "# Canonical\n", 2), draftRecord(1, "# Recovered\n"));
+    const acceptedDocument = document(3, "# Recovered\n", 3);
+
+    expect(session.applyAcceptedMutation(acceptedDocument, 2)).toBe(true);
+    expect(session.state.status).toBe("clean");
+    expect(session.exportSource()).toBe("# Recovered\n");
+    expect(services.clearCheckpoint).toHaveBeenCalledWith(identity, 2, "mutation-recovered");
+  });
+
+  it("preserves a conflict draft when an accepted restore is stale", () => {
+    const services = sessionServices();
+    const session = new DocumentSession(identity, 4, workspace, services);
+    session.recover(document(2, "# Canonical\n", 2), draftRecord(1, "# Recovered\n"));
+
+    expect(session.applyAcceptedMutation(document(3, "# Recovered\n", 3), 1)).toBe(false);
+    expect(session.state.status).toBe("conflict");
+    expect(session.exportSource()).toBe("# Recovered\n");
+    expect(services.clearCheckpoint).not.toHaveBeenCalled();
   });
 
   it("represents load failure and auth lock as explicit states", () => {

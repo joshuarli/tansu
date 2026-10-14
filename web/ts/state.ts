@@ -1,96 +1,100 @@
 import type {
-  BootstrapResponse,
-  ConflictDraftDocument,
-  NoteDocument,
-  NoteMeta,
-  RevisionDocument,
-  RevisionMeta,
-  SearchHit,
-  SessionState,
-  SessionTab,
+  V2ConflictDraftDocument,
+  V2NoteDocument,
+  V2NoteMeta,
+  V2RevisionDocument,
+  V2RevisionMeta,
+  V2SearchHit,
+  V2VaultBootstrapResponse,
+  V2VaultMeta,
 } from "./types.generated.ts";
+import type { DocumentSession } from "./app/document-session.ts";
+import type { LocalDraftSession } from "./app/local-draft-session.ts";
+import type { EditorSession } from "./editor/codemirror-adapter.ts";
+import type { LocalDraftId, NoteId as IdentityNoteId, VaultId } from "./app/identity.ts";
+import { toTabKey, type TabIdentity } from "./app/tab-identity.ts";
+import type { WorkspaceTab } from "./app/workspace-store.ts";
 
 declare const appBrand: unique symbol;
 
 type AppBrand<T, Name extends string> = T & { readonly [appBrand]: Name };
-export type NoteId = AppBrand<string, "NoteId">;
-export type VaultIndex = AppBrand<number, "VaultIndex">;
+export type NoteId = IdentityNoteId;
 export type ContentHash = AppBrand<string, "ContentHash">;
 export type RevisionEventId = AppBrand<number, "RevisionEventId">;
 export type ConflictDraftId = AppBrand<number, "ConflictDraftId">;
 export type AssetName = AppBrand<string, "AssetName">;
 
-export function toNoteId(value: string): NoteId {
-  return value as NoteId;
-}
+export type ShellBootstrap = V2VaultBootstrapResponse & {
+  serverInstanceId: string;
+  vaults: V2VaultMeta[];
+};
 
-export function toVaultIndex(value: number): VaultIndex {
-  return value as VaultIndex;
-}
-
-export function toContentHash(value: string): ContentHash {
-  return value as ContentHash;
-}
-
-export function toRevisionEventId(value: number): RevisionEventId {
-  return value as RevisionEventId;
-}
-
-export function toConflictDraftId(value: number): ConflictDraftId {
-  return value as ConflictDraftId;
-}
-
-export function toAssetName(value: string): AssetName {
-  return value as AssetName;
-}
-
-export type Tab = {
-  noteId: NoteId;
+type TabFields = {
+  key: string;
   title: string;
   path: string;
-  doc: NoteDocument | null;
   draft: string | null;
   dirty: boolean;
   saving: boolean;
   savePending: boolean;
   conflict: boolean;
   conflictDraftId: ConflictDraftId | null;
-  cursorOffset: number | null;
+  selection: { anchor: number; head: number } | null;
+  scrollTop: number;
   sourceMode: boolean;
+  editorSession: EditorSession | null;
+  editorRevision: number;
 };
 
-type NoteDialog =
-  | { kind: "create"; title: string }
+export type SavedTab = TabFields & {
+  kind: "saved";
+  noteId: NoteId;
+  session: DocumentSession | null;
+  doc: V2NoteDocument | null;
+};
+
+export type LocalDraftTab = TabFields & {
+  kind: "local-draft";
+  localDraftId: LocalDraftId;
+  session: LocalDraftSession | null;
+  doc: null;
+};
+
+export type Tab = SavedTab | LocalDraftTab;
+
+export type NoteDialog =
+  | { kind: "create"; localDraftId: LocalDraftId; title: string }
   | { kind: "rename"; noteId: NoteId; title: string }
   | { kind: "tag"; value: string }
   | { kind: "delete"; noteId: NoteId };
 
-type ContextMenuState = {
+export type ContextMenuState = {
   noteId: NoteId;
   x: number;
   y: number;
 };
 
 export type State = {
-  boot: BootstrapResponse | null;
-  vault: VaultIndex;
-  notes: Map<string, NoteMeta>;
+  boot: ShellBootstrap | null;
+  serverInstanceId: string | null;
+  vault: VaultId;
+  notes: Map<string, V2NoteMeta>;
   pinned: Set<string>;
   recent: string[];
   tabs: Tab[];
-  closedTabs: SessionTab[];
-  activeNoteId: NoteId | null;
+  closedTabs: WorkspaceTab[];
+  activeTab: TabIdentity | null;
   searchQuery: string;
-  searchHits: SearchHit[] | null;
+  searchHits: V2SearchHit[] | null;
   searchOpen: boolean;
   searchOverlayQuery: string;
-  searchOverlayHits: SearchHit[] | null;
+  searchOverlayHits: V2SearchHit[] | null;
   commandOpen: boolean;
   commandFilter: string;
   revisionsOpen: boolean;
-  revisionList: RevisionMeta[] | null;
-  revisionDocument: RevisionDocument | null;
-  conflictDraft: ConflictDraftDocument | null;
+  revisionList: V2RevisionMeta[] | null;
+  revisionDocument: V2RevisionDocument | null;
+  conflictDraft: V2ConflictDraftDocument | null;
   settingsOpen: boolean;
   noteDialog: NoteDialog | null;
   contextMenu: ContextMenuState | null;
@@ -98,16 +102,17 @@ export type State = {
   readingMode: boolean;
 };
 
-export function createState(vault: VaultIndex): State {
+export function createState(vault: VaultId): State {
   return {
     boot: null,
+    serverInstanceId: null,
     vault,
     notes: new Map(),
     pinned: new Set(),
     recent: [],
     tabs: [],
     closedTabs: [],
-    activeNoteId: null,
+    activeTab: null,
     searchQuery: "",
     searchHits: null,
     searchOpen: false,
@@ -127,19 +132,54 @@ export function createState(vault: VaultIndex): State {
   };
 }
 
+export function toNoteId(value: string): NoteId {
+  return value as NoteId;
+}
+
+export function toContentHash(value: string): ContentHash {
+  return value as ContentHash;
+}
+
+export function toRevisionEventId(value: number): RevisionEventId {
+  return value as RevisionEventId;
+}
+
+export function toConflictDraftId(value: number): ConflictDraftId {
+  return value as ConflictDraftId;
+}
+
+export function toAssetName(value: string): AssetName {
+  return value as AssetName;
+}
+
 export function activeTab(state: State): Tab | undefined {
-  return state.tabs.find((tab) => tab.noteId === state.activeNoteId);
+  if (state.activeTab === null) return undefined;
+  const key = toTabKey(state.activeTab);
+  return state.tabs.find((tab) => tab.key === key);
 }
 
-export function tabById(state: State, noteId: string): Tab | undefined {
-  return state.tabs.find((tab) => tab.noteId === noteId);
+export function tabById(state: State, noteId: string): SavedTab | undefined {
+  return state.tabs.find((tab): tab is SavedTab => tab.kind === "saved" && tab.noteId === noteId);
 }
 
-export function tabFromMeta(note: NoteMeta): Tab {
+export function tabByKey(state: State, key: string): Tab | undefined {
+  return state.tabs.find((tab) => tab.key === key);
+}
+
+export function tabIdentity(tab: Tab): TabIdentity {
+  return tab.kind === "saved"
+    ? { kind: "saved", noteId: tab.noteId }
+    : { kind: "local-draft", localDraftId: tab.localDraftId };
+}
+
+export function tabFromMeta(note: V2NoteMeta): SavedTab {
   return {
+    kind: "saved",
+    key: toTabKey({ kind: "saved", noteId: toNoteId(note.noteId) }),
     noteId: toNoteId(note.noteId),
     title: note.title,
     path: note.path,
+    session: null,
     doc: null,
     draft: null,
     dirty: false,
@@ -147,56 +187,84 @@ export function tabFromMeta(note: NoteMeta): Tab {
     savePending: false,
     conflict: false,
     conflictDraftId: null,
-    cursorOffset: null,
+    selection: null,
+    scrollTop: 0,
     sourceMode: false,
+    editorSession: null,
+    editorRevision: 0,
   };
 }
 
-export function tabFromDocument(document: NoteDocument): Tab {
+export function tabFromDocument(document: V2NoteDocument): SavedTab {
   const content = normalizeMarkdownNewlines(document.content);
   const doc = content === document.content ? document : { ...document, content };
   return {
-    noteId: toNoteId(doc.meta.noteId),
-    title: doc.meta.title,
-    path: doc.meta.path,
+    ...tabFromMeta(doc.meta),
     doc,
     draft: doc.content,
-    dirty: false,
+  };
+}
+
+export function tabFromWorkspace(tab: WorkspaceTab): Tab {
+  const fields: TabFields = {
+    key: toTabKey(tab.kind === "saved" ? { kind: "saved", noteId: toNoteId(tab.noteId) } : tab),
+    title: tab.title,
+    path: tab.path,
+    draft: null,
+    dirty: tab.kind === "local-draft",
     saving: false,
     savePending: false,
     conflict: false,
     conflictDraftId: null,
-    cursorOffset: null,
-    sourceMode: false,
+    selection: tab.selection,
+    scrollTop: tab.scrollTop,
+    sourceMode: tab.mode === "source",
+    editorSession: null,
+    editorRevision: 0,
   };
+  return tab.kind === "saved"
+    ? { ...fields, kind: "saved", noteId: toNoteId(tab.noteId), session: null, doc: null }
+    : { ...fields, kind: "local-draft", localDraftId: tab.localDraftId, session: null, doc: null };
 }
 
-export function loadedDocument(tab: Tab): NoteDocument | null {
-  return tab.doc;
+export function loadedDocument(tab: Tab): V2NoteDocument | null {
+  return tab.kind === "saved" ? tab.doc : null;
 }
 
 export function loadedDraft(tab: Tab): string | null {
+  if (tab.kind === "local-draft") return tab.session?.state.source ?? tab.draft;
+  if (tab.session !== null) {
+    const session = tab.session.state;
+    if (session.status === "loading" ||
+      session.status === "unavailable" && session.draft === null) return null;
+    return session.draft.source;
+  }
   return tab.doc === null ? null : (tab.draft ?? tab.doc.content);
 }
 
 export function tabIsDirty(tab: Tab): boolean {
-  return tab.dirty;
+  if (tab.dirty) return true;
+  if (tab.kind === "local-draft") return true;
+  if (tab.session === null) return tab.dirty;
+  const session = tab.session.state;
+  const status = session.status;
+  return status === "dirty" || status === "saving" || status === "conflict" ||
+    status === "unavailable" && session.draft !== null;
+}
+
+export function workspaceTabFromTab(tab: Tab): WorkspaceTab {
+  const fields = {
+    title: tab.title,
+    path: tab.path,
+    selection: tab.selection,
+    scrollTop: tab.scrollTop,
+    mode: tab.sourceMode ? "source" as const : "live" as const,
+  };
+  return tab.kind === "saved"
+    ? { ...fields, kind: "saved", noteId: tab.noteId }
+    : { ...fields, kind: "local-draft", localDraftId: tab.localDraftId };
 }
 
 export function normalizeMarkdownNewlines(markdown: string): string {
   return markdown.replaceAll(/\r\n?/g, "\n");
-}
-
-export function sessionFromState(state: State): SessionState {
-  return {
-    openTabs: state.tabs.map((tab) => ({
-      noteId: tab.noteId,
-      title: tab.title,
-      path: tab.path,
-      cursorOffset: tab.cursorOffset,
-      sourceMode: tab.sourceMode,
-    })),
-    activeNoteId: state.activeNoteId,
-    closedTabs: state.closedTabs,
-  };
 }

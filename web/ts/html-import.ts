@@ -1,9 +1,10 @@
 import { importHtml, type HtmlImportParseResult, type ImportedHtml } from "./html-importer.ts";
-import type { NoteMeta } from "./types.generated.ts";
+
+import type { ImportPath } from "./html-importer.ts";
 
 export type { ImportedHtml } from "./html-importer.ts";
 
-export async function pickHtmlImport(notes: Iterable<NoteMeta>): Promise<ImportedHtml | null> {
+export async function pickHtmlImport(notes: Iterable<ImportPath>): Promise<ImportedHtml | null> {
   const file = await pickHtmlFile();
   if (file === null) {
     return null;

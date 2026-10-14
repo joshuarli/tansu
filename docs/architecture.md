@@ -31,7 +31,7 @@ uses the XDG data path. See [Configuration](configuration.md).
 | Search                  | `src/search.rs`                                           |
 | Tags-only frontmatter   | `src/tags.rs`                                             |
 | Vault orchestration     | `src/vault.rs`                                            |
-| Frontend state/API      | `web/ts/app.ts`, `web/ts/api.ts`, `web/ts/state.ts`       |
+| Frontend state/API      | `web/ts/app.ts`, `web/ts/app/v2-api.ts`, `web/ts/state.ts`, `web/ts/app/workspace-store.ts` |
 | Frontend DOM/visuals    | `web/ts/view.ts`, `web/ts/dom.ts`, `web/static/app.css`   |
 | Editor engine           | `web/ts/editor/`                                          |
 | Dev/e2e fixture vaults  | `scripts/test-fixture.mjs`, `tests/fixtures/test-vaults/` |
@@ -64,13 +64,15 @@ identity.
 
 ## Frontend state
 
-- `notes` is a `Map<noteId, NoteMeta>`.
-- Tabs store `noteId`. Only the active tab mounts an editor.
-- Inactive tabs may hold in-memory drafts. Session state does not persist them.
-- Session state stores open tabs, the active note, closed tabs, cursor offsets,
-  and source mode.
-- The mounted editor records its owner note id so a tab switch cannot sync old
-  editor content into the newly active note.
+- `notes` is a `Map<noteId, V2NoteMeta>`.
+- The V2 API client validates network responses and scopes vault calls by stable
+  server and vault identities.
+- Workspace state stores tabs, closed tabs, selection, scroll position, mode,
+  pins, and recents in browser IndexedDB.
+- Saved-note drafts and local-note drafts use separate journal records in
+  browser IndexedDB.
+- The editor records its owning tab and session so a vault switch cannot sync
+  old editor content into a new tab with the same `noteId`.
 
 `web/ts/editor/` owns Markdown rendering, DOM serialization, selection, source
 mode, undo/redo, formatting, paste handling, and extensions. The app owns note

@@ -1,5 +1,4 @@
 import type {
-  LegacyWorkspace,
   SessionState,
   SessionTab,
   Settings,
@@ -57,8 +56,18 @@ export class V2ProtocolError extends Error {
   }
 }
 
+export type LegacyWorkspacePayload = {
+  session: SessionState;
+  pinnedNoteIds: string[];
+  recentNoteIds: string[];
+};
+
+export type V2VaultBootstrap = V2VaultBootstrapResponse & {
+  legacyWorkspace: LegacyWorkspacePayload | null;
+};
+
 export type V2VaultSnapshot = {
-  bootstrap: V2VaultBootstrapResponse;
+  bootstrap: V2VaultBootstrap;
   notes: V2NoteMeta[];
   eventVersion: number;
 };
@@ -76,7 +85,7 @@ export type V2EventSubscription = {
 export type V2VaultClient = {
   readonly identity: ServerIdentity;
   readonly vaultId: VaultId;
-  bootstrap: (signal?: AbortSignal) => Promise<V2VaultBootstrapResponse>;
+  bootstrap: (signal?: AbortSignal) => Promise<V2VaultBootstrap>;
   listNotes: (signal?: AbortSignal) => Promise<V2NoteMeta[]>;
   openNote: (id: string, signal?: AbortSignal) => Promise<V2NoteDocument>;
   createNote: (request: V2CreateNoteRequest, signal?: AbortSignal) => Promise<V2MutationResponse>;
@@ -156,10 +165,15 @@ export function createV2ApiClient(transport: Partial<V2Transport> = {}): V2ApiCl
         decode: Decoder<T>,
         signal?: AbortSignal,
         extraHeaders?: HeadersInit,
+        csrfProtected = true,
       ) => {
         const outgoing = new Headers(headers());
         new Headers(extraHeaders).forEach((value, key) => outgoing.set(key, value));
         outgoing.set("Content-Type", "application/json");
+        if (csrfProtected) {
+          const csrf = readCsrfCookie();
+          if (csrf !== null) outgoing.set("X-Tansu-CSRF", csrf);
+        }
         return getJson(
           request,
           `${vaultPath}${path}`,
@@ -258,18 +272,22 @@ export function createV2ApiClient(transport: Partial<V2Transport> = {}): V2ApiCl
           }
           return result;
         },
-        search: (body, signal) => send("/search", "POST", body, decodeV2SearchResponse, signal),
-        quickOpen: (body, signal) => send("/quick-open", "POST", body, decodeV2QuickOpenResponse, signal),
+        search: (body, signal) => send("/search", "POST", body, decodeV2SearchResponse, signal, undefined, false),
+        quickOpen: (body, signal) => send("/quick-open", "POST", body, decodeV2QuickOpenResponse, signal, undefined, false),
         uploadImage: async (mutationId, image, signal) => {
           assertMutationIdValue(mutationId);
+          const csrf = readCsrfCookie();
+          const uploadHeaders = new Headers({
+            ...Object.fromEntries(headers()),
+            "Content-Type": "image/webp",
+            "X-Tansu-Mutation-Id": mutationId,
+          });
+          if (csrf !== null) uploadHeaders.set("X-Tansu-CSRF", csrf);
           const response = await request(`${vaultPath}/images`, {
             method: "POST",
-            headers: new Headers({
-              ...Object.fromEntries(headers()),
-              "Content-Type": "image/webp",
-              "X-Tansu-Mutation-Id": mutationId,
-            }),
+            headers: uploadHeaders,
             body: image,
+            credentials: "same-origin",
             ...(signal === undefined ? {} : { signal }),
           });
           return decodeResponse(response, decodeV2ImageUploadResponse).then((value) => {
@@ -313,52 +331,46 @@ export function decodeV2Bootstrap(value: unknown): V2BootstrapResponse {
   };
 }
 
-export function decodeV2VaultBootstrap(value: unknown): V2VaultBootstrapResponse {
+export function decodeV2VaultBootstrap(value: unknown): V2VaultBootstrap {
   const body = record(value, "vault bootstrap");
   return {
     vault: decodeV2VaultMeta(field(body, "vault")),
     notes: decodeV2NoteMetaArray(field(body, "notes")),
     settings: decodeSettings(field(body, "settings")),
     searchStatus: decodeSearchStatus(field(body, "searchStatus")),
-    legacyWorkspace: decodeLegacyWorkspace(field(body, "legacyWorkspace")),
+    legacyWorkspace: decodeLegacyWorkspacePayload(field(body, "legacyWorkspace")),
   };
 }
 
-function decodeLegacyWorkspace(value: unknown): LegacyWorkspace | null {
+function decodeLegacyWorkspacePayload(value: unknown): LegacyWorkspacePayload | null {
   if (value === null) {
     return null;
   }
   const body = record(value, "legacy workspace");
+  const sessionBody = record(field(body, "session"), "legacy session");
+  const decodeTabs = (items: unknown, name: string) =>
+    array(items, name).map((item) => {
+      const tab = record(item, "legacy session tab");
+      const cursorOffset = field(tab, "cursorOffset");
+      return {
+        noteId: nonEmptyString(field(tab, "noteId"), "noteId"),
+        title: string(field(tab, "title"), "title"),
+        path: string(field(tab, "path"), "path"),
+        cursorOffset: cursorOffset === null ? null : integer(cursorOffset, "cursorOffset"),
+        sourceMode: boolean(field(tab, "sourceMode"), "sourceMode"),
+      };
+    });
+  const activeNoteId = field(sessionBody, "activeNoteId");
   return {
-    session: decodeSessionState(field(body, "session")),
-    pinnedNoteIds: array(field(body, "pinnedNoteIds"), "pinnedNoteIds").map((noteId) =>
-      nonEmptyString(noteId, "pinned note ID")
-    ),
-    recentNoteIds: array(field(body, "recentNoteIds"), "recentNoteIds").map((noteId) =>
-      nonEmptyString(noteId, "recent note ID")
-    ),
-  };
-}
-
-function decodeSessionState(value: unknown): SessionState {
-  const body = record(value, "session state");
-  const activeNoteId = field(body, "activeNoteId");
-  return {
-    openTabs: array(field(body, "openTabs"), "openTabs").map(decodeSessionTab),
-    activeNoteId: activeNoteId === null ? null : nonEmptyString(activeNoteId, "active note ID"),
-    closedTabs: array(field(body, "closedTabs"), "closedTabs").map(decodeSessionTab),
-  };
-}
-
-function decodeSessionTab(value: unknown): SessionTab {
-  const body = record(value, "session tab");
-  const cursorOffset = field(body, "cursorOffset");
-  return {
-    noteId: nonEmptyString(field(body, "noteId"), "note ID"),
-    title: string(field(body, "title"), "title"),
-    path: nonEmptyString(field(body, "path"), "path"),
-    cursorOffset: cursorOffset === null ? null : integer(cursorOffset, "cursorOffset"),
-    sourceMode: boolean(field(body, "sourceMode"), "sourceMode"),
+    session: {
+      openTabs: decodeTabs(field(sessionBody, "openTabs"), "openTabs"),
+      activeNoteId: activeNoteId === null ? null : nonEmptyString(activeNoteId, "activeNoteId"),
+      closedTabs: decodeTabs(field(sessionBody, "closedTabs"), "closedTabs"),
+    },
+    pinnedNoteIds: array(field(body, "pinnedNoteIds"), "pinnedNoteIds")
+      .map((item) => nonEmptyString(item, "pinnedNoteId")),
+    recentNoteIds: array(field(body, "recentNoteIds"), "recentNoteIds")
+      .map((item) => nonEmptyString(item, "recentNoteId")),
   };
 }
 
@@ -571,6 +583,7 @@ async function getJson<T>(
     requestHeaders.set("Content-Type", "application/json");
   }
   const options: RequestInit = { method, headers: requestHeaders };
+  options.credentials = "same-origin";
   if (body !== undefined) {
     options.body = body;
   }
@@ -579,6 +592,19 @@ async function getJson<T>(
   }
   const response = await fetcher(path, options);
   return decodeResponse(response, decode);
+}
+
+function readCsrfCookie(): string | null {
+  if (typeof document === "undefined") return null;
+  const cookie = document.cookie.split(";").map((part) => part.trim()).find((part) => part.startsWith("__Host-tansu_csrf="));
+  if (cookie === undefined) return null;
+  const raw = cookie.slice("__Host-tansu_csrf=".length);
+  if (raw === "") return null;
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    throw new V2ProtocolError("CSRF cookie is not valid URL encoding");
+  }
 }
 
 async function decodeResponse<T>(response: Response, decode: Decoder<T>): Promise<T> {

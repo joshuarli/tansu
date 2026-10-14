@@ -1,7 +1,8 @@
-import type { State } from "../state.ts";
+import { activeTab, type State } from "../state.ts";
 import type { CommandItem } from "./events.ts";
 
 export function commandItems(state: State): CommandItem[] {
+  const active = activeTab(state);
   const items: CommandItem[] = [
     { id: "open", label: "Open note" },
     { id: "create", label: "Create note" },
@@ -11,7 +12,7 @@ export function commandItems(state: State): CommandItem[] {
     {
       id: "pin",
       label:
-        state.activeNoteId !== null && state.pinned.has(state.activeNoteId)
+        active?.kind === "saved" && state.pinned.has(active.noteId)
           ? "Unpin note"
           : "Pin note",
     },

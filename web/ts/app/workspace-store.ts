@@ -118,7 +118,6 @@ export class DraftJournal {
     private readonly write: (record: DraftJournalRecord) => Promise<boolean> = writeDraftCheckpoint,
     private readonly clear: typeof clearDraftCheckpoint = clearDraftCheckpoint,
     private readonly writeLocal: (record: LocalDraftJournalRecord) => Promise<boolean> = writeLocalDraftCheckpoint,
-    private readonly clearLocal: typeof clearLocalDraftCheckpoint = clearLocalDraftCheckpoint,
     private readonly clearTitle: typeof clearTitleDraftCheckpoint = clearTitleDraftCheckpoint,
   ) {}
 
@@ -203,19 +202,6 @@ export class DraftJournal {
     const key = draftIdentityKey("saved", identity, workspace, noteId);
     return this.clearPendingCheckpoint(key, acceptedLocalRevision, acceptedMutationId, () =>
       this.clear(identity, workspace, noteId, acceptedLocalRevision, acceptedMutationId)
-    );
-  }
-
-  async clearLocalCheckpoint(
-    identity: ServerIdentity,
-    workspace: WorkspaceId,
-    id: LocalDraftId,
-    acceptedLocalRevision: number,
-    acceptedMutationId: string,
-  ): Promise<boolean> {
-    const key = draftIdentityKey("local", identity, workspace, id);
-    return this.clearPendingCheckpoint(key, acceptedLocalRevision, acceptedMutationId, () =>
-      this.clearLocal(identity, workspace, id, acceptedLocalRevision, acceptedMutationId)
     );
   }
 
@@ -409,25 +395,6 @@ export function createLocalDraftCheckpointWriter(
   return (record, urgency, onFailure) => urgency === "typing"
     ? journal.scheduleLocal(record, onFailure)
     : journal.checkpointLocal(record, onFailure);
-}
-
-export function createLocalDraftCheckpointClearer(
-  journal: DraftJournal,
-  workspace: WorkspaceId,
-): (
-  identity: ServerIdentity,
-  localDraftId: LocalDraftId,
-  acceptedLocalRevision: number,
-  acceptedMutationId: string,
-) => Promise<boolean> {
-  return (identity, id, acceptedLocalRevision, acceptedMutationId) =>
-    journal.clearLocalCheckpoint(
-      identity,
-      workspace,
-      id,
-      acceptedLocalRevision,
-      acceptedMutationId,
-    );
 }
 
 export async function getCachedNoteBody(
@@ -913,43 +880,6 @@ export async function clearDraftCheckpoint(
     if (record.serverInstanceId !== identity.serverInstanceId || record.vaultId !== identity.vaultId ||
       record.workspaceId !== workspace || record.noteId !== noteId) {
       throw corrupt("Draft identity does not match its storage key");
-    }
-    if (record.localRevision !== acceptedLocalRevision || record.mutationId !== acceptedMutationId) {
-      await done;
-      return false;
-    }
-    store.delete(key);
-    await done;
-    return true;
-  } catch (error) {
-    throw storageFailure(error);
-  } finally {
-    db.close();
-  }
-}
-
-export async function clearLocalDraftCheckpoint(
-  identity: ServerIdentity,
-  workspace: WorkspaceId,
-  id: LocalDraftId,
-  acceptedLocalRevision: number,
-  acceptedMutationId: string,
-): Promise<boolean> {
-  const db = await openDatabase();
-  try {
-    const transaction = db.transaction(DRAFTS, "readwrite");
-    const done = transactionDone(transaction);
-    const store = transaction.objectStore(DRAFTS);
-    const key = [2, identity.serverInstanceId, identity.vaultId, workspace, id];
-    const raw = await requestResult(store.get(key) as IDBRequest<unknown>);
-    if (raw === undefined) {
-      await done;
-      return false;
-    }
-    const record = decodeLocalDraftJournalRecord(raw);
-    if (record.serverInstanceId !== identity.serverInstanceId || record.vaultId !== identity.vaultId ||
-      record.workspaceId !== workspace || record.localDraftId !== id) {
-      throw corrupt("Local draft identity does not match its storage key");
     }
     if (record.localRevision !== acceptedLocalRevision || record.mutationId !== acceptedMutationId) {
       await done;

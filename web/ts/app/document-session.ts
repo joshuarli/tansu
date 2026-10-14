@@ -1,5 +1,5 @@
 import { canonicalSourceHash } from "../save-delta.ts";
-import type { V2ApiErrorKind, V2MutationResponse, V2NoteDocument, V2NoteMeta, V2NotePrecondition, V2SaveNoteRequest } from "../types.generated.ts";
+import type { V2ApiErrorKind, V2ConflictDraftMeta, V2MutationResponse, V2NoteDocument, V2NoteMeta, V2NotePrecondition, V2SaveNoteRequest } from "../types.generated.ts";
 import { isRetryableV2Error } from "./v2-api.ts";
 import { type DocumentIdentity, type WorkspaceId, documentIdentityKey } from "./identity.ts";
 import type { DraftJournalRecord } from "./workspace-store.ts";
@@ -37,6 +37,9 @@ type LoadedFields = {
   acceptedRevision: number;
   base: SessionBase;
   title: string;
+  titleDraft: string | null;
+  titleRevision: number;
+  titleMutationId: string | null;
   path: string;
   storage: StorageState;
 };
@@ -76,7 +79,7 @@ export type DocumentSessionState =
     draft: DirtyDraft;
     inFlight: InFlightSave & { operationId: string };
   })
-  | (LoadedFields & { status: "conflict"; draft: DirtyDraft; canonical: V2NoteDocument })
+  | (LoadedFields & { status: "conflict"; draft: DirtyDraft; canonical: V2NoteDocument; conflictDraft: V2ConflictDraftMeta | null })
   | (LoadedFields & { status: "unavailable"; draft: DirtyDraft; reason: UnavailableReason })
   | (LoadedFields & { status: "auth-locked"; draft: CleanDraft | DirtyDraft });
 
@@ -119,6 +122,11 @@ export type DocumentSessionServices = {
     identity: DocumentIdentity,
     acceptedLocalRevision: number,
     acceptedMutationId: string,
+  ) => Promise<boolean>;
+  clearTitleCheckpoint?: (
+    identity: DocumentIdentity,
+    acceptedTitleRevision: number,
+    acceptedTitleMutationId: string,
   ) => Promise<boolean>;
 };
 
@@ -185,6 +193,9 @@ export class DocumentSession {
       acceptedRevision: base.revision,
       base,
       title: document.meta.title,
+      titleDraft: null,
+      titleRevision: 0,
+      titleMutationId: null,
       path: document.meta.path,
       draft,
       storage: { kind: "available" },
@@ -211,6 +222,9 @@ export class DocumentSession {
       selection: validateSelection(checkpoint.selection, checkpoint.source.length),
       mutationId: validMutationId(checkpoint.mutationId),
     };
+    const titleDraft = checkpoint.titleDraft;
+    const titleRevision = checkpoint.titleRevision ?? 0;
+    const titleMutationId = checkpoint.titleMutationId ?? null;
     const baseMatches = savedBase.revision === canonicalBase.revision &&
       savedBase.sourceHash === canonicalBase.sourceHash && savedBase.diskHash === canonicalBase.diskHash;
     if (checkpoint.source === document.content) {
@@ -221,11 +235,14 @@ export class DocumentSession {
         acceptedRevision: canonicalBase.revision,
         base: canonicalBase,
         title: document.meta.title,
+        titleDraft,
+        titleRevision,
+        titleMutationId,
         path: document.meta.path,
         draft: { ...draft, mutationId: null },
         storage: { kind: "available" },
       });
-      if (checkpoint.titleDraft === null) {
+      if (titleDraft === null) {
         this.clearCheckpoint(checkpoint.localRevision, checkpoint.mutationId);
       }
       return;
@@ -238,9 +255,13 @@ export class DocumentSession {
         acceptedRevision: canonicalBase.revision,
         base: savedBase,
         title: document.meta.title,
+        titleDraft,
+        titleRevision,
+        titleMutationId,
         path: document.meta.path,
         draft,
         canonical: document,
+        conflictDraft: null,
         storage: { kind: "available" },
       });
       return;
@@ -252,8 +273,51 @@ export class DocumentSession {
       acceptedRevision: canonicalBase.revision,
       base: canonicalBase,
       title: document.meta.title,
+      titleDraft,
+      titleRevision,
+      titleMutationId,
       path: document.meta.path,
       draft,
+      storage: { kind: "available" },
+    });
+  }
+
+  recoverUnavailable(
+    checkpoint: DraftJournalRecord,
+    error: unknown,
+    title: string,
+    path: string,
+  ): void {
+    this.requireStatus("loading", "recover without canonical content for");
+    if (checkpoint.serverInstanceId !== this.identity.serverInstanceId ||
+      checkpoint.vaultId !== this.identity.vaultId || checkpoint.noteId !== this.identity.noteId ||
+      checkpoint.workspaceId !== this.workspaceId) {
+      throw new SessionProtocolError("Recovery identity does not match the document session");
+    }
+    const base: SessionBase = {
+      revision: nonNegativeSafeInteger(checkpoint.baseRevision, "baseRevision"),
+      sourceHash: checkpoint.baseSourceHash,
+      diskHash: checkpoint.baseDiskHash,
+    };
+    const draft: DirtyDraft = {
+      localRevision: nonNegativeSafeInteger(checkpoint.localRevision, "localRevision"),
+      source: checkpoint.source,
+      selection: validateSelection(checkpoint.selection, checkpoint.source.length),
+      mutationId: validMutationId(checkpoint.mutationId),
+    };
+    this.set({
+      status: "unavailable",
+      identity: this.identity,
+      generation: this.generation,
+      acceptedRevision: base.revision,
+      base,
+      title,
+      titleDraft: checkpoint.titleDraft,
+      titleRevision: checkpoint.titleRevision ?? 0,
+      titleMutationId: checkpoint.titleMutationId ?? null,
+      path,
+      draft,
+      reason: classifyUnavailable(error),
       storage: { kind: "available" },
     });
   }
@@ -293,6 +357,194 @@ export class DocumentSession {
     }
   }
 
+  editTitle(titleDraft: string | null): void {
+    const state = this.loadedState("edit the title of");
+    const nextTitleDraft = titleDraft === state.title ? null : titleDraft;
+    if (nextTitleDraft === state.titleDraft) {
+      return;
+    }
+    const titleRevision = incrementSafeInteger(state.titleRevision, "titleRevision");
+    const titleMutationId = nextTitleDraft === null
+      ? null
+      : validMutationId(this.services.createMutationId());
+    this.set({ ...state, titleDraft: nextTitleDraft, titleRevision, titleMutationId } as DocumentSessionState);
+    const current = this.loadedState("checkpoint the title of");
+    this.checkpoint(current.base, current.draft, "structural");
+  }
+
+  async acceptRename(
+    meta: V2NoteMeta,
+    acceptedTitleRevision: number,
+    acceptedTitleMutationId: string,
+  ): Promise<void> {
+    const state = this.loadedState("accept a rename for");
+    if (meta.noteId !== this.identity.noteId) {
+      throw new SessionProtocolError("Rename response note identity does not match the session");
+    }
+    const titleAccepted = state.titleRevision === acceptedTitleRevision &&
+      state.titleMutationId === acceptedTitleMutationId;
+    const base = baseFromMeta(meta);
+    const titleDraft = titleAccepted ? null : state.titleDraft;
+    this.set({
+      ...state,
+      acceptedRevision: base.revision,
+      base,
+      title: meta.title,
+      titleDraft,
+      titleMutationId: titleAccepted ? null : state.titleMutationId,
+      path: meta.path,
+    } as DocumentSessionState);
+    if (titleAccepted) {
+      await this.services.clearTitleCheckpoint?.(
+        this.identity,
+        acceptedTitleRevision,
+        acceptedTitleMutationId,
+      );
+    } else if (titleDraft !== null) {
+      const current = this.loadedState("checkpoint a newer title for");
+      this.checkpoint(current.base, current.draft, "structural");
+    }
+  }
+
+  reconcile(document: V2NoteDocument): "unchanged" | "reloaded" | "conflict" {
+    if (document.meta.noteId !== this.identity.noteId) {
+      throw new SessionProtocolError("Reconciled document note identity does not match the session");
+    }
+    if (this.current.status === "loading" ||
+      this.current.status === "unavailable" && this.current.draft === null ||
+      this.current.status === "auth-locked") {
+      return "unchanged";
+    }
+    if (this.current.status === "conflict") {
+      if (document.meta.revision <= this.current.canonical.meta.revision) {
+        return "unchanged";
+      }
+      this.set({
+        ...this.current,
+        title: document.meta.title,
+        path: document.meta.path,
+        canonical: document,
+      });
+      return "conflict";
+    }
+    const state = this.loadedState("reconcile");
+    const canonicalBase = baseFromMeta(document.meta);
+    const baseMatches = canonicalBase.revision === state.base.revision &&
+      canonicalBase.sourceHash === state.base.sourceHash && canonicalBase.diskHash === state.base.diskHash;
+    if (baseMatches) {
+      this.set({ ...state, title: document.meta.title, path: document.meta.path } as DocumentSessionState);
+      return "unchanged";
+    }
+    if (canonicalBase.revision < state.base.revision) {
+      return "unchanged";
+    }
+    if (canonicalBase.sourceHash === state.base.sourceHash) {
+      this.set({
+        ...state,
+        acceptedRevision: canonicalBase.revision,
+        base: canonicalBase,
+        title: document.meta.title,
+        path: document.meta.path,
+      } as DocumentSessionState);
+      if (state.titleDraft !== null) {
+        const current = this.loadedState("checkpoint a title while reconciling");
+        this.checkpoint(current.base, current.draft, "structural");
+      }
+      return "unchanged";
+    }
+    if (state.status === "clean") {
+      const source = document.content;
+      const draft: CleanDraft = {
+        localRevision: state.draft.localRevision,
+        source,
+        selection: clampSelection(state.draft.selection, source.length),
+        mutationId: null,
+      };
+      this.set({
+        ...state,
+        acceptedRevision: canonicalBase.revision,
+        base: canonicalBase,
+        title: document.meta.title,
+        path: document.meta.path,
+        draft,
+      });
+      if (state.titleDraft !== null) {
+        const current = this.loadedState("checkpoint a title while reconciling");
+        this.checkpoint(current.base, current.draft, "structural");
+      }
+      return "reloaded";
+    }
+    if (state.status === "saving" && state.inFlight.sourceHash === canonicalBase.sourceHash) {
+      this.set({
+        ...state,
+        acceptedRevision: canonicalBase.revision,
+        base: canonicalBase,
+        title: document.meta.title,
+        path: document.meta.path,
+      } as DocumentSessionState);
+      return "unchanged";
+    }
+    this.set({
+      status: "conflict",
+      identity: this.identity,
+      generation: this.generation,
+      acceptedRevision: state.acceptedRevision,
+      base: state.base,
+      title: state.title,
+      titleDraft: state.titleDraft,
+      titleRevision: state.titleRevision,
+      titleMutationId: state.titleMutationId,
+      path: state.path,
+      draft: state.draft as DirtyDraft,
+      canonical: document,
+      conflictDraft: null,
+      storage: state.storage,
+    });
+    return "conflict";
+  }
+
+  applyAcceptedMutation(document: V2NoteDocument, expectedLocalRevision: number): boolean {
+    if (document.meta.noteId !== this.identity.noteId) {
+      throw new SessionProtocolError("Mutation response note identity does not match the session");
+    }
+    const state = this.current;
+    if (state.status === "loading" || state.status === "auth-locked" ||
+      state.status === "unavailable" && state.draft === null) {
+      throw new InvalidSessionTransitionError(state.status, "apply an accepted mutation to");
+    }
+    if (state.draft.localRevision !== expectedLocalRevision) {
+      this.reconcile(document);
+      return false;
+    }
+    const base = baseFromMeta(document.meta);
+    const draft: CleanDraft = {
+      localRevision: state.draft.localRevision,
+      source: document.content,
+      selection: clampSelection(state.draft.selection, document.content.length),
+      mutationId: null,
+    };
+    this.set({
+      status: "clean",
+      identity: this.identity,
+      generation: this.generation,
+      acceptedRevision: base.revision,
+      base,
+      title: document.meta.title,
+      titleDraft: state.titleDraft,
+      titleRevision: state.titleRevision,
+      titleMutationId: state.titleMutationId,
+      path: document.meta.path,
+      draft,
+      storage: state.storage,
+    });
+    if (state.titleDraft !== null) {
+      this.checkpoint(base, draft, "structural");
+    } else if (state.draft.mutationId !== null) {
+      this.clearCheckpoint(state.draft.localRevision, state.draft.mutationId);
+    }
+    return true;
+  }
+
   async save(): Promise<void> {
     if (this.saveTask !== null) {
       return this.saveTask;
@@ -317,7 +569,7 @@ export class DocumentSession {
     return this.saveTask;
   }
 
-  resolvePendingMaterialization(meta: V2NoteMeta): void {
+  async resolvePendingMaterialization(meta: V2NoteMeta): Promise<void> {
     const state = this.current;
     if (state.status !== "saving" || state.phase !== "pendingMaterialization") {
       throw new InvalidSessionTransitionError(state.status, "resolve pending materialization for");
@@ -334,6 +586,9 @@ export class DocumentSession {
         acceptedRevision: base.revision,
         base,
         title: meta.title,
+        titleDraft: state.titleDraft,
+        titleRevision: state.titleRevision,
+        titleMutationId: state.titleMutationId,
         path: meta.path,
         draft: { ...state.draft, mutationId: null },
         storage: state.storage,
@@ -348,12 +603,15 @@ export class DocumentSession {
       acceptedRevision: base.revision,
       base,
       title: meta.title,
+      titleDraft: state.titleDraft,
+      titleRevision: state.titleRevision,
+      titleMutationId: state.titleMutationId,
       path: meta.path,
       draft: state.draft,
       storage: state.storage,
     });
     this.checkpoint(base, state.draft, "structural");
-    void this.save();
+    await this.save();
   }
 
   lock(): void {
@@ -386,6 +644,10 @@ export class DocumentSession {
     }
     const state = this.loadedState("mark unavailable");
     this.set({ ...state, status: "unavailable", reason: classifyUnavailable(error) } as DocumentSessionState);
+  }
+
+  markStorageUnavailable(error: unknown): void {
+    this.updateStorage({ kind: "failed", error });
   }
 
   exportSource(): string {
@@ -476,9 +738,13 @@ export class DocumentSession {
           acceptedRevision: saving.acceptedRevision,
           base: saving.base,
           title: saving.title,
+          titleDraft: saving.titleDraft,
+          titleRevision: saving.titleRevision,
+          titleMutationId: saving.titleMutationId,
           path: saving.path,
           draft: saving.draft,
           canonical: response.outcome.current,
+          conflictDraft: response.outcome.draft,
           storage: saving.storage,
         });
         return;
@@ -516,11 +782,19 @@ export class DocumentSession {
           acceptedRevision: base.revision,
           base,
           title: meta.title,
+          titleDraft: saving.titleDraft,
+          titleRevision: saving.titleRevision,
+          titleMutationId: saving.titleMutationId,
           path: meta.path,
           draft: { ...saving.draft, source: inFlight.source, mutationId: null },
           storage: saving.storage,
         });
-        this.clearCheckpoint(inFlight.localRevision, inFlight.mutationId);
+        const current = this.current;
+        if (current.status === "clean" && current.titleDraft !== null) {
+          this.checkpoint(current.base, current.draft, "structural");
+        } else {
+          this.clearCheckpoint(inFlight.localRevision, inFlight.mutationId);
+        }
         return;
       }
       this.set({
@@ -530,6 +804,9 @@ export class DocumentSession {
         acceptedRevision: base.revision,
         base,
         title: meta.title,
+        titleDraft: saving.titleDraft,
+        titleRevision: saving.titleRevision,
+        titleMutationId: saving.titleMutationId,
         path: meta.path,
         draft: saving.draft,
         storage: saving.storage,
@@ -580,9 +857,13 @@ export class DocumentSession {
               acceptedRevision: current.acceptedRevision,
               base: current.base,
               title: current.title,
+              titleDraft: current.titleDraft,
+              titleRevision: current.titleRevision,
+              titleMutationId: current.titleMutationId,
               path: current.path,
               draft: current.draft,
               canonical: kind.current,
+              conflictDraft: kind.draft,
               storage: current.storage,
             });
           }
@@ -635,6 +916,7 @@ export class DocumentSession {
     }
     const sequence = incrementSafeInteger(this.checkpointGeneration, "checkpointGeneration");
     this.checkpointGeneration = sequence;
+    const titledState = "titleDraft" in this.current ? this.current : null;
     const record: DraftJournalRecord = {
       formatVersion: 1,
       serverInstanceId: this.identity.serverInstanceId,
@@ -647,7 +929,11 @@ export class DocumentSession {
       localRevision: draft.localRevision,
       mutationId: draft.mutationId ?? validMutationId(this.services.createMutationId()),
       source: draft.source,
-      titleDraft: null,
+      titleDraft: titledState?.titleDraft ?? null,
+      titleRevision: titledState?.titleRevision ?? 0,
+      ...(titledState?.titleMutationId === null || titledState?.titleMutationId === undefined
+        ? {}
+        : { titleMutationId: titledState.titleMutationId }),
       selection: draft.selection,
       checkpointedAtMs: Date.now(),
     };
@@ -799,6 +1085,16 @@ function validateSelection(selection: Selection, sourceLength: number): Selectio
     throw new SessionProtocolError("Selection is outside the current source");
   }
   return { anchor, head };
+}
+
+function clampSelection(selection: Selection, sourceLength: number): Selection {
+  if (selection === null) {
+    return null;
+  }
+  return {
+    anchor: Math.min(selection.anchor, sourceLength),
+    head: Math.min(selection.head, sourceLength),
+  };
 }
 
 function apiErrorKind(error: unknown): V2ApiErrorKind | null {

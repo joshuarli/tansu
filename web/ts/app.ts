@@ -1,1072 +1,1465 @@
-import { saveConflictError } from "./api.ts";
 import { commandItems } from "./app/commands.ts";
-import type { CommandId, CommandItem, EditorToolbarCommand, ViewEvent } from "./app/events.ts";
+import type { CommandId, EditorToolbarCommand, ViewEvent } from "./app/events.ts";
+import { DocumentSession, defaultDocumentSessionServices, type DocumentSessionState } from "./app/document-session.ts";
+import { LocalDraftSession } from "./app/local-draft-session.ts";
 import { defaultServices, type AppServices } from "./app/services.ts";
+import { localDraftId, noteId, serverInstanceId, vaultId, type DocumentIdentity, type LocalDraftId, type ServerIdentity, type WorkspaceId } from "./app/identity.ts";
+import { sameTabIdentity, toTabKey, type TabIdentity } from "./app/tab-identity.ts";
 import { logClientEvent } from "./dev-log.ts";
-import {
-  createCalloutExtension,
-  createWikiImageExtension,
-  toggleBold,
-  toggleHeading,
-  toggleHighlight,
-  toggleItalic,
-  toggleStrikethrough,
-  type EditorConfig,
-  type EditorHandle,
-} from "./editor/index.js";
-import {
-  editableMarkdown,
-  frontmatterSupportsTags,
-  markdownBody,
-  normalizeTag,
-  setMarkdownTags,
-} from "./markdown-tags.ts";
-import { buildSaveNoteDeltaRequest } from "./save-delta.ts";
+import type { EditorHandle, EditorSession } from "./editor/codemirror-adapter.ts";
+import { createCalloutExtension, createWikiImageExtension, type EditorConfig } from "./editor/tansu-extensions.ts";
+import { normalizeTag } from "./markdown-tags.ts";
+import { canonicalSourceHash } from "./save-delta.ts";
 import {
   activeTab,
   createState,
+  loadedDraft,
   normalizeMarkdownNewlines,
-  sessionFromState,
   tabById,
   tabFromDocument,
   tabFromMeta,
-  toAssetName,
-  toConflictDraftId,
-  toContentHash,
+  tabFromWorkspace,
+  tabIdentity,
+  tabIsDirty,
   toNoteId,
-  toRevisionEventId,
+  workspaceTabFromTab,
+  type SavedTab,
   type State,
-  type VaultIndex,
   type Tab,
 } from "./state.ts";
-import type { NoteMeta, NoteMutationResponse } from "./types.generated.ts";
-import { renderApp, renderLoading, renderStatusBar, type ViewActions } from "./view.ts";
+import { disposeAppView, renderApp, renderLoading, updateAppView, updateStatusBar, type ViewActions } from "./view.ts";
+import type { Settings, V2BootstrapResponse, V2MutationResponse, V2NoteDocument, V2NoteMeta, V2SearchOverlay, V2ServerEvent } from "./types.generated.ts";
+import type { DraftJournalRecord, WorkspaceState } from "./app/workspace-store.ts";
 
 const SESSION_SAVE_DELAY_MS = 250;
-const EDITOR_SESSION_SAVE_DELAY_MS = 3000;
+const EDITOR_CAPTURE_DELAY_MS = 150;
 const MIN_SEARCH_QUERY_CHARS = 3;
 
 export class TansuApp {
   private readonly state: State;
+  private readonly workspaceId: WorkspaceId;
+  private identity: ServerIdentity | null = null;
+  private journal: ReturnType<AppServices["workspace"]["createJournal"]> | null = null;
+  private detachVisibilityFlush: (() => void) | null = null;
+  private vaultClient: ReturnType<AppServices["api"]["forVault"]> | null = null;
   private editor: EditorHandle | null = null;
-  private editorNoteId: string | null = null;
-  private captureTimer: number | undefined;
-  private readonly autosaveTimers = new Map<string, number>();
-  private sessionTimer: number | undefined;
-  private events: EventSource | null = null;
+  private activeEditorKey: string | null = null;
+  private attachedEditor: { tab: Tab; session: EditorSession } | null = null;
+  private readonly editorMount = document.createElement("div");
   private readonly noteLoads = new Map<string, Promise<void>>();
-  private bootSeq = 0;
+  private readonly autoSaveTimers = new Map<string, number>();
+  private editorCaptureTimer: number | undefined;
+  private readonly inFlightActions = new Set<Promise<unknown>>();
+  private readonly assetScope = new Map<string, string>();
+  private readonly globalEventCleanups: Array<() => void> = [];
+  private assetController: AbortController | null = null;
+  private eventSubscription: { close: () => void } | null = null;
+  private workspaceTimer: number | undefined;
+  private noticeTimer: number | undefined;
+  private disposeTask: Promise<void> | null = null;
   private searchRequestSeq = 0;
   private searchOverlayRequestSeq = 0;
-  private editorChangeLogged = false;
-  private readonly extensions = [
-    createWikiImageExtension({
-      resolveUrl: (name) => this.services.api.assetUrl(toAssetName(name), this.state.vault),
-    }),
-    createCalloutExtension(),
-  ];
+  private bootGeneration = 0;
+  private sessionGeneration = 0;
+  private transitioningVault = false;
+  private disposed = false;
 
   constructor(
     private readonly root: HTMLElement,
     private readonly services: AppServices = defaultServices,
   ) {
-    this.state = createState(this.services.api.activeVault());
+    this.state = createState(vaultId("boot"));
+    this.workspaceId = this.services.workspace.createWorkspaceId();
+    this.editorMount.className = "editor-mount";
+    this.editorMount.id = "editor-mount";
   }
 
-  async boot(): Promise<void> {
-    const bootSeq = ++this.bootSeq;
-    this.destroyEditor();
-    this.events?.close();
-    this.clearAutosaveTimers();
-    this.noteLoads.clear();
-    const vault = this.services.api.activeVault();
-    logClientEvent("info", "system.event", {
-      system: { component: "app", action: "boot_start" },
-      vault,
-    });
-    this.state.vault = vault;
-    this.services.performance.markPerformance("tansu:bootstrap:start");
-    const boot = await this.services.api.bootstrap(vault);
-    if (bootSeq !== this.bootSeq || this.state.vault !== vault) {
+  async boot(requestedVault?: string): Promise<void> {
+    const generation = ++this.bootGeneration;
+    this.transitioningVault = true;
+    this.searchRequestSeq += 1;
+    this.searchOverlayRequestSeq += 1;
+    this.eventSubscription?.close();
+    this.eventSubscription = null;
+    this.cancelAutoSaves();
+    if (this.workspaceTimer !== undefined) window.clearTimeout(this.workspaceTimer);
+    this.workspaceTimer = undefined;
+    this.configureActiveEditor(true);
+    this.captureActiveEditor();
+    let global: V2BootstrapResponse;
+    try {
+      global = await this.services.api.bootstrap();
+    } catch (error) {
+      this.restoreCurrentVault(generation);
+      throw error;
+    }
+    if (generation !== this.bootGeneration || this.disposed) return;
+    const selected = global.vaults.find((vault) => vault.vaultId === requestedVault) ??
+      global.vaults.find((vault) => vault.vaultId === this.state.vault) ?? global.vaults[0];
+    if (selected === undefined) {
+      if (this.identity === null) {
+        this.state.boot = null;
+        this.transitioningVault = false;
+        this.render();
+      }
+      else this.restoreCurrentVault(generation);
+      this.notify("No vault is configured");
       return;
     }
-    this.state.boot = boot;
-    logClientEvent("info", "system.event", {
-      system: { component: "app", action: "boot_ready" },
-      vault,
-      notes: boot.notes.length,
-    });
-    this.services.performance.markPerformance("tansu:bootstrap:response");
-    this.state.notes = new Map(this.state.boot.notes.map((note) => [note.noteId, note]));
-    this.state.pinned = new Set(this.state.boot.pinnedNoteIds);
-    this.state.recent = this.state.boot.recentNoteIds;
-    this.state.tabs = this.state.boot.session.openTabs
-      .filter((tab) => this.state.notes.has(tab.noteId))
-      .map((tab) => ({
-        noteId: toNoteId(tab.noteId),
-        title: tab.title,
-        path: tab.path,
-        doc: null,
-        draft: null,
-        dirty: false,
-        saving: false,
-        savePending: false,
-        conflict: false,
-        conflictDraftId: null,
-        cursorOffset: tab.cursorOffset ?? null,
-        sourceMode: tab.sourceMode,
-      }));
-    this.state.closedTabs = this.state.boot.session.closedTabs.filter((tab) =>
-      this.state.notes.has(tab.noteId),
-    );
-    this.state.activeNoteId =
-      this.state.boot.session.activeNoteId &&
-      this.state.notes.has(this.state.boot.session.activeNoteId)
-        ? toNoteId(this.state.boot.session.activeNoteId)
-        : (this.state.tabs[0]?.noteId ?? null);
-    this.connectSse();
-    this.render();
-    if (this.state.activeNoteId !== null) {
-      await this.ensureActiveLoaded();
+    const nextIdentity: ServerIdentity = {
+      serverInstanceId: serverInstanceId(global.serverInstanceId),
+      vaultId: vaultId(selected.vaultId),
+    };
+    const nextClient = this.services.api.forVault(global.serverInstanceId, selected.vaultId);
+    let vaultBootstrap: Awaited<ReturnType<typeof nextClient.bootstrap>>;
+    let imported: WorkspaceState;
+    try {
+      vaultBootstrap = await nextClient.bootstrap();
+      if (generation !== this.bootGeneration || this.disposed) return;
+      imported = await this.services.workspace.importLegacyWorkspaceOnce(
+        nextIdentity,
+        this.workspaceId,
+        vaultBootstrap.legacyWorkspace,
+      );
+    } catch (error) {
+      this.restoreCurrentVault(generation);
+      throw error;
     }
+    if (generation !== this.bootGeneration || this.disposed) return;
+    await this.drainInFlightActions();
+    if (generation !== this.bootGeneration || this.disposed) return;
+    if (this.identity !== null) {
+      try {
+        await this.flushOutgoingWorkspace(this.identity);
+      } catch (error) {
+        this.restoreCurrentVault(generation);
+        this.notifyStorageFailure(error);
+        return;
+      }
+      if (generation !== this.bootGeneration || this.disposed) return;
+      if (this.identity.serverInstanceId === nextIdentity.serverInstanceId &&
+        this.identity.vaultId === nextIdentity.vaultId) {
+        imported = this.workspaceSnapshot(this.identity);
+      }
+    }
+    this.cancelAssetScope();
+    for (const tab of this.state.tabs) if (tab.kind === "saved") tab.session?.close();
+    for (const timer of this.autoSaveTimers.values()) window.clearTimeout(timer);
+    this.autoSaveTimers.clear();
+    this.noteLoads.clear();
+    this.state.vault = nextIdentity.vaultId;
+    this.state.serverInstanceId = global.serverInstanceId;
+    this.identity = nextIdentity;
+    this.vaultClient = nextClient;
+    this.state.boot = { ...vaultBootstrap, serverInstanceId: global.serverInstanceId, vaults: global.vaults };
+    this.state.notes = new Map(vaultBootstrap.notes.map((meta) => [meta.noteId, meta]));
+    this.state.pinned = new Set(imported.pinnedNoteIds.filter((id) => this.state.notes.has(id)));
+    this.state.recent = imported.recentNoteIds.filter((id) => this.state.notes.has(id));
+    this.state.tabs = imported.tabs.map(tabFromWorkspace);
+    this.state.closedTabs = imported.closedTabs;
+    this.state.activeTab = imported.activeTab !== null && this.state.tabs.some((tab) =>
+        sameTabIdentity(tabIdentity(tab), identityOfWorkspaceIdentity(imported.activeTab!))
+      )
+      ? identityOfWorkspaceIdentity(imported.activeTab)
+      : this.state.tabs[0] === undefined ? null : tabIdentity(this.state.tabs[0]);
+    this.transitioningVault = false;
+    this.scheduleWorkspaceSave();
+    this.connectEvents(generation);
+    this.render();
+    const active = activeTab(this.state);
+    if (active !== undefined) await this.ensureTabLoaded(active);
+  }
+
+  private async flushOutgoingWorkspace(identity: ServerIdentity): Promise<void> {
+    for (;;) {
+      this.captureActiveEditor();
+      if (this.workspaceTimer !== undefined) window.clearTimeout(this.workspaceTimer);
+      this.workspaceTimer = undefined;
+      await Promise.all([
+        this.services.workspace.saveWorkspaceState(this.workspaceSnapshot(identity)),
+        this.journal?.flushAll() ?? Promise.resolve(),
+      ]);
+      if (this.workspaceTimer === undefined) return;
+    }
+  }
+
+  private async drainInFlightActions(): Promise<void> {
+    while (this.inFlightActions.size > 0) {
+      await Promise.allSettled(this.inFlightActions);
+    }
+  }
+
+  private trackAction<T>(action: Promise<T>): Promise<T> {
+    let tracked: Promise<T>;
+    tracked = action.finally(() => this.inFlightActions.delete(tracked));
+    this.inFlightActions.add(tracked);
+    return tracked;
+  }
+
+  private cancelAutoSaves(): void {
+    for (const timer of this.autoSaveTimers.values()) window.clearTimeout(timer);
+    this.autoSaveTimers.clear();
+  }
+
+  private restoreCurrentVault(generation: number): void {
+    if (generation !== this.bootGeneration || this.disposed) return;
+    this.transitioningVault = false;
+    if (this.identity !== null) this.connectEvents(generation);
+    this.render();
+    for (const tab of this.state.tabs) {
+      if (tab.kind === "saved" && tabIsDirty(tab)) this.scheduleAutoSave(tab);
+    }
+    const active = activeTab(this.state);
+    const source = active === undefined ? null : loadedDraft(active);
+    if (active !== undefined && source !== null) void this.prefetchAssets(active, source);
   }
 
   bindGlobalEvents(): void {
-    window.addEventListener("beforeunload", () => {
-      this.syncActiveDraft();
-    });
-
-    window.addEventListener("keydown", (event) => {
-      const target = event.target;
-      const inEditor = this.editor?.containsEditableTarget(target) ?? false;
+    if (this.globalEventCleanups.length > 0) return;
+    const onBeforeUnload = () => {
+      this.captureActiveEditor();
+      this.persistWorkspace();
+      void this.journal?.flushAll();
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (this.transitioningVault) return;
+      const inEditor = event.target instanceof Node && this.editorMount.contains(event.target);
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();
         this.state.commandOpen = true;
         this.state.searchOpen = false;
         this.state.commandFilter = "";
         this.render();
-        return;
-      }
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "p") {
+      } else if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "p") {
         event.preventDefault();
         this.state.searchOpen = true;
         this.state.commandOpen = false;
         this.state.searchOverlayQuery = "";
         this.state.searchOverlayHits = null;
         this.render();
-        return;
-      }
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
+      } else if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
         event.preventDefault();
         this.runAsync(this.manualSave(), "Save failed");
-        return;
-      }
-      if (!inEditor && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "e") {
-        event.preventDefault();
-        this.toggleReadingMode();
-        return;
-      }
-      if (
-        event.key === "Escape" &&
-        (this.state.commandOpen ||
-          this.state.searchOpen ||
-          this.state.revisionsOpen ||
-          this.state.settingsOpen ||
-          this.state.conflictDraft !== null ||
-          this.state.noteDialog !== null ||
-          this.state.contextMenu !== null)
-      ) {
-        event.preventDefault();
-        this.closeOverlays();
-        return;
-      }
-      if (!inEditor && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "n") {
+      } else if (!inEditor && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "n") {
         event.preventDefault();
         this.runAsync(this.commandCreate(), "Create failed");
+      } else if (event.key === "Escape" && this.hasOverlay()) {
+        event.preventDefault();
+        this.runAsync(this.closeOverlays(), "Local recovery storage failed");
       }
-    });
-
-    window.addEventListener("click", (event) => {
-      if (
-        this.state.contextMenu !== null &&
-        event.target instanceof HTMLElement &&
-        event.target.closest(".context-menu") === null
-      ) {
+    };
+    const onClick = (event: MouseEvent) => {
+      if (this.state.contextMenu !== null && event.target instanceof HTMLElement &&
+        event.target.closest(".context-menu") === null) {
         this.state.contextMenu = null;
         this.render();
       }
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("click", onClick);
+    this.globalEventCleanups.push(
+      () => window.removeEventListener("beforeunload", onBeforeUnload),
+      () => window.removeEventListener("keydown", onKeyDown),
+      () => window.removeEventListener("click", onClick),
+    );
+  }
+
+  dispose(): Promise<void> {
+    if (this.disposeTask !== null) return this.disposeTask;
+    this.disposed = true;
+    this.transitioningVault = false;
+    ++this.bootGeneration;
+    for (const cleanup of this.globalEventCleanups.splice(0)) cleanup();
+    this.captureActiveEditor();
+    let pendingJournalFlush: Promise<void>;
+    try {
+      pendingJournalFlush = this.journal?.flushAll() ?? Promise.resolve();
+    } catch (error) {
+      pendingJournalFlush = Promise.reject(error);
+    }
+    this.eventSubscription?.close();
+    this.eventSubscription = null;
+    this.cancelAssetScope();
+    this.detachVisibilityFlush?.();
+    this.detachVisibilityFlush = null;
+    for (const tab of this.state.tabs) if (tab.kind === "saved") tab.session?.close();
+    this.editor?.dispose();
+    this.editor = null;
+    this.activeEditorKey = null;
+    this.attachedEditor = null;
+    for (const timer of this.autoSaveTimers.values()) window.clearTimeout(timer);
+    this.autoSaveTimers.clear();
+    if (this.workspaceTimer !== undefined) window.clearTimeout(this.workspaceTimer);
+    this.workspaceTimer = undefined;
+    if (this.noticeTimer !== undefined) window.clearTimeout(this.noticeTimer);
+    this.noticeTimer = undefined;
+    disposeAppView(this.root);
+    this.root.replaceChildren();
+    this.disposeTask = pendingJournalFlush;
+    return this.disposeTask;
+  }
+
+  private connectEvents(generation: number): void {
+    this.eventSubscription?.close();
+    if (this.vaultClient === null) return;
+    const client = this.vaultClient;
+    const identity = this.identity;
+    if (identity === null) return;
+    this.eventSubscription = this.vaultClient.connectEvents(0, {
+      onEvent: (event) => {
+        if (generation !== this.bootGeneration || this.transitioningVault || !this.isCurrentVault(identity, client)) return;
+        const task = this.trackAction(this.applyServerEvent(event));
+        void task.catch((error) => logClientEvent("warn", "client.events", { error: errorSummary(error) }));
+      },
+      onResync: async (snapshot) => {
+        if (generation !== this.bootGeneration || this.transitioningVault || !this.isCurrentVault(identity, client)) return;
+        await this.trackAction((async () => {
+          if (generation !== this.bootGeneration || this.transitioningVault || !this.isCurrentVault(identity, client)) return;
+          this.state.boot = {
+            ...snapshot.bootstrap,
+            serverInstanceId: this.state.serverInstanceId!,
+            vaults: this.state.boot?.vaults ?? [],
+          };
+          this.state.notes = new Map(snapshot.notes.map((meta) => [meta.noteId, meta]));
+          for (const tab of this.state.tabs) {
+            if (tab.kind === "saved") await this.reconcileTab(tab);
+          }
+          if (generation === this.bootGeneration && this.isCurrentVault(identity, client)) this.render();
+        })());
+      },
+      onError: (error) => logClientEvent("warn", "client.events", { error: errorSummary(error) }),
     });
   }
 
-  private connectSse(): void {
-    this.events?.close();
-    this.events = this.services.api.connectEvents(this.state.vault);
-    this.events.addEventListener("message", (event) => {
-      const payload = this.services.api.parseServerEvent(event as MessageEvent<string>);
-      if (payload.vault !== this.state.vault) {
-        return;
-      }
-      for (const note of payload.notes) {
-        this.state.notes.set(note.noteId, note);
-        const tab = tabById(this.state, note.noteId);
-        if (tab !== undefined) {
-          tab.title = note.title;
-          tab.path = note.path;
-          if (tab.doc !== null) {
-            tab.doc.meta = note;
-          }
+  private async applyServerEvent(event: V2ServerEvent): Promise<void> {
+    if (event.update.kind === "noteChanged") {
+      this.state.notes.set(event.update.note.noteId, event.update.note);
+      const tab = tabById(this.state, event.update.note.noteId);
+      if (tab !== undefined) await this.reconcileTab(tab);
+    } else if (event.update.kind === "vaultChanged") {
+      const next = new Map(event.update.notes.map((meta) => [meta.noteId, meta]));
+      for (const noteId of this.state.notes.keys()) {
+        if (!next.has(noteId)) {
+          this.state.notes.delete(noteId);
+          await this.services.workspace.deleteCachedNoteBodies({ ...this.identity!, noteId: noteId as DocumentIdentity["noteId"] });
+          await this.closeTab({ kind: "saved", noteId: toNoteId(noteId) }, false);
         }
       }
-      for (const noteId of payload.deletedNoteIds) {
-        void this.services.noteCache.deleteCachedNoteBodies(this.state.vault, noteId);
-        this.state.notes.delete(noteId);
-        this.closeTab(noteId, false);
+      this.state.notes = next;
+      for (const tab of this.state.tabs) {
+        if (tab.kind === "saved") await this.reconcileTab(tab);
       }
-      this.render();
-    });
+    } else if (event.update.kind === "noteDeleted") {
+      this.state.notes.delete(event.update.noteId);
+      await this.services.workspace.deleteCachedNoteBodies({ ...this.identity!, noteId: noteId(event.update.noteId) });
+      await this.closeTab({ kind: "saved", noteId: toNoteId(event.update.noteId) }, false);
+    } else if (event.update.kind === "searchChanged" && this.state.boot !== null) {
+      this.state.boot.searchStatus = { dirty: event.update.dirty, degraded: event.update.degraded };
+    }
+    this.render();
+  }
+
+  private async reconcileTab(tab: SavedTab): Promise<void> {
+    if (tab.session === null || this.vaultClient === null) return;
+    const client = this.vaultClient;
+    const serverIdentity = this.identity;
+    if (serverIdentity === null) return;
+    const note = this.state.notes.get(tab.noteId);
+    if (note === undefined) return;
+    if (tab.doc?.meta.revision === note.revision && tab.doc.meta.sourceHash === note.sourceHash &&
+      tab.doc.meta.diskHash === note.diskHash) return;
+    const document = await client.openNote(tab.noteId);
+    if (!this.isCurrentTab(tab, serverIdentity, client)) return;
+    const before = tab.session.state;
+    const result = tab.session.reconcile(document);
+    tab.doc = document;
+    const sessionState = tab.session.state;
+    if ("titleDraft" in sessionState && sessionState.titleDraft !== null) tab.title = sessionState.titleDraft;
+    tab.path = document.meta.path;
+    if (result === "reloaded" && this.activeEditorKey === tab.key && tab.editorSession !== null) {
+      this.editor?.reloadIfClean(tab.editorSession, document.content);
+    }
+    if (before.status === "saving" && before.phase === "pendingMaterialization") {
+      await tab.session.resolvePendingMaterialization(document.meta);
+    }
+    this.cacheDocument(document);
   }
 
   private render(): void {
-    this.syncActiveDraft();
-    this.destroyEditor();
-    if (this.state.boot === null) {
-      this.root.replaceChildren(renderLoading());
-      return;
+    if (this.disposed) return;
+    this.captureActiveEditor();
+    const view = this.state.boot === null ? [renderLoading()] : renderApp(this.state, this.viewActions());
+    const placeholder = view.flatMap((node) => [...node.querySelectorAll<HTMLElement>("#editor-mount")])[0] ??
+      view.find((node) => node.id === "editor-mount");
+    if (placeholder !== undefined && placeholder !== null && this.state.boot !== null && !this.editorMount.isConnected) {
+      placeholder.replaceWith(this.editorMount);
     }
-    this.root.replaceChildren(...renderApp(this.state, this.viewActions()));
-    this.mountActiveEditor();
-    this.scheduleSessionSave();
+    updateAppView(this.root, view);
+    if (this.state.boot !== null) {
+      this.ensureEditor();
+      this.attachActiveEditor();
+      this.scheduleWorkspaceSave();
+    }
   }
 
   private renderStatusOnly(): void {
-    const status = document.querySelector(".statusbar");
-    status?.replaceWith(renderStatusBar(this.state));
+    const status = this.root.querySelector(".statusbar");
+    if (status instanceof HTMLElement) updateStatusBar(status, this.state);
   }
 
-  private mountActiveEditor(): void {
+  private ensureEditor(): void {
     const tab = activeTab(this.state);
-    const mount = document.querySelector<HTMLElement>("#editor-mount");
-    if (tab?.doc === null && tab !== undefined) {
-      void this.ensureActiveLoaded();
-      return;
-    }
-    if (tab === undefined || tab.doc === null || mount === null) {
-      return;
-    }
-    const reading = this.state.readingMode;
-    const config: EditorConfig = {
-      extensions: this.extensions,
-      contentClassName: reading
-        ? "md-editor-content app-editor app-reader"
-        : "md-editor-content app-editor",
-      sourceClassName: "md-editor-source app-editor-source",
-      onImagePaste: (blob) => this.uploadPastedImage(blob),
-      onChange: () => this.noteEditorChanged(),
-      onSave: () => this.runAsync(this.manualSave(), "Save failed"),
-      indentUnit: "  ",
-      resolveImageUrl: (src) => this.resolveMarkdownImageUrl(src),
+    if (this.editor !== null || !this.editorMount.isConnected || tab === undefined || loadedDraft(tab) === null) return;
+    this.editor = this.services.editor.createEditor(this.editorMount, this.editorConfig());
+  }
+
+  private editorConfig(): EditorConfig {
+    const generation = this.bootGeneration;
+    const serverIdentity = this.identity;
+    const client = this.vaultClient;
+    const currentVault = () => serverIdentity !== null && client !== null && this.isCurrentVault(serverIdentity, client);
+    return {
+      extensions: [
+        createWikiImageExtension({ resolveUrl: (name) => this.resolveAssetUrl(name) }),
+        createCalloutExtension(),
+      ],
+      currentNotePath: () => activeTab(this.state)?.path ?? "",
+      wikiNotes: () => [...this.state.notes.values()].map((note) => ({ noteId: note.noteId, title: note.title, path: note.path })),
+      onWikiNoteOpen: (id) => {
+        if (generation === this.bootGeneration && !this.transitioningVault && currentVault()) {
+          this.runAsync(this.openNote(toNoteId(id)), "Open failed");
+        }
+      },
+      onLinkOpen: (url) => window.open(url, "_blank", "noopener,noreferrer"),
+      onSave: () => {
+        if (generation === this.bootGeneration && !this.transitioningVault && currentVault()) {
+          this.runAsync(this.manualSave(), "Save failed");
+        }
+      },
+      onChange: () => {
+        if (generation !== this.bootGeneration || this.transitioningVault || !currentVault()) return;
+        const tab = activeTab(this.state);
+        if (tab === undefined || this.attachedEditor?.tab !== tab) return;
+        tab.dirty = true;
+        if (this.editorCaptureTimer !== undefined) window.clearTimeout(this.editorCaptureTimer);
+        this.editorCaptureTimer = window.setTimeout(() => {
+          this.editorCaptureTimer = undefined;
+          if (generation !== this.bootGeneration || this.transitioningVault ||
+            !currentVault() || !this.state.tabs.includes(tab) || this.attachedEditor?.tab !== tab) return;
+          this.captureActiveEditor();
+          if (tab.kind === "saved" && tabIsDirty(tab)) this.scheduleAutoSave(tab);
+          this.renderStatusOnly();
+          this.scheduleWorkspaceSave();
+        }, EDITOR_CAPTURE_DELAY_MS);
+        this.renderStatusOnly();
+      },
+      onFindRequested: () => {
+        if (generation !== this.bootGeneration || this.transitioningVault || !currentVault()) return;
+        this.state.searchOpen = true;
+        this.state.searchOverlayQuery = "";
+        this.state.searchOverlayHits = null;
+        this.render();
+      },
     };
-    const settings = this.state.boot?.settings;
-    if (settings !== undefined) {
-      config.undoStackMax = settings.undoStackMax;
-      config.typingCheckpointMs = settings.autosaveDelayMs;
-      config.imageWebpQuality = settings.imageWebpQuality;
-    }
-    this.editor = this.services.editor.createEditor(mount, config);
-    this.editorNoteId = tab.noteId;
-    this.editorChangeLogged = false;
-    logClientEvent("info", "client.editor", {
-      editor: { action: "mount", noteId: tab.noteId, sourceMode: tab.sourceMode, reading },
-      note: { id: tab.noteId, path: tab.path, vault: this.state.vault },
-    });
-    this.editor.setValue(
-      editableMarkdown(tab),
-      reading ? undefined : (tab.cursorOffset ?? undefined),
-    );
-    if (reading) {
-      this.editor.setReadOnly(true);
-      return;
-    }
-    if (tab.sourceMode && !this.editor.isSourceMode) {
-      this.editor.toggleSourceMode();
-    }
-    this.services.performance.markPerformance("tansu:editor:mount");
-    this.services.performance.markNextPaint("tansu:editor:first-editable-paint");
-    this.editor.focus();
   }
 
-  private async uploadPastedImage(blob: Blob): Promise<string | null> {
-    try {
-      const uploaded = await this.services.api.uploadImage(blob, this.state.vault);
-      return `<img src="${this.services.api.assetUrl(toAssetName(uploaded.name), this.state.vault)}" alt="${uploaded.name}" data-wiki-image="${uploaded.name}" loading="lazy">`;
-    } catch {
-      logClientEvent("warn", "system.event", {
-        system: { component: "image", action: "upload_failed" },
-      });
-      this.notify("Image upload failed");
-      return null;
-    }
-  }
-
-  private resolveMarkdownImageUrl(src: string): string {
-    const name = src.startsWith("/z-images/") ? src.slice(1) : src;
-    return name.startsWith("z-images/")
-      ? this.services.api.assetUrl(toAssetName(name), this.state.vault)
-      : src;
-  }
-
-  private destroyEditor(): void {
-    if (this.editor !== null) {
-      this.flushEditorChange();
-      this.editor.destroy();
-      this.editor = null;
-    }
-    this.editorNoteId = null;
-  }
-
-  private noteEditorChanged(): void {
-    const active =
-      this.editorNoteId === null ? activeTab(this.state) : tabById(this.state, this.editorNoteId);
-    if (active === undefined || this.editor === null) {
-      return;
-    }
-    active.dirty = true;
-    if (!this.editorChangeLogged) {
-      this.editorChangeLogged = true;
-      logClientEvent("info", "client.editor", {
-        editor: { action: "first_change", noteId: active.noteId },
-        note: { id: active.noteId, vault: this.state.vault },
-      });
-    }
-    window.clearTimeout(this.captureTimer);
-    this.captureTimer = window.setTimeout(() => {
-      this.captureTimer = undefined;
-      this.captureEditorChange();
-    }, 150);
-    this.scheduleAutosave();
-    this.scheduleEditorSessionSave();
-    this.renderStatusOnly();
-  }
-
-  private flushEditorChange(): void {
-    if (this.captureTimer === undefined) {
-      return;
-    }
-    window.clearTimeout(this.captureTimer);
-    this.captureTimer = undefined;
-    this.captureEditorChange();
-  }
-
-  private captureEditorChange(renderStatus = true): void {
-    const active =
-      this.editorNoteId === null ? activeTab(this.state) : tabById(this.state, this.editorNoteId);
-    if (active === undefined || this.editor === null) {
-      return;
-    }
-    const current = active.draft ?? active.doc?.content ?? "";
-    const snapshot = this.editor.getSnapshot();
-    const editorValue = snapshot.markdown;
-    active.draft =
-      active.doc !== null && frontmatterSupportsTags(current)
-        ? setMarkdownTags(editorValue, active.doc.meta.tags)
-        : editorValue;
-    active.dirty = active.draft !== active.doc?.content;
-    active.cursorOffset = snapshot.cursorOffset >= 0 ? snapshot.cursorOffset : null;
-    active.sourceMode = snapshot.sourceMode;
-    if (renderStatus) {
-      this.renderStatusOnly();
-    }
-  }
-
-  private syncActiveDraft(): void {
-    window.clearTimeout(this.captureTimer);
-    this.captureTimer = undefined;
-    const tab =
-      this.editorNoteId === null ? activeTab(this.state) : tabById(this.state, this.editorNoteId);
-    if (
-      tab === undefined ||
-      this.state.readingMode ||
-      this.editor === null ||
-      this.editor.isReadOnly
-    ) {
-      return;
-    }
-    const current = tab.draft ?? tab.doc?.content ?? "";
-    const snapshot = this.editor.getSnapshot();
-    const editorValue = snapshot.markdown;
-    tab.draft =
-      tab.doc !== null && frontmatterSupportsTags(current)
-        ? setMarkdownTags(editorValue, tab.doc.meta.tags)
-        : editorValue;
-    tab.cursorOffset = snapshot.cursorOffset >= 0 ? snapshot.cursorOffset : null;
-    tab.sourceMode = snapshot.sourceMode;
-    tab.dirty = tab.doc !== null && tab.draft !== tab.doc.content;
-  }
-
-  private async ensureActiveLoaded(): Promise<void> {
+  private attachActiveEditor(): void {
     const tab = activeTab(this.state);
-    if (tab === undefined || tab.doc !== null) {
+    if (tab === undefined || loadedDraft(tab) === null) {
+      if (this.editor !== null && this.attachedEditor !== null) this.editor.detachSession();
+      this.activeEditorKey = null;
+      this.attachedEditor = null;
+      this.setEditorMountVisible(false);
       return;
     }
-    const key = this.noteLoadKey(tab.noteId);
-    const existing = this.noteLoads.get(key);
-    if (existing !== undefined) {
-      await existing;
-      return;
+    if (this.editor === null) return;
+    const currentKey = tab.key;
+    const attached = this.attachedEditor;
+    if (attached?.tab !== tab || attached.session !== tab.editorSession) {
+      this.captureActiveEditor();
+      this.editor.detachSession();
+      this.activeEditorKey = currentKey;
+      if (tab.editorSession === null) {
+        const source = loadedDraft(tab) ?? "";
+        tab.editorSession = this.editor.createSession(tab.key, source, {
+          mode: tab.sourceMode ? "source" : "live",
+          readOnly: this.state.readingMode || (tab.kind === "local-draft" && tab.session?.state.promotionPending === true),
+        });
+      }
+      this.editor.attachSession(tab.editorSession);
+      this.attachedEditor = { tab, session: tab.editorSession };
+      if (tab.selection !== null) this.editor.revealSelection(tab.selection);
+      this.editor.updateConfiguration({ ...this.editorConfig(), mode: tab.sourceMode ? "source" : "live", readOnly: this.transitioningVault || this.state.readingMode || (tab.kind === "local-draft" && tab.session?.state.promotionPending === true) });
+      void this.prefetchAssets(tab, loadedDraft(tab) ?? "");
+      this.services.performance.markNextPaint("tansu:editor:first-editable-paint");
+    } else {
+      this.editor.updateConfiguration({ ...this.editorConfig(), mode: tab.sourceMode ? "source" : "live", readOnly: this.transitioningVault || this.state.readingMode || (tab.kind === "local-draft" && tab.session?.state.promotionPending === true) });
     }
-    const vault = this.state.vault;
-    logClientEvent("info", "note.open", {
-      note: { id: tab.noteId, vault },
+    this.setEditorMountVisible(true);
+  }
+
+  private setEditorMountVisible(visible: boolean): void {
+    this.editorMount.hidden = !visible;
+    this.editorMount.inert = !visible;
+    if (visible) this.editorMount.removeAttribute("aria-hidden");
+    else this.editorMount.setAttribute("aria-hidden", "true");
+  }
+
+  private configureActiveEditor(readOnly: boolean): void {
+    const tab = activeTab(this.state);
+    if (tab === undefined || this.editor === null) return;
+    this.editor.updateConfiguration({
+      ...this.editorConfig(),
+      mode: tab.sourceMode ? "source" : "live",
+      readOnly: readOnly || this.state.readingMode || (tab.kind === "local-draft" && tab.session?.state.promotionPending === true),
     });
-    const load = this.loadNote(tab.noteId, vault);
+  }
+
+  private captureActiveEditor(): void {
+    if (this.editorCaptureTimer !== undefined) {
+      window.clearTimeout(this.editorCaptureTimer);
+      this.editorCaptureTimer = undefined;
+    }
+    const tab = this.activeEditorKey === null
+      ? undefined
+      : this.state.tabs.find((candidate) => candidate.key === this.activeEditorKey);
+    const snapshot = this.editor?.getSnapshot();
+    const attached = this.attachedEditor;
+    if (tab === undefined || attached === null || attached.tab !== tab || attached.session !== tab.editorSession ||
+      snapshot === null || snapshot === undefined || snapshot.noteId !== tab.key) return;
+    tab.selection = snapshot.selection;
+    tab.scrollTop = snapshot.scroll.top;
+    tab.sourceMode = snapshot.mode === "source";
+    tab.editorRevision = snapshot.revision;
+    const source = normalizeMarkdownNewlines(snapshot.source);
+    if (tab.kind === "saved") {
+      const before = tab.session?.state;
+      if (before !== undefined && "draft" in before && before.draft !== null) {
+        if (before.draft.source !== source) tab.session?.edit(source, snapshot.selection);
+        else if (!sameSelection(before.draft.selection, snapshot.selection)) tab.session?.updateSelection(snapshot.selection);
+      }
+    } else if (!tab.session?.state.promotionPending) {
+      tab.session?.edit(source, snapshot.selection);
+    }
+  }
+
+  private async ensureTabLoaded(tab: Tab): Promise<void> {
+    if (tab.kind === "local-draft") {
+      if (tab.session === null) await this.loadLocalDraft(tab);
+      return;
+    }
+    if (tab.session !== null && tab.doc !== null) return;
+    const key = `${this.state.serverInstanceId}:${this.state.vault}:${tab.noteId}`;
+    const existing = this.noteLoads.get(key);
+    if (existing !== undefined) return existing;
+    const load = this.loadSavedTab(tab);
     this.noteLoads.set(key, load);
     try {
       await load;
     } finally {
-      if (this.noteLoads.get(key) === load) {
-        this.noteLoads.delete(key);
+      if (this.noteLoads.get(key) === load) this.noteLoads.delete(key);
+    }
+  }
+
+  private async loadSavedTab(tab: SavedTab): Promise<void> {
+    if (this.identity === null || this.vaultClient === null) return;
+    const serverIdentity = this.identity;
+    const client = this.vaultClient;
+    const identity: DocumentIdentity = { ...serverIdentity, noteId: tab.noteId };
+    const generation = ++this.sessionGeneration;
+    const journal = this.ensureJournal();
+    const clear = this.services.workspace.checkpointClearer(journal, this.workspaceId);
+    const services = defaultDocumentSessionServices(
+      async (documentIdentity, responseGeneration, request) => ({
+        identity: { serverInstanceId: documentIdentity.serverInstanceId, vaultId: documentIdentity.vaultId, noteId: documentIdentity.noteId },
+        generation: responseGeneration,
+        response: await client.saveNote(documentIdentity.noteId, request),
+      }),
+      this.services.workspace.checkpointWriter(journal),
+      clear,
+    );
+    services.clearTitleCheckpoint = this.services.workspace.titleCheckpointClearer(journal, this.workspaceId);
+    const session = new DocumentSession(identity, generation, this.workspaceId, services);
+    tab.session = session;
+    session.subscribe((value) => this.onDocumentSessionState(tab, session, serverIdentity, client, value));
+    const [checkpoint, cached] = await Promise.all([
+      this.services.workspace.getDraftCheckpoint(identity, this.workspaceId, tab.noteId),
+      this.services.workspace.getCachedNoteBody(identity, this.state.notes.get(tab.noteId) ?? { noteId: tab.noteId, sourceHash: "" }),
+    ]);
+    const cachedDocument: V2NoteDocument | null = cached !== null && this.state.notes.has(tab.noteId)
+      ? { meta: this.state.notes.get(tab.noteId)!, content: cached.content }
+      : null;
+    if (this.disposed || tab.session !== session || !this.state.tabs.includes(tab) ||
+      this.identity.serverInstanceId !== serverIdentity.serverInstanceId ||
+      this.identity.vaultId !== serverIdentity.vaultId || this.vaultClient !== client) return;
+    if (cachedDocument !== null && tab.doc === null) {
+      tab.doc = cachedDocument;
+      tab.draft = cachedDocument.content;
+      tab.selection = selectionWithin(tab.selection, cachedDocument.content.length);
+      if (checkpoint !== null) session.recover(cachedDocument, checkpoint);
+      else session.loaded(cachedDocument, tab.selection);
+      this.render();
+    }
+    try {
+      const document = await client.openNote(tab.noteId);
+      if (this.disposed || tab.session !== session || !this.state.tabs.includes(tab) ||
+        this.identity?.serverInstanceId !== serverIdentity.serverInstanceId ||
+        this.identity.vaultId !== serverIdentity.vaultId || this.vaultClient !== client) return;
+      const cached = tab.doc;
+      tab.doc = document;
+      tab.selection = selectionWithin(tab.selection, document.content.length);
+      if (session.state.status === "loading") {
+        if (checkpoint !== null) session.recover(document, checkpoint);
+        else session.loaded(document, tab.selection);
+      } else if (cached !== null) {
+        session.reconcile(document);
+      }
+      this.cacheDocument(document);
+      const editor = tab.editorSession;
+      if (editor !== null) this.editor?.reloadIfClean(editor, loadedDraft(tab) ?? document.content);
+    } catch (error) {
+      if (this.disposed || tab.session !== session || !this.state.tabs.includes(tab) ||
+        this.identity?.serverInstanceId !== serverIdentity.serverInstanceId ||
+        this.identity.vaultId !== serverIdentity.vaultId || this.vaultClient !== client) return;
+      if (cachedDocument !== null) {
+        if (checkpoint !== null) session.recover(cachedDocument, checkpoint);
+        else session.loaded(cachedDocument, tab.selection);
+        session.markUnavailable(error);
+      } else if (checkpoint !== null) {
+        session.recoverUnavailable(checkpoint, error, tab.title, tab.path);
+      } else {
+        session.markUnavailable(error);
       }
     }
-  }
-
-  private noteLoadKey(noteId: string): string {
-    return `${this.state.vault}:${noteId}`;
-  }
-
-  private async loadNote(noteId: string, vault: VaultIndex): Promise<void> {
-    this.services.performance.markPerformance("tansu:note:request:start");
-    const serverLoad = this.services.api.openNote(toNoteId(noteId), vault).then((document) => {
-      this.services.performance.markPerformance("tansu:note:request:response");
-      return {
-        ...document,
-        content: normalizeMarkdownNewlines(document.content),
-      };
-    });
-    const cached = await this.readCachedNote(noteId, vault);
-    if (cached) {
-      this.render();
-    }
-    const document = await serverLoad;
-    void this.services.noteCache.cacheNoteBody(vault, document);
-    if (this.state.vault !== vault) {
-      return;
-    }
-    const loadedTab = tabById(this.state, document.meta.noteId);
-    if (loadedTab === undefined) {
-      return;
-    }
-    this.state.notes.set(document.meta.noteId, document.meta);
-    if (loadedTab.dirty) {
-      return;
-    }
-    const sameVisibleContent =
-      loadedTab.doc !== null && loadedTab.doc.meta.contentHash === document.meta.contentHash;
-    loadedTab.doc = document;
-    loadedTab.draft = document.content;
-    loadedTab.title = document.meta.title;
-    loadedTab.path = document.meta.path;
-    if (this.state.activeNoteId === document.meta.noteId && !sameVisibleContent) {
-      this.render();
-    }
-  }
-
-  private async readCachedNote(noteId: string, vault: number): Promise<boolean> {
-    const meta = this.state.notes.get(noteId);
-    if (meta === undefined) {
-      this.services.performance.markPerformance("tansu:note-cache:miss");
-      return false;
-    }
-    const cached = await this.services.noteCache.getCachedNoteBody(vault, meta);
-    if (this.state.vault !== vault) {
-      return false;
-    }
-    const target = tabById(this.state, noteId);
-    const currentMeta = this.state.notes.get(noteId);
-    if (
-      cached === null ||
-      target === undefined ||
-      this.state.activeNoteId !== noteId ||
-      target.doc !== null ||
-      target.dirty ||
-      currentMeta === undefined ||
-      cached.contentHash !== currentMeta.contentHash
-    ) {
-      this.services.performance.markPerformance("tansu:note-cache:miss");
-      return false;
-    }
-    target.doc = {
-      meta: currentMeta,
-      content: normalizeMarkdownNewlines(cached.content),
-    };
-    target.draft = target.doc.content;
-    target.title = currentMeta.title;
-    target.path = currentMeta.path;
-    this.services.performance.markPerformance("tansu:note-cache:hit");
-    return true;
-  }
-
-  private async activateTab(noteId: string): Promise<void> {
-    this.syncActiveDraft();
-    this.state.activeNoteId = toNoteId(noteId);
-    this.touchRecent(noteId);
     this.render();
-    await this.ensureActiveLoaded();
   }
 
-  private async openInTab(noteId: string): Promise<void> {
-    let tab = tabById(this.state, noteId);
-    const note = this.state.notes.get(noteId);
-    if (tab === undefined && note !== undefined) {
-      tab = tabFromMeta(note);
+  private async loadLocalDraft(tab: Extract<Tab, { kind: "local-draft" }>): Promise<void> {
+    const identity = this.identity;
+    const client = this.vaultClient;
+    if (identity === null || client === null) return;
+    const journal = this.ensureJournal();
+    const session = new LocalDraftSession(identity, this.workspaceId, tab.localDraftId, {
+      createMutationId: mutationId,
+      checkpoint: this.services.workspace.localCheckpointWriter(journal),
+    });
+    const checkpoint = await this.services.workspace.getLocalDraftCheckpoint(identity, this.workspaceId, tab.localDraftId);
+    if (!this.isCurrentVault(identity, client) || !this.state.tabs.includes(tab)) return;
+    if (checkpoint !== null) {
+      session.recover(checkpoint);
+    } else {
+      session.editTitle(tab.title);
+      session.edit(tab.draft ?? "", tab.selection, "structural");
+    }
+    tab.session = session;
+    session.subscribe((value) => {
+      if (tab.session !== session || !this.state.tabs.includes(tab) || !this.isCurrentVault(identity, client)) return;
+      tab.title = value.titleDraft;
+      tab.draft = value.source;
+      tab.selection = value.selection;
+      tab.dirty = true;
+      tab.saving = value.promotionPending;
+      this.render();
+      this.scheduleWorkspaceSave();
+    });
+    this.render();
+  }
+
+  private onDocumentSessionState(
+    tab: SavedTab,
+    session: DocumentSession,
+    identity: ServerIdentity,
+    client: ReturnType<AppServices["api"]["forVault"]>,
+    value: DocumentSessionState,
+  ): void {
+    if (tab.session !== session || !this.isCurrentTab(tab, identity, client)) return;
+    const wasSaving = tab.saving;
+    tab.draft = "draft" in value && value.draft !== null ? value.draft.source : null;
+    if ("draft" in value && value.draft !== null) tab.selection = value.draft.selection;
+    tab.dirty = value.status === "dirty" || value.status === "saving" || value.status === "conflict" || value.status === "unavailable" && value.draft !== null;
+    tab.saving = value.status === "saving";
+    tab.savePending = value.status === "saving" && value.phase === "pendingMaterialization";
+    tab.conflict = value.status === "conflict";
+    tab.conflictDraftId = value.status === "conflict" && value.conflictDraft !== null ? value.conflictDraft.draftId as SavedTab["conflictDraftId"] : null;
+    if ("title" in value) tab.title = value.titleDraft ?? value.title;
+    if ("path" in value) tab.path = value.path;
+    this.render();
+    this.scheduleWorkspaceSave();
+    if (value.status === "clean" && tab.doc !== null) {
+      tab.doc = {
+        meta: {
+          ...tab.doc.meta,
+          title: value.title,
+          path: value.path,
+          revision: value.base.revision,
+          sourceHash: value.base.sourceHash,
+          diskHash: value.base.diskHash,
+        },
+        content: value.draft.source,
+      };
+      this.state.notes.set(tab.noteId, tab.doc.meta);
+      if (tab.editorSession !== null) this.editor?.markSaved(tab.editorSession, tab.editorRevision);
+      this.cacheDocument(tab.doc);
+    }
+    if (wasSaving && value.status === "unavailable") this.notify("Save failed");
+  }
+
+  private async activateTab(identity: TabIdentity): Promise<void> {
+    const outgoingTab = this.attachedEditor?.tab;
+    this.captureActiveEditor();
+    if (outgoingTab?.kind === "saved" && tabIsDirty(outgoingTab)) this.scheduleAutoSave(outgoingTab);
+    this.state.activeTab = identity;
+    if (identity.kind === "saved") this.touchRecent(identity.noteId);
+    this.cancelAssetScope();
+    this.render();
+    const tab = activeTab(this.state);
+    if (tab !== undefined) await this.ensureTabLoaded(tab);
+  }
+
+  private async openNote(id: ReturnType<typeof toNoteId>): Promise<void> {
+    let tab = tabById(this.state, id);
+    const meta = this.state.notes.get(id);
+    if (tab === undefined && meta !== undefined) {
+      tab = tabFromMeta(meta);
       this.state.tabs.push(tab);
     }
-    if (tab !== undefined) {
-      await this.activateTab(noteId);
-    }
+    if (tab !== undefined) await this.activateTab({ kind: "saved", noteId: tab.noteId });
   }
 
-  private closeTab(noteId: string, remember = true): void {
-    const index = this.state.tabs.findIndex((tab) => tab.noteId === noteId);
-    if (index === -1) {
-      return;
+  private async openLocalDraft(id: LocalDraftId): Promise<void> {
+    let tab = this.state.tabs.find((candidate) => candidate.kind === "local-draft" && candidate.localDraftId === id);
+    if (tab === undefined && this.identity !== null) {
+      tab = this.localDraftTab(id, "", "");
+      this.state.tabs.push(tab);
     }
-    const [closed] = this.state.tabs.splice(index, 1);
-    if (remember && closed !== undefined) {
-      this.state.closedTabs = [
-        {
-          noteId: closed.noteId,
-          title: closed.title,
-          path: closed.path,
-          cursorOffset: closed.cursorOffset,
-          sourceMode: closed.sourceMode,
-        },
-        ...this.state.closedTabs.filter((tab) => tab.noteId !== closed.noteId),
-      ].slice(0, 20);
+    if (tab !== undefined) await this.activateTab({ kind: "local-draft", localDraftId: id });
+  }
+
+  private async closeTab(identity: TabIdentity, remember = true): Promise<void> {
+    this.captureActiveEditor();
+    const index = this.state.tabs.findIndex((tab) => sameTabIdentity(tabIdentity(tab), identity));
+    if (index < 0) return;
+    const candidate = this.state.tabs[index];
+    if (candidate === undefined) return;
+    const sessionState = candidate.session?.state;
+    const titleDraftPending = sessionState !== undefined && "titleDraft" in sessionState && sessionState.titleDraft !== null;
+    const checkpointPending = candidate.kind === "local-draft" || tabIsDirty(candidate) || titleDraftPending;
+    const wasActive = sameTabIdentity(this.state.activeTab, identity);
+    if (checkpointPending) {
+      if (wasActive) this.configureActiveEditor(true);
+      try {
+        await this.journal?.flushAll();
+      } catch (error) {
+        if (wasActive) this.configureActiveEditor(false);
+        this.notifyStorageFailure(error);
+        return;
+      }
+      if (!this.state.tabs.includes(candidate)) return;
     }
-    if (this.state.activeNoteId === noteId) {
-      this.state.activeNoteId =
-        this.state.tabs[Math.max(0, index - 1)]?.noteId ?? this.state.tabs[0]?.noteId ?? null;
+    const [closed] = this.state.tabs.splice(this.state.tabs.indexOf(candidate), 1);
+    if (closed === undefined) return;
+    if (closed.session !== null) {
+      if (closed.kind === "saved") closed.session.close();
+    }
+    const autoSave = this.autoSaveTimers.get(closed.key);
+    if (autoSave !== undefined) {
+      window.clearTimeout(autoSave);
+      this.autoSaveTimers.delete(closed.key);
+    }
+    if (remember) this.state.closedTabs = [workspaceTabFromTab(closed), ...this.state.closedTabs.filter((item) => !sameTabIdentity(identityOfWorkspace(item), identity))].slice(0, 50);
+    if (sameTabIdentity(this.state.activeTab, identity)) {
+      this.state.activeTab = this.state.tabs[Math.max(0, index - 1)] === undefined
+        ? this.state.tabs[0] === undefined ? null : tabIdentity(this.state.tabs[0])
+        : tabIdentity(this.state.tabs[Math.max(0, index - 1)]!);
+      this.cancelAssetScope();
+    }
+    if (closed.kind === "saved" && this.identity !== null && this.vaultClient !== null) {
+      const identity = this.identity;
+      const client = this.vaultClient;
+      const deletion = this.services.workspace.deleteCachedNoteBodies({ ...identity, noteId: closed.noteId }).catch((error) => {
+        if (this.isCurrentVault(identity, client)) logClientEvent("warn", "client.storage", { error: errorSummary(error) });
+      });
+      this.trackAction(deletion);
     }
     this.render();
+    this.persistWorkspace();
   }
 
   private async manualSave(): Promise<void> {
-    this.syncActiveDraft();
+    this.captureActiveEditor();
     const tab = activeTab(this.state);
-    if (tab === undefined || tab.doc === null || !tab.dirty) {
-      return;
+    if (tab?.kind === "saved" && tab.session !== null) await tab.session.save();
+    else if (tab?.kind === "local-draft") {
+      this.state.noteDialog = { kind: "create", localDraftId: tab.localDraftId, title: tab.title };
+      this.render();
     }
-    if (tab.saving) {
-      tab.savePending = true;
-      return;
-    }
-    this.clearAutosaveTimer(tab);
-    await this.persistTab(tab);
   }
 
-  private scheduleAutosave(): void {
-    const tab =
-      this.editorNoteId === null ? activeTab(this.state) : tabById(this.state, this.editorNoteId);
-    const noteId = tab?.noteId;
-    const vault = this.state.vault;
-    if (noteId === undefined) {
-      return;
-    }
-    const key = this.autosaveTimerKey(vault, noteId);
-    this.clearAutosaveTimerByKey(key);
+  private scheduleAutoSave(tab: SavedTab): void {
+    const old = this.autoSaveTimers.get(tab.key);
+    if (old !== undefined) window.clearTimeout(old);
+    const delay = this.state.boot?.settings.autosaveDelayMs ?? 900;
+    const session = tab.session;
+    if (session === null) return;
     const timer = window.setTimeout(() => {
-      this.autosaveTimers.delete(key);
-      this.syncActiveDraft();
-      if (this.state.vault !== vault) {
-        return;
-      }
-      const target = tabById(this.state, noteId);
-      if (target !== undefined && target.dirty) {
-        if (target.saving) {
-          target.savePending = true;
-        } else {
-          this.runAsync(this.persistTab(target), "Save failed");
-        }
-      }
-    }, this.state.boot?.settings.autosaveDelayMs ?? 900);
-    this.autosaveTimers.set(key, timer);
+      this.autoSaveTimers.delete(tab.key);
+      if (tab.session === session && tabIsDirty(tab)) this.runAsync(session.save(), "Save failed");
+    }, delay);
+    this.autoSaveTimers.set(tab.key, timer);
   }
 
-  private autosaveTimerKey(vault: VaultIndex, noteId: string): string {
-    return `${vault}:${noteId}`;
+  private workspaceSnapshot(identity: ServerIdentity): WorkspaceState {
+    return {
+      formatVersion: 1,
+      serverInstanceId: identity.serverInstanceId,
+      vaultId: identity.vaultId,
+      workspaceId: this.workspaceId,
+      tabs: this.state.tabs.map(workspaceTabFromTab),
+      activeTab: this.state.activeTab,
+      closedTabs: this.state.closedTabs,
+      pinnedNoteIds: [...this.state.pinned],
+      recentNoteIds: this.state.recent,
+      searchHistory: [],
+      legacySessionImported: true,
+      savedAtMs: Date.now(),
+    };
   }
 
-  private clearAutosaveTimer(tab: Tab): void {
-    this.clearAutosaveTimerByKey(this.autosaveTimerKey(this.state.vault, tab.noteId));
+  private async saveWorkspaceState(snapshot: WorkspaceState): Promise<void> {
+    await this.trackAction(this.services.workspace.saveWorkspaceState(snapshot).catch((error) => {
+      this.notifyStorageFailure(error);
+      throw error;
+    }));
   }
 
-  private clearAutosaveTimerByKey(key: string): void {
-    const timer = this.autosaveTimers.get(key);
-    if (timer === undefined) {
-      return;
-    }
-    window.clearTimeout(timer);
-    this.autosaveTimers.delete(key);
-  }
-
-  private clearAutosaveTimers(): void {
-    for (const timer of this.autosaveTimers.values()) {
-      window.clearTimeout(timer);
-    }
-    this.autosaveTimers.clear();
-  }
-
-  private async persistTab(tab: Tab): Promise<void> {
-    if (tab.doc === null || tab.draft === null) {
-      return;
-    }
-    const vault = this.state.vault;
-    const savingDraft = tab.draft;
-    tab.savePending = false;
-    tab.saving = true;
-    this.renderStatusOnly();
-    try {
-      const request = await buildSaveNoteDeltaRequest(
-        tab.doc.content,
-        tab.draft,
-        tab.doc.meta.seq,
-        tab.doc.meta.contentHash,
-        false,
-      );
-      const response = await this.services.api.saveNoteDelta(
-        tab.noteId,
-        {
-          ...request,
-          baseHash: toContentHash(request.baseHash),
-          contentHash: toContentHash(request.contentHash),
-        },
-        vault,
-      );
-      if (response.document !== null) {
-        const document = {
-          ...response.document,
-          content: normalizeMarkdownNewlines(response.document.content),
-        };
-        void this.services.noteCache.cacheNoteBody(vault, document);
-        if (this.state.vault !== vault) {
-          return;
-        }
-        const currentDraft = tab.draft;
-        tab.doc = document;
-        tab.draft = currentDraft === savingDraft ? document.content : currentDraft;
-        tab.title = document.meta.title;
-        tab.path = document.meta.path;
-        this.state.notes.set(document.meta.noteId, document.meta);
-        tab.dirty = tab.draft !== document.content;
-      } else {
-        const document = {
-          meta: response.meta,
-          content: normalizeMarkdownNewlines(savingDraft),
-        };
-        void this.services.noteCache.cacheNoteBody(vault, document);
-        if (this.state.vault !== vault) {
-          return;
-        }
-        const currentDraft = tab.draft;
-        tab.doc = document;
-        tab.draft = currentDraft === savingDraft ? document.content : currentDraft;
-        tab.title = document.meta.title;
-        tab.path = document.meta.path;
-        this.state.notes.set(document.meta.noteId, document.meta);
-        tab.dirty = tab.draft !== document.content;
-      }
-      tab.conflict = false;
-      tab.conflictDraftId = null;
-      logClientEvent("info", "note.save", {
-        note: { id: tab.noteId, path: tab.path, vault },
-        save: {
-          bytes: savingDraft.length,
-          seq: tab.doc?.meta.seq,
-          dirty: tab.dirty,
-          delta: true,
-        },
-      });
-    } catch (error) {
-      if (this.state.vault !== vault) {
-        return;
-      }
-      const conflict = saveConflictError(error);
-      tab.conflict = conflict !== null;
-      tab.conflictDraftId = conflict === null ? null : toConflictDraftId(conflict.draft.draftId);
-      logClientEvent(conflict === null ? "error" : "warn", "note.save_failed", {
-        note: { id: tab.noteId, vault },
-        error: errorSummary(error),
-        conflict: conflict !== null,
-      });
-      this.notify(tab.conflict ? "Save conflict" : "Save failed");
-    } finally {
-      tab.saving = false;
-      if (this.state.vault === vault) {
-        if (tab.savePending && tab.dirty && tab.doc !== null) {
-          tab.savePending = false;
-          this.runAsync(this.persistTab(tab), "Save failed");
-        } else {
-          this.render();
-        }
-      }
+  private persistWorkspace(): void {
+    this.captureActiveEditor();
+    if (this.workspaceTimer !== undefined) window.clearTimeout(this.workspaceTimer);
+    this.workspaceTimer = undefined;
+    if (this.identity !== null) {
+      void this.saveWorkspaceState(this.workspaceSnapshot(this.identity)).catch(() => undefined);
     }
   }
 
-  private scheduleSessionSave(): void {
-    window.clearTimeout(this.sessionTimer);
-    this.sessionTimer = window.setTimeout(() => {
-      void this.services.api.saveSession(sessionFromState(this.state), this.state.vault);
+  private scheduleWorkspaceSave(): void {
+    if (this.identity === null) return;
+    const snapshot = this.workspaceSnapshot(this.identity);
+    if (this.workspaceTimer !== undefined) window.clearTimeout(this.workspaceTimer);
+    this.workspaceTimer = window.setTimeout(() => {
+      this.workspaceTimer = undefined;
+      void this.saveWorkspaceState(snapshot).catch(() => undefined);
     }, SESSION_SAVE_DELAY_MS);
   }
 
-  private scheduleEditorSessionSave(): void {
-    window.clearTimeout(this.sessionTimer);
-    this.sessionTimer = window.setTimeout(() => {
-      this.syncActiveDraft();
-      void this.services.api.saveSession(sessionFromState(this.state), this.state.vault);
-    }, EDITOR_SESSION_SAVE_DELAY_MS);
-  }
-
   private async updateSearch(): Promise<void> {
-    const seq = ++this.searchRequestSeq;
-    const vault = this.state.vault;
+    const request = ++this.searchRequestSeq;
     const query = this.state.searchQuery.trim();
-    if (query.length < MIN_SEARCH_QUERY_CHARS) {
+    const client = this.vaultClient;
+    const serverIdentity = this.identity;
+    if (query.length < MIN_SEARCH_QUERY_CHARS || client === null || serverIdentity === null) {
       this.state.searchHits = null;
       this.render();
       return;
     }
-    logClientEvent("info", "client.search", {
-      search: { surface: "sidebar", action: "start", queryLength: query.length },
-      vault,
-    });
-    const hits = await this.services.api.searchNotes(query, vault);
-    if (
-      seq !== this.searchRequestSeq ||
-      this.state.vault !== vault ||
-      query !== this.state.searchQuery.trim()
-    ) {
-      return;
-    }
-    this.state.searchHits = hits;
-    logClientEvent("info", "client.search", {
-      search: {
-        surface: "sidebar",
-        action: "complete",
-        queryLength: query.length,
-        hits: hits.length,
-      },
-      vault,
-    });
+    const response = await client.search({ query, mode: "default", limit: 50, overlays: this.searchOverlays() });
+    if (request !== this.searchRequestSeq || this.state.searchQuery.trim() !== query ||
+      !this.isCurrentVault(serverIdentity, client)) return;
+    this.state.searchHits = response.hits;
     this.render();
   }
 
   private async updateSearchOverlay(): Promise<void> {
-    const seq = ++this.searchOverlayRequestSeq;
-    const vault = this.state.vault;
+    const request = ++this.searchOverlayRequestSeq;
     const query = this.state.searchOverlayQuery.trim();
-    if (query.length < MIN_SEARCH_QUERY_CHARS) {
+    const client = this.vaultClient;
+    const serverIdentity = this.identity;
+    if (query.length < MIN_SEARCH_QUERY_CHARS || client === null || serverIdentity === null) {
       this.state.searchOverlayHits = null;
       this.render();
       return;
     }
-    logClientEvent("info", "client.search", {
-      search: { surface: "overlay", action: "start", queryLength: query.length },
-      vault,
-    });
-    const hits = await this.services.api.searchNotes(query, vault);
-    if (
-      seq !== this.searchOverlayRequestSeq ||
-      this.state.vault !== vault ||
-      query !== this.state.searchOverlayQuery.trim()
-    ) {
-      return;
-    }
-    this.state.searchOverlayHits = hits;
-    logClientEvent("info", "client.search", {
-      search: {
-        surface: "overlay",
-        action: "complete",
-        queryLength: query.length,
-        hits: hits.length,
-      },
-      vault,
-    });
+    const response = await client.search({ query, mode: "default", limit: 50, overlays: this.searchOverlays() });
+    if (request !== this.searchOverlayRequestSeq || this.state.searchOverlayQuery.trim() !== query ||
+      !this.isCurrentVault(serverIdentity, client)) return;
+    this.state.searchOverlayHits = response.hits;
     this.render();
+  }
+
+  private searchOverlays(): V2SearchOverlay[] {
+    const overlays: V2SearchOverlay[] = [];
+    for (const tab of this.state.tabs) {
+      const source = loadedDraft(tab);
+      if (source === null || !tabIsDirty(tab)) continue;
+      if (tab.kind === "saved") {
+        const session = tab.session?.state;
+        const revision = session !== null && session !== undefined && "base" in session ? session.base.revision : tab.doc?.meta.revision;
+        const sourceHash = session !== null && session !== undefined && "base" in session ? session.base.sourceHash : tab.doc?.meta.sourceHash;
+        const localRevision = session !== null && session !== undefined && "draft" in session && session.draft !== null ? session.draft.localRevision : 1;
+        if (revision === undefined || sourceHash === undefined) continue;
+        overlays.push({ kind: "saved", noteId: tab.noteId, baseRevision: revision, baseSourceHash: sourceHash, localRevision, title: tab.title, path: tab.path, content: source });
+        continue;
+      }
+      overlays.push({ kind: "new", localId: tab.localDraftId, localRevision: tab.session?.state.localRevision ?? 0, title: tab.title, path: tab.path, content: source });
+    }
+    return overlays;
+  }
+
+  private isCurrentVault(
+    identity: ServerIdentity,
+    client: ReturnType<AppServices["api"]["forVault"]>,
+  ): boolean {
+    return !this.disposed && this.identity?.serverInstanceId === identity.serverInstanceId &&
+      this.identity.vaultId === identity.vaultId && this.vaultClient === client;
+  }
+
+  private isCurrentTab(
+    tab: SavedTab,
+    identity: ServerIdentity,
+    client: ReturnType<AppServices["api"]["forVault"]>,
+  ): boolean {
+    return this.isCurrentVault(identity, client) && this.state.tabs.includes(tab) &&
+      tab.session?.identity.serverInstanceId === identity.serverInstanceId &&
+      tab.session.identity.vaultId === identity.vaultId && tab.session.identity.noteId === tab.noteId;
   }
 
   private async commandCreate(): Promise<void> {
-    this.logCommand("create");
-    this.state.noteDialog = { kind: "create", title: "" };
-    this.state.commandOpen = false;
+    const tab = this.localDraftTab(localDraftId(mutationId()), "", "");
+    this.state.tabs.push(tab);
+    this.state.activeTab = { kind: "local-draft", localDraftId: tab.localDraftId };
+    await this.loadLocalDraft(tab);
+    if (this.disposed || !this.state.tabs.includes(tab)) return;
+    this.state.noteDialog = { kind: "create", localDraftId: tab.localDraftId, title: "" };
     this.render();
   }
 
-  private commandOpen(): void {
-    this.logCommand("open");
-    this.state.searchOpen = true;
-    this.state.commandOpen = false;
-    this.state.searchOverlayQuery = "";
-    this.state.searchOverlayHits = null;
+  private localDraftTab(id: LocalDraftId, title: string, source: string) {
+    const tab: Extract<Tab, { kind: "local-draft" }> = {
+      kind: "local-draft",
+      key: toTabKey({ kind: "local-draft", localDraftId: id }),
+      localDraftId: id,
+      title,
+      path: "",
+      session: null,
+      doc: null,
+      draft: source,
+      dirty: true,
+      saving: false,
+      savePending: false,
+      conflict: false,
+      conflictDraftId: null,
+      selection: null,
+      scrollTop: 0,
+      sourceMode: false,
+      editorSession: null,
+      editorRevision: 0,
+    };
+    return tab;
+  }
+
+  private async promoteLocalDraft(tab: Extract<Tab, { kind: "local-draft" }>, title: string, path: string): Promise<void> {
+    if (this.identity === null || this.vaultClient === null || tab.session === null) return;
+    if (!tab.session.state.promotionPending) tab.session.editTitle(title);
+    else if (tab.session.state.titleDraft !== title) throw new Error("A pending local create cannot change its title");
+    const ready = await tab.session.beginPromotion();
+    if (!ready || tab.session.state.storage === "failed") {
+      throw new Error("Local draft checkpoint failed; export its source before retrying");
+    }
+    const source = tab.session.exportSource();
+    const state = tab.session.state;
+    const response = await this.vaultClient.createNote({
+      mutationId: state.mutationId,
+      path,
+      content: source,
+      sourceHash: await canonicalSourceHash(source),
+    });
+    if (response.outcome.state === "pendingMaterialization") {
+      this.notify("Note creation is still being applied. Retry the same save to finish promotion.");
+      return;
+    }
+    if (response.outcome.state !== "accepted" || response.outcome.result === null) {
+      if (response.outcome.state === "conflict") throw new Error("A new local note unexpectedly conflicted");
+      throw new Error("Create response omitted its note metadata");
+    }
+    const noteMeta = response.outcome.result;
+    const document = await this.vaultClient.openNote(noteMeta.noteId);
+    const documentIdentity: DocumentIdentity = { ...this.identity, noteId: noteId(noteMeta.noteId) };
+    const promoted = await this.services.workspace.promoteLocalDraftCheckpoint(documentIdentity, this.workspaceId, tab.localDraftId, document);
+    if (promoted === null) throw new Error("Local draft checkpoint changed before promotion completed");
+    const saved = tabFromDocument(document);
+    saved.selection = selectionWithin(tab.selection, document.content.length);
+    saved.scrollTop = tab.scrollTop;
+    saved.sourceMode = tab.sourceMode;
+    saved.title = title;
+    saved.session = this.createDocumentSession(saved, promoted);
+    this.state.notes.set(document.meta.noteId, document.meta);
+    const index = this.state.tabs.indexOf(tab);
+    if (index >= 0) this.state.tabs.splice(index, 1, saved);
+    this.state.activeTab = { kind: "saved", noteId: saved.noteId };
+    tab.session = null;
+    this.cacheDocument(document);
+    this.state.noteDialog = null;
     this.render();
   }
 
-  private commandRename(noteId = this.state.activeNoteId ?? undefined): void {
-    if (noteId === undefined) {
-      return;
-    }
-    const note = this.state.notes.get(noteId);
-    if (note === undefined) {
-      return;
-    }
-    this.logCommand("rename", noteId);
-    this.state.noteDialog = { kind: "rename", noteId: toNoteId(noteId), title: note.title };
-    this.render();
-  }
-
-  private commandDelete(noteId = this.state.activeNoteId ?? undefined): void {
-    if (noteId === undefined || !this.state.notes.has(noteId)) {
-      return;
-    }
-    this.logCommand("delete", noteId);
-    this.state.noteDialog = { kind: "delete", noteId: toNoteId(noteId) };
-    this.render();
-  }
-
-  private async commandPin(noteId = this.state.activeNoteId ?? undefined): Promise<void> {
-    if (noteId === undefined) {
-      return;
-    }
-    const pinned = !this.state.pinned.has(noteId);
-    this.logCommand("pin", noteId, { pinned });
-    await this.services.api.setPinned(toNoteId(noteId), pinned, this.state.vault);
-    if (pinned) {
-      this.state.pinned.add(noteId);
-    } else {
-      this.state.pinned.delete(noteId);
-    }
-    this.render();
-  }
-
-  private async commandReopenClosed(): Promise<void> {
-    const closed = this.state.closedTabs.shift();
-    if (closed === undefined) {
-      return;
-    }
-    this.logCommand("reopen", closed.noteId);
-    let tab = tabById(this.state, closed.noteId);
-    const note = this.state.notes.get(closed.noteId);
-    if (tab === undefined && note !== undefined) {
-      tab = tabFromMeta(note);
-      tab.cursorOffset = closed.cursorOffset ?? null;
-      tab.sourceMode = closed.sourceMode;
-      this.state.tabs.push(tab);
-    }
-    if (tab !== undefined) {
-      await this.activateTab(closed.noteId);
-    }
-  }
-
-  private async commandImportHtml(): Promise<void> {
-    const imported = await this.services.htmlImport.pickHtmlImport(this.state.notes.values());
-    if (imported === null) {
-      logClientEvent("warn", "client.import", {
-        import: { action: "cancel_or_failed" },
-        vault: this.state.vault,
-      });
-      this.notify("HTML import failed");
-      return;
-    }
-    this.logCommand("import", undefined, { path: imported.path, bytes: imported.content.length });
-    const response = await this.services.api.createNote(
-      { path: imported.path, content: imported.content, source: "import" },
-      this.state.vault,
+  private createDocumentSession(tab: SavedTab, checkpoint: DraftJournalRecord | null): DocumentSession {
+    const serverIdentity = this.identity;
+    if (serverIdentity === null) throw new Error("Server identity is unavailable");
+    const client = this.vaultClient;
+    if (client === null) throw new Error("Vault client is unavailable");
+    const identity: DocumentIdentity = { ...serverIdentity, noteId: tab.noteId };
+    const journal = this.ensureJournal();
+    const services = defaultDocumentSessionServices(
+      async (documentIdentity, generation, request) => ({
+        identity: documentIdentity,
+        generation,
+        response: await client.saveNote(documentIdentity.noteId, request),
+      }),
+      this.services.workspace.checkpointWriter(journal),
+      this.services.workspace.checkpointClearer(journal, this.workspaceId),
     );
-    if (response.document !== null) {
-      this.state.notes.set(response.meta.noteId, response.meta);
-      this.state.tabs.push(tabFromDocument(response.document));
-      logClientEvent("info", "client.import", {
-        import: { action: "complete", path: imported.path, bytes: imported.content.length },
-        note: { id: response.meta.noteId, path: response.meta.path, vault: this.state.vault },
+    services.clearTitleCheckpoint = this.services.workspace.titleCheckpointClearer(journal, this.workspaceId);
+    const session = new DocumentSession(identity, ++this.sessionGeneration, this.workspaceId, services);
+    tab.session = session;
+    session.subscribe((value) => this.onDocumentSessionState(tab, session, serverIdentity, client, value));
+    if (tab.doc !== null && checkpoint !== null) session.recover(tab.doc, checkpoint);
+    else if (tab.doc !== null) {
+      tab.selection = selectionWithin(tab.selection, tab.doc.content.length);
+      session.loaded(tab.doc, tab.selection);
+    }
+    return session;
+  }
+
+  private async submitNoteDialog(value?: string): Promise<void> {
+    const dialog = this.state.noteDialog;
+    if (dialog === null) return;
+    if (dialog.kind === "create") {
+      const title = (value ?? dialog.title).trim();
+      if (title === "") return;
+      const candidate = this.state.tabs.find((item) => item.kind === "local-draft" && item.localDraftId === dialog.localDraftId);
+      if (candidate?.kind !== "local-draft") return;
+      const tab = candidate;
+      const path = uniqueNotePath(title, this.state.notes.values());
+      tab.title = title;
+      tab.path = path;
+      await this.promoteLocalDraft(tab, title, path);
+    } else if (dialog.kind === "rename") {
+      const tab = tabById(this.state, dialog.noteId);
+      const title = (value ?? dialog.title).trim();
+      if (tab?.session === null || tab === undefined || title === "") return;
+      const session = tab.session;
+      session.editTitle(title);
+      const status = session.state;
+      if (!("base" in status) || status.titleMutationId === null) return;
+      const path = renamedPath(tab.path, title, this.state.notes.values(), tab.noteId);
+      const response = await this.vaultClient!.renameNote(tab.noteId, {
+        mutationId: status.titleMutationId,
+        precondition: { baseRevision: status.base.revision, baseSourceHash: status.base.sourceHash, baseDiskHash: status.base.diskHash },
+        path,
       });
-      await this.activateTab(response.meta.noteId);
+      if (response.outcome.state !== "accepted" || response.outcome.result === null) throw new Error("Rename was not accepted");
+      await session.acceptRename(response.outcome.result, status.titleRevision, status.titleMutationId);
+      tab.title = title;
+      tab.path = response.outcome.result.path;
+      tab.doc = { ...tab.doc!, meta: response.outcome.result };
+      this.state.notes.set(tab.noteId, response.outcome.result);
+      this.state.noteDialog = null;
+      this.persistWorkspace();
+      this.render();
+    } else if (dialog.kind === "tag") {
+      const tab = activeTab(this.state);
+      const tag = normalizeTag(value ?? dialog.value);
+      if (tab?.kind === "saved" && tag !== null) this.editor?.updateTags([...new Set([...(tab.doc?.meta.tags ?? []), tag])]);
+      this.state.noteDialog = null;
+      this.render();
+    } else {
+      await this.deleteNote(dialog.noteId);
     }
   }
 
-  private commandSettings(): void {
-    if (this.state.boot === null) {
-      return;
-    }
-    this.logCommand("settings");
-    this.state.settingsOpen = true;
+  private async deleteNote(id: ReturnType<typeof toNoteId>): Promise<void> {
+    const tab = tabById(this.state, id);
+    const status = tab?.session?.state;
+    if (tab === undefined || status === undefined || !("base" in status)) return;
+    const response = await this.vaultClient!.deleteNote(id, {
+      mutationId: mutationId(),
+      precondition: { baseRevision: status.base.revision, baseSourceHash: status.base.sourceHash, baseDiskHash: status.base.diskHash },
+    });
+    if (response.outcome.state !== "accepted") throw new Error("Delete was not accepted");
+    this.state.notes.delete(id);
+    this.state.pinned.delete(id);
+    this.state.recent = this.state.recent.filter((item) => item !== id);
+    await this.services.workspace.deleteCachedNoteBodies({ ...this.identity!, noteId: id });
+    await this.closeTab({ kind: "saved", noteId: id }, false);
+  }
+
+  private async renameDialog(id: ReturnType<typeof toNoteId>): Promise<void> {
+    const tab = tabById(this.state, id);
+    if (tab === undefined) return;
+    this.state.noteDialog = { kind: "rename", noteId: id, title: tab.title };
+    this.render();
+  }
+
+  private async togglePin(id: ReturnType<typeof toNoteId>): Promise<void> {
+    if (this.state.pinned.has(id)) this.state.pinned.delete(id);
+    else this.state.pinned.add(id);
+    this.persistWorkspace();
     this.render();
   }
 
   private async commandRevisions(): Promise<void> {
     const tab = activeTab(this.state);
-    if (tab === undefined) {
-      return;
-    }
-    this.logCommand("revisions", tab.noteId);
+    if (tab?.kind !== "saved" || this.vaultClient === null) return;
     this.state.revisionsOpen = true;
-    this.state.revisionList = await this.services.api.listRevisions(tab.noteId, this.state.vault);
-    logClientEvent("info", "client.revisions", {
-      revisions: { action: "list", count: this.state.revisionList.length },
-      note: { id: tab.noteId, vault: this.state.vault },
-    });
+    this.state.revisionList = await this.vaultClient.listRevisions(tab.noteId);
     this.state.revisionDocument = null;
     this.render();
   }
 
-  private async commandAddTag(): Promise<void> {
+  private async selectRevision(revision: number): Promise<void> {
     const tab = activeTab(this.state);
-    if (
-      tab?.doc === null ||
-      tab === undefined ||
-      !frontmatterSupportsTags(tab.draft ?? tab.doc.content)
-    ) {
-      return;
-    }
-    this.logCommand("add_tag", tab.noteId);
-    this.state.noteDialog = { kind: "tag", value: "" };
+    if (tab?.kind !== "saved" || this.vaultClient === null) return;
+    this.state.revisionDocument = await this.vaultClient.openRevision(tab.noteId, revision);
     this.render();
   }
 
-  private updateActiveTags(tags: string[]): void {
-    this.syncActiveDraft();
+  private async restoreSelectedRevision(): Promise<void> {
     const tab = activeTab(this.state);
-    if (tab === undefined || tab.doc === null) {
-      return;
-    }
-    const current = tab.draft ?? tab.doc.content;
-    if (!frontmatterSupportsTags(current)) {
-      return;
-    }
-    const next = setMarkdownTags(markdownBody(current), tags);
-    tab.draft = next;
-    tab.doc.meta.tags = tags;
-    tab.dirty = next !== tab.doc.content;
-    this.editor?.setValue(markdownBody(next), tab.cursorOffset ?? undefined);
-    logClientEvent("info", "client.tags", {
-      tags: { action: "update", count: tags.length },
-      note: { id: tab.noteId, path: tab.path, vault: this.state.vault },
+    const selected = this.state.revisionDocument;
+    const status = tab?.kind === "saved" ? tab.session?.state : undefined;
+    if (tab?.kind !== "saved" || selected === null || status === undefined || !("base" in status)) return;
+    const response = await this.vaultClient!.restoreRevision(tab.noteId, selected.revision.revision, {
+      mutationId: mutationId(),
+      precondition: { baseRevision: status.base.revision, baseSourceHash: status.base.sourceHash, baseDiskHash: status.base.diskHash },
     });
-    this.scheduleAutosave();
+    await this.handleMutation(response, tab, status.draft.localRevision);
+    this.state.revisionsOpen = false;
+  }
+
+  private async viewConflictDraft(): Promise<void> {
+    const tab = activeTab(this.state);
+    const status = tab?.kind === "saved" ? tab.session?.state : undefined;
+    if (tab?.kind !== "saved" || status?.status !== "conflict" || status.conflictDraft === null || this.vaultClient === null) return;
+    this.state.conflictDraft = await this.vaultClient.openConflictDraft(tab.noteId, status.conflictDraft.draftId);
     this.render();
   }
 
-  private toggleSourceMode(): void {
+  private async restoreConflictDraft(): Promise<void> {
     const tab = activeTab(this.state);
-    if (tab === undefined || this.editor === null) {
-      return;
-    }
-    this.editor.toggleSourceMode();
-    tab.sourceMode = this.editor.isSourceMode;
-    logClientEvent("info", "client.editor", {
-      editor: { action: "toggle_source", sourceMode: tab.sourceMode },
-      note: { id: tab.noteId, path: tab.path, vault: this.state.vault },
+    const status = tab?.kind === "saved" ? tab.session?.state : undefined;
+    if (tab?.kind !== "saved" || status?.status !== "conflict" || status.conflictDraft === null || this.state.conflictDraft === null) return;
+    const response = await this.vaultClient!.restoreConflictDraft(tab.noteId, status.conflictDraft.draftId, {
+      mutationId: mutationId(),
+      precondition: { baseRevision: status.base.revision, baseSourceHash: status.base.sourceHash, baseDiskHash: status.base.diskHash },
     });
-    this.scheduleSessionSave();
+    await this.handleMutation(response, tab, status.draft.localRevision);
+    this.state.conflictDraft = null;
   }
 
-  private toggleReadingMode(): void {
-    if (activeTab(this.state) === undefined) {
-      return;
+  private async handleMutation(response: V2MutationResponse, tab: SavedTab, expectedLocalRevision: number): Promise<void> {
+    if (response.outcome.state === "accepted") {
+      if (response.outcome.result === null) throw new Error("Accepted restore response omitted note metadata");
+      const document = await this.vaultClient!.openNote(tab.noteId);
+      tab.doc = document;
+      const sessionState = tab.session?.state;
+      const matchesRevision = sessionState !== undefined && "draft" in sessionState &&
+        sessionState.draft !== null && sessionState.draft.localRevision === expectedLocalRevision;
+      if (matchesRevision && tab.editorSession !== null) {
+        const snapshot = this.activeEditorKey === tab.key ? this.editor?.getSnapshot() : null;
+        const editorRevision = snapshot?.noteId === tab.key ? snapshot.revision : tab.editorRevision;
+        if (this.editor?.markSaved(tab.editorSession, editorRevision)) {
+          this.editor.reloadIfClean(tab.editorSession, document.content);
+        }
+      }
+      tab.session?.applyAcceptedMutation(document, expectedLocalRevision);
+      this.state.notes.set(tab.noteId, document.meta);
+      this.cacheDocument(document);
+    } else if (response.outcome.state === "conflict") {
+      tab.session?.reconcile(response.outcome.current);
+      tab.doc = response.outcome.current;
+      tab.conflict = true;
     }
-    this.state.readingMode = !this.state.readingMode;
-    logClientEvent("info", "client.editor", {
-      editor: { action: "toggle_reading", reading: this.state.readingMode },
-      note: { id: this.state.activeNoteId, vault: this.state.vault },
-    });
     this.render();
   }
 
-  private filteredCommands(): CommandItem[] {
-    return commandItems(this.state);
+  private async saveSettings(settings: { excludedFoldersText: string; autosaveDelayMs: number; undoStackMax: number; imageWebpQuality: number }): Promise<void> {
+    const current = this.state.boot?.settings;
+    if (current === undefined || this.vaultClient === null) return;
+    const next: Settings = {
+      ...current,
+      excludedFolders: settings.excludedFoldersText.split(",").map((value) => value.trim()).filter(Boolean),
+      autosaveDelayMs: Number.isFinite(settings.autosaveDelayMs)
+        ? Math.max(150, settings.autosaveDelayMs)
+        : current.autosaveDelayMs,
+      undoStackMax: Number.isFinite(settings.undoStackMax)
+        ? Math.max(20, settings.undoStackMax)
+        : current.undoStackMax,
+      imageWebpQuality: Number.isFinite(settings.imageWebpQuality)
+        ? Math.min(1, Math.max(0.1, settings.imageWebpQuality))
+        : current.imageWebpQuality,
+    };
+    const response = await this.vaultClient.saveSettings({ mutationId: mutationId(), settings: next });
+    if (this.state.boot !== null) this.state.boot.settings = response.settings;
+    this.state.settingsOpen = false;
+    this.render();
+  }
+
+  private async importHtml(): Promise<void> {
+    const imported = await this.services.htmlImport.pickHtmlImport(this.state.notes.values());
+    if (imported === null) return;
+    const tab = this.localDraftTab(localDraftId(mutationId()), imported.path.replace(/\.md$/i, ""), imported.content);
+    tab.path = imported.path;
+    this.state.tabs.push(tab);
+    this.state.activeTab = tabIdentity(tab);
+    await this.loadLocalDraft(tab);
+    await this.promoteLocalDraft(tab, tab.title, imported.path);
+  }
+
+  private dispatch(event: ViewEvent): void {
+    if (this.disposed || this.transitioningVault && event.type !== "vault.switch") return;
+    switch (event.type) {
+      case "vault.switch": this.runAsync(this.boot(event.vaultId), "Load failed", false); return;
+      case "search.input": this.state.searchQuery = event.query; this.runAsync(this.updateSearch(), "Search failed"); return;
+      case "search.open": this.state.searchOpen = true; this.state.commandOpen = false; this.state.searchOverlayQuery = ""; this.render(); return;
+      case "search.overlayInput": this.state.searchOverlayQuery = event.query; this.runAsync(this.updateSearchOverlay(), "Search failed"); return;
+      case "command.open": this.state.commandOpen = true; this.state.searchOpen = false; this.state.commandFilter = ""; this.render(); return;
+      case "command.filter": this.state.commandFilter = event.query; this.render(); return;
+      case "command.run": this.executeCommand(event.id); return;
+      case "dialog.input": {
+        const dialog = this.state.noteDialog;
+        if (dialog?.kind === "create" || dialog?.kind === "rename") {
+          dialog.title = event.value;
+          if (dialog.kind === "rename") tabById(this.state, dialog.noteId)?.session?.editTitle(event.value);
+          if (dialog.kind === "create") this.state.tabs.find((tab) => tab.kind === "local-draft" && tab.localDraftId === dialog.localDraftId)?.session?.editTitle(event.value);
+        } else if (dialog?.kind === "tag") dialog.value = event.value;
+        return;
+      }
+      case "dialog.submit": this.runAsync(this.submitNoteDialog(event.value), "Action failed"); return;
+      case "settings.submit": this.runAsync(this.saveSettings(event.settings), "Settings failed"); return;
+      case "overlay.close": this.runAsync(this.closeOverlays(), "Local recovery storage failed"); return;
+      case "context.close": this.state.contextMenu = null; this.render(); return;
+      case "context.open": this.state.contextMenu = { noteId: event.noteId, x: event.x, y: event.y }; this.render(); return;
+      case "tab.activate": this.runAsync(this.activateTab(event.tab), "Open failed"); return;
+      case "tab.close": this.runAsync(this.closeTab(event.tab), "Close failed"); return;
+      case "note.open": this.runAsync(this.openNote(event.noteId), "Open failed"); return;
+      case "localDraft.open": this.runAsync(this.openLocalDraft(event.localDraftId), "Open failed"); return;
+      case "note.rename": {
+        const current = activeTab(this.state);
+        const id = event.noteId ?? (current?.kind === "saved" ? current.noteId : undefined);
+        if (id !== undefined) this.runAsync(this.renameDialog(id), "Rename failed");
+        return;
+      }
+      case "note.delete": {
+        const current = activeTab(this.state);
+        const id = event.noteId ?? (current?.kind === "saved" ? current.noteId : undefined);
+        if (id !== undefined) { this.state.noteDialog = { kind: "delete", noteId: id }; this.render(); }
+        return;
+      }
+      case "note.pin": {
+        const current = activeTab(this.state);
+        const id = event.noteId ?? (current?.kind === "saved" ? current.noteId : undefined);
+        if (id !== undefined) this.runAsync(this.togglePin(id), "Pin failed");
+        return;
+      }
+      case "note.addTag": this.state.noteDialog = { kind: "tag", value: "" }; this.render(); return;
+      case "tags.update": this.editor?.updateTags(event.tags); return;
+      case "reading.toggle": this.state.readingMode = !this.state.readingMode; this.render(); return;
+      case "editor.toolbar": this.dispatchEditorToolbar(event.command); return;
+      case "revisions.open": this.runAsync(this.commandRevisions(), "Revisions failed"); return;
+      case "revisions.select": this.runAsync(this.selectRevision(event.eventId), "Revision failed"); return;
+      case "revisions.restore": this.runAsync(this.restoreSelectedRevision(), "Restore failed"); return;
+      case "conflict.view": this.runAsync(this.viewConflictDraft(), "Conflict draft failed"); return;
+      case "conflict.restore": this.runAsync(this.restoreConflictDraft(), "Restore failed"); return;
+      case "draft.export": this.exportActiveDraft(); return;
+      case "draft.recreate": this.runAsync(this.recreateUnavailableDraft(), "Recreate failed"); return;
+      case "render.request": this.render(); return;
+    }
   }
 
   private executeCommand(id: CommandId): void {
     this.state.commandOpen = false;
+    this.render();
     switch (id) {
-      case "open": {
-        this.commandOpen();
-        return;
-      }
-      case "create": {
-        this.runAsync(this.commandCreate(), "Create failed");
-        return;
-      }
-      case "save": {
-        this.runAsync(this.manualSave(), "Save failed");
-        return;
-      }
-      case "rename": {
-        this.commandRename();
-        return;
-      }
-      case "delete": {
-        this.commandDelete();
-        return;
-      }
-      case "pin": {
-        this.runAsync(this.commandPin(), "Pin failed");
-        return;
-      }
-      case "reopen": {
-        this.runAsync(this.commandReopenClosed(), "Reopen failed");
-        return;
-      }
-      case "reading": {
-        this.toggleReadingMode();
-        return;
-      }
-      case "search": {
-        this.state.searchOpen = true;
-        this.render();
-        return;
-      }
-      case "import": {
-        this.runAsync(this.commandImportHtml(), "Import failed");
-        return;
-      }
-      case "revisions": {
-        this.runAsync(this.commandRevisions(), "Revisions failed");
-        return;
-      }
-      case "settings": {
-        this.commandSettings();
-        return;
-      }
-      case "source": {
-        this.toggleSourceMode();
-        return;
+      case "create": this.runAsync(this.commandCreate(), "Create failed"); break;
+      case "open": this.state.searchOpen = true; this.render(); break;
+      case "save": this.runAsync(this.manualSave(), "Save failed"); break;
+      case "rename": { const tab = activeTab(this.state); if (tab?.kind === "saved") this.runAsync(this.renameDialog(tab.noteId), "Rename failed"); break; }
+      case "delete": { const tab = activeTab(this.state); if (tab?.kind === "saved") this.dispatch({ type: "note.delete", noteId: tab.noteId }); break; }
+      case "pin": { const tab = activeTab(this.state); if (tab?.kind === "saved") this.runAsync(this.togglePin(tab.noteId), "Pin failed"); break; }
+      case "reopen": this.reopenClosed(); break;
+      case "reading": this.state.readingMode = !this.state.readingMode; this.render(); break;
+      case "search": this.state.searchOpen = true; this.render(); break;
+      case "import": this.runAsync(this.importHtml(), "Import failed"); break;
+      case "revisions": this.runAsync(this.commandRevisions(), "Revisions failed"); break;
+      case "settings": this.state.settingsOpen = true; this.render(); break;
+      case "source": this.toggleSourceMode(); break;
+    }
+  }
+
+  private reopenClosed(): void {
+    const closed = this.state.closedTabs.shift();
+    if (closed === undefined) return;
+    const tab = tabFromWorkspace(closed);
+    this.state.tabs.push(tab);
+    this.runAsync(this.activateTab(tabIdentity(tab)), "Open failed");
+  }
+
+  private dispatchEditorToolbar(command: EditorToolbarCommand): void {
+    if (command === "source") this.toggleSourceMode();
+    else if (command === "save") this.runAsync(this.manualSave(), "Save failed");
+    else if (command === "undo") this.editor?.undo();
+    else if (command === "redo") this.editor?.redo();
+    else this.editor?.formatSelection(command);
+  }
+
+  private toggleSourceMode(): void {
+    const tab = activeTab(this.state);
+    if (tab === undefined) return;
+    tab.sourceMode = !tab.sourceMode;
+    this.editor?.setMode(tab.sourceMode ? "source" : "live");
+    this.persistWorkspace();
+    this.render();
+  }
+
+  private async prefetchAssets(tab: Tab, source: string): Promise<void> {
+    this.cancelAssetScope();
+    const controller = new AbortController();
+    this.assetController = controller;
+    const key = tab.key;
+    const generation = this.bootGeneration;
+    const names = new Set([...source.matchAll(/(?:^|[(/])(?:\/?z-images\/[^\s)"'>]+)/g)].map((match) => match[0].replace(/^[(/]*/, "").replace(/^\//, "")));
+    if (this.vaultClient === null) return;
+    for (const name of names) {
+      try {
+        const blob = await this.vaultClient.loadAsset(name, controller.signal);
+        if (controller.signal.aborted || generation !== this.bootGeneration || activeTab(this.state)?.key !== key) return;
+        this.assetScope.set(name, URL.createObjectURL(blob));
+        this.editor?.updateConfiguration(this.editorConfig());
+      } catch (error) {
+        if (!controller.signal.aborted) logClientEvent("warn", "client.asset", { error: errorSummary(error) });
       }
     }
   }
 
-  private notify(message: string): void {
-    logClientEvent("info", "client.notice", {
-      notice: { message },
+  private resolveAssetUrl(name: string): string | null {
+    const normalized = name.startsWith("/") ? name.slice(1) : name;
+    return this.assetScope.get(normalized) ?? null;
+  }
+
+  private cancelAssetScope(): void {
+    this.assetController?.abort();
+    this.assetController = null;
+    for (const url of this.assetScope.values()) URL.revokeObjectURL(url);
+    this.assetScope.clear();
+  }
+
+  private ensureJournal() {
+    if (this.journal !== null) return this.journal;
+    this.journal = this.services.workspace.createJournal((error) => this.notifyStorageFailure(error));
+    this.detachVisibilityFlush = this.services.workspace.attachVisibilityFlush(this.journal);
+    return this.journal;
+  }
+
+  private cacheDocument(document: V2NoteDocument): void {
+    const serverIdentity = this.identity;
+    const client = this.vaultClient;
+    if (serverIdentity === null || client === null) return;
+    const identity: DocumentIdentity = { ...serverIdentity, noteId: noteId(document.meta.noteId) };
+    const write = this.services.workspace.cacheNoteBody(identity, document).catch((error) => {
+      if (this.isCurrentVault(serverIdentity, client)) this.notifyStorageFailure(error);
     });
+    this.trackAction(write);
+  }
+
+  private touchRecent(id: string): void {
+    if (!this.state.notes.has(id)) return;
+    this.state.recent = [id, ...this.state.recent.filter((item) => item !== id)].slice(0, 50);
+    this.scheduleWorkspaceSave();
+  }
+
+  private filteredCommands() {
+    return commandItems(this.state);
+  }
+
+  private viewActions(): ViewActions {
+    return { dispatch: (event) => this.dispatch(event), commandItems: () => this.filteredCommands() };
+  }
+
+  private notify(message: string): void {
+    if (this.disposed) return;
     this.state.notice = message;
     this.render();
-    window.setTimeout(() => {
-      this.state.notice = null;
-      this.render();
+    if (this.noticeTimer !== undefined) window.clearTimeout(this.noticeTimer);
+    this.noticeTimer = window.setTimeout(() => {
+      this.noticeTimer = undefined;
+      if (this.state.notice === message) {
+        this.state.notice = null;
+        this.render();
+      }
     }, 2400);
   }
 
-  private runAsync(promise: Promise<unknown>, failureMessage: string): void {
-    void promise.catch((error: unknown) => {
-      logClientEvent("error", "client.error", {
-        error: errorSummary(error),
-        message: failureMessage,
-      });
-      this.notify(failureMessage);
-    });
+  private notifyStorageFailure(error: unknown): void {
+    logClientEvent("error", "client.storage", { error: errorSummary(error) });
+    this.notify("Local recovery storage failed. Export your draft before closing this tab.");
   }
 
-  private closeOverlays(): void {
+  private exportActiveDraft(): void {
+    const tab = activeTab(this.state);
+    if (tab === undefined) return;
+    const source = tab.kind === "local-draft"
+      ? tab.session?.exportSource() ?? tab.draft
+      : tab.session === null ? tab.draft : tab.session.exportSource();
+    if (source === null) return;
+    const filename = (tab.path || `${tab.title || "untitled"}.md`).replace(/[\\/?%*:|"<>]/g, "-");
+    const url = URL.createObjectURL(new Blob([source], { type: "text/markdown;charset=utf-8" }));
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = filename;
+    anchor.click();
+    window.setTimeout(() => URL.revokeObjectURL(url), 0);
+  }
+
+  private async recreateUnavailableDraft(): Promise<void> {
+    const original = activeTab(this.state);
+    if (original?.kind !== "saved" || original.session?.state.status !== "unavailable" ||
+      original.session.state.reason.kind !== "unresolved" || original.session.state.draft === null ||
+      this.identity === null) return;
+    const recovered = original.session.state.draft;
+    const local = this.localDraftTab(localDraftId(mutationId()), original.title, recovered.source);
+    local.path = original.path;
+    local.selection = recovered.selection;
+    const index = this.state.tabs.indexOf(original);
+    this.state.tabs.splice(index + 1, 0, local);
+    this.state.activeTab = tabIdentity(local);
+    await this.loadLocalDraft(local);
+    const copied = await local.session!.persist();
+    if (!copied) throw new Error("Could not checkpoint recreated draft locally");
+    const cleared = await this.services.workspace.checkpointClearer(
+      this.ensureJournal(),
+      this.workspaceId,
+    )({ ...this.identity, noteId: original.noteId }, recovered.localRevision, recovered.mutationId);
+    if (!cleared) {
+      this.notify("The original recovery copy changed; both drafts are preserved.");
+      return;
+    }
+    original.session.close();
+    this.state.tabs.splice(this.state.tabs.indexOf(original), 1);
+    this.render();
+  }
+
+  private runAsync(promise: Promise<unknown>, message: string, track = true): void {
+    const handled = promise.catch((error: unknown) => {
+      logClientEvent("error", "client.error", { error: errorSummary(error), message });
+      this.notify(message);
+    });
+    if (track) this.trackAction(handled);
+    else void handled;
+  }
+
+  private async closeOverlays(): Promise<void> {
+    const dialog = this.state.noteDialog;
+    if (dialog?.kind === "rename") tabById(this.state, dialog.noteId)?.session?.editTitle(null);
     this.state.commandOpen = false;
     this.state.searchOpen = false;
     this.state.revisionsOpen = false;
@@ -1075,552 +1468,77 @@ export class TansuApp {
     this.state.noteDialog = null;
     this.state.contextMenu = null;
     this.render();
+    if (dialog?.kind === "rename") await this.journal?.flushAll();
   }
 
-  private closeContextMenu(): void {
-    this.state.contextMenu = null;
-    this.render();
+  private hasOverlay(): boolean {
+    return this.state.commandOpen || this.state.searchOpen || this.state.revisionsOpen || this.state.settingsOpen || this.state.conflictDraft !== null || this.state.noteDialog !== null || this.state.contextMenu !== null;
   }
 
-  private openNoteContextMenu(noteId: string, x: number, y: number): void {
-    logClientEvent("info", "client.command", {
-      command: { id: "context", action: "open" },
-      note: { id: noteId, vault: this.state.vault },
-      position: { x, y },
-    });
-    this.state.contextMenu = { noteId: toNoteId(noteId), x, y };
-    this.render();
-  }
-
-  private async submitNoteDialog(value?: string): Promise<void> {
-    const dialog = this.state.noteDialog;
-    if (dialog === null) {
-      return;
-    }
-    if (dialog.kind === "create") {
-      const title = (value ?? "").trim() || "Untitled";
-      const path = uniqueNotePath(title, this.state.notes.values());
-      const response = await this.services.api.createNote(
-        { path, content: `# ${title}\n`, source: null },
-        this.state.vault,
-      );
-      if (response.document !== null) {
-        this.state.notes.set(response.meta.noteId, response.meta);
-        const tab = tabFromDocument(response.document);
-        tab.cursorOffset = tab.doc?.content.length ?? null;
-        this.state.tabs.push(tab);
-        this.state.noteDialog = null;
-        logClientEvent("info", "note.create", {
-          note: { id: response.meta.noteId, path: response.meta.path, vault: this.state.vault },
-          create: { titleLength: title.length },
-        });
-        await this.activateTab(response.meta.noteId);
-      }
-      return;
-    }
-    if (dialog.kind === "rename") {
-      const note = this.state.notes.get(dialog.noteId);
-      const title = (value ?? "").trim();
-      if (note === undefined || title === "" || title === note.title) {
-        this.state.noteDialog = null;
-        this.render();
-        return;
-      }
-      const path = renamedPath(note.path, title, this.state.notes.values(), dialog.noteId);
-      const response = await this.services.api.renameNote(
-        toNoteId(dialog.noteId),
-        { path },
-        this.state.vault,
-      );
-      const tab = tabById(this.state, dialog.noteId);
-      if (tab !== undefined) {
-        tab.title = response.meta.title;
-        tab.path = response.meta.path;
-        if (tab.doc !== null) {
-          tab.doc.meta = response.meta;
-        }
-      }
-      this.state.notes.set(response.meta.noteId, response.meta);
-      this.state.noteDialog = null;
-      logClientEvent("info", "note.rename", {
-        note: { id: response.meta.noteId, path: response.meta.path, vault: this.state.vault },
-        rename: { titleLength: title.length },
-      });
-      this.render();
-      return;
-    }
-    if (dialog.kind === "tag") {
-      const tab = activeTab(this.state);
-      const tag = normalizeTag(value ?? "");
-      if (tab?.doc !== null && tab !== undefined && tag !== null) {
-        this.updateActiveTags([...new Set([...tab.doc.meta.tags, tag])]);
-        logClientEvent("info", "client.tags", {
-          tags: { action: "add", value: tag },
-          note: { id: tab.noteId, path: tab.path, vault: this.state.vault },
-        });
-      }
-      this.state.noteDialog = null;
-      this.render();
-      return;
-    }
-    const noteId = dialog.noteId;
-    const vault = this.state.vault;
-    this.state.noteDialog = null;
-    this.render();
-    try {
-      await this.services.api.deleteNote(toNoteId(noteId), vault);
-      void this.services.noteCache.deleteCachedNoteBodies(vault, noteId);
-      if (this.state.vault !== vault) {
-        return;
-      }
-      this.state.notes.delete(noteId);
-      this.state.pinned.delete(noteId);
-      this.state.recent = this.state.recent.filter((item) => item !== noteId);
-      logClientEvent("info", "note.delete", {
-        note: { id: noteId, vault },
-      });
-      this.closeTab(noteId, false);
-    } catch (error) {
-      logClientEvent("error", "note.delete_failed", {
-        note: { id: noteId, vault },
-        error: errorSummary(error),
-      });
-      if (this.state.vault === vault) {
-        this.notify("Delete failed");
-      }
-    }
-  }
-
-  private async saveSettingsFromModal(settings: {
-    excludedFoldersText: string;
-    autosaveDelayMs: number;
-    undoStackMax: number;
-    imageWebpQuality: number;
-  }): Promise<void> {
-    if (this.state.boot === null) {
-      return;
-    }
-    const current = this.state.boot.settings;
-    this.state.boot.settings = await this.services.api.saveSettings(
-      {
-        ...current,
-        excludedFolders: settings.excludedFoldersText
-          .split(",")
-          .map((part) => part.trim())
-          .filter((part) => part !== ""),
-        autosaveDelayMs: Number.isFinite(settings.autosaveDelayMs)
-          ? Math.max(150, settings.autosaveDelayMs)
-          : current.autosaveDelayMs,
-        undoStackMax: Number.isFinite(settings.undoStackMax)
-          ? Math.max(20, settings.undoStackMax)
-          : current.undoStackMax,
-        imageWebpQuality: Number.isFinite(settings.imageWebpQuality)
-          ? Math.min(1, Math.max(0.1, settings.imageWebpQuality))
-          : current.imageWebpQuality,
-      },
-      this.state.vault,
-    );
-    this.editor?.setConfig({
-      undoStackMax: this.state.boot.settings.undoStackMax,
-      typingCheckpointMs: this.state.boot.settings.autosaveDelayMs,
-      imageWebpQuality: this.state.boot.settings.imageWebpQuality,
-    });
-    this.state.settingsOpen = false;
-    logClientEvent("info", "client.settings", {
-      settings: {
-        action: "save",
-        autosaveDelayMs: this.state.boot.settings.autosaveDelayMs,
-        undoStackMax: this.state.boot.settings.undoStackMax,
-        imageWebpQuality: this.state.boot.settings.imageWebpQuality,
-        excludedFolders: this.state.boot.settings.excludedFolders.length,
-      },
-      vault: this.state.vault,
-    });
-    this.notify("Settings saved");
-  }
-
-  private async selectRevision(eventId: number): Promise<void> {
-    const tab = activeTab(this.state);
-    if (tab === undefined) {
-      return;
-    }
-    this.syncActiveDraft();
-    this.state.revisionDocument = await this.services.api.openRevision(
-      tab.noteId,
-      toRevisionEventId(eventId),
-      this.state.vault,
-    );
-    logClientEvent("info", "client.revisions", {
-      revisions: { action: "select", eventId },
-      note: { id: tab.noteId, vault: this.state.vault },
-    });
-    this.render();
-  }
-
-  private async restoreSelectedRevision(): Promise<void> {
-    const tab = activeTab(this.state);
-    const revision = this.state.revisionDocument;
-    if (tab === undefined || revision === null) {
-      return;
-    }
-    const vault = this.state.vault;
-    const response = await this.services.api.restoreRevision(
-      tab.noteId,
-      toRevisionEventId(revision.revision.eventId),
-      vault,
-    );
-    if (this.state.vault !== vault) {
-      return;
-    }
-    this.applyMutationToTab(response, vault);
-    this.state.revisionsOpen = false;
-    this.state.revisionDocument = null;
-    logClientEvent("info", "client.revisions", {
-      revisions: { action: "restore", eventId: revision.revision.eventId },
-      note: { id: tab.noteId, vault },
-    });
-    this.notify("Revision restored");
-  }
-
-  private async restoreActiveConflictDraft(): Promise<void> {
-    const tab = activeTab(this.state);
-    if (tab === undefined || tab.conflictDraftId === null) {
-      return;
-    }
-    const vault = this.state.vault;
-    const response = await this.services.api.restoreConflictDraft(
-      tab.noteId,
-      toConflictDraftId(tab.conflictDraftId),
-      vault,
-    );
-    if (this.state.vault !== vault) {
-      return;
-    }
-    this.applyMutationToTab(response, vault);
-    this.state.conflictDraft = null;
-    logClientEvent("info", "client.conflict", {
-      conflict: { action: "restore", draftId: tab.conflictDraftId },
-      note: { id: tab.noteId, vault },
-    });
-    this.notify("Conflict draft restored");
-  }
-
-  private async viewActiveConflictDraft(): Promise<void> {
-    const tab = activeTab(this.state);
-    if (tab === undefined || tab.conflictDraftId === null) {
-      return;
-    }
-    this.state.conflictDraft = await this.services.api.openConflictDraft(
-      tab.noteId,
-      toConflictDraftId(tab.conflictDraftId),
-      this.state.vault,
-    );
-    logClientEvent("info", "client.conflict", {
-      conflict: { action: "view", draftId: tab.conflictDraftId },
-      note: { id: tab.noteId, vault: this.state.vault },
-    });
-    this.render();
-  }
-
-  private applyMutationToTab(response: NoteMutationResponse, vault = this.state.vault): void {
-    if (response.document === null) {
-      return;
-    }
-    void this.services.noteCache.cacheNoteBody(vault, {
-      ...response.document,
-      content: normalizeMarkdownNewlines(response.document.content),
-    });
-    let tab = tabById(this.state, response.meta.noteId);
-    if (tab === undefined) {
-      tab = tabFromDocument(response.document);
-      this.state.tabs.push(tab);
-    } else {
-      const document = {
-        ...response.document,
-        content: normalizeMarkdownNewlines(response.document.content),
-      };
-      tab.doc = document;
-      tab.draft = document.content;
-      tab.title = document.meta.title;
-      tab.path = document.meta.path;
-      tab.dirty = false;
-      tab.conflict = false;
-      tab.conflictDraftId = null;
-    }
-    this.state.notes.set(response.meta.noteId, response.meta);
-    this.state.activeNoteId = toNoteId(response.meta.noteId);
-    this.touchRecent(response.meta.noteId);
-    logClientEvent("info", "note.apply_mutation", {
-      note: { id: response.meta.noteId, path: response.meta.path, vault },
-    });
-    this.render();
-  }
-
-  private logCommand(id: string, noteId?: string, extra: Record<string, unknown> = {}): void {
-    logClientEvent("info", "client.command", {
-      command: { id, ...extra },
-      note: noteId === undefined ? undefined : { id: noteId, vault: this.state.vault },
-      vault: this.state.vault,
-    });
-  }
-
-  private touchRecent(noteId: string): void {
-    if (!this.state.notes.has(noteId)) {
-      return;
-    }
-    this.state.recent = [noteId, ...this.state.recent.filter((item) => item !== noteId)].slice(
-      0,
-      50,
-    );
-  }
-
-  private dispatch(event: ViewEvent): void {
-    switch (event.type) {
-      case "vault.switch": {
-        this.services.api.setActiveVault(event.index);
-        this.runAsync(this.boot(), "Load failed");
-        return;
-      }
-      case "search.input": {
-        this.state.searchQuery = event.query;
-        this.runAsync(this.updateSearch(), "Search failed");
-        return;
-      }
-      case "search.open": {
-        this.state.searchOpen = true;
-        this.state.commandOpen = false;
-        this.state.searchOverlayQuery = "";
-        this.state.searchOverlayHits = null;
-        this.render();
-        return;
-      }
-      case "search.overlayInput": {
-        this.state.searchOverlayQuery = event.query;
-        this.runAsync(this.updateSearchOverlay(), "Search failed");
-        return;
-      }
-      case "command.open": {
-        this.state.commandOpen = true;
-        this.state.searchOpen = false;
-        this.state.commandFilter = "";
-        this.render();
-        return;
-      }
-      case "command.filter": {
-        this.state.commandFilter = event.query;
-        this.render();
-        return;
-      }
-      case "command.run": {
-        this.executeCommand(event.id);
-        return;
-      }
-      case "dialog.input": {
-        if (this.state.noteDialog?.kind === "create" || this.state.noteDialog?.kind === "rename") {
-          this.state.noteDialog.title = event.value;
-        } else if (this.state.noteDialog?.kind === "tag") {
-          this.state.noteDialog.value = event.value;
-        }
-        return;
-      }
-      case "dialog.submit": {
-        this.runAsync(this.submitNoteDialog(event.value), "Action failed");
-        return;
-      }
-      case "settings.submit": {
-        this.runAsync(this.saveSettingsFromModal(event.settings), "Settings failed");
-        return;
-      }
-      case "overlay.close": {
-        this.closeOverlays();
-        return;
-      }
-      case "context.close": {
-        this.closeContextMenu();
-        return;
-      }
-      case "context.open": {
-        this.openNoteContextMenu(event.noteId, event.x, event.y);
-        return;
-      }
-      case "tab.activate": {
-        this.runAsync(this.activateTab(event.noteId), "Open failed");
-        return;
-      }
-      case "tab.close": {
-        this.closeTab(event.noteId);
-        return;
-      }
-      case "note.open": {
-        this.runAsync(this.openInTab(event.noteId), "Open failed");
-        return;
-      }
-      case "note.rename": {
-        this.commandRename(event.noteId);
-        return;
-      }
-      case "note.delete": {
-        this.commandDelete(event.noteId);
-        return;
-      }
-      case "note.pin": {
-        this.runAsync(this.commandPin(event.noteId), "Pin failed");
-        return;
-      }
-      case "note.addTag": {
-        this.runAsync(this.commandAddTag(), "Tag failed");
-        return;
-      }
-      case "tags.update": {
-        this.updateActiveTags(event.tags);
-        return;
-      }
-      case "reading.toggle": {
-        this.toggleReadingMode();
-        return;
-      }
-      case "editor.toolbar": {
-        this.dispatchEditorToolbar(event.command);
-        return;
-      }
-      case "revisions.open": {
-        this.runAsync(this.commandRevisions(), "Revisions failed");
-        return;
-      }
-      case "revisions.select": {
-        this.runAsync(this.selectRevision(event.eventId), "Revision failed");
-        return;
-      }
-      case "revisions.restore": {
-        this.runAsync(this.restoreSelectedRevision(), "Restore failed");
-        return;
-      }
-      case "conflict.view": {
-        this.runAsync(this.viewActiveConflictDraft(), "Conflict draft failed");
-        return;
-      }
-      case "conflict.restore": {
-        this.runAsync(this.restoreActiveConflictDraft(), "Restore failed");
-        return;
-      }
-      case "render.request": {
-        this.render();
-        return;
-      }
-    }
-  }
-
-  private dispatchEditorToolbar(command: EditorToolbarCommand): void {
-    switch (command) {
-      case "bold": {
-        this.editor?.applyFormat(toggleBold);
-        return;
-      }
-      case "italic": {
-        this.editor?.applyFormat(toggleItalic);
-        return;
-      }
-      case "highlight": {
-        this.editor?.applyFormat(toggleHighlight);
-        return;
-      }
-      case "strikethrough": {
-        this.editor?.applyFormat(toggleStrikethrough);
-        return;
-      }
-      case "heading": {
-        this.editor?.applyFormat((md, start) => toggleHeading(md, start, 1));
-        return;
-      }
-      case "undo": {
-        this.editor?.undo();
-        return;
-      }
-      case "redo": {
-        this.editor?.redo();
-        return;
-      }
-      case "source": {
-        this.toggleSourceMode();
-        return;
-      }
-      case "save": {
-        this.runAsync(this.manualSave(), "Save failed");
-        return;
-      }
-    }
-  }
-
-  private viewActions(): ViewActions {
-    return {
-      dispatch: (event) => this.dispatch(event),
-      commandItems: () => this.filteredCommands(),
-    };
-  }
 }
 
-function uniqueNotePath(title: string, notes: Iterable<NoteMeta>): string {
+function uniqueNotePath(title: string, notes: Iterable<{ path: string }>): string {
   const base = slugifyTitle(title);
   const existing = new Set([...notes].map((note) => note.path.toLowerCase()));
-  for (let i = 1; ; i += 1) {
-    const suffix = i === 1 ? "" : `-${i}`;
+  for (let index = 1; ; index += 1) {
+    const suffix = index === 1 ? "" : `-${index}`;
     const path = `${base}${suffix}.md`;
-    if (!existing.has(path.toLowerCase())) {
-      return path;
-    }
+    if (!existing.has(path.toLowerCase())) return path;
   }
 }
 
-function renamedPath(
-  currentPath: string,
-  title: string,
-  notes: Iterable<NoteMeta>,
-  noteId: string,
-): string {
+function renamedPath(currentPath: string, title: string, notes: Iterable<V2NoteMeta>, except: string): string {
   const slash = currentPath.lastIndexOf("/");
-  const dir = slash === -1 ? "" : `${currentPath.slice(0, slash + 1)}`;
+  const directory = slash === -1 ? "" : currentPath.slice(0, slash + 1);
   const base = slugifyTitle(title);
-  const existing = new Set(
-    [...notes].filter((note) => note.noteId !== noteId).map((note) => note.path.toLowerCase()),
-  );
-  for (let i = 1; ; i += 1) {
-    const suffix = i === 1 ? "" : `-${i}`;
-    const path = `${dir}${base}${suffix}.md`;
-    if (!existing.has(path.toLowerCase())) {
-      return path;
-    }
+  const existing = new Set([...notes].filter((note) => note.noteId !== except).map((note) => note.path.toLowerCase()));
+  for (let index = 1; ; index += 1) {
+    const suffix = index === 1 ? "" : `-${index}`;
+    const path = `${directory}${base}${suffix}.md`;
+    if (!existing.has(path.toLowerCase())) return path;
   }
 }
 
 function slugifyTitle(title: string): string {
-  const slug = title
-    .trim()
-    .toLowerCase()
-    .replaceAll(/['"]/g, "")
-    .replaceAll(/[^a-z0-9]+/g, "-")
-    .replaceAll(/^-+|-+$/g, "");
-  return slug || "untitled";
+  return title.trim().toLowerCase().replaceAll(/["']/g, "").replaceAll(/[^a-z0-9]+/g, "-").replaceAll(/^-+|-+$/g, "") || "untitled";
 }
 
-export function startApp(root: HTMLElement): void {
-  const app = new TansuApp(root);
-  app.bindGlobalEvents();
-  void app.boot().catch((error: unknown) => {
-    logClientEvent("error", "client.error", {
-      error: errorSummary(error),
-      message: "Load failed",
-    });
-    root.replaceChildren(renderLoading());
-  });
+function identityOfWorkspace(tab: WorkspaceState["tabs"][number]): TabIdentity {
+  return tab.kind === "saved" ? { kind: "saved", noteId: toNoteId(tab.noteId) } : tab;
+}
+
+function identityOfWorkspaceIdentity(tab: NonNullable<WorkspaceState["activeTab"]>): TabIdentity {
+  return tab.kind === "saved" ? { kind: "saved", noteId: toNoteId(tab.noteId) } : tab;
+}
+
+function mutationId(): string {
+  const value = globalThis.crypto?.randomUUID();
+  if (value === undefined) throw new Error("Secure random mutation identity is unavailable");
+  return value;
+}
+
+function selectionWithin(selection: SavedTab["selection"], sourceLength: number): SavedTab["selection"] {
+  if (selection === null) return null;
+  return {
+    anchor: Math.max(0, Math.min(sourceLength, selection.anchor)),
+    head: Math.max(0, Math.min(sourceLength, selection.head)),
+  };
+}
+
+function sameSelection(left: { anchor: number; head: number } | null, right: { anchor: number; head: number } | null): boolean {
+  return left?.anchor === right?.anchor && left?.head === right?.head;
 }
 
 function errorSummary(error: unknown): Record<string, unknown> {
-  if (error instanceof Error) {
-    return {
-      name: error.name,
-      message: error.message,
-      stack: error.stack,
-    };
-  }
-  return { message: String(error) };
+  return error instanceof Error ? { name: error.name, message: error.message, stack: error.stack } : { message: String(error) };
+}
+
+export function startApp(root: HTMLElement): TansuApp {
+  const app = new TansuApp(root);
+  app.bindGlobalEvents();
+  void app.boot().catch((error: unknown) => {
+    logClientEvent("error", "client.error", { error: errorSummary(error), message: "Load failed" });
+    root.replaceChildren(renderLoading());
+  });
+  return app;
 }

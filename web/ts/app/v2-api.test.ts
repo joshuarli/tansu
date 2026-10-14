@@ -4,13 +4,16 @@ import {
   V2ApiError,
   V2ProtocolError,
   createV2ApiClient,
+  decodeV2VaultBootstrap,
   decodeV2NoteMeta,
+  decodeV2ApiErrorResponse,
   decodeV2ServerEvent,
   decodeV2VaultBootstrap,
   isRetryableV2Error,
   type V2Transport,
 } from "./v2-api.ts";
 import type { V2NoteMeta, V2ServerEvent } from "../types.generated.ts";
+import type { V2ApiErrorKind } from "../types.generated.ts";
 
 const sourceHash = hash("a");
 const diskHash = hash("b", "sha256:");
@@ -138,6 +141,18 @@ describe("v2 API client", () => {
     })).toThrow(V2ProtocolError);
   });
 
+  it("requires the legacy workspace field in vault bootstrap responses", () => {
+    const bootstrap = {
+      vault: { vaultId: "vault-1", name: "Notes" },
+      notes: [],
+      settings: settings(),
+      searchStatus: { dirty: false, degraded: false },
+    };
+
+    expect(() => decodeV2VaultBootstrap(bootstrap)).toThrow(V2ProtocolError);
+    expect(decodeV2VaultBootstrap({ ...bootstrap, legacyWorkspace: null }).legacyWorkspace).toBeNull();
+  });
+
   it("keeps error code details and retries only classified transient failures", async () => {
     const fetcher = (async () => jsonResponse({ error: { code: "rate_limited", retryAfterMs: 25 } }, 429)) as typeof fetch;
     const api = createV2ApiClient({ fetch: fetcher });
@@ -154,6 +169,57 @@ describe("v2 API client", () => {
     expect(thrown).toMatchObject({ status: 429, retryAfterMs: 25 });
     expect(isRetryableV2Error(thrown)).toBeTruthy();
     expect(isRetryableV2Error(new V2ProtocolError("bad shape"))).toBeFalsy();
+  });
+
+  it("preserves the generated v2 error discriminant and rejects malformed errors", () => {
+    const response = decodeV2ApiErrorResponse({ error: { code: "path_collision", path: "A.md" } });
+    const error: V2ApiErrorKind = response.error;
+    expect(error.code).toBe("path_collision");
+    expect(() => decodeV2ApiErrorResponse({})).toThrow(V2ProtocolError);
+  });
+
+  it("reports malformed and non-JSON HTTP errors as protocol failures", async () => {
+    const headers = responseHeaders();
+    const malformed = createV2ApiClient({
+      fetch: (async () => jsonResponse({}, 409)) as typeof fetch,
+    });
+    await expect(malformed.forVault("server-1", "vault-1").listNotes()).rejects.toBeInstanceOf(V2ProtocolError);
+
+    const nonJson = createV2ApiClient({
+      fetch: (async () => new Response("offline", { status: 500, headers })) as typeof fetch,
+    });
+    await expect(nonJson.forVault("server-1", "vault-1").listNotes()).rejects.toBeInstanceOf(V2ProtocolError);
+  });
+
+  it("reads the shared CSRF cookie for mutations and sends it with image uploads", async () => {
+    const previous = Object.getOwnPropertyDescriptor(globalThis, "document");
+    Object.defineProperty(globalThis, "document", {
+      configurable: true,
+      value: { cookie: "theme=dark; __Host-tansu_csrf=csrf%2Dtoken" },
+    });
+    try {
+      const fetchCalls: Array<{ path: string; init: RequestInit }> = [];
+      const responses = [jsonResponse(mutationResponse("create-1")), jsonResponse({ mutationId: "image-1", name: "z-images/a.webp", markdown: "![[a]]" })];
+      const api = createV2ApiClient({
+        fetch: (async (input: RequestInfo | URL, init?: RequestInit) => {
+          fetchCalls.push({ path: String(input), init: init ?? {} });
+          const response = responses.shift();
+          if (response === undefined) throw new Error("No mock API response remains");
+          return response;
+        }) as typeof fetch,
+      });
+      const vault = api.forVault("server-1", "vault-1");
+      await vault.createNote({ mutationId: "create-1", path: "A.md", content: "A", sourceHash });
+      await vault.uploadImage("image-1", new Blob(["x"], { type: "image/webp" }));
+
+      expect(new Headers(at(fetchCalls, 0).init.headers).get("X-Tansu-CSRF")).toBe("csrf-token");
+      expect(new Headers(at(fetchCalls, 1).init.headers).get("X-Tansu-CSRF")).toBe("csrf-token");
+      expect(at(fetchCalls, 0).init.credentials).toBe("same-origin");
+      expect(at(fetchCalls, 1).init.credentials).toBe("same-origin");
+    } finally {
+      if (previous === undefined) delete (globalThis as { document?: unknown }).document;
+      else Object.defineProperty(globalThis, "document", previous);
+    }
   });
 
   it("resynchronizes on the server flag and reconnects from its event version", async () => {

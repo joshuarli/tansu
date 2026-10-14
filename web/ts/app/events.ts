@@ -1,4 +1,6 @@
-import type { NoteId, RevisionEventId, VaultIndex } from "../state.ts";
+import type { NoteId, RevisionEventId } from "../state.ts";
+import type { LocalDraftId, VaultId } from "./identity.ts";
+import type { TabIdentity } from "./tab-identity.ts";
 
 export type CommandId =
   | "open"
@@ -39,7 +41,7 @@ type SettingsFormValue = {
 };
 
 export type ViewEvent =
-  | { type: "vault.switch"; index: VaultIndex }
+  | { type: "vault.switch"; vaultId: VaultId }
   | { type: "search.input"; query: string }
   | { type: "search.open" }
   | { type: "search.overlayInput"; query: string }
@@ -52,9 +54,10 @@ export type ViewEvent =
   | { type: "overlay.close" }
   | { type: "context.close" }
   | { type: "context.open"; noteId: NoteId; x: number; y: number }
-  | { type: "tab.activate"; noteId: NoteId }
-  | { type: "tab.close"; noteId: NoteId }
+  | { type: "tab.activate"; tab: TabIdentity }
+  | { type: "tab.close"; tab: TabIdentity }
   | { type: "note.open"; noteId: NoteId }
+  | { type: "localDraft.open"; localDraftId: LocalDraftId }
   | { type: "note.rename"; noteId?: NoteId }
   | { type: "note.delete"; noteId?: NoteId }
   | { type: "note.pin"; noteId?: NoteId }
@@ -67,4 +70,6 @@ export type ViewEvent =
   | { type: "revisions.restore" }
   | { type: "conflict.view" }
   | { type: "conflict.restore" }
+  | { type: "draft.export" }
+  | { type: "draft.recreate" }
   | { type: "render.request" };

@@ -9,6 +9,7 @@ export function button(
   element.className = className;
   element.title = title;
   element.textContent = label;
+  element.dataset["key"] = `button:${className}:${title}:${label}`;
   element.addEventListener("click", onClick);
   return element;
 }

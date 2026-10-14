@@ -6,8 +6,6 @@ import {
   createWorkspaceId,
   createDraftCheckpointClearer,
   createDraftCheckpointWriter,
-  createLocalDraftCheckpointClearer,
-  createLocalDraftCheckpointWriter,
   createTitleDraftCheckpointClearer,
   decodeDraftJournalRecord,
   decodeLocalDraftJournalRecord,
@@ -145,57 +143,6 @@ describe("private workspace storage", () => {
     expect(localWrites).toStrictEqual([local]);
   });
 
-  it("writes local checkpoints and clears only the accepted local revision", async () => {
-    vi.useFakeTimers();
-    const writes: LocalDraftJournalRecord[] = [];
-    const clears: Array<{ id: string; revision: number; mutationId: string }> = [];
-    let stored: LocalDraftJournalRecord | null = null;
-    const journal = new DraftJournal(
-      () => {},
-      200,
-      async () => true,
-      undefined,
-      async (record) => {
-        writes.push(record);
-        stored = record;
-        return true;
-      },
-      async (_identity, _workspace, id, revision, mutationId) => {
-        clears.push({ id, revision, mutationId });
-        if (stored?.localRevision !== revision || stored.mutationId !== mutationId) {
-          return false;
-        }
-        stored = null;
-        return true;
-      },
-    );
-    const identity = {
-      serverInstanceId: serverInstanceId("server-1"),
-      vaultId: vaultId("vault-1"),
-    };
-    const id = localDraftId("local-1");
-    const writeCheckpoint = createLocalDraftCheckpointWriter(journal);
-    const clearCheckpoint = createLocalDraftCheckpointClearer(journal, workspaceId("workspace-1"));
-    const first = localDraftRecord(1, "# First\n");
-    await writeCheckpoint(first, "structural", () => {});
-
-    await expect(clearCheckpoint(identity, id, 0, "mutation-0")).resolves.toBeFalsy();
-    await expect(clearCheckpoint(identity, id, first.localRevision, first.mutationId)).resolves.toBeTruthy();
-    expect(stored).toBeNull();
-
-    const newer = localDraftRecord(2, "# Newer\n");
-    writeCheckpoint(newer, "typing", () => {});
-    await expect(clearCheckpoint(identity, id, first.localRevision, first.mutationId)).resolves.toBeFalsy();
-    await vi.advanceTimersByTimeAsync(200);
-    expect(writes).toStrictEqual([first, newer]);
-    await expect(clearCheckpoint(identity, id, newer.localRevision, newer.mutationId)).resolves.toBeTruthy();
-    expect(clears).toStrictEqual([
-      { id: "local-1", revision: 0, mutationId: "mutation-0" },
-      { id: "local-1", revision: 1, mutationId: "mutation-1" },
-      { id: "local-1", revision: 2, mutationId: "mutation-2" },
-    ]);
-  });
-
   it("clears only the matching saved title version and keeps body data", async () => {
     vi.useFakeTimers();
     const writes: DraftJournalRecord[] = [];
@@ -207,7 +154,6 @@ describe("private workspace storage", () => {
         writes.push(record);
         return true;
       },
-      undefined,
       undefined,
       undefined,
       clearStoredTitle,

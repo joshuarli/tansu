@@ -1,4 +1,5 @@
-import type { NoteMeta } from "./types.generated.ts";
+
+export type ImportPath = { path: string };
 
 type ImportedMetadata = {
   author?: string;
@@ -22,7 +23,7 @@ export type ImportedHtml = {
 type ImportHtmlOptions = {
   html: string;
   fallbackTitle: string;
-  notes?: Iterable<NoteMeta>;
+  notes?: Iterable<ImportPath>;
   parse: HtmlImportParser;
 };
 
@@ -57,7 +58,7 @@ function importedMarkdown(title: string, markdown: string, parsed: ImportedMetad
     : `${heading}${metadata.join("\n")}\n\n${markdown}\n`;
 }
 
-function uniqueImportPath(title: string, notes: Iterable<NoteMeta>): string {
+function uniqueImportPath(title: string, notes: Iterable<ImportPath>): string {
   const stem =
     title
       .trim()
