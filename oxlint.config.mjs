@@ -3,6 +3,7 @@ import { defineConfig } from "oxlint";
 export default defineConfig({
   ignorePatterns: [
     "web/ts/api.generated.ts",
+    "web/ts/editor/vendor/atomic/**",
     "oxlint.config.mjs",
     "vitest*.config.ts",
   ],

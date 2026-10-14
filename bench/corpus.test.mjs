@@ -1,17 +1,16 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
-import { join } from "node:path";
-import { describe, it } from "node:test";
-import { fileURLToPath } from "node:url";
+import { join, resolve } from "node:path";
+import { describe, it } from "vitest";
 
 import { renderCorpusNote, renderStressNote } from "./corpus.mjs";
 
-const REPO_ROOT = fileURLToPath(new URL("..", import.meta.url));
+const REPO_ROOT = resolve(import.meta.dirname, "..");
 const SCRATCH_ROOT = join(REPO_ROOT, ".work", "tmp");
 const CORPUS_ROOT = join(SCRATCH_ROOT, "o1-corpus");
 const SYMLINK_TARGET = join(SCRATCH_ROOT, "o1-corpus-target");
-const GENERATOR = fileURLToPath(new URL("./corpus.mjs", import.meta.url));
+const GENERATOR = resolve(import.meta.dirname, "corpus.mjs");
 
 describe("fixed-seed benchmark corpus", () => {
   it("renders identical corpus notes for the same seed and index", () => {

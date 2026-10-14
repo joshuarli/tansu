@@ -157,7 +157,7 @@ async function listTree(root, base = root) {
     if (entry.isDirectory()) entries.push(...await listTree(path, base));
     else if (entry.isFile()) entries.push([relative(base, path), await readFile(path)]);
   }
-  return entries.sort(([left], [right]) => left.localeCompare(right));
+  return entries.toSorted(([left], [right]) => left.localeCompare(right));
 }
 
 async function main() {

@@ -303,7 +303,7 @@ describe("authenticated Chromium server", () => {
       checkingEmbeddedApp = true;
       const attackerResponse = await page.goto(attackerUrl);
       expect(attackerResponse?.status()).toBe(200);
-      expect(await page.evaluate(() => location.origin)).toBe(attackerOrigin);
+      await expect(page.evaluate(() => location.origin)).resolves.toBe(attackerOrigin);
       expect(iframeCspPolicies).toHaveLength(1);
       expect(iframeCspPolicies[0]).toContain("frame-ancestors 'none'");
       expect(embeddedAppScripts).toStrictEqual([]);
