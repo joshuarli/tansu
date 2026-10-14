@@ -68,7 +68,25 @@ test-rs:
 	cargo test -q
 
 build-linux-musl-docker:
-	docker build --platform $${PLATFORM:-linux/amd64} -f docker/linux-musl.Dockerfile --build-arg TARGET=$${TARGET:-x86_64-unknown-linux-musl} --build-arg CARGO_PROFILE=$${CARGO_PROFILE:-release} --output type=local,dest=dist .
+	mkdir -p "$(CURDIR)/.work/tmp" "$(CURDIR)/.work/dist/$${TARGET:-x86_64-unknown-linux-musl}"
+	TMPDIR="$(CURDIR)/.work/tmp" deno task build
+	TMPDIR="$(CURDIR)/.work/tmp" docker build --platform $${PLATFORM:-linux/amd64} -f docker/linux-musl.Dockerfile --build-arg TARGET=$${TARGET:-x86_64-unknown-linux-musl} --build-arg CARGO_PROFILE=$${CARGO_PROFILE:-release} --output type=local,dest="$(CURDIR)/.work/dist/$${TARGET:-x86_64-unknown-linux-musl}" .
+
+build-linux-musl-x86_64:
+	$(MAKE) build-linux-musl-docker TARGET=x86_64-unknown-linux-musl PLATFORM=linux/amd64
+
+build-linux-musl-aarch64:
+	$(MAKE) build-linux-musl-docker TARGET=aarch64-unknown-linux-musl PLATFORM=linux/amd64
+
+build-linux-musl-both:
+	$(MAKE) build-linux-musl-x86_64
+	$(MAKE) build-linux-musl-aarch64
+
+test-package:
+	mkdir -p "$(CURDIR)/.work/tmp"
+	TMPDIR="$(CURDIR)/.work/tmp" deno task build
+	TMPDIR="$(CURDIR)/.work/tmp" cargo build --locked --release --bin $(NAME)
+	TMPDIR="$(CURDIR)/.work/tmp" python3 scripts/test-package.py target/release/$(NAME)
 
 bench:
 	node bench/integrated-bench.mjs --browser=chromium --warmups=2 --runs=5
@@ -80,4 +98,4 @@ bench-full:
 	node bench/note-cache-bench.mjs --runs=20 --delay=200
 	MD_WYSIWYG_BENCH=1 deno task test web/ts/editor/tests/large-note-bench.test.ts
 
-.PHONY: audit bench bench-full ci coverage coverage-html coverage-rs coverage-ts dev dev-config check lint types types-check ts test test-ts test-e2e test-rs
+.PHONY: audit bench bench-full build-linux-musl-aarch64 build-linux-musl-both build-linux-musl-docker build-linux-musl-x86_64 ci coverage coverage-html coverage-rs coverage-ts dev dev-config check lint test-package types types-check ts test test-ts test-e2e test-rs

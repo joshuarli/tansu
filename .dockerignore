@@ -1,0 +1,16 @@
+**
+!Cargo.toml
+!Cargo.lock
+!rust-toolchain.toml
+!build.rs
+!docker/
+!docker/linux-musl.Dockerfile
+!src/
+!src/**
+!crates/
+!crates/**
+!scripts/
+!scripts/**
+!web/
+!web/dist/
+!web/dist/**

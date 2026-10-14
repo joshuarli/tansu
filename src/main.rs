@@ -12,6 +12,10 @@ use tansu2::http::{
 };
 use tansu2::vault::{V2EventEnvelope, V2EventSubscription};
 
+mod migration;
+
+use migration::run_migration;
+
 const SESSION_TTL_SECS: u64 = 8 * 60 * 60;
 const OWNER_VERIFICATION_TTL_SECS: u64 = 5 * 60;
 const INITIAL_ENROLLMENT_TTL_SECS: u64 = 10 * 60;
@@ -26,6 +30,10 @@ fn main() {
 fn run() -> tansu2::Result<()> {
     match parse_command(std::env::args_os().skip(1))? {
         Command::Serve { port } => run_server(load_config()?, port),
+        Command::Migrate { config_path, dry_run } => {
+            println!("{}", run_migration(&config_path, dry_run)?);
+            Ok(())
+        }
         Command::Auth(command) => {
             let output = run_auth_command(&load_config()?, command)?;
             match output {
@@ -67,6 +75,7 @@ fn run_server(config: Config, port: u16) -> tansu2::Result<()> {
 #[derive(Debug, PartialEq, Eq)]
 enum Command {
     Serve { port: u16 },
+    Migrate { config_path: PathBuf, dry_run: bool },
     Auth(AuthCommand),
 }
 
@@ -93,6 +102,16 @@ fn parse_command(args: impl IntoIterator<Item = OsString>) -> tansu2::Result<Com
                 .ok_or_else(usage_error)?;
             Ok(Command::Serve { port })
         }
+        [migrate, dry_run, path] if migrate == "migrate" && dry_run == "--dry-run" => {
+            Ok(Command::Migrate {
+                config_path: PathBuf::from(path),
+                dry_run: true,
+            })
+        }
+        [migrate, path] if migrate == "migrate" => Ok(Command::Migrate {
+            config_path: PathBuf::from(path),
+            dry_run: false,
+        }),
         [auth, subcommand] if auth == "auth" && subcommand == "enroll" => {
             Ok(Command::Auth(AuthCommand::Enroll))
         }
@@ -108,7 +127,7 @@ fn parse_command(args: impl IntoIterator<Item = OsString>) -> tansu2::Result<Com
 
 fn usage_error() -> tansu2::Error {
     tansu2::Error::BadRequest(
-        "usage: tansu2 [--port PORT] | tansu2 auth enroll | tansu2 auth backup PATH | tansu2 auth restore PATH".to_string(),
+        "usage: tansu2 [--port PORT] | tansu2 migrate [--dry-run] CONFIG | tansu2 auth enroll | tansu2 auth backup PATH | tansu2 auth restore PATH".to_string(),
     )
 }
 
@@ -223,6 +242,20 @@ mod tests {
             parse_command(["auth".into(), "enroll".into()]).unwrap(),
             Command::Auth(AuthCommand::Enroll),
         );
+        assert_eq!(
+            parse_command(["migrate".into(), "--dry-run".into(), "copy.toml".into()]).unwrap(),
+            Command::Migrate {
+                config_path: PathBuf::from("copy.toml"),
+                dry_run: true,
+            },
+        );
+        assert_eq!(
+            parse_command(["migrate".into(), "copy.toml".into()]).unwrap(),
+            Command::Migrate {
+                config_path: PathBuf::from("copy.toml"),
+                dry_run: false,
+            },
+        );
         let path = OsString::from("backup.db");
         assert_eq!(
             parse_command(["auth".into(), "backup".into(), path.clone()]).unwrap(),
@@ -244,4 +277,5 @@ mod tests {
             );
         }
     }
+
 }

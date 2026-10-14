@@ -50,8 +50,11 @@ RUN if [ "${CARGO_PROFILE}" = "release" ]; then \
   else \
     cargo build --locked --target "${TARGET}" --bin tansu2; \
   fi
-RUN if [ "${CARGO_PROFILE}" = "release" ]; then bin="target/${TARGET}/release/tansu2"; else bin="target/${TARGET}/debug/tansu2"; fi; \
-  ! llvm-readelf -d "$bin" | grep NEEDED; \
+RUN set -eu; \
+  if [ "${CARGO_PROFILE}" = "release" ]; then bin="target/${TARGET}/release/tansu2"; else bin="target/${TARGET}/debug/tansu2"; fi; \
+  dynamic_section="$(llvm-readelf -d "$bin")" || exit 1; \
+  printf '%s\n' "$dynamic_section"; \
+  if printf '%s\n' "$dynamic_section" | grep NEEDED; then exit 1; fi; \
   if [ "${CARGO_PROFILE}" = "release" ]; then llvm-strip "$bin"; fi; \
   mkdir -p /out && cp "$bin" /out/tansu2
 
