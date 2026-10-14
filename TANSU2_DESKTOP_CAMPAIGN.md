@@ -1,7 +1,5 @@
 # Tansu2 desktop redesign campaign
 
-Status: winding down (2026-10-14)
-
 **Status:** ready for an unattended executor. **Prepared:** 2026-10-14 against `1ecf383` on `master`; work from the actual checkout.
 **Target:** `~/d/tansu2`. **Read-only references:** `~/d/ferrisearch` @ `039b6b2` (search core), `~/d/laputa-systems/laputa/mirror/webauthn-minimal` @ laputa `ef53ce3` (WebAuthn), `~/d/tansu` (optional visual reference). The campaign must run without any of them present after vendoring.
 
