@@ -26,7 +26,7 @@ Logging is controlled by `TANSU2_LOGS`:
 Defaults and commands:
 
 - `make dev` runs the server with `TANSU2_LOGS=pretty`.
-- `pnpm run test-e2e` builds the browser with `TANSU2_LOGS=buffer` and runs the
+- `deno task test:browser` builds the browser with `TANSU2_LOGS=buffer` and runs the
   server with `TANSU2_LOGS=buffer`.
 - Production browser bundles define `TANSU2_LOGS=off`.
 - Rust release builds compile the real log hub behavior out behind

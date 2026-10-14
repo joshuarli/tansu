@@ -20,9 +20,9 @@ jobs:
       SQLITE3_INCLUDE_DIR: ${{ github.workspace }}/.sqlite/include
       LIBSQLITE3_SYS_USE_PKG_CONFIG: "0"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@v2.9.2
         with:
           key: server-macos-aarch64
 
@@ -44,7 +44,7 @@ jobs:
           tar -C dist -czf "dist/tansu2-$TARGET.tar.gz" "tansu2-$TARGET"
           shasum -a 256 "dist/tansu2-$TARGET.tar.gz" > "dist/tansu2-$TARGET.tar.gz.sha256"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: tansu2-aarch64-apple-darwin
           path: |
@@ -75,7 +75,7 @@ jobs:
             target: aarch64-unknown-linux-musl
     runs-on: ${{ matrix.runner }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Build server in Alpine
         run: |
@@ -94,7 +94,7 @@ jobs:
           tar -C dist -czf "dist/tansu2-${{ matrix.target }}.tar.gz" "tansu2-${{ matrix.target }}"
           sha256sum "dist/tansu2-${{ matrix.target }}.tar.gz" > "dist/tansu2-${{ matrix.target }}.tar.gz.sha256"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: tansu2-${{ matrix.target }}
           path: |

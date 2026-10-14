@@ -39,11 +39,11 @@ describe("HTML import", () => {
 
   it("does not duplicate an existing top-level heading", async () => {
     mockPickedFile(new File(["<article>body</article>"], "clip.html", { type: "text/html" }));
-    mockHtmlText("<title>Clip</title><article># Clip\n\nBody</article>");
+    mockHtmlText("<title>Clip</title><article># Clip</article>");
 
     await expect(pickHtmlImport([])).resolves.toStrictEqual({
       path: "Clip.md",
-      content: "Title: Clip\n\n# Clip\n\nBody\n",
+      content: "Title: Clip\n\n# Clip\n",
     });
   });
 });

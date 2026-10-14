@@ -2,31 +2,8 @@
   "name": "tansu2",
   "private": true,
   "type": "module",
-  "scripts": {
-    "bundle": "node scripts/build-web.mjs production",
-    "bundle-dev": "node scripts/build-web.mjs development",
-    "lint": "oxlint",
-    "playwright:install": "node scripts/install-playwright-browsers.mjs",
-    "test": "vitest run",
-    "test-e2e": "TANSU2_LOGS=buffer pnpm run bundle-dev && vitest run --config vitest.e2e.config.ts"
-  },
-  "devDependencies": {
-    "@types/node": "^25.9.1",
-    "@typescript/native-preview": "7.0.0-dev.20260525.1",
-    "@vitest/coverage-v8": "4.1.7",
-    "esbuild": "0.28.0",
-    "happy-dom": "^20.9.0",
-    "knip": "^6.14.2",
-    "oxlint": "1.66.0",
-    "playwright": "1.60.0",
-    "vitest": "4.1.7"
-  },
-  "engines": {
-    "node": ">=25.9.0"
-  },
-  "packageManager": "pnpm@11.3.0",
   "playwrightBrowsers": {
-    "playwrightVersion": "1.60.0",
+    "playwrightVersion": "1.64.0",
     "install": [
       "chromium",
       "firefox",
@@ -34,17 +11,35 @@
     ],
     "browsers": {
       "chromium": {
-        "version": "148.0.7778.96",
-        "revision": "1223"
+        "version": "156.0.8078.4",
+        "revision": "1248"
       },
       "firefox": {
-        "version": "150.0.2",
-        "revision": "1522"
+        "version": "157.0",
+        "revision": "1555"
       },
       "webkit": {
-        "version": "26.4",
-        "revision": "2287"
+        "version": "27.2",
+        "revision": "2370",
+        "revisionOverrides": {
+          "mac14": "2251",
+          "mac14-arm64": "2251"
+        }
       }
     }
-  }
+  },
+  "devDependencies": {
+    "@types/node": "26.6.5",
+    "@vitest/coverage-v8": "5.0.4",
+    "esbuild": "0.28.2",
+    "happy-dom": "21.0.1",
+    "oxlint": "1.88.0",
+    "playwright": "1.64.0",
+    "typescript": "7.0.2",
+    "vitest": "5.0.4"
+  },
+  "engines": {
+    "node": ">=26.0.0"
+  },
+  "packageManager": "pnpm@12.13.0"
 }

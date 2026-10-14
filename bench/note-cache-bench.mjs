@@ -16,7 +16,7 @@ const runs = Number(args.runs ?? 9);
 const delayMs = Number(args.delay ?? 200);
 
 async function main() {
-  execFileSync("pnpm", ["run", "bundle-dev"], { cwd: REPO_ROOT, stdio: "inherit" });
+  execFileSync("deno", ["task", "build:dev"], { cwd: REPO_ROOT, stdio: "inherit" });
   await mkdir(RESULTS_DIR, { recursive: true });
 
   const root = await mkdtemp(join(tmpdir(), "tansu2-cache-bench-"));

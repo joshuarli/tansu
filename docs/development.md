@@ -5,7 +5,8 @@
 Requirements:
 
 - Rust from `rust-toolchain.toml`
-- Node from `.node-version`
+- Deno 2.x
+- Node 26 or later for Node-based tooling
 - `pnpm` from `package.json`
 
 Supported Rust targets:
@@ -18,14 +19,7 @@ Install dependencies:
 
 ```sh
 pnpm install
-```
-
-Playwright browser versions are declared in `package.json` under
-`playwrightBrowsers`. Use the repo wrapper so the install fails if
-`playwright-core` would install a different browser build:
-
-```sh
-pnpm run playwright:install
+deno task playwright:install
 ```
 
 ## Run
@@ -55,13 +49,15 @@ make test-e2e
 Full focused list:
 
 ```sh
-pnpm exec tsgo --noEmit --pretty false
-pnpm exec oxlint
+deno task lint
+deno task typecheck
+deno task test
+deno task test:browser
 cargo check -q
 cargo test -q
-pnpm run test
-pnpm run test-e2e
 ```
+
+`pnpm` installs packages. Use `deno task` to run project commands.
 
 ## Linux Musl Build
 

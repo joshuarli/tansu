@@ -46,17 +46,28 @@ for (const name of config.install) {
     throw new Error(`playwright-core metadata is missing ${name}`);
   }
 
-  if (actual.browserVersion !== expected.version || actual.revision !== expected.revision) {
+  const platform =
+    process.platform === "darwin"
+      ? process.arch === "arm64"
+        ? "mac14-arm64"
+        : "mac14"
+      : null;
+  const actualRevision =
+    (platform === null ? undefined : actual.revisionOverrides?.[platform]) ?? actual.revision;
+  const expectedRevision =
+    (platform === null ? undefined : expected.revisionOverrides?.[platform]) ?? expected.revision;
+
+  if (actual.browserVersion !== expected.version || actualRevision !== expectedRevision) {
     throw new Error(
-      `${name} is ${actual.browserVersion} revision ${actual.revision}, expected ${expected.version} revision ${expected.revision}`,
+      `${name} is ${actual.browserVersion} revision ${actualRevision}, expected ${expected.version} revision ${expectedRevision}`,
     );
   }
 }
 
 const passthroughArgs = process.argv.slice(2).filter((arg) => arg !== "--");
 const install = spawnSync(
-  "pnpm",
-  ["exec", "playwright", "install", ...passthroughArgs, "--with-deps", ...config.install],
+  "node_modules/.bin/playwright",
+  ["install", ...passthroughArgs, "--with-deps", ...config.install],
   { stdio: "inherit" },
 );
 

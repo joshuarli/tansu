@@ -1,3 +1,4 @@
+---
 allowBuilds:
   esbuild: true
 supportedArchitectures:
@@ -28,4 +29,10 @@ ignoredOptionalDependencies:
   - "*sunos*"
   - "*wasm32*"
   - "*win32*"
-  - "@typescript/native-preview-linux-arm"
+minimumReleaseAgeExclude:
+  - "@oxlint/binding-darwin-arm64@1.88.0"
+  - "@oxlint/binding-darwin-x64@1.88.0"
+  - "@oxlint/binding-linux-arm64-musl@1.88.0"
+  - "@oxlint/binding-linux-x64-musl@1.88.0"
+  - oxlint@1.88.0
+...

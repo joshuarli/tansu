@@ -20,7 +20,7 @@ async function parseHtml(html: string): Promise<HtmlImportParseResult> {
   const author = metadata("author");
   const published = metadata("date") ?? metadata("publish_date");
   const description = metadata("description");
-  const contentMarkdown = doc.body.innerText || doc.body.textContent || undefined;
+  const contentMarkdown = (doc.body.innerText || doc.body.textContent)?.trim() || undefined;
   return {
     ...(doc.title ? { title: doc.title } : {}),
     ...(author ? { author } : {}),

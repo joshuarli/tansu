@@ -1,0 +1,17 @@
+{
+  "nodeModulesDir": "manual",
+  "lock": false,
+  "tasks": {
+    "dev": "make dev",
+    "build": "node scripts/build-web.mjs production",
+    "build:dev": "node scripts/build-web.mjs development",
+    "lint": "node_modules/.bin/oxlint --config oxlint.config.mjs",
+    "typecheck": "node_modules/.bin/tsc --noEmit --pretty false",
+    "test": "node_modules/.bin/vitest run",
+    "test:browser": "TANSU2_LOGS=buffer deno task build:dev && node_modules/.bin/vitest run --config vitest.e2e.config.ts",
+    "playwright:install": "node scripts/install-playwright-browsers.mjs",
+    "coverage": "node_modules/.bin/vitest run --coverage",
+    "coverage:html": "node_modules/.bin/vitest run --coverage --coverage.reporter=html",
+    "check": "deno task lint && deno task typecheck && deno task test && cargo check -q"
+  }
+}
