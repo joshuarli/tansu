@@ -1,0 +1,608 @@
+import { closeBrackets, closeBracketsKeymap } from "@codemirror/autocomplete";
+import { indentWithTab, defaultKeymap, history, historyKeymap, redo, undo } from "@codemirror/commands";
+import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
+import {
+  Annotation,
+  Compartment,
+  EditorSelection,
+  EditorState,
+  Transaction,
+  type Extension,
+} from "@codemirror/state";
+import {
+  drawSelection,
+  EditorView,
+  highlightActiveLine,
+  keymap,
+  rectangularSelection,
+} from "@codemirror/view";
+import { atomicEditorTheme, atomicMarkdownSyntax } from "./vendor/atomic/atomic-theme.js";
+import { autoCloseCodeFence, extendEmphasisPair, startAsteriskList } from "./vendor/atomic/edit-helpers.js";
+import { highlightMarkdown } from "./vendor/atomic/highlight.js";
+import { imageBlocks } from "./vendor/atomic/image-blocks.js";
+import { inlinePreview } from "./vendor/atomic/inline-preview.js";
+import { readOnlyExtension, readOnlyFacet } from "./vendor/atomic/read-only.js";
+import { tables } from "./vendor/atomic/table-widget.js";
+import { wikiLinks } from "./vendor/atomic/wiki-links.js";
+import { calloutDecoration } from "./callout-decoration.js";
+import { sanitizeHtmlToMarkdown } from "./clipboard.js";
+import { findLiteral, outlineFromSyntaxTree, type FindMatch, type Outline } from "./source-navigation.js";
+import { tagsSourceEdit } from "./tag-source.js";
+import type { EditorChange, EditorConfig, EditorExtension } from "./tansu-extensions.js";
+import { createCalloutExtension } from "./tansu-extensions.js";
+import { resolveWikiTarget, suggestWikiTargets } from "./wiki-target.js";
+import { wikiImages } from "./wiki-images.js";
+import {
+  toggleBold,
+  toggleHeading,
+  toggleHighlight,
+  toggleItalic,
+  toggleStrikethrough,
+  type FormatResult,
+} from "./format-ops.js";
+
+const transactionOrigin = Annotation.define<EditorOrigin>();
+
+type EditorOrigin = "load" | "modeChange" | "externalReload" | "userEdit";
+export type EditorMode = "live" | "source";
+export type FormatCommand = "bold" | "italic" | "highlight" | "strikethrough" | "heading";
+
+declare const editorSessionBrand: unique symbol;
+
+export type EditorSession = {
+  readonly noteId: string;
+  readonly [editorSessionBrand]: true;
+};
+
+export type EditorSelectionSnapshot = {
+  anchor: number;
+  head: number;
+};
+
+export type EditorScrollSnapshot = {
+  top: number;
+  left: number;
+};
+
+export type EditorSnapshot = {
+  noteId: string;
+  source: string;
+  revision: number;
+  selection: EditorSelectionSnapshot;
+  mode: EditorMode;
+  readOnly: boolean;
+  scroll: EditorScrollSnapshot;
+  dirty: boolean;
+};
+
+export type ReloadResult =
+  | { kind: "reloaded"; revision: number }
+  | { kind: "unchanged"; revision: number }
+  | { kind: "dirty"; revision: number };
+
+export type SessionOptions = {
+  mode?: EditorMode;
+  readOnly?: boolean;
+};
+
+export type EditorHandle = {
+  createSession(noteId: string, source: string, options?: SessionOptions): EditorSession;
+  attachSession(session: EditorSession): void;
+  detachSession(): EditorSession | null;
+  dispose(): void;
+  focus(): void;
+  getSnapshot(): EditorSnapshot | null;
+  markSaved(session: EditorSession, revision: number): boolean;
+  reloadIfClean(session: EditorSession, source: string): ReloadResult;
+  setMode(mode: EditorMode): void;
+  updateConfiguration(partial: Partial<EditorConfig>): void;
+  revealSelection(selection: EditorSelectionSnapshot): boolean;
+  find(query: string): readonly FindMatch[];
+  revealFindMatch(match: FindMatch): boolean;
+  outline(): Outline;
+  formatSelection(command: FormatCommand): void;
+  updateTags(tags: readonly string[]): boolean;
+  undo(): boolean;
+  redo(): boolean;
+};
+
+type SessionData = {
+  owner: symbol;
+  state: EditorState;
+  revision: number;
+  dirty: boolean;
+  mode: EditorMode;
+  readOnly: boolean;
+  sourceCache: string;
+  sourceCacheRevision: number;
+  scroll: EditorScrollSnapshot;
+};
+
+const sessions = new WeakMap<EditorSession, SessionData>();
+
+function sessionData(session: EditorSession, owner: symbol): SessionData {
+  const data = sessions.get(session);
+  if (data === undefined || data.owner !== owner) {
+    throw new TypeError("Editor session belongs to another editor");
+  }
+  return data;
+}
+
+function editorExtensions(config: EditorConfig, live: boolean): Extension[] {
+  const extensions: Extension[] = [];
+  if (!live) return extensions;
+
+  const configured = config.extensions ?? [];
+  const imageExtensions = configured.filter(
+    (extension): extension is Extract<EditorExtension, { kind: "wiki-images" }> =>
+      extension.kind === "wiki-images",
+  );
+  const calloutExtensions = configured.filter(
+    (extension): extension is Extract<EditorExtension, { kind: "callouts" }> =>
+      extension.kind === "callouts",
+  );
+  const callout = calloutExtensions[calloutExtensions.length - 1] ?? createCalloutExtension();
+  const wikiConfig = {
+    suggest: async (query: string) => suggestWikiTargets(query, config.wikiNotes?.() ?? []),
+    resolve: async (target: string) => {
+      const result = resolveWikiTarget(
+        target,
+        config.currentNotePath?.() ?? "",
+        config.wikiNotes?.() ?? [],
+      );
+      if (result.kind === "resolved") {
+        return { target, label: result.note.title, status: "resolved" as const };
+      }
+      if (result.kind === "ambiguous") return { target, label: target, status: "unresolved" as const };
+      return { target, label: target, status: result.kind === "missing" ? "missing" as const : "unresolved" as const };
+    },
+    onOpen: (target: string) => {
+      const result = resolveWikiTarget(
+        target,
+        config.currentNotePath?.() ?? "",
+        config.wikiNotes?.() ?? [],
+      );
+      if (result.kind === "resolved") config.onWikiNoteOpen?.(result.note.noteId);
+    },
+  };
+
+  for (const extension of imageExtensions) {
+    extensions.push(wikiImages({ resolveUrl: extension.resolveUrl }));
+  }
+  extensions.push(
+    inlinePreview(config.onLinkOpen ? { onLinkClick: config.onLinkOpen } : {}),
+    imageBlocks(),
+    tables(config.onLinkOpen ? { onLinkClick: config.onLinkOpen } : {}),
+    calloutDecoration({ icons: callout.icons }),
+  );
+  if (configured.some((extension) => extension.kind === "wiki-links")) {
+    extensions.push(wikiLinks(wikiConfig));
+  }
+  return extensions;
+}
+
+function createState(
+  source: string,
+  mode: EditorMode,
+  readOnly: boolean,
+  config: EditorConfig,
+  modeCompartment: Compartment,
+  readOnlyCompartment: Compartment,
+  updateListener: Extension,
+  clipboardHandler: Extension,
+  pasteHandler: Extension,
+): EditorState {
+  return EditorState.create({
+    doc: source,
+    extensions: [
+      history(),
+      markdown({ base: markdownLanguage, codeLanguages: [], extensions: [highlightMarkdown] }),
+      atomicEditorTheme,
+      atomicMarkdownSyntax,
+      EditorState.allowMultipleSelections.of(true),
+      EditorState.transactionFilter.of((transaction) => {
+        if (!transaction.docChanged || !transaction.startState.facet(readOnlyFacet)) return transaction;
+        const origin = transaction.annotation(transactionOrigin);
+        return origin === "load" || origin === "externalReload" ? transaction : [];
+      }),
+      EditorState.transactionExtender.of((transaction) =>
+        transaction.docChanged && transaction.annotation(transactionOrigin) === undefined
+          ? { annotations: transactionOrigin.of("userEdit") }
+          : null,
+      ),
+      modeCompartment.of(editorExtensions(config, mode === "live")),
+      readOnlyCompartment.of(readOnlyExtension(readOnly)),
+      drawSelection(),
+      rectangularSelection(),
+      highlightActiveLine(),
+      EditorView.lineWrapping,
+      closeBrackets(),
+      startAsteriskList,
+      extendEmphasisPair,
+      autoCloseCodeFence,
+      keymap.of([
+        { key: "Mod-s", run: () => { config.onSave?.(); return true; } },
+        { key: "Mod-f", run: () => { config.onFindRequested?.(); return true; } },
+        ...closeBracketsKeymap,
+        ...defaultKeymap,
+        ...historyKeymap,
+        indentWithTab,
+      ]),
+      updateListener,
+      clipboardHandler,
+      pasteHandler,
+    ],
+  });
+}
+
+export function createCodeMirrorEditor(container: HTMLElement, initialConfig: EditorConfig = {}): EditorHandle {
+  let config: EditorConfig = { ...initialConfig };
+  let activeSession: EditorSession | null = null;
+  let disposed = false;
+  let view: EditorView;
+  const owner = Symbol("editor");
+  const modeCompartment = new Compartment();
+  const readOnlyCompartment = new Compartment();
+
+  const updateListener = EditorView.updateListener.of((update) => {
+    if (activeSession === null) return;
+    const data = sessionData(activeSession, owner);
+    data.state = update.state;
+    data.scroll = { top: view.scrollDOM.scrollTop, left: view.scrollDOM.scrollLeft };
+    const userTransactions = update.transactions.filter(
+      (transaction) => transaction.docChanged && transaction.annotation(transactionOrigin) === "userEdit",
+    );
+    if (userTransactions.length === 0) return;
+    data.revision += userTransactions.length;
+    data.dirty = true;
+    data.sourceCacheRevision = -1;
+    const change: EditorChange = {
+      noteId: activeSession.noteId,
+      revision: data.revision,
+      origin: "userEdit",
+    };
+    config.onChange?.(change);
+  });
+
+  const pasteHandler = EditorView.domEventHandlers({
+    paste(event, editorView) {
+      const html = event.clipboardData?.getData("text/html");
+      if (!html) return false;
+      event.preventDefault();
+      event.stopPropagation();
+      if (editorView.state.facet(readOnlyFacet)) return true;
+      const markdownSource = sanitizeHtmlToMarkdown(html);
+      if (markdownSource === "") return true;
+      const selection = editorView.state.selection.main;
+      editorView.dispatch({
+        changes: { from: selection.from, to: selection.to, insert: markdownSource },
+        selection: { anchor: selection.from + markdownSource.length },
+        annotations: [transactionOrigin.of("userEdit"), Transaction.userEvent.of("input.paste")],
+      });
+      return true;
+    },
+  });
+
+  const clipboardHandler = EditorView.domEventHandlers({
+    copy(event, editorView) {
+      const selection = editorView.state.selection;
+      const ranges = selection.ranges.filter((range) => !range.empty);
+      if (ranges.length === 0 || event.clipboardData === null) return false;
+      event.clipboardData.setData(
+        "text/plain",
+        ranges.map((range) => editorView.state.sliceDoc(range.from, range.to)).join(editorView.state.lineBreak),
+      );
+      event.preventDefault();
+      return true;
+    },
+    cut(event, editorView) {
+      const selection = editorView.state.selection;
+      const ranges = selection.ranges.filter((range) => !range.empty);
+      if (ranges.length === 0 || event.clipboardData === null) return false;
+      event.clipboardData.setData(
+        "text/plain",
+        ranges.map((range) => editorView.state.sliceDoc(range.from, range.to)).join(editorView.state.lineBreak),
+      );
+      event.preventDefault();
+      if (!editorView.state.facet(readOnlyFacet)) {
+        editorView.dispatch({
+          changes: ranges,
+          annotations: [transactionOrigin.of("userEdit"), Transaction.userEvent.of("delete.cut")],
+        });
+      }
+      return true;
+    },
+  });
+
+  const initialState = createState(
+    "",
+    config.mode ?? "live",
+    config.readOnly ?? false,
+    config,
+    modeCompartment,
+    readOnlyCompartment,
+    updateListener,
+    clipboardHandler,
+    pasteHandler,
+  );
+  view = new EditorView({ state: initialState, parent: container });
+  if (config.className) view.dom.classList.add(config.className);
+
+  function ensureActive(): SessionData | null {
+    if (disposed) throw new TypeError("Editor has been disposed");
+    return activeSession === null ? null : sessionData(activeSession, owner);
+  }
+
+  function storeActiveState(): void {
+    if (activeSession === null) return;
+    const data = sessionData(activeSession, owner);
+    data.state = view.state;
+    data.scroll = { top: view.scrollDOM.scrollTop, left: view.scrollDOM.scrollLeft };
+  }
+
+  function reconfigure(data: SessionData, origin: EditorOrigin): void {
+    view.dispatch({
+      effects: [
+        modeCompartment.reconfigure(editorExtensions(config, data.mode === "live")),
+        readOnlyCompartment.reconfigure(readOnlyExtension(data.readOnly)),
+      ],
+      annotations: transactionOrigin.of(origin),
+    });
+    data.state = view.state;
+  }
+
+  function currentSource(data: SessionData): string {
+    if (data.sourceCacheRevision !== data.revision) {
+      data.sourceCache = data.state.doc.toString();
+      data.sourceCacheRevision = data.revision;
+    }
+    return data.sourceCache;
+  }
+
+  function sourceChange(data: SessionData, transform: (source: string, start: number, end: number) => FormatResult): void {
+    if (data.readOnly) return;
+    const selection = data.state.selection.main;
+    const result = transform(currentSource(data), selection.from, selection.to);
+    const current = currentSource(data);
+    let prefix = 0;
+    while (prefix < current.length && prefix < result.md.length && current[prefix] === result.md[prefix]) prefix++;
+    let currentEnd = current.length;
+    let nextEnd = result.md.length;
+    while (currentEnd > prefix && nextEnd > prefix && current[currentEnd - 1] === result.md[nextEnd - 1]) {
+      currentEnd--;
+      nextEnd--;
+    }
+    if (currentEnd === prefix && nextEnd === prefix) return;
+    view.dispatch({
+      changes: { from: prefix, to: currentEnd, insert: result.md.slice(prefix, nextEnd) },
+      selection: { anchor: result.selStart, head: result.selEnd },
+      annotations: [transactionOrigin.of("userEdit"), Transaction.userEvent.of("input.format")],
+    });
+  }
+
+  return {
+    createSession(noteId, source, options = {}) {
+      if (disposed) throw new TypeError("Editor has been disposed");
+      if (noteId === "") throw new TypeError("Editor session noteId must not be empty");
+      const mode = options.mode ?? config.mode ?? "live";
+      const readOnly = options.readOnly ?? config.readOnly ?? false;
+      const session = Object.freeze({ noteId }) as EditorSession;
+      sessions.set(session, {
+        owner,
+        state: createState(
+          source,
+          mode,
+          readOnly,
+          config,
+          modeCompartment,
+          readOnlyCompartment,
+          updateListener,
+          clipboardHandler,
+          pasteHandler,
+        ),
+        revision: 0,
+        dirty: false,
+        mode,
+        readOnly,
+        sourceCache: source,
+        sourceCacheRevision: 0,
+        scroll: { top: 0, left: 0 },
+      });
+      return session;
+    },
+
+    attachSession(session) {
+      if (disposed) throw new TypeError("Editor has been disposed");
+      const data = sessionData(session, owner);
+      if (activeSession === session) return;
+      storeActiveState();
+      activeSession = session;
+      view.setState(data.state);
+      reconfigure(data, "modeChange");
+      view.scrollDOM.scrollTop = data.scroll.top;
+      view.scrollDOM.scrollLeft = data.scroll.left;
+    },
+
+    detachSession() {
+      if (disposed) throw new TypeError("Editor has been disposed");
+      storeActiveState();
+      const detached = activeSession;
+      activeSession = null;
+      view.setState(initialState);
+      return detached;
+    },
+
+    dispose() {
+      if (disposed) return;
+      storeActiveState();
+      activeSession = null;
+      disposed = true;
+      view.destroy();
+    },
+
+    focus() {
+      if (ensureActive() !== null) view.focus();
+    },
+
+    getSnapshot() {
+      const data = ensureActive();
+      if (data === null || activeSession === null) return null;
+      data.scroll = { top: view.scrollDOM.scrollTop, left: view.scrollDOM.scrollLeft };
+      return {
+        noteId: activeSession.noteId,
+        source: currentSource(data),
+        revision: data.revision,
+        selection: { anchor: data.state.selection.main.anchor, head: data.state.selection.main.head },
+        mode: data.mode,
+        readOnly: data.readOnly,
+        scroll: { ...data.scroll },
+        dirty: data.dirty,
+      };
+    },
+
+    markSaved(session, revision) {
+      const data = sessionData(session, owner);
+      if (data.revision !== revision) return false;
+      data.dirty = false;
+      return true;
+    },
+
+    reloadIfClean(session, source) {
+      const data = sessionData(session, owner);
+      if (data.dirty) return { kind: "dirty", revision: data.revision };
+      if (currentSource(data) === source) return { kind: "unchanged", revision: data.revision };
+      data.revision++;
+      data.dirty = false;
+      data.sourceCache = source;
+      data.sourceCacheRevision = data.revision;
+      data.scroll = { top: 0, left: 0 };
+      data.state = createState(
+        source,
+        data.mode,
+        data.readOnly,
+        config,
+        modeCompartment,
+        readOnlyCompartment,
+        updateListener,
+        clipboardHandler,
+        pasteHandler,
+      );
+      if (activeSession === session) {
+        view.setState(data.state);
+        reconfigure(data, "externalReload");
+        view.scrollDOM.scrollTop = 0;
+        view.scrollDOM.scrollLeft = 0;
+      }
+      return { kind: "reloaded", revision: data.revision };
+    },
+
+    setMode(mode) {
+      const data = ensureActive();
+      if (data === null) {
+        config = { ...config, mode };
+        return;
+      }
+      if (data.mode === mode) return;
+      data.mode = mode;
+      reconfigure(data, "modeChange");
+    },
+
+    updateConfiguration(partial) {
+      if (disposed) throw new TypeError("Editor has been disposed");
+      const previous = config;
+      config = { ...config, ...partial };
+      const data = activeSession === null ? null : sessionData(activeSession, owner);
+      if (data === null) return;
+      const previousMode = data.mode;
+      const previousReadOnly = data.readOnly;
+      if (Object.hasOwn(partial, "readOnly")) data.readOnly = partial.readOnly ?? false;
+      if (Object.hasOwn(partial, "mode")) data.mode = partial.mode ?? data.mode;
+      if (
+        data.mode !== previousMode ||
+        data.readOnly !== previousReadOnly ||
+        previous.extensions !== config.extensions ||
+        previous.wikiNotes !== config.wikiNotes ||
+        previous.currentNotePath !== config.currentNotePath ||
+        previous.onWikiNoteOpen !== config.onWikiNoteOpen ||
+        previous.onLinkOpen !== config.onLinkOpen ||
+        Object.hasOwn(partial, "readOnly") ||
+        Object.hasOwn(partial, "mode")
+      ) reconfigure(data, "modeChange");
+    },
+
+    revealSelection(selection) {
+      const data = ensureActive();
+      if (data === null) return false;
+      if (
+        !Number.isInteger(selection.anchor) ||
+        !Number.isInteger(selection.head) ||
+        selection.anchor < 0 ||
+        selection.head < 0 ||
+        selection.anchor > data.state.doc.length ||
+        selection.head > data.state.doc.length
+      ) return false;
+      view.dispatch({
+        selection: EditorSelection.single(selection.anchor, selection.head),
+        scrollIntoView: true,
+      });
+      return true;
+    },
+
+    find(query) {
+      const data = ensureActive();
+      return data === null ? [] : findLiteral(currentSource(data), query);
+    },
+
+    revealFindMatch(match) {
+      const data = ensureActive();
+      if (data === null || match.from < 0 || match.to > data.state.doc.length || match.from > match.to) return false;
+      view.dispatch({
+        selection: EditorSelection.single(match.from, match.to),
+        scrollIntoView: true,
+      });
+      return true;
+    },
+
+    outline() {
+      const data = ensureActive();
+      return data === null ? { headings: [], complete: true } : outlineFromSyntaxTree(data.state);
+    },
+
+    formatSelection(command) {
+      const data = ensureActive();
+      if (data === null) return;
+      const operation = command === "bold"
+        ? toggleBold
+        : command === "italic"
+        ? toggleItalic
+        : command === "highlight"
+        ? toggleHighlight
+        : command === "strikethrough"
+        ? toggleStrikethrough
+        : (source: string, start: number) => toggleHeading(source, start, 1);
+      sourceChange(data, operation);
+    },
+
+    updateTags(tags) {
+      const data = ensureActive();
+      if (data === null || data.readOnly) return false;
+      const edit = tagsSourceEdit(currentSource(data), tags);
+      if (edit === null) return false;
+      view.dispatch({
+        changes: edit,
+        annotations: [transactionOrigin.of("userEdit"), Transaction.userEvent.of("input.tags")],
+      });
+      return true;
+    },
+
+    undo() {
+      const data = ensureActive();
+      return data !== null && !data.readOnly && undo(view);
+    },
+
+    redo() {
+      const data = ensureActive();
+      return data !== null && !data.readOnly && redo(view);
+    },
+  };
+}
