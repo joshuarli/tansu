@@ -1552,6 +1552,8 @@ impl VaultRuntime {
         self.enqueue_search(SearchJob::Upsert(accepted_meta.clone(), content.to_string()));
         self.broadcast(ServerEventKind::NoteChanged, Vec::new());
         self.log_note_mutation("save_v2", &accepted_meta, Some(content.len()));
+        #[cfg(test)]
+        crate::failure_point::check(crate::failure_point::FailurePoint::ResponseReady)?;
         Ok(response)
     }
 
@@ -2059,6 +2061,8 @@ impl VaultRuntime {
     ) -> Result<V2EventEnvelope> {
         let event = event_envelope(version, update)?;
         let overflow = event_envelope(version, V2ServerEventUpdate::ResyncRequired)?;
+        #[cfg(test)]
+        crate::failure_point::check(crate::failure_point::FailurePoint::BeforeEventPublish)?;
         let mut subscribers = self
             .v2_subscribers
             .lock()
@@ -2074,6 +2078,9 @@ impl VaultRuntime {
                 .expect("event queue mutex poisoned")
                 .closed
         });
+        drop(subscribers);
+        #[cfg(test)]
+        crate::failure_point::check(crate::failure_point::FailurePoint::AfterEventPublish)?;
         Ok(event)
     }
 
@@ -3419,7 +3426,8 @@ fn is_unique_violation(error: &rusqlite::Error) -> bool {
 mod tests {
     use crate::api_types::{
         PathValidationReason, SaveNoteDeltaRequest, SaveNoteRequest, TextEdit, TextPosition,
-        V2CreateNoteRequest, V2MutationOutcome, V2NotePrecondition, V2RestoreConflictRequest,
+        V2CreateNoteRequest, V2DeleteNoteRequest, V2MutationOutcome, V2NotePrecondition,
+        V2RenameNoteRequest, V2RestoreConflictRequest,
         V2RestoreRevisionRequest, V2SaveNoteRequest,
     };
     use crate::paths::visible_path;
@@ -4153,6 +4161,261 @@ mod tests {
         )
         .is_err());
         assert_eq!(fs::read(&visible).unwrap(), external);
+    }
+
+    #[test]
+    fn v2_save_restart_recovers_at_each_durable_boundary() {
+        use crate::failure_point::{self, FailurePoint};
+
+        let points = [
+            FailurePoint::IntentCommitted,
+            FailurePoint::SnapshotWritePermissionDenied,
+            FailurePoint::SnapshotWritten,
+            FailurePoint::CatalogTransitionCommitted,
+            FailurePoint::VisibleFileStorageFull,
+            FailurePoint::VisibleFileReplaced,
+            FailurePoint::DirectorySynced,
+            FailurePoint::CompletionCommitted,
+            FailurePoint::BeforeEventPublish,
+            FailurePoint::AfterEventPublish,
+            FailurePoint::ResponseReady,
+        ];
+
+        for point in points {
+            let directory = tempfile::tempdir().unwrap();
+            let dir = directory.path().to_path_buf();
+            let state_path = dir.join("state");
+            let visible = dir.join("A.md");
+            fs::write(&visible, "# A\nold\n").unwrap();
+            let config = VaultConfig {
+                name: "Test".to_string(),
+                path: dir.clone(),
+                state_path,
+                excluded_folders: Vec::new(),
+            };
+            let vault = VaultRuntime::open(
+                0,
+                &config,
+                LogHub::new(crate::logging::LogMode::Off),
+            )
+            .unwrap();
+            let note = vault.v2_notes().unwrap().remove(0);
+            let base = vault.v2_open_note(&note.note_id).unwrap();
+            let baseline = vault
+                .lock_catalog()
+                .latest_vault_event_version()
+                .unwrap();
+            let subscription = vault.subscribe_v2_events(Some(baseline)).unwrap();
+            let content = "# A\nnew\n";
+            let request = V2SaveNoteRequest {
+                mutation_id: format!("save-{point:?}"),
+                precondition: V2NotePrecondition {
+                    base_revision: base.meta.revision,
+                    base_source_hash: base.meta.source_hash,
+                    base_disk_hash: base.meta.disk_hash,
+                },
+                content: content.to_string(),
+                source_hash: history::source_hash(content),
+            };
+
+            failure_point::inject(point);
+            let first = vault.v2_save_note(&note.note_id, request.clone());
+            assert!(!failure_point::is_armed(), "{point:?} was not reached");
+            if point == FailurePoint::SnapshotWritePermissionDenied {
+                assert!(matches!(
+                    first.as_ref(),
+                    Err(V2VaultError::Internal(Error::Io(error)))
+                        if error.kind() == std::io::ErrorKind::PermissionDenied
+                ));
+            }
+            if matches!(
+                point,
+                FailurePoint::VisibleFileStorageFull
+                    | FailurePoint::VisibleFileReplaced
+                    | FailurePoint::DirectorySynced
+            ) {
+                assert!(matches!(
+                    first.unwrap().outcome,
+                    V2MutationOutcome::PendingMaterialization { .. }
+                ));
+            } else {
+                assert!(first.is_err(), "{point:?} unexpectedly returned a response");
+            }
+            let live_event = subscription
+                .events
+                .recv_timeout(Duration::from_millis(10));
+            if matches!(point, FailurePoint::AfterEventPublish | FailurePoint::ResponseReady) {
+                assert_eq!(live_event.unwrap().payload["update"]["kind"], "noteChanged");
+            } else {
+                assert!(matches!(
+                    live_event,
+                    Err(std::sync::mpsc::RecvTimeoutError::Timeout)
+                ));
+            }
+
+            drop(subscription);
+            drop(vault);
+            let reopened = VaultRuntime::open(
+                0,
+                &config,
+                LogHub::new(crate::logging::LogMode::Off),
+            )
+            .unwrap();
+            let recovered_before_retry = reopened.v2_open_note(&note.note_id).unwrap();
+            if matches!(
+                point,
+                FailurePoint::IntentCommitted
+                    | FailurePoint::SnapshotWritePermissionDenied
+                    | FailurePoint::SnapshotWritten
+            ) {
+                assert_eq!(recovered_before_retry.content, "# A\nold\n", "{point:?}");
+            } else {
+                assert_eq!(recovered_before_retry.content, content, "{point:?}");
+            }
+
+            let retried = reopened
+                .v2_save_note(&note.note_id, request.clone())
+                .unwrap();
+            assert!(matches!(retried.outcome, V2MutationOutcome::Accepted { .. }));
+            assert_eq!(
+                serde_json::to_value(&retried).unwrap(),
+                serde_json::to_value(reopened.v2_save_note(&note.note_id, request).unwrap())
+                    .unwrap(),
+                "{point:?}"
+            );
+            assert_eq!(reopened.v2_open_note(&note.note_id).unwrap().meta.revision, base.meta.revision + 1);
+            let replay = reopened.subscribe_v2_events(Some(baseline)).unwrap();
+            assert!(!replay.resync_required, "{point:?}");
+            assert_eq!(replay.replay.len(), 1, "{point:?}");
+            assert_eq!(replay.replay[0].payload["update"]["kind"], "noteChanged");
+            assert_eq!(replay.current_version, baseline + 1, "{point:?}");
+        }
+    }
+
+    #[test]
+    fn v2_create_rename_delete_restart_after_catalog_transition() {
+        use crate::failure_point::{self, FailurePoint};
+
+        for operation in ["create", "rename", "delete"] {
+            let directory = tempfile::tempdir().unwrap();
+            let dir = directory.path().to_path_buf();
+            let state_path = dir.join("state");
+            if operation != "create" {
+                fs::write(dir.join("A.md"), "# A\noriginal\n").unwrap();
+            }
+            let config = VaultConfig {
+                name: "Test".to_string(),
+                path: dir.clone(),
+                state_path,
+                excluded_folders: Vec::new(),
+            };
+            let vault = VaultRuntime::open(
+                0,
+                &config,
+                LogHub::new(crate::logging::LogMode::Off),
+            )
+            .unwrap();
+            let note_id = if operation == "create" {
+                String::new()
+            } else {
+                vault.v2_notes().unwrap().remove(0).note_id
+            };
+            let precondition = if operation == "create" {
+                None
+            } else {
+                let note = vault.v2_open_note(&note_id).unwrap();
+                Some(V2NotePrecondition {
+                    base_revision: note.meta.revision,
+                    base_source_hash: note.meta.source_hash,
+                    base_disk_hash: note.meta.disk_hash,
+                })
+            };
+            let baseline = vault
+                .lock_catalog()
+                .latest_vault_event_version()
+                .unwrap();
+            failure_point::inject(FailurePoint::CatalogTransitionCommitted);
+            let first = match operation {
+                "create" => {
+                    let content = "# Created\ncreated\n";
+                    vault.v2_create_note(V2CreateNoteRequest {
+                        mutation_id: "create-restart".to_string(),
+                        path: "Created.md".to_string(),
+                        content: content.to_string(),
+                        source_hash: history::source_hash(content),
+                    })
+                }
+                "rename" => vault.v2_rename_note(
+                    &note_id,
+                    V2RenameNoteRequest {
+                        mutation_id: "rename-restart".to_string(),
+                        precondition: precondition.clone().unwrap(),
+                        path: "B.md".to_string(),
+                    },
+                ),
+                "delete" => vault.v2_delete_note(
+                    &note_id,
+                    V2DeleteNoteRequest {
+                        mutation_id: "delete-restart".to_string(),
+                        precondition: precondition.clone().unwrap(),
+                    },
+                ),
+                _ => unreachable!(),
+            };
+            assert!(first.is_err(), "{operation} transition did not fail");
+            assert!(!failure_point::is_armed(), "{operation} transition was not reached");
+            drop(vault);
+
+            let reopened = VaultRuntime::open(
+                0,
+                &config,
+                LogHub::new(crate::logging::LogMode::Off),
+            )
+            .unwrap();
+            let retry = match operation {
+                "create" => {
+                    assert_eq!(fs::read(dir.join("Created.md")).unwrap(), b"# Created\ncreated\n");
+                    reopened.v2_create_note(V2CreateNoteRequest {
+                        mutation_id: "create-restart".to_string(),
+                        path: "Created.md".to_string(),
+                        content: "# Created\ncreated\n".to_string(),
+                        source_hash: history::source_hash("# Created\ncreated\n"),
+                    }).unwrap()
+                }
+                "rename" => {
+                    assert!(!dir.join("A.md").exists());
+                    assert_eq!(fs::read(dir.join("B.md")).unwrap(), b"# A\noriginal\n");
+                    reopened.v2_rename_note(
+                        &note_id,
+                        V2RenameNoteRequest {
+                            mutation_id: "rename-restart".to_string(),
+                            precondition: precondition.clone().unwrap(),
+                            path: "B.md".to_string(),
+                        },
+                    ).unwrap()
+                }
+                "delete" => {
+                    assert!(!dir.join("A.md").exists());
+                    reopened.v2_delete_note(
+                        &note_id,
+                        V2DeleteNoteRequest {
+                            mutation_id: "delete-restart".to_string(),
+                            precondition: precondition.unwrap(),
+                        },
+                    ).unwrap()
+                }
+                _ => unreachable!(),
+            };
+            assert!(matches!(retry.outcome, V2MutationOutcome::Accepted { .. }));
+            let replay = reopened.subscribe_v2_events(Some(baseline)).unwrap();
+            assert_eq!(replay.replay.len(), 1, "{operation}");
+            assert_eq!(replay.current_version, baseline + 1, "{operation}");
+            assert_eq!(
+                replay.replay[0].payload["update"]["kind"],
+                if operation == "delete" { "noteDeleted" } else { "noteChanged" },
+                "{operation}"
+            );
+        }
     }
 
     #[test]

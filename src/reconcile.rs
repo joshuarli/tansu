@@ -105,7 +105,11 @@ pub fn reconcile_vault(
         if moved_note_ids.contains(&row.meta.note_id) {
             continue;
         }
-        match history::read_snapshot_bytes(state_root, &row.meta.note_id, &row.meta.content_hash) {
+        match history::read_snapshot_bytes_for_reconciliation(
+            state_root,
+            &row.meta.note_id,
+            &row.meta.content_hash,
+        ) {
             Ok(bytes) if should_repair_missing_visible(catalog, &row.meta.note_id)? => {
                 write_visible_note_bytes_new(root, &row.meta.path, &bytes)?;
                 let document = SourceDocument::from_disk(&bytes)?;
@@ -127,10 +131,13 @@ pub fn reconcile_vault(
                     NoteEventSource::External,
                 )?;
             }
-            Err(Error::NotFound(_)) => {
+            Err(history::SnapshotReadError::Missing(_)) => {
                 catalog.mark_unresolved(&row.meta.note_id, UnresolvedReason::MissingSnapshot)?;
             }
-            Err(error) => return Err(error),
+            Err(history::SnapshotReadError::Corrupt(_)) => {
+                catalog.mark_unresolved(&row.meta.note_id, UnresolvedReason::CorruptSnapshot)?;
+            }
+            Err(history::SnapshotReadError::Other(error)) => return Err(error),
         }
     }
 
@@ -454,6 +461,16 @@ fn apply_visible_version(
         || row.meta.content_hash == file.legacy_hash
         || row.meta.content_hash == file.legacy_v2_hash;
     if source_matches {
+        if let Err(error) = history::read_snapshot_bytes_for_reconciliation(
+            state_root,
+            &row.meta.note_id,
+            &row.meta.content_hash,
+        ) {
+            if mark_snapshot_unresolved(catalog, &row.meta.note_id, &error)? {
+                return Ok(());
+            }
+            return Err(error.into_error());
+        }
         if row.meta.content_hash != file.source_hash {
             history::write_snapshot_bytes(
                 state_root,
@@ -479,11 +496,17 @@ fn apply_visible_version(
         return Ok(());
     }
     if row.visible_hash == file.disk_hash {
-        let bytes = history::read_snapshot_bytes(
+        let bytes = match history::read_snapshot_bytes_for_reconciliation(
             state_root,
             &row.meta.note_id,
             &row.meta.content_hash,
-        )?;
+        ) {
+            Ok(bytes) => bytes,
+            Err(error) if mark_snapshot_unresolved(catalog, &row.meta.note_id, &error)? => {
+                return Ok(());
+            }
+            Err(error) => return Err(error.into_error()),
+        };
         write_visible_note_bytes_atomic(root, &row.meta.path, &bytes)?;
         catalog.record_visible_hash(&row.meta.note_id, &history::disk_hash(&bytes))?;
         return Ok(());
@@ -507,6 +530,20 @@ fn apply_visible_version(
     Ok(())
 }
 
+fn mark_snapshot_unresolved(
+    catalog: &mut Catalog,
+    note_id: &str,
+    error: &history::SnapshotReadError,
+) -> Result<bool> {
+    let reason = match error {
+        history::SnapshotReadError::Missing(_) => UnresolvedReason::MissingSnapshot,
+        history::SnapshotReadError::Corrupt(_) => UnresolvedReason::CorruptSnapshot,
+        history::SnapshotReadError::Other(_) => return Ok(false),
+    };
+    catalog.mark_unresolved(note_id, reason)?;
+    Ok(true)
+}
+
 fn parse_unresolved_reason(value: &str) -> UnresolvedReason {
     match value {
         "case_fold_collision" => UnresolvedReason::CaseFoldCollision,
@@ -524,6 +561,45 @@ mod tests {
     use crate::api_types::{NoteEventKind, NoteEventSource};
 
     use super::*;
+
+    #[test]
+    fn missing_or_corrupt_current_snapshots_mark_notes_unresolved() {
+        for (damage, remove_visible, expected_reason) in [
+            ("missing", false, "missing_snapshot"),
+            ("corrupt", false, "corrupt_snapshot"),
+            ("missing", true, "missing_snapshot"),
+            ("corrupt", true, "corrupt_snapshot"),
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            let visible = dir.path().join("A.md");
+            let bytes = b"# A\ncurrent\n";
+            fs::write(&visible, bytes).unwrap();
+            let state_root = dir.path().join("state");
+            let mut catalog = Catalog::open(&state_root.join("vault.db")).unwrap();
+            reconcile_vault(dir.path(), &state_root, &mut catalog, &[]).unwrap();
+            let note = catalog.live_notes().unwrap().remove(0);
+            let snapshot = state_root
+                .join("history/snapshots")
+                .join(&note.note_id)
+                .join(format!("{}.lz4", note.content_hash.replace(':', "_")));
+            match damage {
+                "missing" => fs::remove_file(snapshot).unwrap(),
+                "corrupt" => fs::write(snapshot, b"not a snapshot").unwrap(),
+                _ => unreachable!(),
+            }
+            if remove_visible {
+                fs::remove_file(&visible).unwrap();
+            }
+
+            reconcile_vault(dir.path(), &state_root, &mut catalog, &[]).unwrap();
+
+            let rows = catalog.all_rows().unwrap();
+            assert_eq!(rows[0].unresolved_reason.as_deref(), Some(expected_reason));
+            if !remove_visible {
+                assert_eq!(fs::read(&visible).unwrap(), bytes);
+            }
+        }
+    }
 
     #[test]
     fn exact_hash_external_rename_preserves_note_id() {

@@ -135,6 +135,8 @@ fn write_visible_note_bytes(
     if !no_clobber {
         verify_visible_leaf(&directory, &leaf)?;
     }
+    #[cfg(test)]
+    crate::failure_point::check(crate::failure_point::FailurePoint::VisibleFileStorageFull)?;
     for _ in 0..8 {
         let temp = CString::new(format!(".tansu-{:016x}.tmp", fastrand::u64(..)))
             .map_err(|_| Error::Internal("invalid temporary file name".to_string()))?;
@@ -174,7 +176,11 @@ fn write_visible_note_bytes(
         if no_clobber {
             unlink_at(directory.as_raw_fd(), &temp)?;
         }
+        #[cfg(test)]
+        crate::failure_point::check(crate::failure_point::FailurePoint::VisibleFileReplaced)?;
         directory.sync_all()?;
+        #[cfg(test)]
+        crate::failure_point::check(crate::failure_point::FailurePoint::DirectorySynced)?;
         return Ok(());
     }
     Err(Error::Internal(

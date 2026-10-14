@@ -341,6 +341,8 @@ impl Catalog {
                 now_ms()
             ],
         )?;
+        #[cfg(test)]
+        crate::failure_point::check(crate::failure_point::FailurePoint::IntentCommitted)?;
         Ok(())
     }
 
@@ -386,6 +388,8 @@ impl Catalog {
             return Err(Error::Internal(format!("mutation intent {mutation_id} was not prepared")));
         }
         tx.commit()?;
+        #[cfg(test)]
+        crate::failure_point::check(crate::failure_point::FailurePoint::CatalogTransitionCommitted)?;
         self.note_row_by_id(note_id)?
             .map(|row| row.meta)
             .ok_or_else(|| Error::NotFound(note_id.to_string()))
@@ -409,6 +413,8 @@ impl Catalog {
             return Err(Error::Internal(format!("mutation intent {mutation_id} was not prepared")));
         }
         tx.commit()?;
+        #[cfg(test)]
+        crate::failure_point::check(crate::failure_point::FailurePoint::CatalogTransitionCommitted)?;
         Ok(())
     }
 
@@ -443,6 +449,8 @@ impl Catalog {
             return Err(Error::Internal(format!("mutation intent {mutation_id} was not prepared")));
         }
         tx.commit()?;
+        #[cfg(test)]
+        crate::failure_point::check(crate::failure_point::FailurePoint::CatalogTransitionCommitted)?;
         self.note_row_by_id(note_id)?
             .map(|row| row.meta)
             .ok_or_else(|| Error::NotFound(note_id.to_string()))
@@ -476,6 +484,8 @@ impl Catalog {
             return Err(Error::Internal(format!("mutation intent {mutation_id} was not prepared")));
         }
         tx.commit()?;
+        #[cfg(test)]
+        crate::failure_point::check(crate::failure_point::FailurePoint::CatalogTransitionCommitted)?;
         self.note_row_by_id(note_id)?
             .map(|row| row.meta)
             .ok_or_else(|| Error::NotFound(note_id.to_string()))
@@ -553,6 +563,8 @@ impl Catalog {
             None
         };
         tx.commit()?;
+        #[cfg(test)]
+        crate::failure_point::check(crate::failure_point::FailurePoint::CompletionCommitted)?;
         Ok(event_version.map(|version| version as u64))
     }
 

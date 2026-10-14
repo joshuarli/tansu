@@ -18,6 +18,8 @@ pub mod catalog;
 mod cancellation;
 pub use cancellation::CancellationToken;
 pub mod config;
+#[cfg(test)]
+mod failure_point;
 pub mod history;
 pub mod http;
 pub mod embedded_assets;

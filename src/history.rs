@@ -36,6 +36,22 @@ pub struct SourceDocument {
     dominant_line_ending: LineEnding,
 }
 
+pub(crate) enum SnapshotReadError {
+    Missing(String),
+    Corrupt(String),
+    Other(Error),
+}
+
+impl SnapshotReadError {
+    pub(crate) fn into_error(self) -> Error {
+        match self {
+            Self::Missing(hash) => Error::NotFound(format!("missing snapshot {hash}")),
+            Self::Corrupt(hash) => Error::Internal(format!("corrupt snapshot {hash}")),
+            Self::Other(error) => error,
+        }
+    }
+}
+
 impl SourceDocument {
     pub fn from_disk(bytes: &[u8]) -> Result<Self> {
         let text = std::str::from_utf8(bytes)
@@ -258,7 +274,11 @@ pub fn write_snapshot_bytes(
     let dir = root.join("history").join("snapshots").join(note_id);
     fs::create_dir_all(&dir)?;
     let path = dir.join(hash_filename(&hash));
+    #[cfg(test)]
+    crate::failure_point::check(crate::failure_point::FailurePoint::SnapshotWritePermissionDenied)?;
     write_compressed_atomic(&path, disk_bytes)?;
+    #[cfg(test)]
+    crate::failure_point::check(crate::failure_point::FailurePoint::SnapshotWritten)?;
     Ok(hash)
 }
 
@@ -268,9 +288,20 @@ pub fn read_snapshot(root: &Path, note_id: &str, hash: &str) -> Result<String> {
 }
 
 pub fn read_snapshot_bytes(root: &Path, note_id: &str, hash: &str) -> Result<Vec<u8>> {
-    validate_note_id(note_id)?;
+    read_snapshot_bytes_for_reconciliation(root, note_id, hash)
+        .map_err(SnapshotReadError::into_error)
+}
+
+pub(crate) fn read_snapshot_bytes_for_reconciliation(
+    root: &Path,
+    note_id: &str,
+    hash: &str,
+) -> std::result::Result<Vec<u8>, SnapshotReadError> {
+    validate_note_id(note_id).map_err(SnapshotReadError::Other)?;
     if !valid_snapshot_hash(hash) {
-        return Err(Error::BadRequest("invalid snapshot hash".to_string()));
+        return Err(SnapshotReadError::Other(Error::BadRequest(
+            "invalid snapshot hash".to_string(),
+        )));
     }
     let path = root
         .join("history")
@@ -279,14 +310,15 @@ pub fn read_snapshot_bytes(root: &Path, note_id: &str, hash: &str) -> Result<Vec
         .join(hash_filename(hash));
     let compressed = fs::read(&path).map_err(|error| {
         if error.kind() == ErrorKind::NotFound {
-            Error::NotFound(format!("missing snapshot {hash}"))
+            SnapshotReadError::Missing(hash.to_string())
         } else {
-            Error::Io(error)
+            SnapshotReadError::Other(Error::Io(error))
         }
     })?;
     let bytes = decompress_size_prepended(&compressed)
-        .map_err(|_| Error::Internal(format!("corrupt snapshot {hash}")))?;
-    let document = SourceDocument::from_disk(&bytes)?;
+        .map_err(|_| SnapshotReadError::Corrupt(hash.to_string()))?;
+    let document = SourceDocument::from_disk(&bytes)
+        .map_err(|_| SnapshotReadError::Corrupt(hash.to_string()))?;
     let matches = if hash.starts_with("blake3-v3:") {
         source_hash(&document.source) == hash
     } else if hash.starts_with("sha256-v2:") {
@@ -295,7 +327,7 @@ pub fn read_snapshot_bytes(root: &Path, note_id: &str, hash: &str) -> Result<Vec
         legacy_content_hash(&document.source) == hash
     };
     if !matches {
-        return Err(Error::Internal(format!("snapshot hash mismatch for {hash}")));
+        return Err(SnapshotReadError::Corrupt(hash.to_string()));
     }
     Ok(bytes)
 }
