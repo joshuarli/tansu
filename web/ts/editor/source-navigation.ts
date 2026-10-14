@@ -22,7 +22,7 @@ export type Outline = {
 export function findLiteral(source: string, query: string): FindMatch[] {
   if (query === "") return [];
   const caseSensitive = query !== query.toLowerCase();
-  const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`);
   const expression = new RegExp(escaped, caseSensitive ? "gu" : "giu");
   const matches: FindMatch[] = [];
   for (const match of source.matchAll(expression)) {

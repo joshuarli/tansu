@@ -28,8 +28,7 @@ import { calloutDecoration } from "./callout-decoration.js";
 import { sanitizeHtmlToMarkdown } from "./clipboard.js";
 import { findLiteral, outlineFromSyntaxTree, type FindMatch, type Outline } from "./source-navigation.js";
 import { tagsSourceEdit } from "./tag-source.js";
-import type { EditorChange, EditorConfig, EditorExtension } from "./tansu-extensions.js";
-import { createCalloutExtension } from "./tansu-extensions.js";
+import { createCalloutExtension, type EditorChange, type EditorConfig, type EditorExtension } from "./tansu-extensions.js";
 import { resolveWikiTarget, suggestWikiTargets } from "./wiki-target.js";
 import { wikiImages } from "./wiki-images.js";
 import {
@@ -239,7 +238,6 @@ export function createCodeMirrorEditor(container: HTMLElement, initialConfig: Ed
   let config: EditorConfig = { ...initialConfig };
   let activeSession: EditorSession | null = null;
   let disposed = false;
-  let view: EditorView;
   const owner = Symbol("editor");
   const modeCompartment = new Compartment();
   const readOnlyCompartment = new Compartment();
@@ -325,7 +323,7 @@ export function createCodeMirrorEditor(container: HTMLElement, initialConfig: Ed
     clipboardHandler,
     pasteHandler,
   );
-  view = new EditorView({ state: initialState, parent: container });
+  const view = new EditorView({ state: initialState, parent: container });
   if (config.className) view.dom.classList.add(config.className);
 
   function ensureActive(): SessionData | null {

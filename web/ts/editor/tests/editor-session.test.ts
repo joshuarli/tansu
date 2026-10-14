@@ -12,10 +12,6 @@ type MountedEditor = {
 
 const mounted: MountedEditor[] = [];
 
-afterEach(() => {
-  for (const item of mounted.splice(0)) item.dispose();
-});
-
 function mountEditor(
   source = "",
   config: Parameters<typeof createCodeMirrorEditor>[1] = {},
@@ -44,6 +40,10 @@ function mountEditor(
 }
 
 describe("CodeMirror editor sessions", () => {
+  afterEach(() => {
+    for (const item of mounted.splice(0)) item.dispose();
+  });
+
   it("keeps the complete source and UTF-16 selection in one snapshot", () => {
     const source = "\uFEFF---\ntags:\n  - alpha\n---\n\n# Title\n\n";
     const { editor, view } = mountEditor(source);
@@ -66,17 +66,20 @@ describe("CodeMirror editor sessions", () => {
     const { container, editor, session: first, view } = mountEditor("A", {}, "first");
     view.dispatch({ changes: { from: 1, insert: "1" }, annotations: Transaction.userEvent.of("input.type") });
     expect(editor.getSnapshot()).toMatchObject({ source: "A1", revision: 1, dirty: true });
+    // oxlint-disable-next-line vitest/prefer-to-be-truthy -- Keep the exact boolean result.
     expect(editor.markSaved(first, 1)).toBe(true);
 
     const second = editor.createSession("second", "B");
     editor.attachSession(second);
     view.dispatch({ changes: { from: 1, insert: "2" }, annotations: Transaction.userEvent.of("input.type") });
     expect(editor.getSnapshot()?.source).toBe("B2");
+    // oxlint-disable-next-line vitest/prefer-to-be-truthy -- Keep the exact boolean result.
     expect(editor.undo()).toBe(true);
     expect(editor.getSnapshot()?.source).toBe("B");
 
     editor.attachSession(first);
     expect(editor.getSnapshot()?.source).toBe("A1");
+    // oxlint-disable-next-line vitest/prefer-to-be-truthy -- Keep the exact boolean result.
     expect(editor.undo()).toBe(true);
     expect(editor.getSnapshot()?.source).toBe("A");
     expect(container.querySelectorAll(".cm-editor")).toHaveLength(1);
@@ -131,10 +134,12 @@ describe("CodeMirror editor sessions", () => {
     const { editor, session, view } = mountEditor("base");
     view.dispatch({ changes: { from: 4, insert: " draft" }, annotations: Transaction.userEvent.of("input.type") });
     const draftRevision = editor.getSnapshot()!.revision;
-    expect(editor.reloadIfClean(session, "external")).toEqual({ kind: "dirty", revision: draftRevision });
+    expect(editor.reloadIfClean(session, "external")).toStrictEqual({ kind: "dirty", revision: draftRevision });
+    // oxlint-disable-next-line vitest/prefer-to-be-truthy -- Keep the exact boolean result.
     expect(editor.markSaved(session, draftRevision)).toBe(true);
-    expect(editor.reloadIfClean(session, "external")).toEqual({ kind: "reloaded", revision: draftRevision + 1 });
+    expect(editor.reloadIfClean(session, "external")).toStrictEqual({ kind: "reloaded", revision: draftRevision + 1 });
     expect(editor.getSnapshot()).toMatchObject({ source: "external", dirty: false, revision: draftRevision + 1 });
+    // oxlint-disable-next-line vitest/prefer-to-be-falsy -- Keep the exact boolean result.
     expect(editor.undo()).toBe(false);
   });
 
@@ -151,7 +156,7 @@ describe("CodeMirror editor sessions", () => {
       annotations: Transaction.userEvent.of("input.type"),
     });
     expect(onChange).toHaveBeenCalledWith({ noteId: "note", revision: 1, origin: "userEdit" });
-    expect(editor.getSnapshot()?.selection).toEqual({ anchor: 3, head: 3 });
+    expect(editor.getSnapshot()?.selection).toStrictEqual({ anchor: 3, head: 3 });
   });
 
   it("routes rich HTML through a sanitizer and leaves plain text to CodeMirror", () => {
@@ -180,7 +185,7 @@ describe("CodeMirror editor sessions", () => {
     const copy = new Event("copy", { bubbles: true, cancelable: true }) as ClipboardEvent;
     Object.defineProperty(copy, "clipboardData", { value: clipboardData });
     editor.revealSelection({ anchor: 7, head: 15 });
-    expect(editor.getSnapshot()?.selection).toEqual({ anchor: 7, head: 15 });
+    expect(editor.getSnapshot()?.selection).toStrictEqual({ anchor: 7, head: 15 });
     view.contentDOM.dispatchEvent(copy);
 
     expect(written.get("text/plain")).toBe("**bold**");

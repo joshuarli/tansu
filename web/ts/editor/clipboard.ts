@@ -62,21 +62,27 @@ function serializeNode(node: Node): string {
   if (!(node instanceof Element)) return "";
   const content = serializeChildren(node);
   switch (node.tagName) {
-    case "BR":
+    case "BR": {
       return "\n";
+    }
     case "STRONG":
-    case "B":
+    case "B": {
       return `**${content}**`;
+    }
     case "EM":
-    case "I":
+    case "I": {
       return `*${content}*`;
+    }
     case "S":
-    case "DEL":
+    case "DEL": {
       return `~~${content}~~`;
-    case "CODE":
+    }
+    case "CODE": {
       return `\`${content.replaceAll("`", "\\`")}\``;
-    case "PRE":
+    }
+    case "PRE": {
       return serializeCodeBlock(node);
+    }
     case "A": {
       const href = node.getAttribute("href");
       return href === null ? content : `[${content}](${href})`;
@@ -89,27 +95,35 @@ function serializeNode(node: Node): string {
     case "P":
     case "DIV":
     case "SECTION":
-    case "ARTICLE":
+    case "ARTICLE": {
       return `${content}\n\n`;
+    }
     case "H1":
     case "H2":
     case "H3":
     case "H4":
     case "H5":
-    case "H6":
+    case "H6": {
       return `${"#".repeat(Number(node.tagName.slice(1)))} ${content}\n\n`;
-    case "BLOCKQUOTE":
+    }
+    case "BLOCKQUOTE": {
       return `${content.trim().split("\n").map((line) => `> ${line}`).join("\n")}\n\n`;
-    case "UL":
+    }
+    case "UL": {
       return `${[...node.children].filter((child) => child.tagName === "LI").map((item) => `- ${serializeChildren(item).trim()}`).join("\n")}\n\n`;
-    case "OL":
+    }
+    case "OL": {
       return `${[...node.children].filter((child) => child.tagName === "LI").map((item, index) => `${index + 1}. ${serializeChildren(item).trim()}`).join("\n")}\n\n`;
-    case "TABLE":
+    }
+    case "TABLE": {
       return serializeTable(node);
-    case "HR":
+    }
+    case "HR": {
       return "---\n\n";
-    default:
+    }
+    default: {
       return content;
+    }
   }
 }
 
@@ -126,7 +140,8 @@ function serializeTable(table: Element): string {
   );
   if (rows.length === 0) return "";
   const columns = Math.max(...rows.map((row) => row.length));
-  const serializeRow = (row: string[]) => `| ${Array.from({ length: columns }, (_, index) => (row[index] ?? "").replaceAll("|", "\\|")).join(" | ")} |`;
+  const escapedPipe = String.raw`\|`;
+  const serializeRow = (row: string[]) => `| ${Array.from({ length: columns }, (_, index) => (row[index] ?? "").replaceAll("|", escapedPipe)).join(" | ")} |`;
   const header = serializeRow(rows[0]!);
   const separator = `| ${Array.from({ length: columns }, () => "---").join(" | ")} |`;
   return `${[header, separator, ...rows.slice(1).map(serializeRow)].join("\n")}\n\n`;

@@ -42,7 +42,7 @@ describe("source-preserving Markdown operations", () => {
   it("inserts tags after a BOM without changing authored source", () => {
     const source = "\uFEFF# Body\n";
     const edit = tagsSourceEdit(source, ["alpha"]);
-    expect(edit).toEqual({ from: 1, to: 1, insert: "---\ntags:\n  - alpha\n---\n\n" });
+    expect(edit).toStrictEqual({ from: 1, to: 1, insert: "---\ntags:\n  - alpha\n---\n\n" });
     expect(source.slice(0, edit!.from) + edit!.insert + source.slice(edit!.to)).toBe(
       "\uFEFF---\ntags:\n  - alpha\n---\n\n# Body\n",
     );
@@ -50,13 +50,13 @@ describe("source-preserving Markdown operations", () => {
 
   it("finds literal text with smartcase and UTF-16 source offsets", () => {
     const source = "😀 café CAFÉ café";
-    expect(findLiteral(source, "café")).toEqual([
+    expect(findLiteral(source, "café")).toStrictEqual([
       { from: 3, to: 7 },
       { from: 8, to: 12 },
       { from: 13, to: 17 },
     ]);
-    expect(findLiteral(source, "CAFÉ")).toEqual([{ from: 8, to: 12 }]);
-    expect(findLiteral("x.* x.*", ".*")).toEqual([{ from: 1, to: 3 }, { from: 5, to: 7 }]);
+    expect(findLiteral(source, "CAFÉ")).toStrictEqual([{ from: 8, to: 12 }]);
+    expect(findLiteral("x.* x.*", ".*")).toStrictEqual([{ from: 1, to: 3 }, { from: 5, to: 7 }]);
   });
 
   it("builds the outline from Markdown headings outside frontmatter and code fences", () => {
@@ -107,6 +107,7 @@ describe("source-preserving Markdown operations", () => {
       window.dispatchEvent(new MouseEvent("pointermove", { clientX: 150 }));
       window.dispatchEvent(new MouseEvent("pointerup"));
       expect(editor.getSnapshot()?.source).toBe("before ![[photo|370]] after\n");
+      // oxlint-disable-next-line vitest/prefer-to-be-truthy -- Keep the exact boolean result.
       expect(editor.undo()).toBe(true);
       expect(editor.getSnapshot()?.source).toBe(source);
     } finally {
@@ -139,11 +140,11 @@ describe("vault-scoped wiki link rules", () => {
   ];
 
   it("resolves explicit relative and root paths and rejects ambiguous basenames", () => {
-    expect(resolveWikiTarget("../root", "folder/current.md", notes)).toEqual({
+    expect(resolveWikiTarget("../root", "folder/current.md", notes)).toStrictEqual({
       kind: "resolved",
       note: notes[2],
     });
-    expect(resolveWikiTarget("/folder/current.md", "folder/current.md", notes)).toEqual({
+    expect(resolveWikiTarget("/folder/current.md", "folder/current.md", notes)).toStrictEqual({
       kind: "resolved",
       note: notes[0],
     });
@@ -160,7 +161,7 @@ describe("vault-scoped wiki link rules", () => {
   });
 
   it("suggests root-relative note targets", () => {
-    expect(suggestWikiTargets("sibl", notes)).toEqual([
+    expect(suggestWikiTargets("sibl", notes)).toStrictEqual([
       { target: "/folder/sibling.md", label: "Sibling", detail: "folder/sibling.md" },
       { target: "/other/sibling.md", label: "Sibling", detail: "other/sibling.md" },
     ]);
