@@ -129,6 +129,20 @@ describe("v2 desktop shell", () => {
     expect(api.forVault).not.toHaveBeenCalled();
   });
 
+  it("restores the loading view when the initial bootstrap fails", async () => {
+    const root = document.createElement("div");
+    document.body.append(root);
+    const bootstrap = vi.spyOn(defaultServices.api, "bootstrap").mockRejectedValue(new Error("offline"));
+    const app = startApp(root);
+    apps.push(app);
+    try {
+      await until(() => root.querySelector(".loading") !== null);
+      expect(root.querySelector(".loading")).not.toBeNull();
+    } finally {
+      bootstrap.mockRestore();
+    }
+  });
+
   it("flushes workspace and draft state before the page unloads", async () => {
     const note = noteMeta("note-1", "one.md", "One");
     configureVault([note], legacySession([

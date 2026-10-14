@@ -3435,6 +3435,118 @@ mod tests {
     use super::*;
 
     #[test]
+    fn v2_boundary_helpers_validate_and_translate_errors() {
+        assert!(validate_mutation_id("x").is_ok());
+        assert!(validate_mutation_id(&"x".repeat(128)).is_ok());
+        assert!(validate_mutation_id("").is_err());
+        assert!(validate_mutation_id(&"x".repeat(129)).is_err());
+        assert!(v2_source("# Note\n").is_ok());
+        assert!(matches!(
+            v2_source("# Note\r\n"),
+            Err(V2VaultError::Api(V2ApiErrorKind::BadRequest { .. }))
+        ));
+        assert!(validate_v2_search_limit(1).is_ok());
+        assert!(validate_v2_search_limit(tansu_search::SearchLimit::MAX as u16).is_ok());
+        assert!(validate_v2_search_limit(0).is_err());
+        assert!(validate_v2_search_limit((tansu_search::SearchLimit::MAX + 1) as u16).is_err());
+
+        assert!(matches!(
+            v2_search_error(tansu_search::SearchError::InvalidInput { field: "query" }),
+            V2VaultError::Api(V2ApiErrorKind::BadRequest { .. })
+        ));
+        assert!(matches!(
+            v2_search_error(tansu_search::SearchError::Io(std::io::Error::other("index"))),
+            V2VaultError::Internal(Error::Internal(_))
+        ));
+        assert_eq!(v2_unresolved_reason(Some("case_fold_collision")), UnresolvedReason::CaseFoldCollision);
+        assert_eq!(v2_unresolved_reason(Some("invalid_utf8")), UnresolvedReason::InvalidUtf8);
+        assert_eq!(v2_unresolved_reason(Some("missing_snapshot")), UnresolvedReason::MissingSnapshot);
+        assert_eq!(v2_unresolved_reason(Some("corrupt_snapshot")), UnresolvedReason::CorruptSnapshot);
+        assert_eq!(v2_unresolved_reason(None), UnresolvedReason::FileCatalogMismatch);
+
+        let api_error = V2ApiErrorKind::NotImplemented;
+        assert_eq!(V2VaultError::Api(api_error.clone()).to_string(), format!("{api_error:?}"));
+        assert!(matches!(
+            V2VaultError::from(Error::BadRequest("invalid".to_string())),
+            V2VaultError::Internal(Error::BadRequest(_))
+        ));
+        let json_error = serde_json::from_slice::<serde_json::Value>(b"{").unwrap_err();
+        assert!(matches!(
+            V2VaultError::from(json_error),
+            V2VaultError::Internal(Error::Json(_))
+        ));
+    }
+
+    #[test]
+    fn settings_mutations_replay_only_for_the_original_payload() {
+        let vault = test_vault();
+        let request = V2SettingsRequest {
+            mutation_id: "settings-once".to_string(),
+            settings: Settings::default(),
+        };
+        let accepted = vault.v2_save_settings(request.clone()).unwrap();
+        let replay = vault.v2_save_settings(request.clone()).unwrap();
+        assert_eq!(
+            serde_json::to_value(accepted).unwrap(),
+            serde_json::to_value(replay).unwrap()
+        );
+
+        let mut changed = request;
+        changed.settings.autosave_delay_ms += 1;
+        assert!(matches!(
+            vault.v2_save_settings(changed),
+            Err(V2VaultError::Api(V2ApiErrorKind::MutationIdReuse { .. }))
+        ));
+    }
+
+    #[test]
+    fn preconditions_reject_stale_source_disk_and_revision_values() {
+        let vault = test_vault();
+        let content = "# Note\n";
+        vault
+            .v2_create_note(V2CreateNoteRequest {
+                mutation_id: "precondition-note".to_string(),
+                path: "note.md".to_string(),
+                content: content.to_string(),
+                source_hash: history::source_hash(content),
+            })
+            .unwrap();
+        let meta = vault.v2_notes().unwrap().remove(0);
+        let row = vault
+            .lock_catalog()
+            .note_row_by_id(&meta.note_id)
+            .unwrap()
+            .unwrap();
+        let valid = V2NotePrecondition {
+            base_revision: meta.revision,
+            base_source_hash: meta.source_hash,
+            base_disk_hash: meta.disk_hash,
+        };
+        assert!(v2_check_precondition(&row, &valid).is_ok());
+
+        let mut stale_source = valid.clone();
+        stale_source.base_source_hash = "stale-source".to_string();
+        assert!(matches!(
+            v2_check_precondition(&row, &stale_source),
+            Err(V2VaultError::Api(V2ApiErrorKind::SourceHashMismatch { .. }))
+        ));
+
+        let mut stale_disk = valid.clone();
+        stale_disk.base_disk_hash = "stale-disk".to_string();
+        assert!(matches!(
+            v2_check_precondition(&row, &stale_disk),
+            Err(V2VaultError::Api(V2ApiErrorKind::DiskHashMismatch { .. }))
+        ));
+
+        let mut stale_revision = valid;
+        stale_revision.base_revision += 1;
+        assert!(matches!(
+            v2_check_precondition(&row, &stale_revision),
+            Err(V2VaultError::Api(V2ApiErrorKind::BadRequest { .. }))
+        ));
+    }
+
+    #[test]
     fn create_path_validation_returns_typed_api_error() {
         let vault = test_vault();
         let error = vault

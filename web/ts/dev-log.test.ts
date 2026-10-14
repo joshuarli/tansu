@@ -14,9 +14,10 @@ describe("dev log client", () => {
     process.env["TANSU2_LOGS"] = "off";
     const fetch = vi.fn();
     vi.stubGlobal("fetch", fetch);
-    const { logClientEvent, flushLogs } = await import("./dev-log.ts");
+    const { installClientLogCapture, logClientEvent, flushLogs } = await import("./dev-log.ts");
 
     logClientEvent("info", "system.event", { system: { component: "test", action: "skip" } });
+    installClientLogCapture();
     flushLogs(false);
 
     expect(fetch).not.toHaveBeenCalled();
@@ -27,9 +28,10 @@ describe("dev log client", () => {
     process.env["TANSU2_LOGS"] = "buffer";
     const fetch = vi.fn(async () => ({ ok: true }));
     vi.stubGlobal("fetch", fetch);
-    const { logClientEvent } = await import("./dev-log.ts");
+    const { createRequestId, logClientEvent } = await import("./dev-log.ts");
 
-    logClientEvent("info", "system.event", { system: { component: "test", action: "run" } });
+    const requestId = createRequestId();
+    logClientEvent("info", "system.event", { system: { component: "test", action: "run" } }, requestId);
     vi.runOnlyPendingTimers();
 
     expect(fetch).toHaveBeenCalledTimes(1);
@@ -40,6 +42,7 @@ describe("dev log client", () => {
           source: "client",
           level: "info",
           kind: "system.event",
+          requestId,
           system: { component: "test", action: "run" },
         },
       ],
@@ -92,15 +95,21 @@ describe("dev log client", () => {
     const rejection = new Event("unhandledrejection");
     Object.defineProperty(rejection, "reason", { value: "promise failed" });
     window.dispatchEvent(rejection);
+    const circular: Record<string, unknown> = {};
+    circular["self"] = circular;
+    const circularRejection = new Event("unhandledrejection");
+    Object.defineProperty(circularRejection, "reason", { value: circular });
+    window.dispatchEvent(circularRejection);
     window.dispatchEvent(new Event("beforeunload"));
 
     expect(sendBeacon).toHaveBeenCalledTimes(1);
     const [path, body] = sendBeacon.mock.calls[0] ?? [];
     expect(path).toBe("/api/dev/logs");
     const payload = JSON.parse(await (body as Blob).text());
-    expect(payload.events).toHaveLength(2);
+    expect(payload.events).toHaveLength(3);
     expect(payload.events[0]).toMatchObject({ error: { name: "Error", message: "render failed" } });
     expect(payload.events[1]).toMatchObject({ error: { message: "promise failed", value: '"promise failed"' } });
+    expect(payload.events[2]).toMatchObject({ error: { message: "unhandled rejection", value: "[object Object]" } });
     expect(fetch).not.toHaveBeenCalled();
   });
 
