@@ -368,6 +368,7 @@ The old exact-delta request test now exercises `PATCH /api/v2/vaults/:vaultId/no
 The startup image render, delete-modal close, and external watcher event assertions remain in the browser suite. APP and SRV integration fixes preserve those user flows. The browser file now passes all nine cases in Chromium, Firefox, and WebKit.
 
 2026-10-14 | I1 | All nine V2 server browser cases passed in Chromium, Firefox, and WebKit, including open, edit, save, search, rename, restart, conflict recovery, revision restore, image paste, delta save, and watcher reconciliation.
+2026-10-14 | P2 | Rust and TypeScript coverage passed unchanged gates (87.04%/84.75% lines/functions and 90%/88.88%); lint, typecheck, workspace tests, Chromium/Firefox/WebKit suites, auth virtual-authenticator checks, and package smoke passed. Both musl artifacts passed the no-NEEDED linkage check; x86_64 was rebuilt at the phase head and is 11 MiB stripped.
 
 # For the owner afterwards
 
