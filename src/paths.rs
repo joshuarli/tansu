@@ -713,12 +713,16 @@ mod tests {
         fs::write(outside.path().join("value.webp"), b"secret").unwrap();
         let root_path = root.path().to_path_buf();
         let outside_path = outside.path().to_path_buf();
+        let substitutions = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let writer_substitutions = substitutions.clone();
         let writer = std::thread::spawn(move || {
             let visible = root_path.join("z-images");
             let hidden = root_path.join("z-images-hidden");
             for _ in 0..300 {
                 if fs::rename(&visible, &hidden).is_ok() {
-                    let _ = symlink(&outside_path, &visible);
+                    if symlink(&outside_path, &visible).is_ok() {
+                        writer_substitutions.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    }
                     let _ = fs::remove_file(&visible);
                     let _ = fs::rename(&hidden, &visible);
                 }
@@ -731,5 +735,6 @@ mod tests {
             }
         }
         writer.join().unwrap();
+        assert!(substitutions.load(std::sync::atomic::Ordering::Relaxed) > 0);
     }
 }

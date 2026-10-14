@@ -11,7 +11,7 @@ use rusqlite::backup::Backup;
 use rusqlite::{Connection, OpenFlags, OptionalExtension, Transaction, TransactionBehavior, params};
 use rustix::fs::{AtFlags, Mode, OFlags, RenameFlags, openat, renameat_with, unlinkat};
 use serde::{Deserialize, Serialize};
-use tansu_webauthn::{AuthChallenge, AuthenticationFinish, RegChallenge, StoredCredential};
+use tansu_webauthn::{AuthChallenge, AuthenticationFinish, CounterResult, RegChallenge, StoredCredential};
 
 use crate::CancellationToken;
 
@@ -1222,6 +1222,9 @@ mod tests {
         assert_eq!(stored, hash);
         assert_eq!(expires_at, 40);
         drop(connection);
+        let state = RegChallenge { challenge: "challenge".into(), user_id: "owner".into(), username: "owner".into() };
+        assert_eq!(store.begin_registration(&state, None, None, 39, 30), Err(AuthError::Unauthorized));
+        assert_eq!(store.begin_registration(&state, Some(&capability), None, 40, 30), Err(AuthError::Unauthorized));
         assert!(store.create_enrollment_capability(10, 30).is_ok());
     }
 
@@ -1285,6 +1288,80 @@ mod tests {
         let ticket = store.begin_registration(&state, Some(&capability), None, 2, 10).unwrap();
         assert_eq!(store.finish_registration(&ticket.id, 13, |_| Ok(credential(1))), Err(AuthError::Expired));
         assert_eq!(store.finish_registration(&ticket.id, 14, |_| Ok(credential(1))), Err(AuthError::CeremonyUsed));
+    }
+
+    #[test]
+    fn authentication_ceremonies_expire_and_are_single_use() {
+        let (_root, store) = store();
+        let (capability, _) = store.create_enrollment_capability(10, 30).unwrap();
+        let registration = RegChallenge { challenge: "first".into(), user_id: "owner".into(), username: "owner".into() };
+        let registration_ticket = store.begin_registration(&registration, Some(&capability), None, 11, 30).unwrap();
+        store.finish_registration(&registration_ticket.id, 12, |_| Ok(credential(1))).unwrap();
+        let state = AuthChallenge {
+            challenge: "login".into(),
+            allowed_credential_ids: vec![vec![1]],
+            owner_handle: vec![7, 8],
+        };
+        let ticket = store.begin_authentication(&state, 13, 30).unwrap();
+        let session = store.finish_authentication(&ticket.id, 14, |challenge, credentials| {
+            assert_eq!(challenge.challenge, "login");
+            assert_eq!(challenge.owner_handle, vec![7, 8]);
+            let credential = credentials.first().ok_or(AuthError::Unauthorized)?.clone();
+            Ok(AuthenticationFinish {
+                credential,
+                counter: CounterResult::Unsupported,
+            })
+        }).unwrap();
+        assert!(store.validate_request(request(
+            "notes.example.com",
+            Some("https://notes.example.com"),
+            RequestAction::Read,
+            Some(&session.cookie_value),
+            None,
+            SessionRequirement::Required,
+            15,
+        )).unwrap().is_some());
+        assert_eq!(store.finish_authentication(&ticket.id, 15, |_, _| unreachable!()), Err(AuthError::CeremonyUsed));
+
+        let expired = store.begin_authentication(&state, 16, 1).unwrap();
+        assert_eq!(store.finish_authentication(&expired.id, 17, |_, _| unreachable!()), Err(AuthError::Expired));
+        assert_eq!(store.finish_authentication(&expired.id, 18, |_, _| unreachable!()), Err(AuthError::CeremonyUsed));
+    }
+
+    #[test]
+    fn concurrent_authentication_finishes_consume_the_ceremony_once() {
+        let (_root, store) = store();
+        let store = Arc::new(store);
+        let (capability, _) = store.create_enrollment_capability(10, 30).unwrap();
+        let registration = RegChallenge { challenge: "first".into(), user_id: "owner".into(), username: "owner".into() };
+        let registration_ticket = store.begin_registration(&registration, Some(&capability), None, 11, 30).unwrap();
+        store.finish_registration(&registration_ticket.id, 12, |_| Ok(credential(1))).unwrap();
+        let state = AuthChallenge {
+            challenge: "login".into(),
+            allowed_credential_ids: vec![vec![1]],
+            owner_handle: vec![7, 8],
+        };
+        let ticket = store.begin_authentication(&state, 13, 30).unwrap();
+        let start = Arc::new(std::sync::Barrier::new(3));
+        let finishes = (0..2).map(|_| {
+            let store = store.clone();
+            let start = start.clone();
+            let ceremony_id = ticket.id.clone();
+            std::thread::spawn(move || {
+                start.wait();
+                store.finish_authentication(&ceremony_id, 14, |_, credentials| {
+                    let credential = credentials.first().ok_or(AuthError::Unauthorized)?.clone();
+                    Ok(AuthenticationFinish {
+                        credential,
+                        counter: CounterResult::Unsupported,
+                    })
+                })
+            })
+        }).collect::<Vec<_>>();
+        start.wait();
+        let outcomes = finishes.into_iter().map(|finish| finish.join().unwrap()).collect::<Vec<_>>();
+        assert_eq!(outcomes.iter().filter(|outcome| outcome.is_ok()).count(), 1);
+        assert_eq!(outcomes.iter().filter(|outcome| matches!(outcome, Err(AuthError::CeremonyUsed))).count(), 1);
     }
 
     #[test]
