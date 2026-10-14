@@ -114,6 +114,27 @@ describe("v2 desktop shell", () => {
     expect(root.textContent).toContain("One");
   });
 
+  it("loads a note reopened while its previous tab load is pending", async () => {
+    const note = noteMeta("note-1", "one.md", "One");
+    const client = configureVault([note]);
+    const load = deferred<V2NoteDocument>();
+    client.openNote.mockReturnValue(load.promise);
+    const { app, root } = mountApp();
+    await app.boot();
+
+    root.querySelector<HTMLButtonElement>(".note-row")?.click();
+    await flushAsync();
+    root.querySelector<HTMLButtonElement>(".tab-close")?.click();
+    await flushAsync();
+    root.querySelector<HTMLButtonElement>(".note-row")?.click();
+    await flushAsync();
+
+    expect(client.openNote).toHaveBeenCalledTimes(2);
+    load.resolve(documentFor(note, "# One\n"));
+    await until(() => editorMock.instances[0]?.getSnapshot()?.source === "# One\n");
+    expect(root.textContent).toContain("One");
+  });
+
   it("shows the empty-vault notice when bootstrap has no configured vaults", async () => {
     vi.useFakeTimers();
     api.bootstrap.mockResolvedValueOnce({ apiVersion: 2, serverInstanceId: "server-1", vaults: [] });

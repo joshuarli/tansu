@@ -23,15 +23,6 @@ Next: 21
 - **Effort:** M
 - **Design:** `docs/rfcs/0001-webauthn-counter-policy.md`
 
-### TNS-11 · P2 · Reload a note reopened during an in-flight load
-
-- **Area:** Tab loading state
-- **Where:** `web/ts/app.ts:591-605`, `web/ts/app.ts:609-650`
-- **Problem:** Loads are shared by note identity but hydrate the original tab object. If that tab closes during loading and the note is reopened before the promise settles, the new tab reuses the old promise and stays unhydrated.
-- **Recommendation:** Make the shared result hydrate the current tab or discard the in-flight entry when its tab closes.
-- **Fix with:** lifecycle-concurrency
-- **Effort:** S
-
 ### TNS-12 · P2 · Show partial draft-search coverage
 
 - **Area:** Search correctness

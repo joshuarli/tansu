@@ -848,6 +848,9 @@ export class TansuApp {
     }
     const [closed] = this.state.tabs.splice(this.state.tabs.indexOf(candidate), 1);
     if (closed === undefined) return;
+    if (closed.kind === "saved") {
+      this.noteLoads.delete(`${this.state.serverInstanceId}:${this.state.vault}:${closed.noteId}`);
+    }
     if (closed.session !== null) {
       if (closed.kind === "saved") closed.session.close();
     }
