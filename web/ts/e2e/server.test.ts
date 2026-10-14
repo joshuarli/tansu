@@ -293,10 +293,11 @@ describe("real server harness", () => {
   it("streams vault-scoped note changes over SSE", async () => {
     const page = await newLoggedPage();
     await page.goto(baseUrl);
+    const after = await currentV2EventVersion(vaultOneId);
     const title = `SSE ${randomUUID()}`;
     const pathMarker = title.slice(4).toLowerCase();
     await page.evaluate(async (args) => {
-      const response = await fetch(`/api/v2/vaults/${args.vaultId}/events`, {
+      const response = await fetch(`/api/v2/vaults/${args.vaultId}/events?after=${args.after}`, {
         headers: { "X-Tansu-Server-Instance": args.serverInstanceId },
       });
       if (!response.ok || response.body === null) throw new Error(`event stream failed: ${response.status}`);
@@ -326,6 +327,7 @@ describe("real server harness", () => {
     }, {
       vaultId: vaultOneId,
       serverInstanceId,
+      after,
       pathMarker,
     });
     await createCodeMirrorNote(page, title);
@@ -340,8 +342,9 @@ describe("real server harness", () => {
   it("reconciles external filesystem edits for the active vault", async () => {
     const page = await newLoggedPage();
     await page.goto(baseUrl);
+    const after = await currentV2EventVersion(vaultOneId);
     const eventPromise = page.evaluate(async (args) => {
-      const response = await fetch(`/api/v2/vaults/${args.vaultId}/events`, {
+      const response = await fetch(`/api/v2/vaults/${args.vaultId}/events?after=${args.after}`, {
         headers: { "X-Tansu-Server-Instance": args.serverInstanceId },
       });
       if (!response.ok || response.body === null) throw new Error(`event stream failed: ${response.status}`);
@@ -364,7 +367,7 @@ describe("real server harness", () => {
           }
         }
       }
-    }, { vaultId: vaultOneId, serverInstanceId });
+    }, { vaultId: vaultOneId, serverInstanceId, after });
     await new Promise((resolve) => setTimeout(resolve, 900));
     await writeFile(join(vaultOnePath, "outside.md"), "# Outside\n\nedit\n", "utf8");
     await expect(eventPromise).resolves.toBe("vaultChanged");
@@ -752,6 +755,23 @@ async function v2Request(vaultId: string, path: string, init: RequestInit = {}):
     ...init,
     headers,
   });
+}
+
+async function currentV2EventVersion(vaultId: string): Promise<number> {
+  const response = await v2Request(
+    vaultId,
+    `/events?after=${Number.MAX_SAFE_INTEGER}`,
+    { headers: { Accept: "text/event-stream" } },
+  );
+  if (!response.ok) throw new Error(`event cursor request failed: ${response.status}`);
+  const frame = await response.text();
+  const data = frame.split("\n").find((line) => line.startsWith("data: "))?.slice(6);
+  if (data === undefined) throw new Error("event cursor response had no data");
+  const event = JSON.parse(data) as { eventVersion: number; resyncRequired: boolean };
+  if (!event.resyncRequired || !Number.isSafeInteger(event.eventVersion)) {
+    throw new Error("event cursor response did not contain a valid resync version");
+  }
+  return event.eventVersion;
 }
 
 async function waitForReady(url: string): Promise<void> {
