@@ -72,13 +72,16 @@ describe("authenticated Chromium server", () => {
       "-subj",
       "/CN=localhost",
       "-addext",
-      "subjectAltName=DNS:localhost",
+      "subjectAltName=DNS:localhost,DNS:evil.localhost",
     ], { cwd: process.cwd(), env: environment, stdio: "ignore" });
 
     let server: ChildProcess | undefined;
     let browser: Browser | undefined;
     let browserContext: BrowserContext | undefined;
     let proxy: ReturnType<typeof createHttpsServer> | undefined;
+    let checkingEmbeddedApp = false;
+    const iframeCspPolicies: string[] = [];
+    const embeddedAppScripts: string[] = [];
     const serverOutput: string[] = [];
     try {
       server = spawn(serverBinary, ["--port", String(upstreamPort)], {
@@ -97,6 +100,15 @@ describe("authenticated Chromium server", () => {
       proxy = createHttpsServer(
         { key: await readFile(keyPath), cert: await readFile(certificatePath) },
         (incoming, outgoing) => {
+          if (incoming.headers.host === `evil.localhost:${publicPort}` && incoming.url === "/iframe-ceremony") {
+            outgoing.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+            outgoing.end(`<!doctype html><iframe id="tansu" allow="publickey-credentials-get" src="${origin}/"></iframe>`);
+            return;
+          }
+          const isEmbeddedApp = checkingEmbeddedApp && incoming.headers.host === `localhost:${publicPort}`;
+          if (isEmbeddedApp && incoming.headers["sec-fetch-dest"] === "script") {
+            embeddedAppScripts.push(incoming.url ?? "");
+          }
           const upstream = httpRequest({
             hostname: "127.0.0.1",
             port: upstreamPort,
@@ -104,6 +116,9 @@ describe("authenticated Chromium server", () => {
             method: incoming.method,
             headers: incoming.headers,
           }, (response) => {
+            if (isEmbeddedApp && incoming.headers["sec-fetch-dest"] === "iframe") {
+              iframeCspPolicies.push(String(response.headers["content-security-policy"] ?? ""));
+            }
             outgoing.writeHead(response.statusCode ?? 502, response.headers);
             response.pipe(outgoing);
           });
@@ -223,7 +238,7 @@ describe("authenticated Chromium server", () => {
 
       await page.keyboard.press(`${process.platform === "darwin" ? "Meta" : "Control"}+k`);
       await page.locator(".command-input").fill("Settings");
-      await page.locator(".command-row", { hasText: "Settings" }).click();
+      await page.locator(".command-row", { hasText: "Settings" }).evaluate((row) => (row as HTMLElement).click());
       await page.getByTitle("Lock this session").click();
       await page.waitForSelector(".auth-gate");
       await expect(page.evaluate(() => (
@@ -270,6 +285,39 @@ describe("authenticated Chromium server", () => {
       expect((await loginOptions).status()).toBe(200);
       expect((await loginFinish).status()).toBe(200);
       await page.waitForSelector(".main");
+
+      await page.keyboard.press(`${process.platform === "darwin" ? "Meta" : "Control"}+k`);
+      await page.locator(".command-input").fill("Settings");
+      await page.locator(".command-row", { hasText: "Settings" }).evaluate((row) => (row as HTMLElement).click());
+      await page.getByTitle("Lock this session").click();
+      await page.waitForSelector(".auth-gate");
+      expect((await browserContext.cookies(origin)).some((cookie) => cookie.name === "__Host-tansu_session"))
+        .toBeFalsy();
+
+      const attackerOrigin = `https://evil.localhost:${publicPort}`;
+      const attackerUrl = `${attackerOrigin}/iframe-ceremony`;
+      const iframeCeremonyRequests: string[] = [];
+      page.on("request", (request) => {
+        if (request.url().includes("/api/v2/auth/login/")) iframeCeremonyRequests.push(request.url());
+      });
+      checkingEmbeddedApp = true;
+      const attackerResponse = await page.goto(attackerUrl);
+      expect(attackerResponse?.status()).toBe(200);
+      expect(await page.evaluate(() => location.origin)).toBe(attackerOrigin);
+      expect(iframeCspPolicies).toHaveLength(1);
+      expect(iframeCspPolicies[0]).toContain("frame-ancestors 'none'");
+      expect(embeddedAppScripts).toStrictEqual([]);
+      expect(iframeCeremonyRequests).toStrictEqual([]);
+      expect((await browserContext.cookies(origin)).some((cookie) => cookie.name === "__Host-tansu_session"))
+        .toBeFalsy();
+      const crossOriginSession = await secureRequest(
+        publicPort,
+        origin,
+        "/api/v2/bootstrap",
+        "",
+        serverInstanceId,
+      );
+      expect(crossOriginSession.status).toBe(401);
       await cdp.send("WebAuthn.removeVirtualAuthenticator", { authenticatorId });
       await cdp.detach();
       await page.close();
