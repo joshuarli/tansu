@@ -3,28 +3,31 @@ use std::sync::Arc;
 use std::io::Write;
 use std::net::TcpStream;
 
-use crate::api_types::VaultEntry;
-use crate::config::Config;
+use crate::api_types::{V2BootstrapResponse, VaultEntry};
+use crate::config::{Config, initialize_state_layout};
 use crate::http::HttpRequest;
 use crate::logging::{LogHub, LogLevel, fields};
-use crate::vault::VaultRuntime;
+use crate::vault::{EventSubscription, VaultRuntime};
 use crate::{Error, Result};
 
 #[derive(Clone)]
 pub struct App {
     vaults: Arc<Vec<Arc<VaultRuntime>>>,
+    server_instance_id: Arc<String>,
     logs: LogHub,
 }
 
 impl App {
     pub fn new(config: Config) -> Result<Self> {
         let logs = LogHub::from_env();
+        let (server_instance_id, vault_configs) = initialize_state_layout(&config.vaults)?;
         let mut runtimes = Vec::new();
-        for (index, vault) in config.vaults.iter().enumerate() {
+        for (index, vault) in vault_configs.iter().enumerate() {
             runtimes.push(Arc::new(VaultRuntime::open(index, vault, logs.clone())?));
         }
         let app = Self {
             vaults: Arc::new(runtimes),
+            server_instance_id: Arc::new(server_instance_id),
             logs,
         };
         if app.logs.enabled() {
@@ -53,6 +56,35 @@ impl App {
             .get(index)
             .cloned()
             .ok_or_else(|| Error::BadRequest(format!("unknown vault index {index}")))
+    }
+
+    pub fn vault_by_id(&self, vault_id: &str) -> Result<Arc<VaultRuntime>> {
+        self.vaults
+            .iter()
+            .find(|vault| vault.vault_id == vault_id)
+            .cloned()
+            .ok_or_else(|| Error::NotFound(format!("unknown vault ID {vault_id}")))
+    }
+
+    pub fn server_instance_id(&self) -> &str {
+        self.server_instance_id.as_str()
+    }
+
+    pub fn v2_bootstrap(&self) -> V2BootstrapResponse {
+        V2BootstrapResponse {
+            api_version: 2,
+            server_instance_id: self.server_instance_id().to_string(),
+            vaults: self.vaults.iter().map(|vault| vault.vault_meta()).collect(),
+        }
+    }
+
+    pub fn subscribe_v2_events(
+        &self,
+        vault_id: &str,
+        after_event_version: Option<u64>,
+    ) -> Result<EventSubscription> {
+        self.vault_by_id(vault_id)?
+            .subscribe_v2_events(after_event_version)
     }
 
     pub fn vault_entries(&self) -> Vec<VaultEntry> {

@@ -1,11 +1,15 @@
 use std::collections::{HashMap, HashSet};
 use std::fs;
+use std::io::ErrorKind;
 use std::path::Path;
 
-use crate::api_types::{NoteEventKind, NoteEventSource, UnresolvedReason};
-use crate::catalog::{Catalog, InsertNote};
-use crate::history;
-use crate::paths::{normalize_note_path, path_key};
+use crate::api_types::{ApiErrorKind, NoteEventKind, NoteEventSource, UnresolvedReason};
+use crate::catalog::{Catalog, InsertNote, NoteRow};
+use crate::history::{self, SourceDocument};
+use crate::paths::{
+    normalize_note_path, path_key, read_visible_bytes, write_visible_note_bytes_atomic,
+    write_visible_note_bytes_new,
+};
 use crate::tags::parse_markdown;
 use crate::{Error, Result};
 
@@ -23,123 +27,237 @@ pub fn reconcile_vault(
             .or_default()
             .push(file);
     }
-
     for records in seen_keys.values_mut() {
-        records.sort_by(|a, b| a.path.cmp(&b.path));
+        records.sort_by(|left, right| left.path.cmp(&right.path));
         if records.len() > 1 {
             for record in records.iter().skip(1) {
-                insert_unresolved(
-                    state_root,
-                    catalog,
-                    record,
-                    UnresolvedReason::CaseFoldCollision,
-                )?;
+                insert_unresolved(state_root, catalog, record, UnresolvedReason::CaseFoldCollision)?;
             }
         }
     }
 
     let primary_files = seen_keys
-        .values()
-        .filter_map(|records| records.first().cloned())
+        .into_values()
+        .filter_map(|mut records| records.drain(..).next())
         .collect::<Vec<_>>();
+    let rows = catalog.all_rows()?;
+    let live_rows = rows
+        .iter()
+        .filter(|row| !row.tombstoned && row.unresolved_reason.is_none())
+        .cloned()
+        .collect::<Vec<_>>();
+    let live_paths = live_rows
+        .iter()
+        .map(|row| path_key(&row.meta.path))
+        .collect::<HashSet<_>>();
     let mut consumed = HashSet::new();
 
-    for row in catalog.all_rows()? {
-        if row.tombstoned || row.unresolved_reason.is_some() {
+    for row in &live_rows {
+        let key = path_key(&row.meta.path);
+        let Some(file) = primary_files.iter().find(|file| file.path_key == key) else {
+            continue;
+        };
+        consumed.insert(file.path_key.clone());
+        apply_visible_version(root, state_root, catalog, row, file)?;
+    }
+
+    let unmatched_rows = live_rows
+        .iter()
+        .filter(|row| !primary_files.iter().any(|file| file.path_key == path_key(&row.meta.path)))
+        .cloned()
+        .collect::<Vec<_>>();
+    let unmatched_files = primary_files
+        .iter()
+        .filter(|file| !consumed.contains(&file.path_key) && file.unresolved.is_none())
+        .collect::<Vec<_>>();
+    let moved_pairs = unambiguous_move_pairs(&unmatched_rows, &unmatched_files);
+    let moved_note_ids = moved_pairs
+        .iter()
+        .map(|(row_index, _)| unmatched_rows[*row_index].meta.note_id.clone())
+        .collect::<HashSet<_>>();
+    let moved_paths = moved_pairs
+        .iter()
+        .map(|(_, file_index)| unmatched_files[*file_index].path_key.clone())
+        .collect::<HashSet<_>>();
+    for (row_index, file_index) in moved_pairs {
+        let row = &unmatched_rows[row_index];
+        let file = unmatched_files[file_index];
+        catalog.rename_note(&row.meta.note_id, &file.path, &file.path_key)?;
+        catalog.record_visible_hash(&row.meta.note_id, &file.disk_hash)?;
+        let migrated = history::write_snapshot_bytes(
+            state_root,
+            &row.meta.note_id,
+            &file.source_hash,
+            &file.disk_bytes,
+        )?;
+        if migrated != row.meta.content_hash {
+            catalog.migrate_current_hashes(
+                &row.meta.note_id,
+                &row.meta.content_hash,
+                &file.source_hash,
+                &file.disk_hash,
+            )?;
+        }
+        consumed.insert(file.path_key.clone());
+    }
+
+    for row in unmatched_rows {
+        if moved_note_ids.contains(&row.meta.note_id) {
             continue;
         }
-        if let Some(file) = primary_files
-            .iter()
-            .find(|file| file.path_key == path_key(&row.meta.path))
-        {
-            consumed.insert(file.path_key.clone());
-            if let Some(reason) = file.unresolved.clone() {
-                catalog.mark_unresolved(&row.meta.note_id, reason)?;
-            } else if file.hash != row.meta.content_hash {
-                if row.visible_hash != row.meta.content_hash && file.hash == row.visible_hash {
-                    let content = history::read_snapshot(
-                        state_root,
+        match history::read_snapshot_bytes(state_root, &row.meta.note_id, &row.meta.content_hash) {
+            Ok(bytes) if should_repair_missing_visible(catalog, &row.meta.note_id)? => {
+                write_visible_note_bytes_new(root, &row.meta.path, &bytes)?;
+                let document = SourceDocument::from_disk(&bytes)?;
+                catalog.record_visible_hash(&row.meta.note_id, &history::disk_hash(&bytes))?;
+                let source_hash = history::source_hash(&document.source);
+                if source_hash != row.meta.content_hash {
+                    catalog.migrate_current_hashes(
                         &row.meta.note_id,
                         &row.meta.content_hash,
+                        &source_hash,
+                        &history::disk_hash(&bytes),
                     )?;
-                    history::write_visible_atomic(
-                        &crate::paths::visible_path(root, &row.meta.path),
-                        &content,
-                    )?;
-                    catalog.record_visible_hash(&row.meta.note_id, &row.meta.content_hash)?;
-                } else {
-                    let parsed = parse_markdown(&file.path, &file.content);
-                    history::write_snapshot(state_root, &row.meta.note_id, &file.content)?;
-                    catalog.update_note_content(
-                        &row.meta.note_id,
-                        &parsed.title,
-                        &parsed.tags,
-                        &file.hash,
-                        NoteEventKind::ExternalEdit,
-                        NoteEventSource::External,
-                    )?;
-                    catalog.record_visible_hash(&row.meta.note_id, &file.hash)?;
                 }
             }
-        } else if let Some(file) =
-            exact_hash_match(&primary_files, &consumed, &row.meta.content_hash)
-        {
-            consumed.insert(file.path_key.clone());
-            catalog.rename_note(&row.meta.note_id, &file.path, &file.path_key)?;
-        } else if let Ok(content) =
-            history::read_snapshot(state_root, &row.meta.note_id, &row.meta.content_hash)
-        {
-            if should_repair_missing_visible(catalog, &row.meta.note_id)? {
-                history::write_visible_atomic(
-                    &crate::paths::visible_path(root, &row.meta.path),
-                    &content,
-                )?;
-                catalog.record_visible_hash(&row.meta.note_id, &row.meta.content_hash)?;
-            } else {
+            Ok(_) => {
                 catalog.tombstone_note(
                     &row.meta.note_id,
                     NoteEventKind::ExternalDelete,
                     NoteEventSource::External,
                 )?;
             }
-        } else {
-            catalog.mark_unresolved(&row.meta.note_id, UnresolvedReason::MissingSnapshot)?;
+            Err(Error::NotFound(_)) => {
+                catalog.mark_unresolved(&row.meta.note_id, UnresolvedReason::MissingSnapshot)?;
+            }
+            Err(error) => return Err(error),
         }
     }
 
     for file in primary_files {
-        if consumed.contains(&file.path_key) {
+        if consumed.contains(&file.path_key) || moved_paths.contains(&file.path_key) {
             continue;
         }
         if let Some(reason) = file.unresolved.clone() {
             insert_unresolved(state_root, catalog, &file, reason)?;
             continue;
         }
-        if catalog.note_by_path_key(&file.path_key)?.is_some() {
+        if catalog.note_by_path_key(&file.path_key)?.is_some() || live_paths.contains(&file.path_key) {
             continue;
         }
-        let parsed = parse_markdown(&file.path, &file.content);
+        let parsed = parse_markdown(&file.path, &file.source);
         let note_id = catalog.insert_note(InsertNote {
             path: &file.path,
             path_key: &file.path_key,
             title: &parsed.title,
             tags: &parsed.tags,
-            content_hash: &file.hash,
+            content_hash: &file.source_hash,
+            visible_hash: &file.disk_hash,
             kind: NoteEventKind::Baseline,
             source: NoteEventSource::External,
             unresolved: None,
         })?;
-        history::write_snapshot(state_root, &note_id, &file.content)?;
+        history::write_snapshot_bytes(
+            state_root,
+            &note_id,
+            &file.source_hash,
+            &file.disk_bytes,
+        )?;
     }
     Ok(())
+}
+
+pub fn reconcile_note_before_write(
+    root: &Path,
+    state_root: &Path,
+    catalog: &mut Catalog,
+    note_id: &str,
+) -> Result<bool> {
+    let row = catalog
+        .note_row_by_id(note_id)?
+        .ok_or_else(|| Error::NotFound(note_id.to_string()))?;
+    if row.tombstoned {
+        return Err(Error::NotFound(note_id.to_string()));
+    }
+    if let Some(reason) = row.unresolved_reason.as_deref() {
+        return Err(Error::api(ApiErrorKind::UnresolvedNote {
+            note_id: note_id.to_string(),
+            reason: parse_unresolved_reason(reason),
+        }));
+    }
+    let bytes = match read_visible_bytes(root, &row.meta.path) {
+        Ok(bytes) => bytes,
+        Err(Error::Io(error)) if error.kind() == ErrorKind::NotFound => {
+            catalog.tombstone_note(
+                note_id,
+                NoteEventKind::ExternalDelete,
+                NoteEventSource::External,
+            )?;
+            return Err(Error::NotFound(note_id.to_string()));
+        }
+        Err(error) => return Err(error),
+    };
+    let document = match SourceDocument::from_disk(&bytes) {
+        Ok(document) => document,
+        Err(_) => {
+            catalog.mark_unresolved(note_id, UnresolvedReason::InvalidUtf8)?;
+            return Err(Error::api(ApiErrorKind::UnresolvedNote {
+                note_id: note_id.to_string(),
+                reason: UnresolvedReason::InvalidUtf8,
+            }));
+        }
+    };
+    let source_hash = history::source_hash(&document.source);
+    let disk_hash = history::disk_hash(&bytes);
+    let legacy_hash_matches = history::legacy_content_hash(&document.source) == row.meta.content_hash;
+    if source_hash == row.meta.content_hash || legacy_hash_matches {
+        if row.meta.content_hash != source_hash {
+            history::write_snapshot_bytes(state_root, note_id, &source_hash, &bytes)?;
+            catalog.migrate_current_hashes(
+                note_id,
+                &row.meta.content_hash,
+                &source_hash,
+                &disk_hash,
+            )?;
+            return Ok(true);
+        }
+        if row.visible_hash != disk_hash {
+            history::write_snapshot_bytes(state_root, note_id, &source_hash, &bytes)?;
+            catalog.record_visible_hash(note_id, &disk_hash)?;
+            return Ok(true);
+        }
+        return Ok(false);
+    }
+    if row.visible_hash == disk_hash {
+        catalog.mark_unresolved(note_id, UnresolvedReason::FileCatalogMismatch)?;
+        return Err(Error::api(ApiErrorKind::UnresolvedNote {
+            note_id: note_id.to_string(),
+            reason: UnresolvedReason::FileCatalogMismatch,
+        }));
+    }
+    history::write_snapshot_bytes(state_root, note_id, &source_hash, &bytes)?;
+    let parsed = parse_markdown(&row.meta.path, &document.source);
+    catalog.update_note_content(
+        note_id,
+        &parsed.title,
+        &parsed.tags,
+        &source_hash,
+        &disk_hash,
+        NoteEventKind::ExternalEdit,
+        NoteEventSource::External,
+    )?;
+    Ok(true)
 }
 
 #[derive(Debug, Clone)]
 struct FileRecord {
     path: String,
     path_key: String,
-    hash: String,
-    content: String,
+    source_hash: String,
+    legacy_hash: String,
+    disk_hash: String,
+    source: String,
+    disk_bytes: Vec<u8>,
     unresolved: Option<UnresolvedReason>,
 }
 
@@ -166,72 +284,114 @@ fn walk_dir(
     for entry in fs::read_dir(dir)? {
         let entry = entry?;
         let path = entry.path();
-        let file_name = entry.file_name().to_string_lossy().to_string();
         if path.starts_with(state_root) {
             continue;
         }
+        let file_name = match entry.file_name().to_str() {
+            Some(file_name) => file_name.to_string(),
+            None => continue,
+        };
         if file_name == ".tansu" || excluded_folders.iter().any(|folder| folder == &file_name) {
             continue;
         }
-        if path.is_dir() {
+        let file_type = entry.file_type()?;
+        if file_type.is_symlink() {
+            continue;
+        }
+        if file_type.is_dir() {
             walk_dir(root, state_root, &path, excluded_folders, out)?;
             continue;
         }
-        if path.extension().and_then(|value| value.to_str()) != Some("md") {
+        if !file_type.is_file() || path.extension().and_then(|value| value.to_str()) != Some("md") {
             continue;
         }
         let rel = path
             .strip_prefix(root)
             .map_err(|_| Error::Internal("walked path outside vault".to_string()))?
-            .to_string_lossy()
+            .to_str()
+            .ok_or_else(|| Error::BadRequest("Markdown path is not valid UTF-8".to_string()))?
             .replace('\\', "/");
         let rel = match normalize_note_path(&rel) {
             Ok(rel) => rel,
             Err(_) => continue,
         };
-        let bytes = fs::read(&path)?;
-        let content = match history::validate_and_canonicalize(&bytes) {
-            Ok(content) => content,
-            Err(_) => {
-                let hash = format!("invalid-utf8:{}", path_key(&rel));
-                out.push(FileRecord {
-                    path: rel.clone(),
-                    path_key: path_key(&rel),
-                    hash,
-                    content: String::new(),
-                    unresolved: Some(UnresolvedReason::InvalidUtf8),
-                });
-                continue;
-            }
-        };
-        let hash = history::content_hash(&content);
-        out.push(FileRecord {
-            path: rel.clone(),
-            path_key: path_key(&rel),
-            hash,
-            content,
-            unresolved: None,
-        });
+        let disk_bytes = read_visible_bytes(root, &rel)?;
+        let disk_hash = history::disk_hash(&disk_bytes);
+        match SourceDocument::from_disk(&disk_bytes) {
+            Ok(document) => out.push(FileRecord {
+                path: rel,
+                path_key: path_key(&entry_path_to_string(&path, root)?),
+                source_hash: history::source_hash(&document.source),
+                legacy_hash: history::legacy_content_hash(&document.source),
+                disk_hash,
+                source: document.source,
+                disk_bytes,
+                unresolved: None,
+            }),
+            Err(_) => out.push(FileRecord {
+                path_key: path_key(&rel),
+                path: rel.clone(),
+                source_hash: format!("invalid-utf8:{}", path_key(&rel)),
+                legacy_hash: String::new(),
+                disk_hash,
+                source: String::new(),
+                disk_bytes,
+                unresolved: Some(UnresolvedReason::InvalidUtf8),
+            }),
+        }
     }
     Ok(())
 }
 
-fn exact_hash_match<'a>(
-    files: &'a [FileRecord],
-    consumed: &HashSet<String>,
-    content_hash: &str,
-) -> Option<&'a FileRecord> {
-    let matches = files
-        .iter()
-        .filter(|file| !consumed.contains(&file.path_key))
-        .filter(|file| file.unresolved.is_none())
-        .filter(|file| file.hash == content_hash)
-        .collect::<Vec<_>>();
-    if matches.len() == 1 {
-        matches.first().copied()
-    } else {
-        None
+fn entry_path_to_string(path: &Path, root: &Path) -> Result<String> {
+    path.strip_prefix(root)
+        .map_err(|_| Error::Internal("walked path outside vault".to_string()))?
+        .to_str()
+        .map(|value| value.replace('\\', "/"))
+        .ok_or_else(|| Error::BadRequest("Markdown path is not valid UTF-8".to_string()))
+}
+
+fn unambiguous_move_pairs(rows: &[NoteRow], files: &[&FileRecord]) -> Vec<(usize, usize)> {
+    let mut rows_by_hash = HashMap::<&str, Vec<usize>>::new();
+    for (index, row) in rows.iter().enumerate() {
+        rows_by_hash
+            .entry(row.meta.content_hash.as_str())
+            .or_default()
+            .push(index);
     }
+    let mut files_by_hash = HashMap::<&str, Vec<usize>>::new();
+    for (index, file) in files.iter().enumerate() {
+        files_by_hash
+            .entry(file.source_hash.as_str())
+            .or_default()
+            .push(index);
+        files_by_hash
+            .entry(file.legacy_hash.as_str())
+            .or_default()
+            .push(index);
+    }
+    let mut pairs = Vec::new();
+    let mut claimed_files = HashSet::new();
+    for (hash, row_indices) in rows_by_hash {
+        if row_indices.len() != 1 {
+            continue;
+        }
+        let Some(file_indices) = files_by_hash.get(hash) else {
+            continue;
+        };
+        let unique_files = file_indices
+            .iter()
+            .copied()
+            .filter(|index| !claimed_files.contains(index))
+            .collect::<HashSet<_>>();
+        if unique_files.len() == 1 {
+            let file_index = *unique_files.iter().next().expect("one move candidate");
+            if claimed_files.insert(file_index) {
+                pairs.push((row_indices[0], file_index));
+            }
+        }
+    }
+    pairs
 }
 
 fn should_repair_missing_visible(catalog: &Catalog, note_id: &str) -> Result<bool> {
@@ -250,21 +410,104 @@ fn insert_unresolved(
     if catalog.note_by_path_key(&record.path_key)?.is_some() {
         return Ok(());
     }
-    let parsed = parse_markdown(&record.path, &record.content);
+    let parsed = parse_markdown(&record.path, &record.source);
     let note_id = catalog.insert_note(InsertNote {
         path: &record.path,
         path_key: &record.path_key,
         title: &parsed.title,
         tags: &parsed.tags,
-        content_hash: &record.hash,
+        content_hash: &record.source_hash,
+        visible_hash: &record.disk_hash,
         kind: NoteEventKind::Baseline,
         source: NoteEventSource::External,
         unresolved: Some(reason),
     })?;
-    if !record.content.is_empty() {
-        let _ = history::write_snapshot(state_root, &note_id, &record.content);
+    if !record.source.is_empty() {
+        history::write_snapshot_bytes(
+            state_root,
+            &note_id,
+            &history::source_hash(&record.source),
+            &record.disk_bytes,
+        )?;
     }
     Ok(())
+}
+
+fn apply_visible_version(
+    root: &Path,
+    state_root: &Path,
+    catalog: &mut Catalog,
+    row: &NoteRow,
+    file: &FileRecord,
+) -> Result<()> {
+    if let Some(reason) = file.unresolved.clone() {
+        catalog.mark_unresolved(&row.meta.note_id, reason)?;
+        return Ok(());
+    }
+    let source_matches = row.meta.content_hash == file.source_hash
+        || row.meta.content_hash == file.legacy_hash;
+    if source_matches {
+        if row.meta.content_hash != file.source_hash {
+            history::write_snapshot_bytes(
+                state_root,
+                &row.meta.note_id,
+                &file.source_hash,
+                &file.disk_bytes,
+            )?;
+            catalog.migrate_current_hashes(
+                &row.meta.note_id,
+                &row.meta.content_hash,
+                &file.source_hash,
+                &file.disk_hash,
+            )?;
+        } else if row.visible_hash != file.disk_hash {
+            history::write_snapshot_bytes(
+                state_root,
+                &row.meta.note_id,
+                &file.source_hash,
+                &file.disk_bytes,
+            )?;
+            catalog.record_visible_hash(&row.meta.note_id, &file.disk_hash)?;
+        }
+        return Ok(());
+    }
+    if row.visible_hash == file.disk_hash {
+        let bytes = history::read_snapshot_bytes(
+            state_root,
+            &row.meta.note_id,
+            &row.meta.content_hash,
+        )?;
+        write_visible_note_bytes_atomic(root, &row.meta.path, &bytes)?;
+        catalog.record_visible_hash(&row.meta.note_id, &history::disk_hash(&bytes))?;
+        return Ok(());
+    }
+    let parsed = parse_markdown(&file.path, &file.source);
+    history::write_snapshot_bytes(
+        state_root,
+        &row.meta.note_id,
+        &file.source_hash,
+        &file.disk_bytes,
+    )?;
+    catalog.update_note_content(
+        &row.meta.note_id,
+        &parsed.title,
+        &parsed.tags,
+        &file.source_hash,
+        &file.disk_hash,
+        NoteEventKind::ExternalEdit,
+        NoteEventSource::External,
+    )?;
+    Ok(())
+}
+
+fn parse_unresolved_reason(value: &str) -> UnresolvedReason {
+    match value {
+        "case_fold_collision" => UnresolvedReason::CaseFoldCollision,
+        "invalid_utf8" => UnresolvedReason::InvalidUtf8,
+        "missing_snapshot" => UnresolvedReason::MissingSnapshot,
+        "corrupt_snapshot" => UnresolvedReason::CorruptSnapshot,
+        _ => UnresolvedReason::FileCatalogMismatch,
+    }
 }
 
 #[cfg(test)]
@@ -307,10 +550,27 @@ mod tests {
 
         assert_eq!(live.len(), 1);
         assert_ne!(live[0].note_id, original.note_id);
-        assert!(
-            rows.iter()
-                .any(|row| row.meta.note_id == original.note_id && row.tombstoned)
-        );
+        assert!(rows.iter().any(|row| row.meta.note_id == original.note_id && row.tombstoned));
+    }
+
+    #[test]
+    fn identical_content_never_pairs_external_moves_ambiguously() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("A.md"), "same\n").unwrap();
+        fs::write(dir.path().join("B.md"), "same\n").unwrap();
+        let mut catalog = Catalog::open(&dir.path().join("state").join("vault.db")).unwrap();
+        reconcile_vault(dir.path(), &dir.path().join("state"), &mut catalog, &[]).unwrap();
+        let original = catalog.live_notes().unwrap();
+
+        fs::remove_file(dir.path().join("A.md")).unwrap();
+        fs::remove_file(dir.path().join("B.md")).unwrap();
+        fs::write(dir.path().join("C.md"), "same\n").unwrap();
+        fs::write(dir.path().join("D.md"), "same\n").unwrap();
+        reconcile_vault(dir.path(), &dir.path().join("state"), &mut catalog, &[]).unwrap();
+
+        let live = catalog.live_notes().unwrap();
+        assert_eq!(live.len(), 2);
+        assert!(live.iter().all(|note| !original.iter().any(|old| old.note_id == note.note_id)));
     }
 
     #[test]
@@ -335,15 +595,16 @@ mod tests {
         reconcile_vault(dir.path(), &dir.path().join("state"), &mut catalog, &[]).unwrap();
         let note = catalog.live_notes().unwrap().remove(0);
         let accepted = "# A\n\nnew\n";
-        let accepted_hash =
-            history::write_snapshot(&dir.path().join("state"), &note.note_id, accepted).unwrap();
+        let accepted_source_hash = history::write_snapshot(&dir.path().join("state"), &note.note_id, accepted).unwrap();
+        let base_disk_hash = history::disk_hash(b"# A\n\nold\n");
         let parsed = parse_markdown(&note.path, accepted);
         catalog
             .update_note_content(
                 &note.note_id,
                 &parsed.title,
                 &parsed.tags,
-                &accepted_hash,
+                &accepted_source_hash,
+                &base_disk_hash,
                 NoteEventKind::Save,
                 NoteEventSource::User,
             )
@@ -352,10 +613,10 @@ mod tests {
         reconcile_vault(dir.path(), &dir.path().join("state"), &mut catalog, &[]).unwrap();
 
         let visible = fs::read_to_string(dir.path().join("A.md")).unwrap();
-        assert_eq!(visible, history::canonical_markdown_string(accepted));
+        assert_eq!(visible, accepted);
         let row = catalog.note_row_by_id(&note.note_id).unwrap().unwrap();
-        assert_eq!(row.meta.content_hash, accepted_hash);
-        assert_eq!(row.visible_hash, accepted_hash);
+        assert_eq!(row.meta.content_hash, accepted_source_hash);
+        assert_eq!(row.visible_hash, history::disk_hash(accepted.as_bytes()));
     }
 
     #[test]
@@ -366,15 +627,16 @@ mod tests {
         reconcile_vault(dir.path(), &dir.path().join("state"), &mut catalog, &[]).unwrap();
         let note = catalog.live_notes().unwrap().remove(0);
         let accepted = "# A\n\nnew\n";
-        let accepted_hash =
-            history::write_snapshot(&dir.path().join("state"), &note.note_id, accepted).unwrap();
+        let accepted_source_hash = history::write_snapshot(&dir.path().join("state"), &note.note_id, accepted).unwrap();
+        let base_disk_hash = history::disk_hash(b"# A\n\nold\n");
         let parsed = parse_markdown(&note.path, accepted);
         catalog
             .update_note_content(
                 &note.note_id,
                 &parsed.title,
                 &parsed.tags,
-                &accepted_hash,
+                &accepted_source_hash,
+                &base_disk_hash,
                 NoteEventKind::Save,
                 NoteEventSource::User,
             )
@@ -385,13 +647,25 @@ mod tests {
 
         let live = catalog.live_notes().unwrap().remove(0);
         assert_eq!(live.note_id, note.note_id);
-        assert_eq!(
-            live.content_hash,
-            history::content_hash("# A\n\nexternal\n")
-        );
-        assert_eq!(
-            fs::read_to_string(dir.path().join("A.md")).unwrap(),
-            "# A\n\nexternal\n"
-        );
+        assert_eq!(live.content_hash, history::content_hash("# A\n\nexternal\n"));
+        assert_eq!(fs::read_to_string(dir.path().join("A.md")).unwrap(), "# A\n\nexternal\n");
+    }
+
+    #[test]
+    fn watcher_delay_preflight_adopts_external_content_before_save() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("A.md"), "base\r\n").unwrap();
+        let state = dir.path().join("state");
+        let mut catalog = Catalog::open(&state.join("vault.db")).unwrap();
+        reconcile_vault(dir.path(), &state, &mut catalog, &[]).unwrap();
+        let note = catalog.live_notes().unwrap().remove(0);
+        fs::write(dir.path().join("A.md"), "external\r").unwrap();
+
+        assert!(reconcile_note_before_write(dir.path(), &state, &mut catalog, &note.note_id).unwrap());
+        let updated = catalog.note_by_id(&note.note_id).unwrap().unwrap();
+        let row = catalog.note_row_by_id(&note.note_id).unwrap().unwrap();
+        assert_ne!(updated.content_hash, note.content_hash);
+        assert_eq!(row.visible_hash, history::disk_hash(b"external\r"));
+        assert_eq!(history::read_snapshot_bytes(&state, &note.note_id, &updated.content_hash).unwrap(), b"external\r");
     }
 }

@@ -8,6 +8,7 @@ pub struct ParsedMarkdown {
 }
 
 pub fn parse_markdown(path: &str, content: &str) -> ParsedMarkdown {
+    let content = content.strip_prefix('\u{feff}').unwrap_or(content);
     let (tags, supported) = parse_tags_frontmatter(content);
     ParsedMarkdown {
         tags,
@@ -86,6 +87,16 @@ mod tests {
         assert_eq!(parsed.tags, vec!["one", "two"]);
         assert_eq!(parsed.title, "Title");
         assert!(parsed.frontmatter_supported);
+    }
+
+    #[test]
+    fn parses_display_metadata_after_a_source_bom_without_removing_it_from_source() {
+        let source = "\u{feff}---\ntags: [rust]\n---\n# Heading\n";
+        let parsed = parse_markdown("fallback.md", source);
+
+        assert_eq!(parsed.tags, vec!["rust"]);
+        assert_eq!(parsed.title, "Heading");
+        assert!(source.starts_with('\u{feff}'));
     }
 
     #[test]

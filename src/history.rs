@@ -1,5 +1,7 @@
+use std::collections::{HashMap, VecDeque};
+use std::ffi::OsString;
 use std::fmt::Write as _;
-use std::fs;
+use std::fs::{self, OpenOptions};
 use std::io::{ErrorKind, Write};
 use std::path::{Path, PathBuf};
 
@@ -8,42 +10,213 @@ use sha2::{Digest, Sha256};
 
 use crate::{Error, Result};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LineEnding {
+    Lf,
+    CrLf,
+    Cr,
+}
+
+impl LineEnding {
+    fn bytes(self) -> &'static [u8] {
+        match self {
+            Self::Lf => b"\n",
+            Self::CrLf => b"\r\n",
+            Self::Cr => b"\r",
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct SourceDocument {
+    pub source: String,
+    pub disk_bytes: Vec<u8>,
+    pub line_endings: Vec<LineEnding>,
+    dominant_line_ending: LineEnding,
+}
+
+impl SourceDocument {
+    pub fn from_disk(bytes: &[u8]) -> Result<Self> {
+        let text = std::str::from_utf8(bytes)
+            .map_err(|_| Error::BadRequest("markdown must be valid UTF-8".to_string()))?;
+        let mut source = String::with_capacity(text.len());
+        let mut line_endings = Vec::new();
+        let mut counts = [0_usize; 3];
+        let mut chars = text.char_indices().peekable();
+        while let Some((_, ch)) = chars.next() {
+            match ch {
+                '\r' => {
+                    let ending = if matches!(chars.peek(), Some((_, '\n'))) {
+                        chars.next();
+                        LineEnding::CrLf
+                    } else {
+                        LineEnding::Cr
+                    };
+                    line_endings.push(ending);
+                    counts[line_ending_index(ending)] += 1;
+                    source.push('\n');
+                }
+                '\n' => {
+                    line_endings.push(LineEnding::Lf);
+                    counts[line_ending_index(LineEnding::Lf)] += 1;
+                    source.push('\n');
+                }
+                _ => source.push(ch),
+            }
+        }
+        let dominant_line_ending = if counts[0] >= counts[1] && counts[0] >= counts[2] {
+            LineEnding::Lf
+        } else if counts[1] >= counts[2] {
+            LineEnding::CrLf
+        } else {
+            LineEnding::Cr
+        };
+        Ok(Self {
+            source,
+            disk_bytes: bytes.to_vec(),
+            line_endings,
+            dominant_line_ending,
+        })
+    }
+
+    pub fn disk_bytes_for_source(&self, source: &str) -> Result<Vec<u8>> {
+        if source == self.source {
+            return Ok(self.disk_bytes.clone());
+        }
+        if source.contains('\r') {
+            return Err(Error::BadRequest(
+                "editor source must use LF line endings".to_string(),
+            ));
+        }
+        let original_lines = self.source.split('\n').collect::<Vec<_>>();
+        let mut original_positions = HashMap::<&str, VecDeque<usize>>::new();
+        for (index, line) in original_lines.iter().enumerate() {
+            if index < self.line_endings.len() {
+                original_positions
+                    .entry(line)
+                    .or_default()
+                    .push_back(index);
+            }
+        }
+        let mut last_original_line = None;
+        let candidate_lines = source.split('\n').collect::<Vec<_>>();
+        let mut bytes = Vec::with_capacity(source.len() + self.line_endings.len());
+        for (index, line) in candidate_lines.iter().enumerate() {
+            bytes.extend_from_slice(line.as_bytes());
+            if index + 1 == candidate_lines.len() {
+                continue;
+            }
+            let ending = original_positions
+                .get_mut(line)
+                .and_then(|positions| {
+                    while positions.front().is_some_and(|position| {
+                        last_original_line.is_some_and(|last| *position <= last)
+                    }) {
+                        positions.pop_front();
+                    }
+                    positions.pop_front()
+                })
+                .map(|line| {
+                    last_original_line = Some(line);
+                    self.line_endings[line]
+                })
+                .unwrap_or(self.dominant_line_ending);
+            bytes.extend_from_slice(ending.bytes());
+        }
+        Ok(bytes)
+    }
+}
+
+fn line_ending_index(ending: LineEnding) -> usize {
+    match ending {
+        LineEnding::Lf => 0,
+        LineEnding::CrLf => 1,
+        LineEnding::Cr => 2,
+    }
+}
+
 pub fn canonical_markdown_bytes(content: &str) -> Vec<u8> {
-    let normalized = content.replace("\r\n", "\n").replace('\r', "\n");
-    normalized.replace('\n', "\r\n").into_bytes()
+    normalize_lf(content).into_bytes()
 }
 
 pub fn canonical_markdown_string(content: &str) -> String {
-    String::from_utf8(canonical_markdown_bytes(content)).expect("canonical markdown is UTF-8")
+    normalize_lf(content)
 }
 
 pub fn validate_and_canonicalize(bytes: &[u8]) -> Result<String> {
-    let content = std::str::from_utf8(bytes)
-        .map_err(|_| Error::BadRequest("markdown must be valid UTF-8".to_string()))?;
-    Ok(canonical_markdown_string(content))
+    Ok(SourceDocument::from_disk(bytes)?.source)
 }
 
 pub fn content_hash(content: &str) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(canonical_markdown_bytes(content));
-    let digest = hasher.finalize();
+    source_hash(content)
+}
+
+pub fn source_hash(content: &str) -> String {
+    format!("sha256-v2:{}", digest(normalize_lf(content).as_bytes()))
+}
+
+pub fn disk_hash(bytes: &[u8]) -> String {
+    format!("sha256:{}", digest(bytes))
+}
+
+pub fn legacy_content_hash(content: &str) -> String {
+    let normalized = normalize_lf(content);
+    let canonical = normalized.replace('\n', "\r\n");
+    format!("sha256:{}", digest(canonical.as_bytes()))
+}
+
+pub fn source_hash_matches(expected: &str, content: &str) -> bool {
+    expected == source_hash(content) || expected == legacy_content_hash(content)
+}
+
+fn normalize_lf(content: &str) -> String {
+    content.replace("\r\n", "\n").replace('\r', "\n")
+}
+
+fn digest(bytes: &[u8]) -> String {
     let mut hex = String::with_capacity(64);
-    for byte in digest {
+    for byte in Sha256::digest(bytes) {
         write!(&mut hex, "{byte:02x}").expect("writing to String cannot fail");
     }
-    format!("sha256:{hex}")
+    hex
 }
 
 pub fn write_snapshot(root: &Path, note_id: &str, content: &str) -> Result<String> {
-    let hash = content_hash(content);
+    let source = canonical_markdown_string(content);
+    write_snapshot_bytes(root, note_id, &source_hash(&source), source.as_bytes())
+}
+
+pub fn write_snapshot_bytes(
+    root: &Path,
+    note_id: &str,
+    expected_source_hash: &str,
+    disk_bytes: &[u8],
+) -> Result<String> {
+    validate_note_id(note_id)?;
+    let document = SourceDocument::from_disk(disk_bytes)?;
+    let hash = source_hash(&document.source);
+    if expected_source_hash != hash {
+        return Err(Error::Internal(format!(
+            "snapshot source hash mismatch for {expected_source_hash}"
+        )));
+    }
     let dir = root.join("history").join("snapshots").join(note_id);
     fs::create_dir_all(&dir)?;
     let path = dir.join(hash_filename(&hash));
-    write_compressed_atomic(&path, &canonical_markdown_bytes(content))?;
+    write_compressed_atomic(&path, disk_bytes)?;
     Ok(hash)
 }
 
 pub fn read_snapshot(root: &Path, note_id: &str, hash: &str) -> Result<String> {
+    let bytes = read_snapshot_bytes(root, note_id, hash)?;
+    validate_and_canonicalize(&bytes)
+}
+
+pub fn read_snapshot_bytes(root: &Path, note_id: &str, hash: &str) -> Result<Vec<u8>> {
+    validate_note_id(note_id)?;
+    if !valid_snapshot_hash(hash) {
+        return Err(Error::BadRequest("invalid snapshot hash".to_string()));
+    }
     let path = root
         .join("history")
         .join("snapshots")
@@ -58,14 +231,16 @@ pub fn read_snapshot(root: &Path, note_id: &str, hash: &str) -> Result<String> {
     })?;
     let bytes = decompress_size_prepended(&compressed)
         .map_err(|_| Error::Internal(format!("corrupt snapshot {hash}")))?;
-    let content = validate_and_canonicalize(&bytes)?;
-    let actual = content_hash(&content);
-    if actual != hash {
-        return Err(Error::Internal(format!(
-            "snapshot hash mismatch for {hash}"
-        )));
+    let document = SourceDocument::from_disk(&bytes)?;
+    let matches = if hash.starts_with("sha256-v2:") {
+        source_hash(&document.source) == hash
+    } else {
+        legacy_content_hash(&document.source) == hash
+    };
+    if !matches {
+        return Err(Error::Internal(format!("snapshot hash mismatch for {hash}")));
     }
-    Ok(content)
+    Ok(bytes)
 }
 
 pub fn write_conflict_draft(
@@ -74,11 +249,13 @@ pub fn write_conflict_draft(
     draft_id: i64,
     content: &str,
 ) -> Result<String> {
-    let hash = content_hash(content);
+    validate_note_id(note_id)?;
+    let source = canonical_markdown_string(content);
+    let hash = source_hash(&source);
     let dir = root.join("history").join("conflicts").join(note_id);
     fs::create_dir_all(&dir)?;
     let path = dir.join(format!("{draft_id}.lz4"));
-    write_compressed_atomic(&path, &canonical_markdown_bytes(content))?;
+    write_compressed_atomic(&path, source.as_bytes())?;
     Ok(hash)
 }
 
@@ -88,6 +265,7 @@ pub fn read_conflict_draft(
     draft_id: i64,
     expected_hash: &str,
 ) -> Result<String> {
+    validate_note_id(note_id)?;
     let path = root
         .join("history")
         .join("conflicts")
@@ -97,18 +275,25 @@ pub fn read_conflict_draft(
     let bytes = decompress_size_prepended(&compressed)
         .map_err(|_| Error::Internal("corrupt conflict draft".to_string()))?;
     let content = validate_and_canonicalize(&bytes)?;
-    let actual = content_hash(&content);
-    if actual != expected_hash {
+    if content_hash(&content) != expected_hash && legacy_content_hash(&content) != expected_hash {
         return Err(Error::Internal("conflict draft hash mismatch".to_string()));
     }
     Ok(content)
 }
 
 pub fn write_visible_atomic(path: &Path, content: &str) -> Result<()> {
+    write_bytes_atomic(path, canonical_markdown_bytes(content).as_slice())
+}
+
+pub fn write_visible_bytes_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
+    write_bytes_atomic(path, bytes)
+}
+
+pub fn write_visible_bytes_new(path: &Path, bytes: &[u8]) -> Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
-    write_atomic(path, &canonical_markdown_bytes(content))
+    write_new_atomic(path, bytes)
 }
 
 pub fn write_bytes_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
@@ -130,14 +315,13 @@ fn write_compressed_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
 }
 
 fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
-    let tmp = temp_path(path);
-    if let Some(parent) = tmp.parent() {
-        fs::create_dir_all(parent)?;
-    }
+    let tmp = create_temp_file(path, bytes)?;
     let result = (|| {
-        let mut file = fs::File::create(&tmp)?;
-        file.write_all(bytes)?;
-        file.sync_all()?;
+        if fs::symlink_metadata(path)
+            .is_ok_and(|metadata| metadata.file_type().is_symlink())
+        {
+            return Err(Error::BadRequest("refusing to replace a symlink".to_string()));
+        }
         fs::rename(&tmp, path)?;
         sync_parent_dir(path)?;
         Ok(())
@@ -148,6 +332,49 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
     result
 }
 
+fn write_new_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
+    let tmp = create_temp_file(path, bytes)?;
+    let result = (|| {
+        fs::hard_link(&tmp, path)?;
+        fs::remove_file(&tmp)?;
+        sync_parent_dir(path)?;
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&tmp);
+    }
+    result
+}
+
+fn create_temp_file(path: &Path, bytes: &[u8]) -> Result<PathBuf> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| Error::BadRequest("atomic path has no parent".to_string()))?;
+    fs::create_dir_all(parent)?;
+    let name = path
+        .file_name()
+        .ok_or_else(|| Error::BadRequest("atomic path has no filename".to_string()))?;
+    for _ in 0..32 {
+        let mut temp_name = OsString::from(".");
+        temp_name.push(name);
+        temp_name.push(format!(".{}.tmp", fastrand::u64(..)));
+        let tmp = parent.join(temp_name);
+        match OpenOptions::new().write(true).create_new(true).open(&tmp) {
+            Ok(mut file) => {
+                let result = file.write_all(bytes).and_then(|()| file.sync_all());
+                if let Err(error) = result {
+                    let _ = fs::remove_file(&tmp);
+                    return Err(Error::Io(error));
+                }
+                return Ok(tmp);
+            }
+            Err(error) if error.kind() == ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(Error::Io(error)),
+        }
+    }
+    Err(Error::Internal("could not allocate an atomic temp file".to_string()))
+}
+
 #[cfg(unix)]
 fn sync_dir(path: &Path) -> Result<()> {
     fs::File::open(path)?.sync_all()?;
@@ -156,22 +383,35 @@ fn sync_dir(path: &Path) -> Result<()> {
 
 #[cfg(not(unix))]
 fn sync_dir(_path: &Path) -> Result<()> {
-    Ok(())
-}
-
-fn temp_path(path: &Path) -> PathBuf {
-    let mut tmp = path.to_path_buf();
-    let extension = path
-        .extension()
-        .and_then(|value| value.to_str())
-        .map(|value| format!("{value}.tmp"))
-        .unwrap_or_else(|| "tmp".to_string());
-    tmp.set_extension(extension);
-    tmp
+    Err(Error::BadRequest(
+        "durable directory sync is unsupported on this platform".to_string(),
+    ))
 }
 
 fn hash_filename(hash: &str) -> String {
     format!("{}.lz4", hash.replace(':', "_"))
+}
+
+fn valid_snapshot_hash(hash: &str) -> bool {
+    ["sha256-v2:", "sha256:"]
+        .iter()
+        .any(|prefix| {
+            hash.strip_prefix(prefix)
+                .is_some_and(|digest| digest.len() == 64 && digest.bytes().all(|byte| byte.is_ascii_hexdigit()))
+        })
+}
+
+fn validate_note_id(note_id: &str) -> Result<()> {
+    if note_id.is_empty()
+        || note_id == "."
+        || note_id == ".."
+        || note_id.contains('/')
+        || note_id.contains('\\')
+        || note_id.contains('\0')
+    {
+        return Err(Error::BadRequest("invalid note ID".to_string()));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -179,36 +419,90 @@ mod tests {
     use super::*;
 
     #[test]
-    fn lf_and_mixed_line_endings_hash_the_same() {
+    fn source_hash_normalizes_line_endings_and_keeps_the_bom() {
         assert_eq!(
-            content_hash("a\nb\r\nc\rd"),
-            content_hash("a\r\nb\r\nc\r\nd")
+            source_hash("\u{feff}a\nb\nc\nd"),
+            source_hash("\u{feff}a\r\nb\rc\nd")
+        );
+        assert_ne!(source_hash("a"), source_hash("\u{feff}a"));
+        assert!(source_hash("a").starts_with("sha256-v2:"));
+    }
+
+    #[test]
+    fn source_document_preserves_untouched_endings_and_uses_dominant_for_inserted_lines() {
+        let source = SourceDocument::from_disk(b"a\r\nb\nc\r").unwrap();
+        assert_eq!(source.source, "a\nb\nc\n");
+        assert_eq!(source.line_endings, vec![LineEnding::CrLf, LineEnding::Lf, LineEnding::Cr]);
+        assert_eq!(
+            source.disk_bytes_for_source("a\ninserted\nb\nc\n").unwrap(),
+            b"a\r\ninserted\nb\nc\r"
         );
     }
 
     #[test]
-    fn snapshot_round_trip_verifies_hash() {
-        let dir = tempfile::tempdir().unwrap();
-        let hash = write_snapshot(dir.path(), "note", "hello\n").unwrap();
-        let content = read_snapshot(dir.path(), "note", &hash).unwrap();
-        assert_eq!(content, "hello\r\n");
+    fn source_document_preserves_original_bytes_for_no_op_edits() {
+        for bytes in [b"\xef\xbb\xbfalpha\r\n\r\nomega".as_slice(), b"x\rY\nZ"] {
+            let source = SourceDocument::from_disk(bytes).unwrap();
+            assert_eq!(source.disk_bytes_for_source(&source.source).unwrap(), bytes);
+        }
     }
 
     #[test]
-    fn corrupt_snapshot_is_reported_without_content() {
+    fn versioned_snapshot_reader_keeps_legacy_hashes_and_bytes_readable() {
         let dir = tempfile::tempdir().unwrap();
-        let hash = write_snapshot(dir.path(), "note", "hello\n").unwrap();
-        let path = dir
+        let legacy_bytes = b"hello\r\n";
+        let legacy_hash = legacy_content_hash("hello\n");
+        let legacy_path = dir
             .path()
-            .join("history")
-            .join("snapshots")
-            .join("note")
-            .join(hash_filename(&hash));
-        fs::write(path, b"not lz4").unwrap();
+            .join("history/snapshots/note")
+            .join(hash_filename(&legacy_hash));
+        fs::create_dir_all(legacy_path.parent().unwrap()).unwrap();
+        fs::write(
+            &legacy_path,
+            compress_prepend_size(legacy_bytes),
+        )
+        .unwrap();
 
-        assert!(matches!(
-            read_snapshot(dir.path(), "note", &hash),
-            Err(Error::Internal(_))
-        ));
+        assert_eq!(
+            read_snapshot_bytes(dir.path(), "note", &legacy_hash).unwrap(),
+            legacy_bytes
+        );
+        assert_eq!(
+            read_snapshot(dir.path(), "note", &legacy_hash).unwrap(),
+            "hello\n"
+        );
+        assert_eq!(fs::read(legacy_path).unwrap(), compress_prepend_size(legacy_bytes));
+    }
+
+    #[test]
+    fn snapshot_hash_cannot_escape_its_history_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(read_snapshot_bytes(dir.path(), "note", "../../../../etc/passwd").is_err());
+        assert!(read_snapshot_bytes(dir.path(), "../../note", &source_hash("safe")).is_err());
+    }
+
+    #[test]
+    fn visible_create_is_no_clobber_and_replace_uses_unique_temp_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("note.md");
+        write_visible_bytes_new(&path, b"first").unwrap();
+        assert!(write_visible_bytes_new(&path, b"second").is_err());
+        write_visible_bytes_atomic(&path, b"replaced").unwrap();
+        assert_eq!(fs::read(&path).unwrap(), b"replaced");
+        assert!(fs::read_dir(dir.path()).unwrap().all(|entry| {
+            !entry.unwrap().file_name().to_string_lossy().ends_with(".tmp")
+        }));
+    }
+
+    #[test]
+    fn atomic_replace_refuses_a_symlink_destination() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("target.md");
+        let link = dir.path().join("link.md");
+        fs::write(&target, b"outside").unwrap();
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+
+        assert!(write_visible_bytes_atomic(&link, b"inside").is_err());
+        assert_eq!(fs::read(&target).unwrap(), b"outside");
     }
 }
