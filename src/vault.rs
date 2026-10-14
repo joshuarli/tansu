@@ -3065,25 +3065,34 @@ impl VaultRuntime {
             .filter(|row| !row.tombstoned && row.unresolved_reason.is_none())
             .map(|row| (row.meta.note_id.clone(), (row.meta, row.visible_hash)))
             .collect::<HashMap<_, _>>();
-        let deleted = before
+        let mut deleted = before
             .keys()
             .filter(|note_id| !after.contains_key(*note_id))
             .cloned()
             .collect::<Vec<_>>();
-        let changed = before != after;
-        let v2_notes = notes
-            .iter()
-            .map(|note| {
-                let (_, visible_hash) = after
-                    .get(&note.note_id)
-                    .ok_or_else(|| Error::Internal("reconciled note metadata disappeared".to_string()))?;
-                Ok(v2_note_meta(note, visible_hash))
-            })
-            .collect::<Result<Vec<_>>>()?;
+        let mut changed_v2_notes = Vec::new();
+        for (note_id, (meta, visible_hash)) in &after {
+            let unchanged = before.get(note_id).is_some_and(|(previous_meta, previous_hash)| {
+                previous_meta == meta && previous_hash == visible_hash
+            });
+            if !unchanged {
+                changed_v2_notes.push(v2_note_meta(meta, visible_hash));
+            }
+        }
+        deleted.sort();
+        changed_v2_notes.sort_by(|left, right| left.path.cmp(&right.path));
+        let changed = !deleted.is_empty() || !changed_v2_notes.is_empty();
         drop(catalog);
         self.enqueue_search(SearchJob::Rebuild);
         if changed {
-            self.record_v2_event(V2ServerEventUpdate::VaultChanged { notes: v2_notes })?;
+            for note_id in &deleted {
+                self.record_v2_event(V2ServerEventUpdate::NoteDeleted {
+                    note_id: note_id.clone(),
+                })?;
+            }
+            for note in changed_v2_notes {
+                self.record_v2_event(V2ServerEventUpdate::VaultChanged { notes: vec![note] })?;
+            }
         }
         self.broadcast(ServerEventKind::VaultChanged, deleted);
         if self.logs.enabled() {
@@ -4193,7 +4202,7 @@ mod tests {
     }
 
     #[test]
-    fn watcher_reconciliation_publishes_v2_vault_changes() {
+    fn watcher_reconciliation_publishes_bounded_v2_note_events() {
         let vault = test_vault();
         let subscription = vault.subscribe_v2_events(None).unwrap();
 
@@ -4210,12 +4219,10 @@ mod tests {
             .recv_timeout(Duration::from_millis(100))
             .unwrap();
         assert_eq!(added.payload["update"]["kind"], "vaultChanged");
-        let added_note = added.payload["update"]["notes"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|note| note["path"] == "outside.md")
-            .unwrap();
+        let added_note = &added.payload["update"]["notes"][0];
+        assert_eq!(added_note["path"], "outside.md");
+        assert_eq!(added.payload["update"]["notes"].as_array().unwrap().len(), 1);
+        let note_id = added_note["noteId"].as_str().unwrap();
         let source_hash = added_note["sourceHash"].as_str().unwrap();
         let disk_hash = added_note["diskHash"].as_str().unwrap();
 
@@ -4225,14 +4232,21 @@ mod tests {
             .events
             .recv_timeout(Duration::from_millis(100))
             .unwrap();
-        let changed_note = line_endings.payload["update"]["notes"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|note| note["path"] == "outside.md")
-            .unwrap();
+        assert_eq!(line_endings.payload["update"]["kind"], "vaultChanged");
+        let changed_note = &line_endings.payload["update"]["notes"][0];
+        assert_eq!(changed_note["path"], "outside.md");
+        assert_eq!(line_endings.payload["update"]["notes"].as_array().unwrap().len(), 1);
         assert_eq!(changed_note["sourceHash"], source_hash);
         assert_ne!(changed_note["diskHash"], disk_hash);
+
+        fs::remove_file(vault.root.join("outside.md")).unwrap();
+        vault.reconcile_from_watcher().unwrap();
+        let deleted = subscription
+            .events
+            .recv_timeout(Duration::from_millis(100))
+            .unwrap();
+        assert_eq!(deleted.payload["update"]["kind"], "noteDeleted");
+        assert_eq!(deleted.payload["update"]["noteId"], note_id);
     }
 
     #[test]

@@ -185,6 +185,10 @@ over `Last-Event-ID`. The server replays retained events or sends
 and notes again. Each event also has a typed update. Resync status is derived
 from the update variant, so a normal event cannot serialize with
 `resyncRequired: true`.
+`vaultChanged` carries metadata only for notes added or changed by watcher
+reconciliation; removed notes arrive as `noteDeleted`. Clients merge the
+changed metadata and remove only the IDs named by `noteDeleted`. If an event
+cannot fit the bounded stream payload, the server sends `resyncRequired`.
 
 ### Authentication
 

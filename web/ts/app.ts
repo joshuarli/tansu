@@ -338,17 +338,10 @@ export class TansuApp {
       const tab = tabById(this.state, event.update.note.noteId);
       if (tab !== undefined) await this.reconcileTab(tab);
     } else if (event.update.kind === "vaultChanged") {
-      const next = new Map(event.update.notes.map((meta) => [meta.noteId, meta]));
-      for (const noteId of this.state.notes.keys()) {
-        if (!next.has(noteId)) {
-          this.state.notes.delete(noteId);
-          await this.services.workspace.deleteCachedNoteBodies({ ...this.identity!, noteId: noteId as DocumentIdentity["noteId"] });
-          await this.closeTab({ kind: "saved", noteId: toNoteId(noteId) }, false);
-        }
-      }
-      this.state.notes = next;
-      for (const tab of this.state.tabs) {
-        if (tab.kind === "saved") await this.reconcileTab(tab);
+      for (const meta of event.update.notes) {
+        this.state.notes.set(meta.noteId, meta);
+        const tab = tabById(this.state, meta.noteId);
+        if (tab !== undefined) await this.reconcileTab(tab);
       }
     } else if (event.update.kind === "noteDeleted") {
       this.state.notes.delete(event.update.noteId);

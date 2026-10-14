@@ -330,6 +330,26 @@ describe("v2 desktop shell", () => {
     expect(root.textContent).toContain("Search degraded");
   });
 
+  it("merges watcher note updates without dropping unaffected notes", async () => {
+    const first = noteMeta("first", "first.md", "First");
+    const second = noteMeta("second", "second.md", "Second");
+    const updated = noteMeta(second.noteId, "renamed.md", "Renamed", [], 2, HASH_B);
+    const client = configureVault([first, second]);
+    const { app, root } = mountApp();
+    await app.boot();
+
+    client.eventHandlers?.onEvent({
+      eventVersion: 1,
+      resyncRequired: false,
+      update: { kind: "vaultChanged", notes: [updated] },
+    });
+    await until(() => root.textContent?.includes("Renamed") && root.textContent.includes("First"));
+
+    expect(root.textContent).toContain("First");
+    expect(root.textContent).toContain("Renamed");
+    expect(root.textContent).not.toContain("Second");
+  });
+
   it("reconnects the old event stream when the global bootstrap fails", async () => {
     const note = noteMeta("note-1", "one.md", "One");
     const oldClient = configureVault([note], legacySession([
