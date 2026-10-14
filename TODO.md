@@ -23,15 +23,6 @@ Next: 21
 - **Effort:** M
 - **Design:** `docs/rfcs/0001-webauthn-counter-policy.md`
 
-### TNS-14 · P2 · Isolate release write permission from build jobs
-
-- **Area:** Release security
-- **Where:** `.github/workflows/build-server.yml:8-9`, release asset upload steps
-- **Problem:** Workflow-wide `contents: write` applies while dependency installation and compilation run. The checkout persists credentials, so build-time code runs in jobs with permission to write repository contents.
-- **Recommendation:** Keep build jobs read-only, disable persisted checkout credentials there, and grant write permission only to a separate release-upload job.
-- **Fix with:** lifecycle-concurrency
-- **Effort:** M
-
 ### TNS-15 · P3 · Run CI on code changes
 
 - **Area:** CI
