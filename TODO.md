@@ -23,15 +23,6 @@ Next: 21
 - **Effort:** M
 - **Design:** `docs/rfcs/0001-webauthn-counter-policy.md`
 
-### TNS-10 · P2 · Resolve HTML import when the file picker is canceled
-
-- **Area:** Browser import lifecycle
-- **Where:** `web/ts/html-import.ts:33-40`, `web/ts/app.ts:206`
-- **Problem:** The picker promise resolves only on `change`. Native cancellation does not dispatch that event, leaving the import action pending; vault changes and logout drain in-flight actions and can then wait indefinitely.
-- **Recommendation:** Resolve on the input's `cancel` event and remove both listeners after completion.
-- **Fix with:** lifecycle-concurrency
-- **Effort:** S
-
 ### TNS-11 · P2 · Reload a note reopened during an in-flight load
 
 - **Area:** Tab loading state

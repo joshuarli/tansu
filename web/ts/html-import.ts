@@ -35,7 +35,25 @@ function pickHtmlFile(): Promise<File | null> {
     const input = document.createElement("input");
     input.type = "file";
     input.accept = ".html,.htm,text/html";
-    input.addEventListener("change", () => resolve(input.files?.[0] ?? null), { once: true });
-    input.click();
+    const cleanup = () => {
+      input.removeEventListener("change", onChange);
+      input.removeEventListener("cancel", onCancel);
+    };
+    const onChange = () => {
+      cleanup();
+      resolve(input.files?.[0] ?? null);
+    };
+    const onCancel = () => {
+      cleanup();
+      resolve(null);
+    };
+    input.addEventListener("change", onChange);
+    input.addEventListener("cancel", onCancel);
+    try {
+      input.click();
+    } catch (error) {
+      cleanup();
+      throw error;
+    }
   });
 }

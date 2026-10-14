@@ -15,6 +15,17 @@ describe("HTML import", () => {
     await expect(pickHtmlImport([])).resolves.toBeNull();
   });
 
+  it("resolves and removes picker listeners when native cancellation fires", async () => {
+    const input = mockPickerInput(null);
+    const removeListener = vi.spyOn(input, "removeEventListener");
+    const pending = pickHtmlImport([]);
+
+    input.dispatchEvent(new Event("cancel"));
+
+    await expect(pending).resolves.toBeNull();
+    expect(removeListener.mock.calls.map(([type]) => type).sort()).toEqual(["cancel", "change"]);
+  });
+
   it("creates unique markdown with imported metadata", async () => {
     mockPickedFile(new File(["<article>body</article>"], "Saved Page.html", { type: "text/html" }));
     mockHtmlText(
@@ -53,16 +64,24 @@ function mockHtmlText(html: string): void {
 }
 
 function mockPickedFile(file: File | null): void {
+  const input = mockPickerInput(file);
+  input.click = () => input.dispatchEvent(new Event("change"));
+}
+
+function mockPickerInput(file: File | null): HTMLInputElement {
   const createElement = document.createElement.bind(document);
+  const input = document.createElement("input");
+  Object.defineProperty(input, "files", {
+    value: file === null ? null : [file],
+    configurable: true,
+  });
   vi.spyOn(document, "createElement").mockImplementationOnce((tagName: string) => {
-    const input = createElement(tagName) as HTMLInputElement;
-    Object.defineProperty(input, "files", {
-      value: file === null ? null : [file],
-      configurable: true,
-    });
-    input.click = () => input.dispatchEvent(new Event("change"));
+    if (tagName !== "input") {
+      return createElement(tagName);
+    }
     return input;
   });
+  return input;
 }
 
 function note(path: string): NoteMeta {
