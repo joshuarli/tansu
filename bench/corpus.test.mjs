@@ -1,7 +1,20 @@
 import assert from "node:assert/strict";
+import { mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { describe, it } from "node:test";
+import { fileURLToPath } from "node:url";
 
-import { renderCorpusNote, renderStressNote } from "./corpus.mjs";
+import {
+  renderCorpusNote,
+  renderStressNote,
+  resetCorpusOutput,
+  writeCorpusNotes,
+} from "./corpus.mjs";
+
+const REPO_ROOT = fileURLToPath(new URL("..", import.meta.url));
+const SCRATCH_ROOT = join(REPO_ROOT, ".work", "tmp");
+const CORPUS_ROOT = join(SCRATCH_ROOT, "o1-corpus");
+const SYMLINK_TARGET = join(SCRATCH_ROOT, "o1-corpus-target");
 
 describe("fixed-seed benchmark corpus", () => {
   it("renders identical corpus notes for the same seed and index", () => {
@@ -16,6 +29,30 @@ describe("fixed-seed benchmark corpus", () => {
       assert.match(note, /\| Column A \| Column B \|/);
       assert.match(note, /!\[Stress image\]/);
       assert.match(note, /café 東京 🧭 Δοκιμή/);
+    }
+  });
+
+  it("rebuilds a small corpus identically and removes an output symlink without following it", async () => {
+    await rm(CORPUS_ROOT, { recursive: true, force: true });
+    await rm(SYMLINK_TARGET, { recursive: true, force: true });
+    await mkdir(SYMLINK_TARGET, { recursive: true });
+    await writeFile(join(SYMLINK_TARGET, "keep.txt"), "outside the corpus output");
+    await symlink(SYMLINK_TARGET, CORPUS_ROOT, "dir");
+    try {
+      await resetCorpusOutput();
+      assert.equal(await readFile(join(SYMLINK_TARGET, "keep.txt"), "utf8"), "outside the corpus output");
+      await writeCorpusNotes(join(CORPUS_ROOT, "repro-a"), 0x5eed1234, 8);
+      await writeCorpusNotes(join(CORPUS_ROOT, "repro-b"), 0x5eed1234, 8);
+      for (let index = 1; index <= 8; index += 1) {
+        const name = `note-${String(index).padStart(5, "0")}.md`;
+        assert.deepEqual(
+          await readFile(join(CORPUS_ROOT, "repro-a", name)),
+          await readFile(join(CORPUS_ROOT, "repro-b", name)),
+        );
+      }
+    } finally {
+      await rm(CORPUS_ROOT, { recursive: true, force: true });
+      await rm(SYMLINK_TARGET, { recursive: true, force: true });
     }
   });
 });

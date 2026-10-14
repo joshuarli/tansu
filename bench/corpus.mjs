@@ -1,6 +1,6 @@
 import { cp, mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
-import { dirname, join, relative, resolve, sep } from "node:path";
-import { fileURLToPath } from "node:url";
+import { dirname, join, relative, resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const FIXTURE_ROOT = join(REPO_ROOT, "tests", "fixtures", "test-vaults");
@@ -30,22 +30,16 @@ export function renderStressNote(sizeBytes) {
   return `${prefix}${"x".repeat(remainingBytes)}`;
 }
 
-export async function generateCorpus(output = DEFAULT_OUTPUT, seed = 0x5eed1234) {
-  const outputRoot = resolve(output);
-  assertOutputRoot(outputRoot);
-  await rm(outputRoot, { recursive: true, force: true });
-  await mkdir(outputRoot, { recursive: true });
+export async function generateCorpus(seed = 0x5eed1234) {
+  await resetCorpusOutput();
+  const outputRoot = DEFAULT_OUTPUT;
 
   const fixturesOutput = join(outputRoot, "fixture-vaults");
   await cp(FIXTURE_ROOT, fixturesOutput, { recursive: true });
 
   for (const count of NOTE_COUNTS) {
     const corpusRoot = join(outputRoot, `notes-${count}`);
-    await mkdir(corpusRoot, { recursive: true });
-    for (let index = 0; index < count; index += 1) {
-      const number = String(index + 1).padStart(5, "0");
-      await writeFile(join(corpusRoot, `note-${number}.md`), renderCorpusNote(seed, index));
-    }
+    await writeCorpusNotes(corpusRoot, seed, count);
   }
 
   const stressRoot = join(outputRoot, "stress");
@@ -54,13 +48,12 @@ export async function generateCorpus(output = DEFAULT_OUTPUT, seed = 0x5eed1234)
     await writeFile(join(stressRoot, `note-${sizeLabel(sizeBytes)}.md`), renderStressNote(sizeBytes));
   }
 
-  await validateCorpus(outputRoot, seed);
+  await validateCorpus(seed);
   return outputRoot;
 }
 
-export async function validateCorpus(output = DEFAULT_OUTPUT, seed = 0x5eed1234) {
-  const outputRoot = resolve(output);
-  assertOutputRoot(outputRoot);
+export async function validateCorpus(seed = 0x5eed1234) {
+  const outputRoot = DEFAULT_OUTPUT;
 
   for (const vaultName of await readdir(FIXTURE_ROOT)) {
     const sourceVault = join(FIXTURE_ROOT, vaultName);
@@ -102,6 +95,19 @@ export async function validateCorpus(output = DEFAULT_OUTPUT, seed = 0x5eed1234)
     }
   }
   return true;
+}
+
+export async function writeCorpusNotes(corpusRoot, seed, count) {
+  await mkdir(corpusRoot, { recursive: true });
+  for (let index = 0; index < count; index += 1) {
+    const number = String(index + 1).padStart(5, "0");
+    await writeFile(join(corpusRoot, `note-${number}.md`), renderCorpusNote(seed, index));
+  }
+}
+
+export async function resetCorpusOutput() {
+  await rm(DEFAULT_OUTPUT, { recursive: true, force: true });
+  await mkdir(DEFAULT_OUTPUT, { recursive: true });
 }
 
 function seededRandom(seed) {
@@ -154,42 +160,21 @@ async function listTree(root, base = root) {
   return entries.sort(([left], [right]) => left.localeCompare(right));
 }
 
-function assertOutputRoot(path) {
-  const scratchRoot = join(REPO_ROOT, ".work", "tmp");
-  const fromScratch = relative(scratchRoot, path);
-  if (fromScratch === "" || fromScratch === ".." || fromScratch.startsWith(`..${sep}`)) {
-    throw new Error(`corpus output must be a child of ${scratchRoot}`);
-  }
-}
-
 async function main() {
   const [command = "generate", ...args] = process.argv.slice(2);
-  const options = parseArgs(args);
-  const output = options.output ?? DEFAULT_OUTPUT;
-  const seed = parseSeed(options.seed ?? "0x5eed1234");
+  if (args.length !== 0 && (args.length !== 2 || args[0] !== "--seed")) {
+    throw new Error("usage: node bench/corpus.mjs [generate|validate] [--seed INTEGER]");
+  }
+  const seed = parseSeed(args[1] ?? "0x5eed1234");
   if (command === "generate") {
-    await generateCorpus(output, seed);
-    console.log(`generated and validated corpus at ${resolve(output)} (seed ${seed})`);
+    await generateCorpus(seed);
+    console.log(`generated and validated corpus at ${DEFAULT_OUTPUT} (seed ${seed})`);
   } else if (command === "validate") {
-    await validateCorpus(output, seed);
-    console.log(`validated corpus at ${resolve(output)}`);
+    await validateCorpus(seed);
+    console.log(`validated corpus at ${DEFAULT_OUTPUT}`);
   } else {
-    throw new Error("usage: node bench/corpus.mjs [generate|validate] [--output PATH] [--seed INTEGER]");
+    throw new Error("usage: node bench/corpus.mjs [generate|validate] [--seed INTEGER]");
   }
-}
-
-function parseArgs(args) {
-  const options = {};
-  for (let index = 0; index < args.length; index += 1) {
-    const key = args[index];
-    const value = args[index + 1];
-    if (!["--output", "--seed"].includes(key) || value === undefined) {
-      throw new Error("usage: node bench/corpus.mjs [generate|validate] [--output PATH] [--seed INTEGER]");
-    }
-    options[key.slice(2)] = value;
-    index += 1;
-  }
-  return options;
 }
 
 function parseSeed(value) {
@@ -200,4 +185,6 @@ function parseSeed(value) {
   return seed;
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) await main();
+if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+  await main();
+}
