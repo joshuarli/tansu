@@ -325,10 +325,13 @@ Append-only, one line per judgment call a reader would miss.
 2026-10-14 | G3 | Keep tabs, pins, and recents browser-local; only transient search requests carry unsaved source to the server.
 2026-10-14 | G3 | Derive `resyncRequired` from the event update variant in a server-only constructor, so serialized events cannot contradict their update.
 2026-10-14 | G3 | Cap search and quick-open queries at 1,024 UTF-8 bytes, results at 100, and excerpts at 512 bytes to bound request and response work.
+2026-10-14 | G1 | Refresh block metadata after native input because Firefox could select a stale gutter id; two diagnostic full-suite runs also hit transient editor polling timeouts, while the final three-engine runs passed.
 
 # Campaign log
 
 Append-only, one line per phase end.
+
+2026-10-14 | P0 | `make check`, `make test` (588 TS, 51 Rust, 1 source corpus), `cargo test --workspace -q`, fixture immutability, and all browser suites passed (26 each); idle pre/post perf gates passed, with cold start 3,606.88 ms, editor interactive 91.22 ms, edit-save 39.65 ms, search 110.54 ms, bundle 135,387 B, large-note setValue 11,871.13 ms for 6,214,657 chars.
 
 # For the owner afterwards
 
