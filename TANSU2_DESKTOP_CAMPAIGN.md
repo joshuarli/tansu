@@ -121,7 +121,7 @@ The loop is already fast; no loop-repair item. `make lint-rs` runs `clippy --fix
 | Model/DOM engine | `editor-model`, `editor-normalize`, `cursor-offset`, `render-selection`, `editor-hot-path`, `serialize`, `roundtrip`, `editor.test.ts` internals | Behaviors port to CodeMirror adapter tests (source fidelity, selection, undo, source mode); DOM-model internals are deleted with the engine, reason logged. |
 | Markdown rendering | `markdown`, `highlight`, `inline-patterns`, `extensions` (wiki link, wiki image, callout) | Every case is a live-preview or extension test, or logged as an intentional change. |
 | App/state | `app.test.ts` (27), `state`, `view`, `api`, `note-cache` tests | Re-expressed against the session state machine and new components. |
-| Server | 49 Rust tests; `web/ts/e2e/server.test.ts` (26) | Stay green or are rewritten for v2 with the reason logged. |
+| Server | 49 Rust tests; `web/ts/e2e/server.test.ts` (26) | Six browser cases remain, two are rewritten for V2, one lifecycle case is new, and 18 editor cases have dispositions below. |
 | Search | `src/search.rs` tests; Ferrisearch's 106 inline tests | Port; differential run once against the reference; intentional differences logged. |
 
 A behavior with no test is not done. Break the port on purpose once per area and see its test fail.
@@ -326,12 +326,43 @@ Append-only, one line per judgment call a reader would miss.
 2026-10-14 | G3 | Derive `resyncRequired` from the event update variant in a server-only constructor, so serialized events cannot contradict their update.
 2026-10-14 | G3 | Cap search and quick-open queries at 1,024 UTF-8 bytes, results at 100, and excerpts at 512 bytes to bound request and response work.
 2026-10-14 | G1 | Refresh block metadata after native input because Firefox could select a stale gutter id; two diagnostic full-suite runs also hit transient editor polling timeouts, while the final three-engine runs passed.
+2026-10-14 | INT | Keep the seeded-image, delete-modal, and watcher assertions live while their APP and SRV integration defects remain. Do not replace those user flows with API-only checks.
 
 # Campaign log
 
 Append-only, one line per phase end.
 
 2026-10-14 | P0 | `make check`, `make test` (588 TS, 51 Rust, 1 source corpus), `cargo test --workspace -q`, fixture immutability, and all browser suites passed (26 each); idle pre/post perf gates passed, with cold start 3,606.88 ms, editor interactive 91.22 ms, edit-save 39.65 ms, search 110.54 ms, bundle 135,387 B, large-note setValue 11,871.13 ms for 6,214,657 chars.
+2026-10-14 | INT | Ported the server harness to V2 and added cross-engine lifecycle proof. The lifecycle and delta-edit cases passed in Chromium, Firefox, and WebKit. The full server browser file passed six of nine cases in each engine; all three runs exposed the seeded image render timeout, delete-modal close timeout, and external watcher event timeout.
+
+## INT server browser test dispositions
+
+The reference suite had 26 cases. Six server and UI cases remain. The delta-save and large-note cases now use V2. The lifecycle case adds cross-engine save, search, rename, restart, conflict, and recovery proof. These 18 cases asserted retired editor DOM or V1 routes:
+
+| Reference case | Disposition |
+| --- | --- |
+| `keeps immediate typing after Enter in the visual editor` | The lifecycle case types after Enter and saves the exact Markdown in three browsers. It drops the old paragraph-host DOM check. |
+| `preserves repeated blank lines across autosave` | The lifecycle case presses Enter three times and verifies the saved source. `web/ts/app.test.ts` covers V2 autosave. Old contenteditable line-box counts no longer apply. |
+| `preserves blank lines inserted between typed paragraphs` | The lifecycle case verifies two blank lines between typed paragraphs. It drops the old `.app-editor` layout metrics. |
+| `places the visual cursor after a real blank line when pressing Enter twice` | The lifecycle case types after repeated Enter presses and verifies the saved position in source. CodeMirror owns the cursor and document. |
+| `moves through visible blank lines with arrow keys` | The test measured placeholder lanes in the old contenteditable DOM. CodeMirror owns arrow navigation and exposes document selections. `editor-session.test.ts` covers UTF-16 selection snapshots. |
+| `source mode round trip preserves repeated blank-line geometry and markdown` | `editor-session.test.ts` verifies source mode keeps the same document and does not mark it dirty. The old textarea and placeholder geometry checks were removed. |
+| `handles Enter at paragraph start, middle, and end through model transactions` | CodeMirror owns input transactions. The lifecycle case covers Enter at the end of a heading and preserves exact source. Old custom-model DOM assertions were removed. |
+| `handles Backspace and Delete across text and blank-line boundaries` | CodeMirror owns Backspace and Delete behavior. The old test asserted mutations to placeholder paragraphs in the retired DOM model. |
+| `applies visual block input syntax through model-backed rendering` | CodeMirror parses Markdown source directly. Markdown and extension tests cover rendered syntax. The old live-DOM model summary was removed. |
+| `preserves blank lines when pasting multiline plain text and sanitized HTML` | `editor-session.test.ts` now checks multiline paste preserves empty lines and rich HTML passes through the sanitizer. |
+| `adapts legacy editor typing and inline round-trip regressions` | Markdown round-trip and extension tests cover syntax preservation. The lifecycle case covers live CodeMirror typing and persistence. |
+| `adapts legacy heading, list, and boundary regressions` | CodeMirror owns the source and selection. The lifecycle case enters a heading. Markdown tests cover heading and list syntax. Legacy DOM cursor-host checks were removed. |
+| `adapts legacy autosave, reload, and double-newline loss regressions` | V2 app tests cover autosave. The lifecycle case verifies exact source after restart. Old randomized contenteditable editing sequences were removed. |
+| `adapts legacy save and shortcut integration coverage` | The V2 UI case keeps the Meta or Control search and command shortcuts. The lifecycle case uses the V2 save shortcut. Old `/api/session` and `/api/notes` request checks were retired with those routes. |
+| `covers lists, tasks, and undoable structural editing across the exposed markdown surface` | `editor-session.test.ts` checks a task checkbox changes Markdown in one edit. Markdown tests cover syntax. The old list and task DOM transformations were removed. |
+| `pastes and resizes images through model markdown` | The V2 browser case covers image upload and asset download. `editor-source-operations.test.ts` covers image resizing. App clipboard-to-upload wiring is absent and remains a separate APP finding. |
+| `covers block gutter copy, range selection, replacement, delete, escape, and undo` | The CodeMirror adapter test covers copying and cutting authored source. The new editor has no legacy block-gutter control, so block-handle actions were removed. |
+| `restores markdown and cursor through undo and redo checkpoints` | `editor-session.test.ts` covers independent per-note history. `web/ts/app.test.ts` covers tab selection and scroll restoration. Old DOM cursor markers were removed. |
+
+The old exact-delta request test now exercises `PATCH /api/v2/vaults/:vaultId/notes/:noteId` with a revision precondition, UTF-16 range, and `sourceHash`. The large-note case keeps keyboard editing and V2 persistence, but drops its fixed 2.5-second limit because the campaign runs timing gates only on an idle host.
+
+The startup image-render assertion, delete-modal close assertion, and external watcher event assertion remain in the browser suite. The image render and modal close failures expose APP integration defects. The watcher timeout exposes the SRV event publication gap. All three fail in Chromium, Firefox, and WebKit. None is replaced by a direct API assertion.
 
 # For the owner afterwards
 

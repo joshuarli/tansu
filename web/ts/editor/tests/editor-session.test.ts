@@ -174,6 +174,28 @@ describe("CodeMirror editor sessions", () => {
     expect(editor.getSnapshot()?.source).toBe("start safe linkend");
   });
 
+  it("preserves empty lines in multiline plain-text paste", () => {
+    const { editor, view } = mountEditor("start end");
+    editor.revealSelection({ anchor: 6, head: 6 });
+    const paste = new Event("paste", { bubbles: true, cancelable: true }) as ClipboardEvent;
+    Object.defineProperty(paste, "clipboardData", {
+      value: { getData: (type: string) => type === "text/plain" ? "first\n\nthird" : "" },
+    });
+    view.contentDOM.dispatchEvent(paste);
+
+    expect(editor.getSnapshot()?.source).toBe("start first\n\nthirdend");
+  });
+
+  it("toggles a task checkbox as one source edit", () => {
+    const { container, editor } = mountEditor("- [ ] task");
+    const task = container.querySelector<HTMLInputElement>(".cm-atomic-task-checkbox");
+    if (task === null) throw new Error("task checkbox was not rendered");
+
+    task.click();
+
+    expect(editor.getSnapshot()).toMatchObject({ source: "- [x] task", revision: 1, dirty: true });
+  });
+
   it("copies and cuts the selected authored Markdown source", () => {
     const { editor, view } = mountEditor("before **bold** after");
     const written = new Map<string, string>();

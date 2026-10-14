@@ -8,7 +8,7 @@ use tansu2::auth::{AuthError, AuthStore};
 use tansu2::config::{AuthConfig, Config, load_config, prepare_auth_state_directory};
 use tansu2::http::{
     EventEnvelope, EventSource, EventSourceError, EventSubscription, EventSubscriptionStream,
-    ServerServices, serve, serve_with_services,
+    ServerServices, serve_with_services,
 };
 use tansu2::vault::{V2EventEnvelope, V2EventSubscription};
 
@@ -40,25 +40,25 @@ fn run() -> tansu2::Result<()> {
 fn run_server(config: Config, port: u16) -> tansu2::Result<()> {
     let auth_config = config.auth.clone();
     let app = App::new(config)?;
-    let Some(auth_config) = auth_config else {
-        return serve(app, port);
-    };
-    prepare_auth_state_directory(&auth_config)?;
-    let auth = Arc::new(
-        AuthStore::open(
-            auth_config.state_directory(),
-            auth_config.policy().clone(),
-            SESSION_TTL_SECS,
-            OWNER_VERIFICATION_TTL_SECS,
-        )
-        .map_err(auth_error)?,
-    );
+    let auth = auth_config
+        .map(|auth_config| {
+            prepare_auth_state_directory(&auth_config)?;
+            AuthStore::open(
+                auth_config.state_directory(),
+                auth_config.policy().clone(),
+                SESSION_TTL_SECS,
+                OWNER_VERIFICATION_TTL_SECS,
+            )
+            .map(Arc::new)
+            .map_err(auth_error)
+        })
+        .transpose()?;
     let events: Arc<dyn EventSource> = Arc::new(AppEventSource(app.clone()));
     serve_with_services(
         app,
         port,
         ServerServices {
-            auth: Some(auth),
+            auth,
             events: Some(events),
         },
     )
