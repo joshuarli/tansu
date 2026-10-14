@@ -23,15 +23,6 @@ Next: 21
 - **Effort:** M
 - **Design:** `docs/rfcs/0001-webauthn-counter-policy.md`
 
-### TNS-9 · P2 · Reject symlinks during legacy state migration
-
-- **Area:** Filesystem security
-- **Where:** `src/vault.rs:3359-3390`
-- **Problem:** Legacy `.tansu` migration uses path APIs that follow symlinks. A symlinked directory or child can make startup copy files from outside the vault or recurse through a symlink loop.
-- **Recommendation:** Reject symlinks in the legacy tree and copy through handle-relative operations that do not follow replaced path components.
-- **Fix with:** os-boundaries
-- **Effort:** M
-
 ### TNS-10 · P2 · Resolve HTML import when the file picker is canceled
 
 - **Area:** Browser import lifecycle

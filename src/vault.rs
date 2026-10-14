@@ -1,4 +1,4 @@
-use std::fs;
+use std::fs::{self, File};
 use std::collections::{HashMap, VecDeque};
 use std::path::{Component, Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, Sender, SyncSender, TryRecvError, TrySendError};
@@ -3403,18 +3403,124 @@ fn state_dir_is_empty(path: &Path) -> Result<bool> {
     }
 }
 
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 fn copy_dir_recursive(from: &Path, to: &Path) -> Result<()> {
+    use rustix::fs::{Mode, OFlags, open, openat};
+
+    let flags = OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC;
+    let parent = from
+        .parent()
+        .ok_or_else(|| Error::BadRequest("legacy state has no parent directory".to_string()))?;
+    let name = from
+        .file_name()
+        .ok_or_else(|| Error::BadRequest("legacy state has no directory name".to_string()))?;
+    let parent = File::from(open(parent, flags, Mode::empty()).map_err(|error| Error::Io(error.into()))?);
+    let source = File::from(
+        openat(&parent, name, flags, Mode::empty())
+            .map_err(|error| Error::Io(error.into()))?,
+    );
     fs::create_dir_all(to)?;
-    for entry in fs::read_dir(from)? {
-        let entry = entry?;
-        let source = entry.path();
-        let target = to.join(entry.file_name());
-        if source.is_dir() {
-            copy_dir_recursive(&source, &target)?;
+    let destination = File::from(
+        open(to, flags, Mode::empty()).map_err(|error| Error::Io(error.into()))?,
+    );
+    match copy_legacy_directory_contents(&source, &destination, from) {
+        Ok(()) => Ok(()),
+        Err(error) => match fs::remove_dir_all(to) {
+            Ok(()) => Err(error),
+            Err(cleanup_error)
+                if cleanup_error.kind() == std::io::ErrorKind::NotFound =>
+            {
+                Err(error)
+            }
+            Err(cleanup_error) => Err(Error::Internal(format!(
+                "legacy state migration failed: {error}; destination cleanup failed: {cleanup_error}"
+            ))),
+        },
+    }
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+fn copy_dir_recursive(_from: &Path, _to: &Path) -> Result<()> {
+    Err(Error::Internal(
+        "legacy state migration is unsupported on this platform".to_string(),
+    ))
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn copy_legacy_directory_contents(
+    source: &File,
+    destination: &File,
+    source_path: &Path,
+) -> Result<()> {
+    use rustix::fs::{AtFlags, FileType, Mode, OFlags, mkdirat, openat, statat};
+    use std::io;
+
+    for entry in fs::read_dir(source_path)? {
+        let name = entry?.file_name();
+        let metadata = statat(source, &name, AtFlags::SYMLINK_NOFOLLOW)
+            .map_err(|error| Error::Io(error.into()))?;
+        let kind = FileType::from_raw_mode(metadata.st_mode);
+        if kind.is_symlink() {
+            return Err(Error::BadRequest(
+                "legacy state cannot contain symlinks".to_string(),
+            ));
+        }
+        if kind.is_dir() {
+            mkdirat(destination, &name, Mode::RUSR | Mode::WUSR | Mode::XUSR)
+                .map_err(|error| Error::Io(error.into()))?;
+            let flags = OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC;
+            let source_child = File::from(
+                openat(source, &name, flags, Mode::empty())
+                    .map_err(|error| Error::Io(error.into()))?,
+            );
+            let destination_child = File::from(
+                openat(destination, &name, flags, Mode::empty())
+                    .map_err(|error| Error::Io(error.into()))?,
+            );
+            copy_legacy_directory_contents(
+                &source_child,
+                &destination_child,
+                &source_path.join(&name),
+            )?;
+            destination_child.sync_all()?;
+        } else if kind.is_file() {
+            let source_file = File::from(
+                openat(
+                    source,
+                    &name,
+                    OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC | OFlags::NONBLOCK,
+                    Mode::empty(),
+                )
+                .map_err(|error| Error::Io(error.into()))?,
+            );
+            if !source_file.metadata()?.is_file() {
+                return Err(Error::BadRequest(
+                    "legacy state contains a non-regular file".to_string(),
+                ));
+            }
+            let mut destination_file = File::from(
+                openat(
+                    destination,
+                    &name,
+                    OFlags::WRONLY
+                        | OFlags::CREATE
+                        | OFlags::EXCL
+                        | OFlags::NOFOLLOW
+                        | OFlags::CLOEXEC,
+                    Mode::RUSR | Mode::WUSR,
+                )
+                .map_err(|error| Error::Io(error.into()))?,
+            );
+            let mut source_file = source_file;
+            io::copy(&mut source_file, &mut destination_file)?;
+            destination_file.sync_all()?;
         } else {
-            fs::copy(&source, &target)?;
+            return Err(Error::BadRequest(
+                "legacy state contains a special file".to_string(),
+            ));
         }
     }
+    destination.sync_all()?;
     Ok(())
 }
 
@@ -5316,6 +5422,90 @@ mod tests {
             vault.bootstrap(vec![], 0).unwrap().notes[0].note_id,
             legacy_note.note_id
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn legacy_state_migration_rejects_symlinked_children() {
+        use std::os::unix::fs::symlink;
+
+        let dir = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let legacy_state = dir.path().join(".tansu");
+        let state_path = dir.path().join("state");
+        fs::create_dir_all(&legacy_state).unwrap();
+        let mut catalog = Catalog::open(&legacy_state.join("vault.db")).unwrap();
+        reconcile_vault(dir.path(), &legacy_state, &mut catalog, &[]).unwrap();
+        drop(catalog);
+        fs::write(outside.path().join("secret"), b"outside").unwrap();
+        symlink(
+            outside.path().join("secret"),
+            legacy_state.join("linked-file"),
+        )
+        .unwrap();
+        symlink(outside.path(), legacy_state.join("linked-directory")).unwrap();
+
+        let result = VaultRuntime::open(
+            0,
+            &VaultConfig {
+                name: "Test".to_string(),
+                path: dir.path().to_path_buf(),
+                state_path: state_path.clone(),
+                excluded_folders: Vec::new(),
+            },
+            LogHub::new(crate::logging::LogMode::Off),
+        );
+
+        assert!(result.is_err());
+        assert!(!state_path.join("vault.db").exists());
+        assert!(!state_path.join("linked-file").exists());
+        assert!(!state_path.join("linked-directory/secret").exists());
+
+        let retry = VaultRuntime::open(
+            0,
+            &VaultConfig {
+                name: "Test".to_string(),
+                path: dir.path().to_path_buf(),
+                state_path: state_path.clone(),
+                excluded_folders: Vec::new(),
+            },
+            LogHub::new(crate::logging::LogMode::Off),
+        );
+
+        assert!(retry.is_err());
+        assert!(!state_path.join("vault.db").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn legacy_state_migration_rejects_symlinked_root() {
+        use std::os::unix::fs::symlink;
+
+        let dir = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let external_legacy_state = outside.path().join("legacy");
+        let legacy_state = dir.path().join(".tansu");
+        let state_path = dir.path().join("state");
+        fs::create_dir_all(&external_legacy_state).unwrap();
+        let mut catalog = Catalog::open(&external_legacy_state.join("vault.db")).unwrap();
+        reconcile_vault(dir.path(), &external_legacy_state, &mut catalog, &[]).unwrap();
+        drop(catalog);
+        symlink(&external_legacy_state, &legacy_state).unwrap();
+
+        let result = VaultRuntime::open(
+            0,
+            &VaultConfig {
+                name: "Test".to_string(),
+                path: dir.path().to_path_buf(),
+                state_path: state_path.clone(),
+                excluded_folders: Vec::new(),
+            },
+            LogHub::new(crate::logging::LogMode::Off),
+        );
+
+        assert!(result.is_err());
+        assert!(!state_path.join("vault.db").exists());
+        assert!(external_legacy_state.join("vault.db").exists());
     }
 
     fn test_vault_with_note(path: &str, content: &str) -> VaultRuntime {
