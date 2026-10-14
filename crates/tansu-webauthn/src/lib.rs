@@ -264,7 +264,7 @@ impl RelyingParty {
         let attest = decode_cbor_exact(&attest_bytes)
             .map_err(|error| WebAuthnError::InvalidAttestation(format!("attestationObject CBOR: {error}")))?;
         reject_duplicate_cbor_map_keys(&attest)
-            .map_err(|error| WebAuthnError::InvalidAttestation(error))?;
+            .map_err(WebAuthnError::InvalidAttestation)?;
 
         let fmt = cbor_get_text(&attest, "fmt").ok_or_else(|| {
             WebAuthnError::InvalidAttestation("missing fmt in attestationObject".into())
@@ -329,8 +329,6 @@ impl RelyingParty {
     }
 
     #[allow(deprecated)]
-
-
     pub fn finish_authentication(
         &self,
         response: &AuthenticationResponse,
@@ -821,7 +819,7 @@ mod tests {
             auth_data.extend_from_slice(&[0u8; 16]);
             auth_data.extend_from_slice(&(credential_id.len() as u16).to_be_bytes());
             auth_data.extend_from_slice(credential_id);
-            auth_data.extend_from_slice(&cose_key);
+            auth_data.extend_from_slice(cose_key);
             auth_data
         }
 

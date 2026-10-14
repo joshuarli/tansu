@@ -97,20 +97,18 @@ pub(crate) fn execute(
         (results, effective_fuzziness)
     };
 
+    let result_context = SearchResultContext {
+        searcher: &searcher,
+        index,
+        terms: &all_terms,
+        fuzzy_terms: &parsed.terms,
+        fuzziness,
+        options,
+    };
     let mut results = top_docs
         .into_iter()
         .filter_map(|(score, address)| {
-            make_result(
-                &searcher,
-                index,
-                address,
-                score,
-                &all_terms,
-                &parsed.terms,
-                fuzziness,
-                options,
-            )
-            .transpose()
+            make_result(&result_context, address, score).transpose()
         })
         .collect::<Result<Vec<_>, SearchError>>()?;
     results.truncate(options.limit.get());
@@ -217,16 +215,29 @@ fn build_search_query(
     Box::new(BooleanQuery::new(must_clauses))
 }
 
-fn make_result(
-    searcher: &Searcher,
-    index: &IndexManager,
-    address: DocAddress,
-    score: f32,
-    terms: &[String],
-    fuzzy_terms: &[String],
+#[derive(Clone, Copy)]
+struct SearchResultContext<'a> {
+    searcher: &'a Searcher,
+    index: &'a IndexManager,
+    terms: &'a [String],
+    fuzzy_terms: &'a [String],
     fuzziness: Fuzziness,
     options: SearchOptions,
+}
+
+fn make_result(
+    context: &SearchResultContext<'_>,
+    address: DocAddress,
+    score: f32,
 ) -> Result<Option<SearchResult>, SearchError> {
+    let SearchResultContext {
+        searcher,
+        index,
+        terms,
+        fuzzy_terms,
+        fuzziness,
+        options,
+    } = *context;
     let document = searcher.doc::<TantivyDocument>(address)?;
     let note_id = doc_text(&document, index.fields().note_id);
     let path = doc_text(&document, index.fields().path);
@@ -543,11 +554,11 @@ fn osa_distance(left: &str, right: &str) -> usize {
         return 3;
     }
     let mut matrix = vec![vec![0; right.len() + 1]; left.len() + 1];
-    for row in 0..=left.len() {
-        matrix[row][0] = row;
+    for (row, values) in matrix.iter_mut().enumerate() {
+        values[0] = row;
     }
-    for column in 0..=right.len() {
-        matrix[0][column] = column;
+    for (column, value) in matrix[0].iter_mut().enumerate() {
+        *value = column;
     }
     for row in 1..=left.len() {
         for column in 1..=right.len() {
@@ -593,12 +604,11 @@ fn build_excerpt(
     let budget = MAX_EXCERPT_BYTES.saturating_sub(prefix + 3);
     let mut end = floor_char_boundary(content, (start + budget).min(content.len()));
     if end < content.len() {
-        if let Some(boundary) = content[start..end].rfind(char::is_whitespace) {
-            let candidate = start + boundary;
-            if candidate > first_start {
-                end = candidate;
-            }
-        }
+        end = content[start..end]
+            .rfind(char::is_whitespace)
+            .map(|boundary| start + boundary)
+            .filter(|candidate| *candidate > first_start)
+            .unwrap_or(end);
     }
     let suffix = end < content.len();
     let mut excerpt = String::new();
@@ -745,8 +755,8 @@ mod tests {
     #[test]
     fn single_file_filter() {
         let index = setup_index(vec![doc("one", "alpha"), doc("two", "alpha")]);
-        assert_eq!(index.has_document("one").unwrap(), true);
-        assert_eq!(index.has_document("missing").unwrap(), false);
+        assert!(index.has_document("one").unwrap());
+        assert!(!index.has_document("missing").unwrap());
     }
 
     #[test]
@@ -926,7 +936,7 @@ mod tests {
             },
         );
         assert_eq!(hits.len(), 1);
-        assert!(hits[0].excerpt_ranges.len() > 0);
+        assert!(!hits[0].excerpt_ranges.is_empty());
     }
 
     #[test]
