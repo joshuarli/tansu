@@ -375,12 +375,18 @@ function decodeLegacyWorkspacePayload(value: unknown): LegacyWorkspacePayload | 
 
 export function decodeV2NoteMeta(value: unknown): V2NoteMeta {
   const body = record(value, "note metadata");
-  const sourceHash = hash(field(body, "sourceHash"), "sourceHash", "sha256-v2:");
-  const diskHash = hash(field(body, "diskHash"), "diskHash", "sha256:");
-  if (integer(field(body, "sourceHashFormatVersion"), "sourceHashFormatVersion", 2, 2) !== 2 ||
-    integer(field(body, "diskHashFormatVersion"), "diskHashFormatVersion", 1, 1) !== 1) {
-    throw new V2ProtocolError("Unsupported note hash format version");
-  }
+  const sourceHash = hash(field(body, "sourceHash"), "sourceHash", "source");
+  const diskHash = hash(field(body, "diskHash"), "diskHash", "disk");
+  const sourceHashFormatVersion = hashVersion(
+    sourceHash,
+    integer(field(body, "sourceHashFormatVersion"), "sourceHashFormatVersion", 1, 3),
+    "source",
+  );
+  const diskHashFormatVersion = hashVersion(
+    diskHash,
+    integer(field(body, "diskHashFormatVersion"), "diskHashFormatVersion", 1, 2),
+    "disk",
+  );
   return {
     noteId: nonEmptyString(field(body, "noteId"), "noteId"),
     path: string(field(body, "path"), "path"),
@@ -389,8 +395,8 @@ export function decodeV2NoteMeta(value: unknown): V2NoteMeta {
     revision: integer(field(body, "revision"), "revision"),
     sourceHash,
     diskHash,
-    sourceHashFormatVersion: 2,
-    diskHashFormatVersion: 1,
+    sourceHashFormatVersion,
+    diskHashFormatVersion,
     updatedAtMs: integer(field(body, "updatedAtMs"), "updatedAtMs"),
   };
 }
@@ -481,13 +487,13 @@ export function decodeV2ApiErrorResponse(value: unknown): V2ApiErrorResponse {
       break;
     }
     case "source_hash_mismatch": {
-      decoded["expected"] = hash(field(error, "expected"), "expected", "sha256-v2:");
-      decoded["received"] = hash(field(error, "received"), "received", "sha256-v2:");
+      decoded["expected"] = hash(field(error, "expected"), "expected", "source");
+      decoded["received"] = hash(field(error, "received"), "received", "source");
       break;
     }
     case "disk_hash_mismatch": {
-      decoded["expected"] = hash(field(error, "expected"), "expected", "sha256:");
-      decoded["received"] = hash(field(error, "received"), "received", "sha256:");
+      decoded["expected"] = hash(field(error, "expected"), "expected", "disk");
+      decoded["received"] = hash(field(error, "received"), "received", "disk");
       break;
     }
     case "request_too_large": {
@@ -652,8 +658,8 @@ function decodeV2ConflictDraftMeta(value: unknown) {
     draftId: positiveSafeInteger(field(body, "draftId"), "draftId"),
     noteId: nonEmptyString(field(body, "noteId"), "noteId"),
     baseRevision: integer(field(body, "baseRevision"), "baseRevision"),
-    baseSourceHash: hash(field(body, "baseSourceHash"), "baseSourceHash", "sha256-v2:"),
-    sourceHash: hash(field(body, "sourceHash"), "sourceHash", "sha256-v2:"),
+    baseSourceHash: hash(field(body, "baseSourceHash"), "baseSourceHash", "source"),
+    sourceHash: hash(field(body, "sourceHash"), "sourceHash", "source"),
     createdAtMs: integer(field(body, "createdAtMs"), "createdAtMs"),
   };
 }
@@ -675,7 +681,7 @@ function decodeV2RevisionMeta(value: unknown): V2RevisionMeta {
     source: oneOf(field(body, "source"), "source", ["user", "import", "external", "repair"]),
     sourceHash: field(body, "sourceHash") === null
       ? null
-      : hash(field(body, "sourceHash"), "sourceHash", "sha256-v2:"),
+      : hash(field(body, "sourceHash"), "sourceHash", "source"),
     createdAtMs: integer(field(body, "createdAtMs"), "createdAtMs"),
   };
 }
@@ -761,7 +767,7 @@ function decodeSearchIdentity(value: unknown): V2SearchResponse["hits"][number][
       kind,
       noteId: nonEmptyString(field(body, "noteId"), "noteId"),
       revision: positiveSafeInteger(field(body, "revision"), "revision"),
-      sourceHash: hash(field(body, "sourceHash"), "sourceHash", "sha256-v2:"),
+      sourceHash: hash(field(body, "sourceHash"), "sourceHash", "source"),
     };
   }
   if (kind === "savedOverlay") {
@@ -769,7 +775,7 @@ function decodeSearchIdentity(value: unknown): V2SearchResponse["hits"][number][
       kind,
       noteId: nonEmptyString(field(body, "noteId"), "noteId"),
       localRevision: integer(field(body, "localRevision"), "localRevision"),
-      sourceHash: hash(field(body, "sourceHash"), "sourceHash", "sha256-v2:"),
+      sourceHash: hash(field(body, "sourceHash"), "sourceHash", "source"),
     };
   }
   if (kind === "newLocalDraft") {
@@ -777,7 +783,7 @@ function decodeSearchIdentity(value: unknown): V2SearchResponse["hits"][number][
       kind,
       localId: nonEmptyString(field(body, "localId"), "localId"),
       localRevision: integer(field(body, "localRevision"), "localRevision"),
-      sourceHash: hash(field(body, "sourceHash"), "sourceHash", "sha256-v2:"),
+      sourceHash: hash(field(body, "sourceHash"), "sourceHash", "source"),
     };
   }
   return fail("Unknown search hit identity");
@@ -800,7 +806,7 @@ function decodeV2QuickOpenResponse(value: unknown): V2QuickOpenResponse {
       const hit = record(item, "quick-open hit");
       return {
         noteId: nonEmptyString(field(hit, "noteId"), "noteId"),
-        sourceHash: hash(field(hit, "sourceHash"), "sourceHash", "sha256-v2:"),
+        sourceHash: hash(field(hit, "sourceHash"), "sourceHash", "source"),
         title: string(field(hit, "title"), "title"),
         path: string(field(hit, "path"), "path"),
         score: finiteNumber(field(hit, "score"), "score"),
@@ -1029,12 +1035,25 @@ function assertMutationIdValue(value: string): void {
   }
 }
 
-function hash(value: unknown, name: string, prefix: "sha256:" | "sha256-v2:"): string {
+function hash(value: unknown, name: string, family: "source" | "disk"): string {
   const result = string(value, name);
-  if (!new RegExp(`^${prefix}[0-9a-f]{64}$`).test(result)) {
+  const prefixes = family === "source"
+    ? ["blake3-v3:", "sha256-v2:", "sha256:"]
+    : ["blake3-v2:", "sha256:"];
+  if (!prefixes.some((prefix) => new RegExp(`^${prefix}[0-9a-f]{64}$`).test(result))) {
     throw new V2ProtocolError(`${name} is not a supported hash`);
   }
   return result;
+}
+
+function hashVersion(hash: string, version: number, family: "source" | "disk"): number {
+  const prefix = family === "source"
+    ? version === 1 ? "sha256:" : version === 2 ? "sha256-v2:" : version === 3 ? "blake3-v3:" : null
+    : version === 1 ? "sha256:" : version === 2 ? "blake3-v2:" : null;
+  if (prefix === null || !hash.startsWith(prefix)) {
+    throw new V2ProtocolError("Hash format version does not match its value");
+  }
+  return version;
 }
 
 function record(value: unknown, name: string): Record<string, unknown> {

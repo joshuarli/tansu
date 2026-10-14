@@ -24,9 +24,9 @@ import type {
 } from "./types.generated.ts";
 import type { DraftJournalRecord, LocalDraftJournalRecord, WorkspaceState, WorkspaceTab } from "./app/workspace-store.ts";
 
-const HASH_A = `sha256-v2:${"a".repeat(64)}`;
-const HASH_B = `sha256-v2:${"b".repeat(64)}`;
-const DISK_HASH = `sha256:${"c".repeat(64)}`;
+const HASH_A = `blake3-v3:${"a".repeat(64)}`;
+const HASH_B = `blake3-v3:${"b".repeat(64)}`;
+const DISK_HASH = `blake3-v2:${"c".repeat(64)}`;
 const DEFAULT_VAULT = "vault-1";
 
 type TestClient = ReturnType<typeof createTestClient>;
@@ -639,7 +639,7 @@ describe("v2 desktop shell", () => {
     root.querySelector<HTMLButtonElement>(".note-dialog-panel .primary-button")?.click();
     await flushAsync();
     const request = client.createNote.mock.calls[0]![0];
-    expect(request).toMatchObject({ path: "meeting-notes.md", content: "", sourceHash: expect.stringMatching(/^sha256-v2:/) });
+    expect(request).toMatchObject({ path: "meeting-notes.md", content: "", sourceHash: expect.stringMatching(/^blake3-v3:/) });
     expect(root.querySelector<HTMLInputElement>(".note-dialog-panel input")?.disabled).toBeTruthy();
     expect(root.querySelector<HTMLButtonElement>(".note-dialog-panel .primary-button")?.textContent).toBe("Retry create");
     pending.resolve({ mutationId: request.mutationId, outcome: { state: "pendingMaterialization", operationId: "op-1" } });
@@ -1502,7 +1502,7 @@ function mountApp(services: AppServices = createServices()): { app: TansuApp; ro
 }
 
 function noteMeta(id: string, path: string, title: string, tags: string[] = [], revision = 1, sourceHash = HASH_A): V2NoteMeta {
-  return { noteId: id, path, title, tags, revision, sourceHash, diskHash: DISK_HASH, sourceHashFormatVersion: 2, diskHashFormatVersion: 1, updatedAtMs: revision };
+  return { noteId: id, path, title, tags, revision, sourceHash, diskHash: DISK_HASH, sourceHashFormatVersion: 3, diskHashFormatVersion: 2, updatedAtMs: revision };
 }
 
 function documentFor(meta: V2NoteMeta, content: string): V2NoteDocument { return { meta, content }; }

@@ -96,6 +96,11 @@ describe("private workspace storage", () => {
       titleRevision: 2,
       titleMutationId: "title-mutation-2",
     });
+    expect(decodeDraftJournalRecord({
+      ...valid,
+      baseSourceHash: hash("a", "sha256-v2:"),
+      baseDiskHash: hash("a", "sha256:"),
+    })).toMatchObject({ baseSourceHash: expect.stringMatching(/^sha256-v2:/), baseDiskHash: expect.stringMatching(/^sha256:/) });
     expect(() => decodeDraftJournalRecord({ ...valid, baseSourceHash: "sha256:old" })).toThrow(ClientStorageFailureError);
     expect(() => decodeDraftJournalRecord({ ...valid, selection: { anchor: 99, head: 99 } })).toThrow(ClientStorageFailureError);
     expect(() => decodeDraftJournalRecord({ ...valid, titleRevision: -1 })).toThrow(ClientStorageFailureError);
@@ -282,7 +287,7 @@ function draftRecord(baseRevision: number, source: string): DraftJournalRecord {
     noteId: "note-1",
     baseRevision,
     baseSourceHash: hash(String(baseRevision)),
-    baseDiskHash: hash(String(baseRevision), "sha256:"),
+    baseDiskHash: hash(String(baseRevision), "blake3-v2:"),
     localRevision: baseRevision,
     mutationId: `mutation-${baseRevision}`,
     source,
@@ -316,7 +321,10 @@ function localDraftRecord(
 
 type IsAssignable<Source, Target> = [Source] extends [Target] ? true : false;
 
-function hash(value: string, prefix: "sha256:" | "sha256-v2:" = "sha256-v2:"): string {
+function hash(
+  value: string,
+  prefix: "blake3-v2:" | "blake3-v3:" | "sha256:" | "sha256-v2:" = "blake3-v3:",
+): string {
   return `${prefix}${value.charCodeAt(0).toString(16).padStart(64, "0")}`;
 }
 

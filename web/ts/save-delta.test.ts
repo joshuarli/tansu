@@ -40,9 +40,9 @@ describe("save delta", () => {
     ]);
   });
 
-  it("normalizes CRLF and computes canonical hashes", async () => {
+  it("normalizes CRLF and computes BLAKE3 source hashes", async () => {
     await expect(canonicalContentHash("# A\n")).resolves.toBe(
-      "sha256:ec054cdfbe2628ecb67e5d3e6e2dc4b72d60b3b041eb05d67c44c8333bf21481",
+      "blake3-v3:83c0644fd4a5e2389d802f496de4b3a0df19f6f64ae165556fac2e91cbb14c1f",
     );
     await expect(
       buildSaveNoteDeltaRequest("# A\r\n", "# B\n", 3, "sha256:base", false),
@@ -54,11 +54,11 @@ describe("save delta", () => {
     });
   });
 
-  it("uses the v2 source hash format over LF-normalized editor source", async () => {
+  it("uses source hashes over LF-normalized editor source", async () => {
     const lf = await canonicalSourceHash("# A\n");
 
     await expect(canonicalSourceHash("# A\r\n")).resolves.toBe(lf);
-    expect(lf).toMatch(/^sha256-v2:[0-9a-f]{64}$/);
-    expect(lf).not.toBe(await canonicalContentHash("# A\n"));
+    expect(lf).toMatch(/^blake3-v3:[0-9a-f]{64}$/);
+    await expect(canonicalContentHash("# A\n")).resolves.toBe(lf);
   });
 });

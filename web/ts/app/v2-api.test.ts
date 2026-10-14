@@ -14,7 +14,7 @@ import {
 import type { V2ApiErrorKind, V2NoteMeta, V2ServerEvent } from "../types.generated.ts";
 
 const sourceHash = hash("a");
-const diskHash = hash("b", "sha256:");
+const diskHash = hash("b", "blake3-v2:");
 
 describe("v2 API client", () => {
   it("decodes the one-time legacy workspace import seed", () => {
@@ -124,6 +124,17 @@ describe("v2 API client", () => {
 
   it("decodes bounded v2 data and rejects incompatible hashes and event flags", () => {
     expect(decodeV2NoteMeta(noteMeta("n")).revision).toBe(1);
+    const legacyMeta = {
+      ...noteMeta("old"),
+      sourceHash: hash("c", "sha256-v2:"),
+      diskHash: hash("d", "sha256:"),
+      sourceHashFormatVersion: 2,
+      diskHashFormatVersion: 1,
+    };
+    expect(decodeV2NoteMeta(legacyMeta)).toMatchObject({
+      sourceHashFormatVersion: 2,
+      diskHashFormatVersion: 1,
+    });
     expect(decodeV2ServerEvent({
       eventVersion: 0,
       resyncRequired: false,
@@ -131,7 +142,7 @@ describe("v2 API client", () => {
     }).eventVersion).toBe(0);
     expect(() => decodeV2NoteMeta({ ...noteMeta("n"), revision: Number.MAX_SAFE_INTEGER + 1 })).toThrow(V2ProtocolError);
     expect(() => decodeV2NoteMeta({ ...noteMeta("n"), sourceHash: "sha256:old" })).toThrow(V2ProtocolError);
-    expect(() => decodeV2NoteMeta({ ...noteMeta("n"), sourceHashFormatVersion: 1 })).toThrow(V2ProtocolError);
+    expect(() => decodeV2NoteMeta({ ...noteMeta("n"), sourceHashFormatVersion: 2 })).toThrow(V2ProtocolError);
     expect(() => decodeV2ServerEvent({
       eventVersion: 2,
       resyncRequired: true,
@@ -308,8 +319,8 @@ function noteMeta(noteId: string): V2NoteMeta {
     revision: 1,
     sourceHash,
     diskHash,
-    sourceHashFormatVersion: 2,
-    diskHashFormatVersion: 1,
+    sourceHashFormatVersion: 3,
+    diskHashFormatVersion: 2,
     updatedAtMs: 10,
   };
 }
@@ -351,7 +362,10 @@ function settings() {
   };
 }
 
-function hash(value: string, prefix: "sha256:" | "sha256-v2:" = "sha256-v2:"): string {
+function hash(
+  value: string,
+  prefix: "blake3-v2:" | "blake3-v3:" | "sha256:" | "sha256-v2:" = "blake3-v3:",
+): string {
   const hex = value.charCodeAt(0).toString(16).padStart(64, "0");
   return `${prefix}${hex}`;
 }

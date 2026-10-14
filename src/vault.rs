@@ -46,8 +46,8 @@ const EVENT_REPLAY_LIMIT: usize = 512;
 const EVENT_SUBSCRIBER_CAPACITY: usize = 64;
 const SEARCH_QUEUE_CAPACITY: usize = 128;
 
-fn v2_note_meta(meta: &NoteMeta, disk_hash: &str) -> V2NoteMeta {
-    V2NoteMeta {
+fn v2_note_meta(meta: &NoteMeta, disk_hash: &str) -> Result<V2NoteMeta> {
+    Ok(V2NoteMeta {
         note_id: meta.note_id.clone(),
         path: meta.path.clone(),
         title: meta.title.clone(),
@@ -55,10 +55,10 @@ fn v2_note_meta(meta: &NoteMeta, disk_hash: &str) -> V2NoteMeta {
         revision: meta.seq,
         source_hash: meta.content_hash.clone(),
         disk_hash: disk_hash.to_string(),
-        source_hash_format_version: if meta.content_hash.starts_with("sha256-v2:") { 2 } else { 1 },
-        disk_hash_format_version: 1,
+        source_hash_format_version: history::source_hash_format_version(&meta.content_hash)?,
+        disk_hash_format_version: history::disk_hash_format_version(disk_hash)?,
         updated_at_ms: meta.updated_at_ms,
-    }
+    })
 }
 
 pub struct VaultRuntime {
@@ -134,19 +134,67 @@ fn validate_mutation_id(mutation_id: &str) -> V2Result<()> {
     Ok(())
 }
 
-fn v2_request_hash<T: serde::Serialize>(kind: &str, target: Option<&str>, request: &T) -> V2Result<String> {
-    Ok(history::disk_hash(&serde_json::to_vec(&(kind, target, request))?))
+struct V2PayloadHashes {
+    current: String,
+    legacy: String,
+}
+
+impl V2PayloadHashes {
+    fn matches(&self, hash: &str) -> bool {
+        self.current == hash || self.legacy == hash
+    }
+}
+
+fn v2_request_hash<T: serde::Serialize>(kind: &str, target: Option<&str>, request: &T) -> V2Result<V2PayloadHashes> {
+    let bytes = serde_json::to_vec(&(kind, target, request))?;
+    Ok(V2PayloadHashes {
+        current: history::disk_hash(&bytes),
+        legacy: history::legacy_disk_hash(&bytes),
+    })
+}
+
+fn v2_request_hash_for_source<T: serde::Serialize>(
+    kind: &str,
+    target: Option<&str>,
+    request: &T,
+    content: &str,
+) -> V2Result<V2PayloadHashes> {
+    let bytes = serde_json::to_vec(&(kind, target, request))?;
+    let current_source_hash = serde_json::to_string(&history::source_hash(content))?;
+    let legacy_source_hash = serde_json::to_string(&history::legacy_source_hash_v2(content))?;
+    let current_field = format!("\"sourceHash\":{current_source_hash}");
+    let legacy_field = format!("\"sourceHash\":{legacy_source_hash}");
+    let serialized = std::str::from_utf8(&bytes)
+        .map_err(|_| Error::Internal("serialized mutation payload is not UTF-8".to_string()))?
+        .to_string();
+    let mut matches = serialized.match_indices(&current_field);
+    let Some((start, _)) = matches.next() else {
+        return Err(Error::Internal("mutation payload has no sourceHash field".to_string()).into());
+    };
+    if matches.next().is_some() {
+        return Err(Error::Internal("mutation payload has duplicate sourceHash fields".to_string()).into());
+    }
+    let mut legacy_bytes = serialized;
+    legacy_bytes.replace_range(start..start + current_field.len(), &legacy_field);
+    Ok(V2PayloadHashes {
+        current: history::disk_hash(&bytes),
+        legacy: history::legacy_disk_hash(legacy_bytes.as_bytes()),
+    })
+}
+
+fn v2_legacy_request_hash<T: serde::Serialize>(kind: &str, target: Option<&str>, request: &T) -> V2Result<String> {
+    Ok(history::legacy_disk_hash(&serde_json::to_vec(&(kind, target, request))?))
 }
 
 fn v2_existing_result<T: DeserializeOwned>(
     catalog: &mut Catalog,
     mutation_id: &str,
-    payload_hash: &str,
+    payload_hash: &V2PayloadHashes,
 ) -> V2Result<Option<T>> {
     let Some(record) = catalog.mutation(mutation_id)? else {
         return Ok(None);
     };
-    if record.payload_hash != payload_hash {
+    if !payload_hash.matches(&record.payload_hash) {
         return Err(V2VaultError::Api(V2ApiErrorKind::MutationIdReuse {
             mutation_id: mutation_id.to_string(),
         }));
@@ -176,12 +224,12 @@ fn v2_existing_mutation(
     state_root: &Path,
     catalog: &mut Catalog,
     mutation_id: &str,
-    payload_hash: &str,
+    payload_hash: &V2PayloadHashes,
 ) -> V2Result<Option<V2MutationResponse>> {
     let Some(mut record) = catalog.mutation(mutation_id)? else {
         return Ok(None);
     };
-    if record.payload_hash != payload_hash {
+    if !payload_hash.matches(&record.payload_hash) {
         return Err(V2VaultError::Api(V2ApiErrorKind::MutationIdReuse {
             mutation_id: mutation_id.to_string(),
         }));
@@ -288,11 +336,11 @@ fn v2_unresolved_reason(reason: Option<&str>) -> UnresolvedReason {
     }
 }
 
-fn v2_document(meta: &NoteMeta, disk_hash: &str, content: String) -> V2NoteDocument {
-    V2NoteDocument {
-        meta: v2_note_meta(meta, disk_hash),
+fn v2_document(meta: &NoteMeta, disk_hash: &str, content: String) -> Result<V2NoteDocument> {
+    Ok(V2NoteDocument {
+        meta: v2_note_meta(meta, disk_hash)?,
         content,
-    }
+    })
 }
 
 fn v2_source(content: &str) -> V2Result<&str> {
@@ -349,7 +397,7 @@ fn repair_pending_mutation(
                 .disk_hash
                 .as_deref()
                 .ok_or_else(|| Error::Internal("pending mutation has no disk hash".to_string()))?;
-            if history::disk_hash(&bytes) != expected_disk_hash {
+            if !history::disk_hash_matches(expected_disk_hash, &bytes) {
                 return Err(Error::Internal(format!(
                     "pending mutation {} snapshot disk hash mismatch",
                     mutation.mutation_id
@@ -416,7 +464,7 @@ fn repair_pending_mutation(
                 Error::Internal("pending delete has no expected disk hash".to_string())
             })?;
             if let Some(bytes) = read_optional_visible_bytes(root, path)? {
-                if history::disk_hash(&bytes) != expected {
+                if !history::disk_hash_matches(expected, &bytes) {
                     return Err(Error::Internal(format!(
                         "pending delete {} found unexpected file bytes",
                         mutation.mutation_id
@@ -445,7 +493,7 @@ fn repair_pending_mutation(
                 mutation.disk_hash.as_deref().ok_or_else(|| {
                     Error::Internal("pending mutation has no disk hash".to_string())
                 })?,
-            )),
+            )?),
         )
     };
     let update = if mutation.kind == "delete" {
@@ -485,7 +533,7 @@ fn materialize_pending_file(
             sync_visible_note_parent(root, path)
         }
         Some(bytes) => {
-            if expected_before.is_none_or(|hash| history::disk_hash(&bytes) != hash) {
+            if expected_before.is_none_or(|hash| !history::disk_hash_matches(hash, &bytes)) {
                 return Err(Error::Internal(format!(
                     "pending mutation found unexpected bytes at {path}"
                 )));
@@ -508,14 +556,14 @@ fn move_pending_file(
     let old_bytes = read_optional_visible_bytes(root, old_path)?;
     let new_bytes = read_optional_visible_bytes(root, new_path)?;
     if let Some(bytes) = &new_bytes {
-        if history::disk_hash(bytes) != expected_hash {
+        if !history::disk_hash_matches(expected_hash, bytes) {
             return Err(Error::Internal(format!(
                 "pending rename found unexpected bytes at {new_path}"
             )));
         }
     }
     if let Some(bytes) = &old_bytes {
-        if history::disk_hash(bytes) != expected_hash {
+        if !history::disk_hash_matches(expected_hash, bytes) {
             return Err(Error::Internal(format!(
                 "pending rename found unexpected bytes at {old_path}"
             )));
@@ -830,7 +878,7 @@ impl VaultRuntime {
                 let row = catalog
                     .note_row_by_id(&note.note_id)?
                     .ok_or_else(|| Error::NotFound(note.note_id.clone()))?;
-                Ok(v2_note_meta(&row.meta, &row.visible_hash))
+                v2_note_meta(&row.meta, &row.visible_hash)
             })
             .collect()
     }
@@ -845,7 +893,7 @@ impl VaultRuntime {
                 let row = catalog
                     .note_row_by_id(&note.note_id)?
                     .ok_or_else(|| Error::NotFound(note.note_id.clone()))?;
-                Ok(v2_note_meta(&row.meta, &row.visible_hash))
+                v2_note_meta(&row.meta, &row.visible_hash)
             })
             .collect::<Result<Vec<_>>>()?;
         Ok(V2VaultBootstrapResponse {
@@ -969,7 +1017,7 @@ impl VaultRuntime {
         }
         catalog.prepare_mutation(MutationIntent {
             mutation_id: &request.mutation_id,
-            payload_hash: &payload_hash,
+            payload_hash: &payload_hash.current,
             kind: "settings",
             note_id: None,
             path: None,
@@ -1006,11 +1054,13 @@ impl VaultRuntime {
             }));
         }
         let body_hash = history::disk_hash(bytes);
-        let payload_hash = v2_request_hash("image_upload", None, &body_hash)?;
+        let mut payload_hash = v2_request_hash("image_upload", None, &body_hash)?;
+        let legacy_body_hash = history::legacy_disk_hash(bytes);
+        payload_hash.legacy = v2_legacy_request_hash("image_upload", None, &legacy_body_hash)?;
         let _op = self.lock_op();
         let mut catalog = self.lock_catalog();
         if let Some(record) = catalog.mutation(mutation_id)? {
-            if record.payload_hash != payload_hash {
+            if !payload_hash.matches(&record.payload_hash) {
                 return Err(V2VaultError::Api(V2ApiErrorKind::MutationIdReuse {
                     mutation_id: mutation_id.to_string(),
                 }));
@@ -1057,10 +1107,13 @@ impl VaultRuntime {
             }
         }
         let digest = history::disk_hash(mutation_id.as_bytes());
-        let name = format!("z-images/image-{}.webp", digest.trim_start_matches("sha256:"));
+        let digest_hex = digest.strip_prefix("blake3-v2:").ok_or_else(|| {
+            Error::Internal("image name hash uses an unsupported format".to_string())
+        })?;
+        let name = format!("z-images/image-{digest_hex}.webp");
         catalog.prepare_mutation(MutationIntent {
             mutation_id,
-            payload_hash: &payload_hash,
+            payload_hash: &payload_hash.current,
             kind: "image_upload",
             note_id: None,
             path: Some(&name),
@@ -1146,7 +1199,7 @@ impl VaultRuntime {
             }
         })?;
         catalog.touch_recent(note_id)?;
-        Ok(v2_document(&row.meta, &row.visible_hash, content))
+        Ok(v2_document(&row.meta, &row.visible_hash, content)?)
     }
 
     pub fn v2_save_note(
@@ -1163,7 +1216,7 @@ impl VaultRuntime {
                 received: request.source_hash,
             }));
         }
-        let payload_hash = v2_request_hash("save", Some(note_id), &request)?;
+        let payload_hash = v2_request_hash_for_source("save", Some(note_id), &request, &content)?;
         self.v2_save_source(
             note_id,
             &request.mutation_id,
@@ -1181,15 +1234,9 @@ impl VaultRuntime {
         request: V2SaveNoteDeltaRequest,
     ) -> V2Result<V2MutationResponse> {
         validate_mutation_id(&request.mutation_id)?;
-        let payload_hash = v2_request_hash("save_delta", Some(note_id), &request)?;
         {
             let _op = self.lock_op();
-            let mut catalog = self.lock_catalog();
-            if let Some(response) =
-                v2_existing_mutation(self, &self.root, &self.state_root, &mut catalog, &request.mutation_id, &payload_hash)?
-            {
-                return Ok(response);
-            }
+            let catalog = self.lock_catalog();
             let row = catalog.note_row_by_id(note_id)?.ok_or_else(|| {
                 V2VaultError::Api(V2ApiErrorKind::NoteNotFound {
                     note_id: note_id.to_string(),
@@ -1217,6 +1264,7 @@ impl VaultRuntime {
                 message: error.to_string(),
             })
         })?;
+        let payload_hash = v2_request_hash_for_source("save_delta", Some(note_id), &request, &content)?;
         let submitted_hash = history::source_hash(&content);
         if submitted_hash != request.source_hash {
             return Err(V2VaultError::Api(V2ApiErrorKind::SourceHashMismatch {
@@ -1322,7 +1370,7 @@ impl VaultRuntime {
         precondition: &V2NotePrecondition,
         content: &str,
         submitted_hash: &str,
-        payload_hash: &str,
+        payload_hash: &V2PayloadHashes,
         kind: &str,
     ) -> V2Result<V2MutationResponse> {
         let _op = self.lock_op();
@@ -1391,7 +1439,7 @@ impl VaultRuntime {
         let current = row.meta.clone();
         catalog.prepare_mutation(MutationIntent {
             mutation_id,
-            payload_hash,
+            payload_hash: &payload_hash.current,
             kind,
             note_id: Some(note_id),
             path: Some(&current.path),
@@ -1415,7 +1463,7 @@ impl VaultRuntime {
         if source_document.source == content {
             let response = v2_accepted_response(
                 mutation_id,
-                Some(v2_note_meta(&current, &row.visible_hash)),
+                Some(v2_note_meta(&current, &row.visible_hash)?),
             );
             catalog.complete_noop_mutation(
                 mutation_id,
@@ -1441,7 +1489,7 @@ impl VaultRuntime {
             })?;
             catalog.prepare_mutation(MutationIntent {
                 mutation_id,
-                payload_hash,
+                payload_hash: &payload_hash.current,
                 kind,
                 note_id: Some(note_id),
                 path: Some(&latest.meta.path),
@@ -1485,7 +1533,7 @@ impl VaultRuntime {
         if write_visible_note_bytes_atomic(&self.root, &current.path, &candidate_disk_bytes).is_err() {
             return Ok(pending);
         }
-        let note_meta = v2_note_meta(&accepted_meta, &candidate_disk_hash);
+        let note_meta = v2_note_meta(&accepted_meta, &candidate_disk_hash)?;
         let response = v2_accepted_response(mutation_id, Some(note_meta.clone()));
         let update = V2ServerEventUpdate::NoteChanged { note: note_meta };
         let update_json = serde_json::to_string(&update)?;
@@ -1523,7 +1571,7 @@ impl VaultRuntime {
         let path = normalize_note_path(&request.path).map_err(|reason| {
             V2VaultError::Api(V2ApiErrorKind::PathInvalid { reason })
         })?;
-        let payload_hash = v2_request_hash("create", None, &request)?;
+        let payload_hash = v2_request_hash_for_source("create", None, &request, &content)?;
         let _op = self.lock_op();
         let mut catalog = self.lock_catalog();
         if let Some(response) =
@@ -1546,7 +1594,7 @@ impl VaultRuntime {
         let disk_hash = history::disk_hash(disk_bytes);
         catalog.prepare_mutation(MutationIntent {
             mutation_id: &request.mutation_id,
-            payload_hash: &payload_hash,
+            payload_hash: &payload_hash.current,
             kind: "create",
             note_id: Some(&note_id),
             path: Some(&path),
@@ -1592,7 +1640,7 @@ impl VaultRuntime {
         let meta = catalog
             .note_by_id(&note_id)?
             .ok_or_else(|| Error::NotFound(note_id.clone()))?;
-        let note_meta = v2_note_meta(&meta, &disk_hash);
+        let note_meta = v2_note_meta(&meta, &disk_hash)?;
         let response = v2_accepted_response(&request.mutation_id, Some(note_meta.clone()));
         let update = V2ServerEventUpdate::NoteChanged { note: note_meta };
         let version = catalog.complete_mutation(
@@ -1649,11 +1697,11 @@ impl VaultRuntime {
         if path == row.meta.path {
             let response = v2_accepted_response(
                 &request.mutation_id,
-                Some(v2_note_meta(&row.meta, &row.visible_hash)),
+                Some(v2_note_meta(&row.meta, &row.visible_hash)?),
             );
             catalog.prepare_mutation(MutationIntent {
                 mutation_id: &request.mutation_id,
-                payload_hash: &payload_hash,
+                payload_hash: &payload_hash.current,
                 kind: "rename",
                 note_id: Some(note_id),
                 path: Some(&path),
@@ -1710,7 +1758,7 @@ impl VaultRuntime {
         }
         catalog.prepare_mutation(MutationIntent {
             mutation_id: &request.mutation_id,
-            payload_hash: &payload_hash,
+            payload_hash: &payload_hash.current,
             kind: "rename",
             note_id: Some(note_id),
             path: Some(&path),
@@ -1759,7 +1807,7 @@ impl VaultRuntime {
         {
             return Ok(pending);
         }
-        let note_meta = v2_note_meta(&accepted_meta, &row.visible_hash);
+        let note_meta = v2_note_meta(&accepted_meta, &row.visible_hash)?;
         let response = v2_accepted_response(&request.mutation_id, Some(note_meta.clone()));
         let update = V2ServerEventUpdate::NoteChanged { note: note_meta };
         let version = catalog.complete_mutation(
@@ -1827,7 +1875,7 @@ impl VaultRuntime {
         )?;
         catalog.prepare_mutation(MutationIntent {
             mutation_id: &request.mutation_id,
-            payload_hash: &payload_hash,
+            payload_hash: &payload_hash.current,
             kind: "delete",
             note_id: Some(note_id),
             path: None,
@@ -1914,7 +1962,7 @@ impl VaultRuntime {
                     current_meta,
                     current_disk_hash,
                     current_content,
-                )),
+                )?),
                 draft,
             },
         };
@@ -3076,7 +3124,7 @@ impl VaultRuntime {
                 previous_meta == meta && previous_hash == visible_hash
             });
             if !unchanged {
-                changed_v2_notes.push(v2_note_meta(meta, visible_hash));
+                changed_v2_notes.push(v2_note_meta(meta, visible_hash)?);
             }
         }
         deleted.sort();
@@ -3666,9 +3714,23 @@ mod tests {
             fs::read(vault.root.join("A.md")).unwrap(),
             created_content.as_bytes()
         );
+        let legacy_payload = v2_request_hash_for_source("create", None, &create, created_content).unwrap();
+        let mut legacy_result = serde_json::to_value(&created).unwrap();
+        legacy_result["outcome"]["result"]["sourceHash"] =
+            history::legacy_source_hash_v2(created_content).into();
+        legacy_result["outcome"]["result"]["sourceHashFormatVersion"] = 2.into();
+        legacy_result["outcome"]["result"]["diskHash"] =
+            history::legacy_disk_hash(created_content.as_bytes()).into();
+        legacy_result["outcome"]["result"]["diskHashFormatVersion"] = 1.into();
+        let connection = rusqlite::Connection::open(vault.state_root.join("vault.db")).unwrap();
+        connection.execute(
+            "UPDATE mutation_operations SET payload_hash=?2, result_json=?3 WHERE mutation_id=?1",
+            rusqlite::params!["create-1", legacy_payload.legacy, serde_json::to_string(&legacy_result).unwrap()],
+        ).unwrap();
+        drop(connection);
         let retried = vault.v2_create_note(create.clone()).unwrap();
         assert_eq!(
-            serde_json::to_value(&created).unwrap(),
+            legacy_result,
             serde_json::to_value(&retried).unwrap()
         );
 
@@ -4166,7 +4228,10 @@ mod tests {
                 &vault.state_root,
                 &mut catalog,
                 "retry-pending-save",
-                "payload",
+                &V2PayloadHashes {
+                    current: "payload".to_string(),
+                    legacy: "payload".to_string(),
+                },
             )
             .unwrap()
             .unwrap()

@@ -75,11 +75,14 @@ or serialize parsed data back over authored source. A leading UTF-8 BOM is part
 of editor source. A line-ending-only external edit changes `diskHash` even when
 it leaves `sourceHash` unchanged.
 
-`sourceHash` is `sha256-v2:<64 lowercase hex characters>` over the UTF-8 editor
-source with CRLF and CR normalized to LF. Its `sourceHashFormatVersion` is `2`.
-`diskHash` is `sha256:<64 lowercase hex characters>` over the exact visible
-file bytes. Its `diskHashFormatVersion` is `1`. Legacy `sha256:` content hashes
-are not reinterpreted as v2 source hashes.
+`sourceHash` is `blake3-v3:<64 lowercase hex characters>` over the UTF-8 editor
+source with CRLF and CR normalized to LF. Its `sourceHashFormatVersion` is `3`.
+`diskHash` is `blake3-v2:<64 lowercase hex characters>` over the exact visible
+file bytes. Its `diskHashFormatVersion` is `2`. The server reads prior
+`sha256:` source hashes (version 1), `sha256-v2:` source hashes (version 2),
+and `sha256:` disk hashes (version 1); it upgrades catalog hashes during
+reconciliation without adding a note revision. Client workspace journals
+also accept those prior formats.
 
 Existing-note mutations send `precondition` with the base revision,
 `baseSourceHash`, and `baseDiskHash`. Full and delta saves include the candidate
@@ -95,7 +98,8 @@ in `X-Tansu-Mutation-Id`. Idempotency is scoped to a vault and retained for the
 life of that vault's durable state: the same ID, method, path, and decoded
 request payload returns the original outcome; reuse with a different method,
 path, or payload returns `mutation_id_reuse`. Image retries compare exact WebP
-bytes.
+bytes. Existing durable mutation records retain their SHA-256 payload hash for
+same-request replay; new records use BLAKE3.
 
 An accepted content change has a complete recoverable snapshot before its
 revision commits. `accepted` means both catalog and visible-file steps finished.
@@ -118,11 +122,11 @@ Content-Type: application/json
   "mutationId": "01J...",
   "precondition": {
     "baseRevision": 3,
-    "baseSourceHash": "sha256-v2:...",
-    "baseDiskHash": "sha256:..."
+    "baseSourceHash": "blake3-v3:...",
+    "baseDiskHash": "blake3-v2:..."
   },
   "content": "# Title\n\nbody\n",
-  "sourceHash": "sha256-v2:..."
+  "sourceHash": "blake3-v3:..."
 }
 ```
 

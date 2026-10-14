@@ -991,8 +991,8 @@ export function decodeDraftJournalRecord(value: unknown): DraftJournalRecord {
     workspaceId: identityString(body["workspaceId"], "workspaceId"),
     noteId: identityString(body["noteId"], "noteId"),
     baseRevision: safeInteger(body["baseRevision"], "baseRevision"),
-    baseSourceHash: sourceHash(body["baseSourceHash"], "baseSourceHash", "sha256-v2:"),
-    baseDiskHash: sourceHash(body["baseDiskHash"], "baseDiskHash", "sha256:"),
+    baseSourceHash: sourceHash(body["baseSourceHash"], "baseSourceHash", "source"),
+    baseDiskHash: sourceHash(body["baseDiskHash"], "baseDiskHash", "disk"),
     localRevision: safeInteger(body["localRevision"], "localRevision"),
     mutationId: boundedMutationId(body["mutationId"]),
     source,
@@ -1045,7 +1045,7 @@ export function decodeCachedNoteBody(value: unknown): CachedNoteBody {
     serverInstanceId: identityString(body["serverInstanceId"], "serverInstanceId"),
     vaultId: identityString(body["vaultId"], "vaultId"),
     noteId: identityString(body["noteId"], "noteId"),
-    sourceHash: sourceHash(body["sourceHash"], "sourceHash", "sha256-v2:"),
+    sourceHash: sourceHash(body["sourceHash"], "sourceHash", "source"),
     content: text(body["content"], "content"),
     cachedAtMs: safeInteger(body["cachedAtMs"], "cachedAtMs"),
   };
@@ -1066,16 +1066,20 @@ export function workspaceTabFromLegacy(tab: SessionState["openTabs"][number]): W
 function decodeV2NoteDocument(value: V2NoteDocument): V2NoteDocument {
   const body = object(value, "note document");
   const meta = object(body["meta"], "note metadata");
+  const sourceHashValue = sourceHash(meta["sourceHash"], "sourceHash", "source");
+  const diskHashValue = sourceHash(meta["diskHash"], "diskHash", "disk");
+  const sourceHashFormatVersion = hashVersion(sourceHashValue, meta["sourceHashFormatVersion"], "source");
+  const diskHashFormatVersion = hashVersion(diskHashValue, meta["diskHashFormatVersion"], "disk");
   const note: V2NoteMeta = {
     noteId: identityString(meta["noteId"], "noteId"),
     path: text(meta["path"], "path"),
     title: text(meta["title"], "title"),
     tags: list(meta["tags"], "tags").map((tag) => text(tag, "tag")),
     revision: safeInteger(meta["revision"], "revision"),
-    sourceHash: sourceHash(meta["sourceHash"], "sourceHash", "sha256-v2:"),
-    diskHash: sourceHash(meta["diskHash"], "diskHash", "sha256:"),
-    sourceHashFormatVersion: exactVersion(meta["sourceHashFormatVersion"], 2, "source hash"),
-    diskHashFormatVersion: exactVersion(meta["diskHashFormatVersion"], 1, "disk hash"),
+    sourceHash: sourceHashValue,
+    diskHash: diskHashValue,
+    sourceHashFormatVersion,
+    diskHashFormatVersion,
     updatedAtMs: safeInteger(meta["updatedAtMs"], "updatedAtMs"),
   };
   return { meta: note, content: text(body["content"], "content") };
@@ -1342,15 +1346,24 @@ function version(value: unknown, expected: number, name: string): void {
   }
 }
 
-function exactVersion(value: unknown, expected: number, name: string): number {
-  version(value, expected, name);
-  return expected;
+function sourceHash(value: unknown, name: string, family: "source" | "disk"): string {
+  const result = text(value, name);
+  const prefixes = family === "source"
+    ? ["blake3-v3:", "sha256-v2:", "sha256:"]
+    : ["blake3-v2:", "sha256:"];
+  if (!prefixes.some((prefix) => new RegExp(`^${prefix}[0-9a-f]{64}$`).test(result))) {
+    throw corrupt(`${name} uses an unsupported hash format`);
+  }
+  return result;
 }
 
-function sourceHash(value: unknown, name: string, prefix: "sha256:" | "sha256-v2:"): string {
-  const result = text(value, name);
-  if (!new RegExp(`^${prefix}[0-9a-f]{64}$`).test(result)) {
-    throw corrupt(`${name} uses an unsupported hash format`);
+function hashVersion(hash: string, value: unknown, family: "source" | "disk"): number {
+  const result = safeInteger(value, `${family} hash format version`);
+  const prefix = family === "source"
+    ? result === 1 ? "sha256:" : result === 2 ? "sha256-v2:" : result === 3 ? "blake3-v3:" : null
+    : result === 1 ? "sha256:" : result === 2 ? "blake3-v2:" : null;
+  if (prefix === null || !hash.startsWith(prefix)) {
+    throw corrupt(`${family} hash format version does not match its value`);
   }
   return result;
 }

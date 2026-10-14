@@ -209,8 +209,7 @@ pub fn reconcile_note_before_write(
     };
     let source_hash = history::source_hash(&document.source);
     let disk_hash = history::disk_hash(&bytes);
-    let legacy_hash_matches = history::legacy_content_hash(&document.source) == row.meta.content_hash;
-    if source_hash == row.meta.content_hash || legacy_hash_matches {
+    if history::source_hash_matches(&row.meta.content_hash, &document.source) {
         if row.meta.content_hash != source_hash {
             history::write_snapshot_bytes(state_root, note_id, &source_hash, &bytes)?;
             catalog.migrate_current_hashes(
@@ -255,6 +254,7 @@ struct FileRecord {
     path_key: String,
     source_hash: String,
     legacy_hash: String,
+    legacy_v2_hash: String,
     disk_hash: String,
     source: String,
     disk_bytes: Vec<u8>,
@@ -323,6 +323,7 @@ fn walk_dir(
                 path_key: path_key(&entry_path_to_string(&path, root)?),
                 source_hash: history::source_hash(&document.source),
                 legacy_hash: history::legacy_content_hash(&document.source),
+                legacy_v2_hash: history::legacy_source_hash_v2(&document.source),
                 disk_hash,
                 source: document.source,
                 disk_bytes,
@@ -333,6 +334,7 @@ fn walk_dir(
                 path: rel.clone(),
                 source_hash: format!("invalid-utf8:{}", path_key(&rel)),
                 legacy_hash: String::new(),
+                legacy_v2_hash: String::new(),
                 disk_hash,
                 source: String::new(),
                 disk_bytes,
@@ -367,6 +369,10 @@ fn unambiguous_move_pairs(rows: &[NoteRow], files: &[&FileRecord]) -> Vec<(usize
             .push(index);
         files_by_hash
             .entry(file.legacy_hash.as_str())
+            .or_default()
+            .push(index);
+        files_by_hash
+            .entry(file.legacy_v2_hash.as_str())
             .or_default()
             .push(index);
     }
@@ -445,7 +451,8 @@ fn apply_visible_version(
         return Ok(());
     }
     let source_matches = row.meta.content_hash == file.source_hash
-        || row.meta.content_hash == file.legacy_hash;
+        || row.meta.content_hash == file.legacy_hash
+        || row.meta.content_hash == file.legacy_v2_hash;
     if source_matches {
         if row.meta.content_hash != file.source_hash {
             history::write_snapshot_bytes(
@@ -532,6 +539,56 @@ mod tests {
 
         assert_eq!(after.note_id, before.note_id);
         assert_eq!(after.path, "Renamed.md");
+    }
+
+    #[test]
+    fn legacy_hashes_migrate_during_external_rename_without_losing_identity() {
+        let content = "# A\n\nsame\n";
+        let bytes = content.as_bytes();
+        for previous_hash in [
+            history::legacy_source_hash_v2(content),
+            history::legacy_content_hash(content),
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            fs::write(dir.path().join("A.md"), bytes).unwrap();
+            let state = dir.path().join("state");
+            let mut catalog = Catalog::open(&state.join("vault.db")).unwrap();
+            reconcile_vault(dir.path(), &state, &mut catalog, &[]).unwrap();
+            let before = catalog.live_notes().unwrap().remove(0);
+            let old_disk_hash = history::legacy_disk_hash(bytes);
+            let old_snapshot = state
+                .join("history/snapshots")
+                .join(&before.note_id)
+                .join(format!("{}.lz4", previous_hash.replace(':', "_")));
+            fs::create_dir_all(old_snapshot.parent().unwrap()).unwrap();
+            fs::write(&old_snapshot, lz4_flex::compress_prepend_size(bytes)).unwrap();
+            drop(catalog);
+
+            let connection = rusqlite::Connection::open(state.join("vault.db")).unwrap();
+            connection.execute(
+                "UPDATE notes SET content_hash=?2, visible_hash=?3 WHERE note_id=?1",
+                rusqlite::params![&before.note_id, &previous_hash, &old_disk_hash],
+            ).unwrap();
+            connection.execute(
+                "UPDATE note_events SET content_hash=?2 WHERE note_id=?1 AND seq=?3",
+                rusqlite::params![&before.note_id, &previous_hash, before.seq],
+            ).unwrap();
+            drop(connection);
+            fs::rename(dir.path().join("A.md"), dir.path().join("Renamed.md")).unwrap();
+
+            let mut catalog = Catalog::open(&state.join("vault.db")).unwrap();
+            reconcile_vault(dir.path(), &state, &mut catalog, &[]).unwrap();
+            let migrated = catalog.live_notes().unwrap().remove(0);
+            let row = catalog.note_row_by_id(&before.note_id).unwrap().unwrap();
+
+            assert_eq!(migrated.note_id, before.note_id);
+            assert_eq!(migrated.path, "Renamed.md");
+            assert_eq!(migrated.seq, before.seq + 1);
+            assert_eq!(row.meta.content_hash, history::source_hash(content));
+            assert_eq!(row.visible_hash, history::disk_hash(bytes));
+            assert_eq!(history::read_snapshot_bytes(&state, &before.note_id, &previous_hash).unwrap(), bytes);
+            assert_eq!(fs::read(dir.path().join("Renamed.md")).unwrap(), bytes);
+        }
     }
 
     #[test]

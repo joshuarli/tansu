@@ -67,3 +67,7 @@ backup atomically. Restore validates the backup, preserves credentials, and
 clears sessions, enrollment capabilities, and pending ceremonies. These
 commands manage passkey state only; they do not back up vault notes or app
 history.
+
+When an older auth database is first opened after the token hash format
+upgrade, Tansu2 clears sessions, enrollment capabilities, and unfinished
+ceremonies. Registered passkeys remain available.

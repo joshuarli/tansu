@@ -1,3 +1,5 @@
+import { blake3 } from "@noble/hashes/blake3.js";
+
 import type { SaveNoteDeltaRequest, TextEdit, TextPosition } from "./types.generated.ts";
 
 export async function buildSaveNoteDeltaRequest(
@@ -44,35 +46,20 @@ export function computeTextEdits(base: string, next: string): TextEdit[] {
 }
 
 export async function canonicalContentHash(content: string): Promise<string> {
-  const bytes = new TextEncoder().encode(canonicalMarkdownString(content));
-  if (globalThis.crypto?.subtle === undefined) {
-    throw new Error("Web Crypto is unavailable");
-  }
-  const digest = await globalThis.crypto.subtle.digest("SHA-256", bytes);
-  const hex = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join(
-    "",
-  );
-  return `sha256:${hex}`;
+  return canonicalSourceHash(content);
 }
 
 export async function canonicalSourceHash(content: string): Promise<string> {
   const bytes = new TextEncoder().encode(normalizeMarkdownNewlines(content));
-  if (globalThis.crypto?.subtle === undefined) {
-    throw new Error("Web Crypto is unavailable");
-  }
-  const digest = await globalThis.crypto.subtle.digest("SHA-256", bytes);
-  const hex = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join(
-    "",
-  );
-  return `sha256-v2:${hex}`;
-}
-
-function canonicalMarkdownString(content: string): string {
-  return normalizeMarkdownNewlines(content).replaceAll(/\n/g, "\r\n");
+  return `blake3-v3:${hex(blake3(bytes))}`;
 }
 
 function normalizeMarkdownNewlines(markdown: string): string {
   return markdown.replaceAll(/\r\n?/g, "\n");
+}
+
+function hex(bytes: Uint8Array): string {
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 function commonPrefixLength(left: string, right: string): number {

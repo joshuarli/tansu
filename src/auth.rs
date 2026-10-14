@@ -6,13 +6,15 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use blake3::hash as blake3_hash;
 use rusqlite::backup::Backup;
 use rusqlite::{Connection, OpenFlags, OptionalExtension, Transaction, TransactionBehavior, params};
 use rustix::fs::{AtFlags, Mode, OFlags, RenameFlags, openat, renameat_with, unlinkat};
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use tansu_webauthn::{AuthChallenge, AuthenticationFinish, RegChallenge, StoredCredential};
 use tokio::sync::watch;
+
+const AUTH_TOKEN_HASH_VERSION: i64 = 2;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AuthError {
@@ -269,6 +271,27 @@ impl AuthStore {
                  rp_id TEXT NOT NULL
              );",
         ).map_err(storage)?;
+        let hash_version: i64 = connection
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .map_err(storage)?;
+        match hash_version {
+            0 => {
+                let transaction = connection.unchecked_transaction().map_err(storage)?;
+                transaction.execute("DELETE FROM enrollment_capabilities", []).map_err(storage)?;
+                transaction.execute("DELETE FROM sessions", []).map_err(storage)?;
+                transaction.execute("DELETE FROM ceremonies", []).map_err(storage)?;
+                transaction
+                    .pragma_update(None, "user_version", AUTH_TOKEN_HASH_VERSION)
+                    .map_err(storage)?;
+                transaction.commit().map_err(storage)?;
+            }
+            version if version == AUTH_TOKEN_HASH_VERSION => {}
+            version => {
+                return Err(AuthError::Storage(format!(
+                    "unsupported auth token hash version {version}"
+                )));
+            }
+        }
         bind_auth_identity(&connection, &policy)?;
         Ok(Self {
             connection: Mutex::new(connection),
@@ -1069,7 +1092,7 @@ fn token_hash(token: &str) -> Result<Vec<u8>, AuthError> {
     if token.len() != 64 || !token.bytes().all(|byte| byte.is_ascii_hexdigit()) {
         return Err(AuthError::Unauthorized);
     }
-    Ok(Sha256::digest(token.as_bytes()).to_vec())
+    Ok(blake3_hash(token.as_bytes()).as_bytes().to_vec())
 }
 
 fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
@@ -1109,6 +1132,54 @@ mod tests {
             backup_eligible: false,
             backup_state: false,
         }
+    }
+
+    #[test]
+    fn token_hashes_use_blake3() {
+        let token = "00".repeat(32);
+        assert_eq!(token_hash(&token).unwrap(), blake3_hash(token.as_bytes()).as_bytes());
+    }
+
+    #[test]
+    fn token_hash_upgrade_clears_ephemeral_auth_state_and_preserves_credentials() {
+        let root = tempfile::tempdir().unwrap();
+        let directory = root.path().join("auth");
+        fs::create_dir(&directory).unwrap();
+        let database_path = directory.join("auth.db");
+        let connection = Connection::open(&database_path).unwrap();
+        connection.execute_batch(
+            "CREATE TABLE enrollment_capabilities (token_hash BLOB PRIMARY KEY, expires_at INTEGER NOT NULL);
+             CREATE TABLE sessions (token_hash BLOB PRIMARY KEY, csrf_hash BLOB NOT NULL, created_at INTEGER NOT NULL, verified_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, revoked INTEGER NOT NULL DEFAULT 0);
+             CREATE TABLE ceremonies (id_hash BLOB PRIMARY KEY, kind TEXT NOT NULL, state BLOB NOT NULL, expires_at INTEGER NOT NULL, capability_hash BLOB, session_hash BLOB);
+             CREATE TABLE credentials (credential_id BLOB PRIMARY KEY, value BLOB NOT NULL);
+             CREATE TABLE auth_identity (singleton INTEGER PRIMARY KEY CHECK(singleton = 1), external_origin TEXT NOT NULL, rp_id TEXT NOT NULL);
+             INSERT INTO enrollment_capabilities VALUES (x'01', 100);
+             INSERT INTO sessions VALUES (x'02', x'03', 1, 1, 100, 0);
+             INSERT INTO ceremonies VALUES (x'04', 'registration', x'05', 100, NULL, NULL);",
+        ).unwrap();
+        connection.execute(
+            "INSERT INTO credentials(credential_id, value) VALUES (?1, ?2)",
+            params![vec![7_u8], serde_json::to_vec(&credential(7)).unwrap()],
+        ).unwrap();
+        drop(connection);
+
+        let store = AuthStore::open(
+            &directory,
+            AuthPolicy::authenticated("https://notes.example.com", "example.com", "Tansu").unwrap(),
+            3600,
+            300,
+        ).unwrap();
+        let connection = store.connection.lock().unwrap();
+        for table in ["enrollment_capabilities", "sessions", "ceremonies"] {
+            let count: i64 = connection
+                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| row.get(0))
+                .unwrap();
+            assert_eq!(count, 0);
+        }
+        let version: i64 = connection.pragma_query_value(None, "user_version", |row| row.get(0)).unwrap();
+        assert_eq!(version, AUTH_TOKEN_HASH_VERSION);
+        drop(connection);
+        assert_eq!(store.credentials().unwrap(), vec![credential(7)]);
     }
 
     fn request<'a>(
