@@ -325,6 +325,7 @@ function baseState(): State {
     notes,
     settings: settings(),
     searchStatus: { dirty: false, degraded: false },
+    legacyWorkspace: null,
   };
   return state;
 }

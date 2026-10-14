@@ -4,7 +4,6 @@ import {
   V2ApiError,
   V2ProtocolError,
   createV2ApiClient,
-  decodeV2VaultBootstrap,
   decodeV2NoteMeta,
   decodeV2ApiErrorResponse,
   decodeV2ServerEvent,

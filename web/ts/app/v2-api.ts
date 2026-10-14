@@ -1,6 +1,5 @@
 import type {
   SessionState,
-  SessionTab,
   Settings,
   V2ApiErrorKind,
   V2ApiErrorResponse,
