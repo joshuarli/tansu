@@ -7,8 +7,8 @@ use crate::types::{
     DirtyNoteSnapshot, DocumentInput, OverlaySearchResult, SearchOptions,
 };
 
-const MAX_OVERLAY_NOTES: usize = 20;
-const MAX_OVERLAY_BYTES: usize = 2 * 1024 * 1024;
+pub const MAX_OVERLAY_NOTES: usize = 20;
+pub const MAX_OVERLAY_BYTES: usize = 2 * 1024 * 1024;
 
 pub(crate) fn search(
     query: &str,

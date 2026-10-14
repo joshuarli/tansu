@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use pulldown_cmark::{Event, Parser, Tag, TagEnd};
 use tansu_search::{
@@ -8,120 +8,120 @@ use tansu_search::{
     MAX_REBUILD_SOURCE_BYTES,
 };
 
-use crate::api_types::{NoteMeta, SearchFieldScores, SearchHit, Settings};
+use crate::api_types::{NoteMeta, SearchFieldScores, SearchHit};
 use crate::history;
 use crate::paths::visible_path;
+use crate::tags::parse_markdown;
 use crate::{Error, Result};
 
 pub const DEFAULT_SEARCH_LIMIT: usize = 20;
 
+pub(crate) fn dirty_note_snapshot(
+    note_id: String,
+    path: String,
+    title: String,
+    revision: i64,
+    source_hash: String,
+    local_revision: u64,
+    source: String,
+) -> std::result::Result<DirtyNoteSnapshot, tansu_search::SearchError> {
+    let tags = parse_markdown(&path, &source).tags;
+    let headings = extract_headings(&source);
+    let identity = NoteIdentity::new(note_id, path, title, tags, revision, source_hash.clone())?;
+    DirtyNoteSnapshot::new(identity, revision, source_hash, local_revision, source, headings)
+}
+
 pub struct SearchIndex {
-    service: SearchService,
-    revisions: HashMap<String, i64>,
-    pub dirty: bool,
-    pub degraded: bool,
+    state: SearchIndexState,
+    path: PathBuf,
+}
+
+enum SearchIndexState {
+    Available {
+        service: SearchService,
+        needs_reconciliation: bool,
+        degraded: bool,
+    },
+    Unavailable,
 }
 
 impl SearchIndex {
-    pub fn open(state_root: &Path) -> Result<Self> {
-        let service = SearchService::open(&state_root.join("search"))
-            .map_err(|error| Error::Internal(error.to_string()))?;
-        let status = service.status();
-        Ok(Self {
-            service,
-            revisions: HashMap::new(),
-            dirty: status.dirty,
-            degraded: status.degraded,
-        })
+    pub fn open(state_root: &Path) -> Self {
+        let path = state_root.join("search");
+        let state = match SearchService::open(&path) {
+            Ok(service) => {
+                let status = service.status();
+                SearchIndexState::Available {
+                    service,
+                    needs_reconciliation: status.dirty,
+                    degraded: status.degraded,
+                }
+            }
+            Err(_) => SearchIndexState::Unavailable,
+        };
+        Self { state, path }
     }
 
     pub fn rebuild(&mut self, root: &Path, notes: &[NoteMeta]) -> Result<()> {
         let identities = notes
             .iter()
             .map(note_identity)
-            .collect::<Result<Vec<_>>>()?;
-        if !self.service.needs_reconciliation()
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(search_error)?;
+        if !self.needs_reconciliation()
             && self
-                .service
-                .is_current(identities.clone())
+                .call_service(|service| service.is_current(identities.clone()))
                 .map_err(search_error)?
         {
-            self.revisions = notes
-                .iter()
-                .map(|note| (note.note_id.clone(), note.seq))
-                .collect();
-            self.refresh_status();
             return Ok(());
         }
-        let documents = read_documents(root, notes, identities)?;
-        self.service.rebuild(documents).map_err(search_error)?;
-        self.revisions = notes
-            .iter()
-            .map(|note| (note.note_id.clone(), note.seq))
-            .collect();
-        self.refresh_status();
+        let documents = match read_documents(root, notes, identities) {
+            Ok(documents) => documents,
+            Err(error) => {
+                self.mark_needs_reconciliation(true);
+                return Err(error);
+            }
+        };
+        self.call_service(|service| service.rebuild(documents))
+            .map_err(search_error)?;
+        self.mark_rebuilt();
         Ok(())
-    }
-
-    pub fn index_note(&mut self, meta: NoteMeta, content: &str) {
-        if self.try_index_note(meta, content).is_err() {
-            self.dirty = true;
-            self.degraded = true;
-        }
     }
 
     pub fn try_index_note(&mut self, meta: NoteMeta, content: &str) -> Result<()> {
-        let identity = note_identity(&meta)?;
-        let document = DocumentInput::new(
+        let identity = note_identity(&meta).map_err(search_error)?;
+        let document = match DocumentInput::new(
             identity,
             to_lf(content),
             extract_headings(content),
-        )
-        .map_err(search_error)?;
-        self.service.upsert(document).map_err(search_error)?;
-        self.revisions.insert(meta.note_id, meta.seq);
-        self.refresh_status();
-        Ok(())
-    }
-
-    pub fn remove_note(&mut self, note_id: &str) {
-        let Some(revision) = self
-            .revisions
-            .get(note_id)
-            .copied()
-            .and_then(|revision| revision.checked_add(1))
-        else {
-            self.dirty = true;
-            self.degraded = true;
-            return;
+        ) {
+            Ok(document) => document,
+            Err(error) => {
+                self.mark_needs_reconciliation(true);
+                return Err(search_error(error));
+            }
         };
-        if self.try_remove_note(note_id, revision).is_err() {
-            self.dirty = true;
-            self.degraded = true;
+        let outcome = self
+            .call_service(|service| service.upsert(document))
+            .map_err(search_error)?;
+        if outcome == tansu_search::UpdateOutcome::Overflow {
+            self.mark_needs_reconciliation(false);
         }
+        Ok(())
     }
 
     pub fn try_remove_note(&mut self, note_id: &str, revision: i64) -> Result<()> {
-        self.service
-            .remove(note_id.to_owned(), revision)
+        let outcome = self
+            .call_service(|service| service.remove(note_id.to_owned(), revision))
             .map_err(search_error)?;
-        self.revisions.insert(note_id.to_owned(), revision);
-        self.refresh_status();
+        if outcome == tansu_search::UpdateOutcome::Overflow {
+            self.mark_needs_reconciliation(false);
+        }
         Ok(())
     }
 
-    pub fn search(
-        &self,
-        query: &str,
-        _settings: &Settings,
-        current: &[NoteMeta],
-        limit: usize,
-    ) -> Vec<SearchHit> {
-        self.try_search(query, current, limit).unwrap_or_default()
-    }
-
     pub fn try_search(
-        &self,
+        &mut self,
         query: &str,
         current: &[NoteMeta],
         limit: usize,
@@ -135,10 +135,10 @@ impl SearchIndex {
         let identities = current
             .iter()
             .map(note_identity)
-            .collect::<Result<Vec<_>>>()?;
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(search_error)?;
         let results = self
-            .service
-            .search(query.to_owned(), options, identities)
+            .call_service(|service| service.search(query.to_owned(), options, identities))
             .map_err(search_error)?;
         let metadata = current
             .iter()
@@ -146,66 +146,159 @@ impl SearchIndex {
             .collect::<HashMap<_, _>>();
         results
             .into_iter()
-            .filter_map(|result| {
-                metadata
-                    .get(result.note_id.as_str())
-                    .map(|note| result_to_hit(result, (*note).clone()))
+            .map(|result| {
+                let note = metadata.get(result.note_id.as_str()).ok_or_else(|| {
+                    Error::Internal("search result is missing canonical metadata".to_string())
+                })?;
+                result_to_hit(result, (*note).clone())
             })
-            .collect::<Result<Vec<_>>>()
+            .collect()
     }
 
     pub fn try_search_with_overlay(
-        &self,
+        &mut self,
         query: &str,
         current: &[NoteMeta],
         limit: usize,
+        mode: SearchMode,
         snapshots: &[DirtyNoteSnapshot],
-    ) -> Result<OverlaySearchResult> {
+    ) -> std::result::Result<OverlaySearchResult, tansu_search::SearchError> {
         let options = SearchOptions::new(
-            SearchMode::ExactPrefix,
+            mode,
             Fuzziness::OneEdit,
-            SearchLimit::try_from(limit).map_err(search_error)?,
-        )
-        .map_err(search_error)?;
+            SearchLimit::try_from(limit)?,
+        )?;
         let identities = current
             .iter()
             .map(note_identity)
-            .collect::<Result<Vec<_>>>()?;
-        self.service
-            .search_with_overlay(query.to_owned(), options, identities, snapshots)
-            .map_err(search_error)
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        self.call_service(|service| {
+            service.search_with_overlay(query.to_owned(), options, identities, snapshots)
+        })
     }
 
     pub fn quick_open(
-        &self,
+        &mut self,
         query: &str,
         current: &[NoteMeta],
         pinned: &[String],
         recent: &[String],
         limit: usize,
-    ) -> Result<QuickOpenResponse> {
-        let limit = SearchLimit::try_from(limit).map_err(search_error)?;
+    ) -> std::result::Result<QuickOpenResponse, tansu_search::SearchError> {
+        let limit = SearchLimit::try_from(limit)?;
         let identities = current
             .iter()
             .map(note_identity)
-            .collect::<Result<Vec<_>>>()?;
-        self.service
-            .quick_open(query, &identities, pinned, recent, limit)
-            .map_err(search_error)
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        self.call_service(|service| service.quick_open(query, &identities, pinned, recent, limit))
     }
 
     pub fn search_status(&self) -> tansu_search::SearchStatus {
-        self.service.status()
+        match &self.state {
+            SearchIndexState::Unavailable => tansu_search::SearchStatus {
+                dirty: true,
+                degraded: true,
+            },
+            SearchIndexState::Available {
+                service,
+                needs_reconciliation,
+                degraded,
+            } => {
+                let status = service.status();
+                tansu_search::SearchStatus {
+                    dirty: status.dirty || *needs_reconciliation,
+                    degraded: status.degraded || *degraded,
+                }
+            }
+        }
     }
 
-    fn refresh_status(&mut self) {
-        let status = self.service.status();
-        self.dirty = status.dirty;
-        self.degraded = status.degraded;
+    pub fn needs_reconciliation(&self) -> bool {
+        match &self.state {
+            SearchIndexState::Unavailable => true,
+            SearchIndexState::Available {
+                service,
+                needs_reconciliation,
+                ..
+            } => *needs_reconciliation || service.needs_reconciliation(),
+        }
+    }
+
+    pub fn mark_needs_reconciliation(&mut self, degraded: bool) {
+        if let SearchIndexState::Available {
+            needs_reconciliation,
+            degraded: state_degraded,
+            ..
+        } = &mut self.state
+        {
+            *needs_reconciliation = true;
+            *state_degraded |= degraded;
+        }
+    }
+
+    fn mark_rebuilt(&mut self) {
+        if let SearchIndexState::Available {
+            needs_reconciliation,
+            degraded,
+            ..
+        } = &mut self.state
+        {
+            *needs_reconciliation = false;
+            *degraded = false;
+        }
+    }
+
+    fn call_service<T>(
+        &mut self,
+        operation: impl FnOnce(&SearchService) -> std::result::Result<T, tansu_search::SearchError>,
+    ) -> std::result::Result<T, tansu_search::SearchError> {
+        let result = {
+            let service = self.ensure_service()?;
+            operation(service)
+        };
+        match result {
+            Ok(value) => Ok(value),
+            Err(error) => {
+                if !matches!(
+                    error,
+                    tansu_search::SearchError::InvalidInput { .. }
+                        | tansu_search::SearchError::LimitOutOfRange { .. }
+                        | tansu_search::SearchError::QueryTooLong { .. }
+                        | tansu_search::SearchError::InvalidRange { .. }
+                        | tansu_search::SearchError::DuplicateOverlayNote
+                ) {
+                    self.mark_needs_reconciliation(true);
+                }
+                Err(error)
+            }
+        }
+    }
+
+    fn ensure_service(
+        &mut self,
+    ) -> std::result::Result<&SearchService, tansu_search::SearchError> {
+        if matches!(self.state, SearchIndexState::Unavailable) {
+            match SearchService::open(&self.path) {
+                Ok(service) => {
+                    self.state = SearchIndexState::Available {
+                        service,
+                        needs_reconciliation: true,
+                        degraded: false,
+                    };
+                }
+                Err(error) => return Err(error),
+            }
+        }
+        match &self.state {
+            SearchIndexState::Available { service, .. } => Ok(service),
+            SearchIndexState::Unavailable => Err(tansu_search::SearchError::WorkerStopped),
+        }
     }
 }
 
-fn note_identity(note: &NoteMeta) -> Result<NoteIdentity> {
+fn note_identity(
+    note: &NoteMeta,
+) -> std::result::Result<NoteIdentity, tansu_search::SearchError> {
     NoteIdentity::new(
         note.note_id.clone(),
         note.path.clone(),
@@ -214,7 +307,6 @@ fn note_identity(note: &NoteMeta) -> Result<NoteIdentity> {
         note.seq,
         note.content_hash.clone(),
     )
-    .map_err(search_error)
 }
 
 fn read_documents(
@@ -353,20 +445,21 @@ mod tests {
     }
 
     #[test]
-    fn indexing_failure_keeps_the_accepted_note_and_marks_search_degraded() {
+    fn unavailable_index_reports_degraded_after_index_failure() {
         let temp = tempfile::tempdir().unwrap();
         let state_root = temp.path().join("state");
-        let mut search = SearchIndex::open(&state_root).unwrap();
-        std::fs::rename(state_root.join("search"), state_root.join("saved-search"))
-            .unwrap();
+        std::fs::create_dir_all(&state_root).unwrap();
         std::fs::write(state_root.join("search"), "unavailable").unwrap();
+        let mut search = SearchIndex::open(&state_root);
         let accepted = NoteMeta {
             content_hash: "sha256:accepted".to_owned(),
             ..note_meta("accepted")
         };
-        search.index_note(accepted.clone(), "accepted source");
+        assert!(search
+            .try_index_note(accepted.clone(), "accepted source")
+            .is_err());
         assert_eq!(accepted.content_hash, "sha256:accepted");
-        assert!(search.dirty);
-        assert!(search.degraded);
+        assert!(search.search_status().dirty);
+        assert!(search.search_status().degraded);
     }
 }

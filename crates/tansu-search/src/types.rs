@@ -352,6 +352,7 @@ impl QuickOpenRange {
 pub struct QuickOpenHit {
     pub identity: NoteIdentity,
     pub priority: QuickOpenPriority,
+    pub score: u16,
     pub ranges: Vec<QuickOpenRange>,
 }
 

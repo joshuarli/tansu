@@ -1,8 +1,8 @@
 use std::fs;
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::path::{Component, Path, PathBuf};
-use std::sync::mpsc::{self, Receiver, Sender};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::mpsc::{self, Receiver, Sender, SyncSender, TryRecvError, TrySendError};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, Weak};
 use std::time::{Duration, Instant};
 use std::thread;
@@ -16,7 +16,10 @@ use crate::api_types::{
     RevisionMeta, SaveNoteDeltaRequest, SaveNoteRequest, SearchHit, SearchStatus, ServerEvent,
     ServerEventKind, SessionState, Settings, TextEdit, TextPosition, V2ApiErrorKind,
     V2CreateNoteRequest, V2DeleteNoteRequest, V2MutationOutcome,
-    V2MutationResponse, V2NoteDocument, V2NoteMeta, V2NotePrecondition, V2RenameNoteRequest,
+    V2MutationResponse, V2NoteDocument, V2NoteMeta, V2NotePrecondition, V2QuickOpenHit,
+    V2QuickOpenRequest, V2QuickOpenResponse, V2RenameNoteRequest, V2SearchHit,
+    V2SearchHitIdentity, V2SearchMode, V2SearchOverlay, V2SearchRequest, V2SearchResponse,
+    V2SourceRange, V2ExcerptRange, V2OverlayCoverage,
     V2RestoreConflictRequest, V2RestoreRevisionRequest, V2SaveNoteDeltaRequest,
     V2SaveNoteRequest, V2ServerEvent, V2ServerEventUpdate, V2VaultBootstrapResponse,
     V2VaultMeta, VaultEntry, UnresolvedReason,
@@ -31,12 +34,14 @@ use crate::paths::{
     sync_visible_note_parent, write_visible_note_bytes_atomic, write_visible_note_bytes_new,
 };
 use crate::reconcile::{reconcile_note_before_write, reconcile_vault};
-use crate::search::SearchIndex;
+use crate::search::{SearchIndex, dirty_note_snapshot};
 use crate::tags::parse_markdown;
 use crate::{Error, Result};
+use tansu_search::{SearchMode, MAX_OVERLAY_BYTES, MAX_OVERLAY_NOTES};
 
 const EVENT_REPLAY_LIMIT: usize = 512;
 const EVENT_SUBSCRIBER_CAPACITY: usize = 64;
+const SEARCH_QUEUE_CAPACITY: usize = 128;
 
 fn v2_note_meta(meta: &NoteMeta, disk_hash: &str) -> V2NoteMeta {
     V2NoteMeta {
@@ -66,8 +71,9 @@ pub struct VaultRuntime {
     v2_subscribers: Arc<Mutex<Vec<(u64, Weak<EventQueue<V2EventEnvelope>>)>>>,
     next_subscriber_id: AtomicU64,
     watcher: Mutex<Option<RecommendedWatcher>>,
-    search_tx: Sender<SearchJob>,
+    search_tx: SyncSender<SearchJob>,
     search_rx: Mutex<Option<Receiver<SearchJob>>>,
+    search_needs_reconciliation: AtomicBool,
     logs: LogHub,
 }
 
@@ -156,10 +162,15 @@ fn v2_existing_mutation(
         let (version, update) = repair_pending_mutation(root, state_root, catalog, &record)?;
         vault.broadcast_v2_event(version, update.clone())?;
         if record.kind == "delete" {
-            let _ = catalog.set_search_dirty(true, false);
-            if vault.search_tx.send(SearchJob::Remove(note_id.to_string())).is_err() {
-                let _ = catalog.set_search_dirty(true, true);
-            }
+            let revision = catalog
+                .note_row_by_id(note_id)?
+                .ok_or_else(|| Error::Internal("pending delete note is unavailable".to_string()))?
+                .meta
+                .seq;
+            vault.enqueue_search_with_catalog(
+                catalog,
+                SearchJob::Remove(note_id.to_string(), revision),
+            );
         } else {
             let meta = catalog
                 .note_by_id(note_id)?
@@ -168,10 +179,7 @@ fn v2_existing_mutation(
                 Error::Internal("pending mutation has no source hash".to_string())
             })?;
             let content = history::read_snapshot(state_root, note_id, source_hash)?;
-            let _ = catalog.set_search_dirty(true, false);
-            if vault.search_tx.send(SearchJob::Upsert(meta, content)).is_err() {
-                let _ = catalog.set_search_dirty(true, true);
-            }
+            vault.enqueue_search_with_catalog(catalog, SearchJob::Upsert(meta, content));
         }
         record = catalog
             .mutation(mutation_id)?
@@ -190,6 +198,30 @@ fn v2_pending_response(mutation_id: &str) -> V2MutationResponse {
         outcome: V2MutationOutcome::PendingMaterialization {
             operation_id: mutation_id.to_string(),
         },
+    }
+}
+
+fn validate_v2_search_limit(limit: u16) -> V2Result<()> {
+    if limit == 0 || usize::from(limit) > tansu_search::SearchLimit::MAX {
+        return Err(V2VaultError::Api(V2ApiErrorKind::BadRequest {
+            message: format!("search limit must be between 1 and {}", tansu_search::SearchLimit::MAX),
+        }));
+    }
+    Ok(())
+}
+
+fn v2_search_error(error: tansu_search::SearchError) -> V2VaultError {
+    match error {
+        tansu_search::SearchError::InvalidInput { .. }
+        | tansu_search::SearchError::LimitOutOfRange { .. }
+        | tansu_search::SearchError::QueryTooLong { .. }
+        | tansu_search::SearchError::InvalidRange { .. }
+        | tansu_search::SearchError::DuplicateOverlayNote => {
+            V2VaultError::Api(V2ApiErrorKind::BadRequest {
+                message: error.to_string(),
+            })
+        }
+        error => V2VaultError::Internal(Error::Internal(error.to_string())),
     }
 }
 
@@ -580,8 +612,38 @@ impl Drop for V2EventSubscription {
 
 enum SearchJob {
     Upsert(NoteMeta, String),
-    Remove(String),
+    Remove(String, i64),
     Rebuild,
+}
+
+enum SearchOverlayIdentityKind {
+    Saved(String),
+    New(String),
+}
+
+fn run_search_worker(runtime: Arc<VaultRuntime>, receiver: Receiver<SearchJob>) {
+    loop {
+        if runtime
+            .search_needs_reconciliation
+            .swap(false, Ordering::AcqRel)
+            && !runtime.run_search_job(SearchJob::Rebuild)
+        {
+            thread::sleep(Duration::from_secs(1));
+        }
+        let mut job = match receiver.recv_timeout(Duration::from_secs(1)) {
+            Ok(job) => job,
+            Err(mpsc::RecvTimeoutError::Timeout) => continue,
+            Err(mpsc::RecvTimeoutError::Disconnected) => return,
+        };
+        loop {
+            runtime.run_search_job(job);
+            match receiver.try_recv() {
+                Ok(next) => job = next,
+                Err(TryRecvError::Empty) => break,
+                Err(TryRecvError::Disconnected) => return,
+            }
+        }
+    }
 }
 
 impl VaultRuntime {
@@ -606,11 +668,14 @@ impl VaultRuntime {
         repair_pending_mutations(&config.path, &config.state_path, &mut catalog)?;
         reconcile_vault(&config.path, &config.state_path, &mut catalog, &excluded)?;
         let notes = catalog.live_notes()?;
-        let mut search = SearchIndex::open(&config.state_path)?;
+        let mut search = SearchIndex::open(&config.state_path);
         if search.rebuild(&config.path, &notes).is_err() {
-            catalog.set_search_dirty(true, true)?;
+            search.mark_needs_reconciliation(true);
         }
-        let (search_tx, search_rx) = mpsc::channel();
+        let search_status = search.search_status();
+        catalog.set_search_dirty(search_status.dirty, search_status.degraded)?;
+        let (search_tx, search_rx) = mpsc::sync_channel(SEARCH_QUEUE_CAPACITY);
+        let search_needs_reconciliation = search.needs_reconciliation();
         if logs.enabled() {
             logs.server_event(
                 LogLevel::Info,
@@ -646,6 +711,7 @@ impl VaultRuntime {
             watcher: Mutex::new(None),
             search_tx,
             search_rx: Mutex::new(Some(search_rx)),
+            search_needs_reconciliation: AtomicBool::new(search_needs_reconciliation),
             logs,
         })
     }
@@ -661,9 +727,7 @@ impl VaultRuntime {
         };
         let runtime = Arc::clone(self);
         thread::spawn(move || {
-            while let Ok(job) = rx.recv() {
-                runtime.run_search_job(job);
-            }
+            run_search_worker(runtime, rx);
         });
     }
 
@@ -1492,7 +1556,7 @@ impl VaultRuntime {
             }));
         }
         let pending = v2_pending_response(&request.mutation_id);
-        catalog.accept_delete_mutation(
+        let tombstone = catalog.accept_delete_mutation(
             &request.mutation_id,
             note_id,
             &serde_json::to_string(&pending)?,
@@ -1518,7 +1582,7 @@ impl VaultRuntime {
         if let Some(version) = version {
             self.broadcast_v2_event(version, update)?;
         }
-        self.enqueue_search(SearchJob::Remove(note_id.to_string()));
+        self.enqueue_search(SearchJob::Remove(note_id.to_string(), tombstone.seq));
         self.broadcast(ServerEventKind::NoteChanged, vec![note_id.to_string()]);
         self.log_note_mutation("delete_v2", &row.meta, None);
         Ok(response)
@@ -1992,7 +2056,7 @@ impl VaultRuntime {
         }
         let sync_version = catalog.sync_version()?;
         drop(catalog);
-        self.enqueue_search(SearchJob::Remove(note_id.to_string()));
+        self.enqueue_search(SearchJob::Remove(note_id.to_string(), meta.seq));
         self.broadcast(ServerEventKind::NoteDeleted, vec![note_id.to_string()]);
         self.log_note_mutation("delete", &meta, None);
         Ok(NoteMutationResponse {
@@ -2004,12 +2068,16 @@ impl VaultRuntime {
 
     pub fn search(&self, query: &str, limit: usize) -> Result<Vec<SearchHit>> {
         let _op = self.lock_op();
-        let (notes, settings) = {
+        let notes = {
             let catalog = self.lock_catalog();
-            (catalog.live_notes()?, catalog.settings()?)
+            catalog.live_notes()?
         };
-        let search = self.search.lock().expect("search mutex poisoned");
-        let hits = search.search(query, &settings, &notes, limit);
+        let hits = {
+            let mut search = self.search.lock().expect("search mutex poisoned");
+            search.try_search(query, &notes, limit)
+        };
+        self.persist_search_status();
+        let hits = hits?;
         if self.logs.enabled() {
             self.logs.server_event(
                 LogLevel::Info,
@@ -2030,6 +2098,226 @@ impl VaultRuntime {
             );
         }
         Ok(hits)
+    }
+
+    pub fn v2_search(&self, request: V2SearchRequest) -> V2Result<V2SearchResponse> {
+        let _op = self.lock_op();
+        validate_v2_search_limit(request.limit)?;
+        let notes = self.lock_catalog().live_notes()?;
+        let mut snapshots = Vec::new();
+        let mut overlay_kinds = HashMap::new();
+        let mut search_ids = notes
+            .iter()
+            .map(|note| note.note_id.clone())
+            .chain(request.overlays.iter().filter_map(|overlay| match overlay {
+                V2SearchOverlay::Saved { note_id, .. } => Some(note_id.clone()),
+                V2SearchOverlay::New { .. } => None,
+            }))
+            .collect::<std::collections::HashSet<_>>();
+        let mut seen_overlay_ids = std::collections::HashSet::new();
+        let mut source_bytes = 0usize;
+        let mut skipped = 0usize;
+        for (overlay_index, overlay) in request.overlays.iter().enumerate() {
+            let (is_new_draft, overlay_id) = match overlay {
+                V2SearchOverlay::Saved { note_id, .. } => (false, note_id),
+                V2SearchOverlay::New { local_id, .. } => (true, local_id),
+            };
+            if overlay_id.is_empty()
+                || !seen_overlay_ids.insert((is_new_draft, overlay_id.clone()))
+            {
+                return Err(V2VaultError::Api(V2ApiErrorKind::BadRequest {
+                    message: "search overlays must have unique nonempty identities".to_string(),
+                }));
+            }
+            let (note_id, local_revision, title, path, source, kind, revision, source_hash) =
+                match overlay {
+                    V2SearchOverlay::Saved {
+                        note_id,
+                        base_revision,
+                        base_source_hash,
+                        local_revision,
+                        title,
+                        path,
+                        content,
+                    } => (
+                        note_id.clone(),
+                        *local_revision,
+                        title,
+                        path,
+                        content,
+                        SearchOverlayIdentityKind::Saved(note_id.clone()),
+                        *base_revision,
+                        base_source_hash.clone(),
+                    ),
+                    V2SearchOverlay::New {
+                        local_id,
+                        local_revision,
+                        title,
+                        path,
+                        content,
+                    } => {
+                        let source_hash = history::source_hash(content);
+                        let mut search_note_id = format!("tansu-local-overlay-{overlay_index}");
+                        while !search_ids.insert(search_note_id.clone()) {
+                            search_note_id.push('_');
+                        }
+                        (
+                            search_note_id,
+                            *local_revision,
+                            title,
+                            path,
+                            content,
+                            SearchOverlayIdentityKind::New(local_id.clone()),
+                            0,
+                            source_hash,
+                        )
+                    }
+                };
+            if source.contains('\r') {
+                return Err(V2VaultError::Api(V2ApiErrorKind::BadRequest {
+                    message: "overlay source must use LF line endings".to_string(),
+                }));
+            }
+            if snapshots.len() == MAX_OVERLAY_NOTES
+                || source_bytes.saturating_add(source.len()) > MAX_OVERLAY_BYTES
+            {
+                skipped = request.overlays.len() - snapshots.len();
+                break;
+            }
+            source_bytes += source.len();
+            let snapshot = dirty_note_snapshot(
+                note_id.clone(),
+                path.clone(),
+                title.clone(),
+                revision,
+                source_hash,
+                local_revision,
+                source.clone(),
+            )
+            .map_err(v2_search_error)?;
+            overlay_kinds.insert(note_id.clone(), kind);
+            snapshots.push(snapshot);
+        }
+        let mode = match request.mode {
+            V2SearchMode::Default => SearchMode::ExactPrefix,
+            V2SearchMode::TypoOnly => SearchMode::TypoOnly,
+        };
+        let results = {
+            let mut search = self.search.lock().expect("search mutex poisoned");
+            search.try_search_with_overlay(
+                &request.query,
+                &notes,
+                usize::from(request.limit),
+                mode,
+                &snapshots,
+            )
+        };
+        self.persist_search_status();
+        let results = results.map_err(v2_search_error)?;
+        let hits = results
+            .hits
+            .into_iter()
+            .map(|result| -> V2Result<V2SearchHit> {
+                let identity = if let Some(local_revision) = result.local_revision {
+                    match overlay_kinds.get(&result.note_id) {
+                        Some(SearchOverlayIdentityKind::Saved(note_id)) => {
+                            V2SearchHitIdentity::SavedOverlay {
+                                note_id: note_id.clone(),
+                                local_revision,
+                                source_hash: result.source_hash.clone(),
+                            }
+                        }
+                        Some(SearchOverlayIdentityKind::New(local_id)) => {
+                            V2SearchHitIdentity::NewLocalDraft {
+                                local_id: local_id.clone(),
+                                local_revision,
+                                source_hash: result.source_hash.clone(),
+                            }
+                        }
+                        None => {
+                            return Err(V2VaultError::Internal(Error::Internal(
+                                "search overlay result has no request identity".to_string(),
+                            )));
+                        }
+                    }
+                } else {
+                    V2SearchHitIdentity::Canonical {
+                        note_id: result.note_id.clone(),
+                        revision: result.revision,
+                        source_hash: result.source_hash.clone(),
+                    }
+                };
+                Ok(V2SearchHit {
+                    identity,
+                    title: result.title,
+                    path: result.path,
+                    score: result.score,
+                    excerpt: result.excerpt,
+                    excerpt_ranges: result
+                        .excerpt_ranges
+                        .into_iter()
+                        .map(|range| V2ExcerptRange {
+                            start_utf16: range.start(),
+                            end_utf16: range.end(),
+                        })
+                        .collect(),
+                    source_range: result.source_reveal_range.map(|range| V2SourceRange {
+                        start_utf16: range.start(),
+                        end_utf16: range.end(),
+                    }),
+                })
+            })
+            .collect::<V2Result<Vec<_>>>()?;
+        let skipped = if skipped == 0 {
+            results.skipped_notes
+        } else {
+            skipped
+        };
+        let overlay_coverage = if skipped == 0 {
+            V2OverlayCoverage::Complete
+        } else {
+            V2OverlayCoverage::Partial {
+                skipped_note_count: u16::try_from(skipped).map_err(|_| {
+                    V2VaultError::Api(V2ApiErrorKind::BadRequest {
+                        message: "search request contains too many overlays".to_string(),
+                    })
+                })?,
+            }
+        };
+        Ok(V2SearchResponse { hits, overlay_coverage })
+    }
+
+    pub fn v2_quick_open(
+        &self,
+        request: V2QuickOpenRequest,
+    ) -> V2Result<V2QuickOpenResponse> {
+        let _op = self.lock_op();
+        validate_v2_search_limit(request.limit)?;
+        let notes = self.lock_catalog().live_notes()?;
+        let result = {
+            let mut search = self.search.lock().expect("search mutex poisoned");
+            search.quick_open(
+                &request.query,
+                &notes,
+                &request.pinned_note_ids,
+                &request.recent_note_ids,
+                usize::from(request.limit),
+            )
+        };
+        self.persist_search_status();
+        let response = result.map_err(v2_search_error)?;
+        let hits = response
+            .hits
+            .into_iter()
+            .map(|hit| V2QuickOpenHit {
+                note_id: hit.identity.note_id().to_owned(),
+                source_hash: hit.identity.source_hash().to_owned(),
+                title: hit.identity.title().to_owned(),
+                path: hit.identity.path().to_owned(),
+                score: f32::from(hit.score),
+            })
+            .collect();
+        Ok(V2QuickOpenResponse { hits })
     }
 
     pub fn save_session(&self, session: SessionState) -> Result<()> {
@@ -2334,51 +2622,112 @@ impl VaultRuntime {
     }
 
     fn enqueue_search(&self, job: SearchJob) {
-        if let Ok(mut catalog) = self.catalog.lock() {
-            let _ = catalog.set_search_dirty(true, false);
+        let mut catalog = self.lock_catalog();
+        self.enqueue_search_with_catalog(&mut catalog, job);
+    }
+
+    fn enqueue_search_with_catalog(&self, catalog: &mut Catalog, job: SearchJob) {
+        let degraded = self
+            .search
+            .lock()
+            .expect("search mutex poisoned")
+            .search_status()
+            .degraded;
+        if let Err(error) = catalog.set_search_dirty(true, degraded) {
+            self.log_search_failure("persist queued search status", &error.to_string());
         }
-        if self.search_tx.send(job).is_err()
-            && let Ok(mut catalog) = self.catalog.lock()
-        {
-            let _ = catalog.set_search_dirty(true, true);
+        match self.search_tx.try_send(job) {
+            Ok(()) => {}
+            Err(TrySendError::Full(_)) => {
+                self.search_needs_reconciliation
+                    .store(true, Ordering::Release);
+                if let Err(error) = catalog.set_search_dirty(true, true) {
+                    self.log_search_failure("persist search queue overflow", &error.to_string());
+                }
+                self.log_search_failure("search queue overflow", "scheduled canonical rebuild");
+            }
+            Err(TrySendError::Disconnected(_)) => {
+                self.search_needs_reconciliation
+                    .store(true, Ordering::Release);
+                if let Err(error) = catalog.set_search_dirty(true, true) {
+                    self.log_search_failure("persist stopped search worker", &error.to_string());
+                }
+                self.log_search_failure("search worker stopped", "scheduled canonical rebuild");
+            }
         }
     }
 
-    fn run_search_job(&self, job: SearchJob) {
+    fn run_search_job(&self, job: SearchJob) -> bool {
         let result = match job {
             SearchJob::Upsert(meta, content) => {
-                let mut search = self.search.lock().expect("search mutex poisoned");
-                search.index_note(meta, &content);
-                (search.dirty, search.degraded)
+                self.search
+                    .lock()
+                    .expect("search mutex poisoned")
+                    .try_index_note(meta, &content)
             }
-            SearchJob::Remove(note_id) => {
-                let mut search = self.search.lock().expect("search mutex poisoned");
-                search.remove_note(&note_id);
-                (search.dirty, search.degraded)
+            SearchJob::Remove(note_id, revision) => {
+                self.search
+                    .lock()
+                    .expect("search mutex poisoned")
+                    .try_remove_note(&note_id, revision)
             }
             SearchJob::Rebuild => {
                 let notes = match self.catalog.lock() {
-                    Ok(mut catalog) => match catalog.live_notes() {
-                        Ok(notes) => notes,
-                        Err(_) => {
-                            let _ = catalog.set_search_dirty(true, true);
-                            return;
-                        }
-                    },
-                    Err(_) => return,
+                    Ok(catalog) => catalog.live_notes(),
+                    Err(_) => Err(Error::Internal("catalog mutex poisoned".to_string())),
                 };
-                let mut search = self.search.lock().expect("search mutex poisoned");
-                if search.rebuild(&self.root, &notes).is_err() {
-                    (true, true)
-                } else {
-                    (search.dirty, search.degraded)
+                match notes {
+                    Ok(notes) => self
+                        .search
+                        .lock()
+                        .expect("search mutex poisoned")
+                        .rebuild(&self.root, &notes),
+                    Err(error) => Err(error),
                 }
             }
         };
-        if let Ok(mut catalog) = self.catalog.lock() {
-            let _ = catalog.set_search_dirty(result.0, result.1);
+        let mut search = self.search.lock().expect("search mutex poisoned");
+        if let Err(error) = &result {
+            search.mark_needs_reconciliation(true);
+            self.search_needs_reconciliation
+                .store(true, Ordering::Release);
+            self.log_search_failure("update search index", &error.to_string());
         }
-        if result.1 && self.logs.enabled() {
+        let status = search.search_status();
+        if search.needs_reconciliation() {
+            self.search_needs_reconciliation
+                .store(true, Ordering::Release);
+        }
+        drop(search);
+        if let Ok(mut catalog) = self.catalog.lock() {
+            if let Err(error) = catalog.set_search_dirty(status.dirty, status.degraded) {
+                self.log_search_failure("persist search status", &error.to_string());
+            }
+        }
+        result.is_ok()
+    }
+
+    fn persist_search_status(&self) {
+        let (status, needs_reconciliation) = {
+            let search = self.search.lock().expect("search mutex poisoned");
+            (search.search_status(), search.needs_reconciliation())
+        };
+        if needs_reconciliation {
+            self.search_needs_reconciliation
+                .store(true, Ordering::Release);
+        }
+        match self.catalog.lock() {
+            Ok(mut catalog) => {
+                if let Err(error) = catalog.set_search_dirty(status.dirty, status.degraded) {
+                    self.log_search_failure("persist search status", &error.to_string());
+                }
+            }
+            Err(_) => self.log_search_failure("persist search status", "catalog mutex poisoned"),
+        }
+    }
+
+    fn log_search_failure(&self, action: &str, detail: &str) {
+        if self.logs.enabled() {
             self.logs.server_event(
                 LogLevel::Warn,
                 "system.event",
@@ -2386,11 +2735,14 @@ impl VaultRuntime {
                 fields([
                     (
                         "system",
-                        serde_json::json!({ "component": "search", "action": "degraded" }),
+                        serde_json::json!({
+                            "component": "vault",
+                            "action": "search_failure",
+                            "operation": action,
+                            "detail": detail,
+                        }),
                     ),
                     ("vault", serde_json::json!(self.index)),
-                    ("dirty", serde_json::json!(result.0)),
-                    ("degraded", serde_json::json!(result.1)),
                 ]),
             );
         }
@@ -2723,6 +3075,132 @@ mod tests {
                 reason: PathValidationReason::Traversal
             }
         ));
+    }
+
+    #[test]
+    fn v2_search_returns_saved_overlay_identity_and_source_ranges() {
+        let vault = test_vault_with_note("A.md", "# Moon\n\ncomet vintage\n");
+        let meta = vault.lock_catalog().live_notes().unwrap().remove(0);
+        let response = vault
+            .v2_search(V2SearchRequest {
+                query: "comet".to_string(),
+                mode: V2SearchMode::Default,
+                limit: 10,
+                overlays: vec![V2SearchOverlay::Saved {
+                    note_id: meta.note_id.clone(),
+                    base_revision: meta.seq,
+                    base_source_hash: meta.content_hash.clone(),
+                    local_revision: 4,
+                    title: "Moon".to_string(),
+                    path: "A.md".to_string(),
+                    content: "# Moon\n\n😀 comet rocket\n".to_string(),
+                }],
+            })
+            .unwrap();
+
+        assert_eq!(response.hits.len(), 1);
+        assert!(matches!(
+            &response.hits[0].identity,
+            V2SearchHitIdentity::SavedOverlay {
+                note_id,
+                local_revision: 4,
+                ..
+            } if note_id == &meta.note_id
+        ));
+        assert!(response.hits[0].excerpt.contains("rocket"));
+        assert!(!response.hits[0].excerpt.contains("vintage"));
+        assert!(response.hits[0].source_range.is_some());
+        assert_eq!(response.overlay_coverage, V2OverlayCoverage::Complete);
+    }
+
+    #[test]
+    fn new_draft_identity_does_not_suppress_a_canonical_note() {
+        let vault = test_vault_with_note("A.md", "# Moon\n\ncomet vintage\n");
+        let meta = vault.lock_catalog().live_notes().unwrap().remove(0);
+        let response = vault
+            .v2_search(V2SearchRequest {
+                query: "comet".to_string(),
+                mode: V2SearchMode::Default,
+                limit: 10,
+                overlays: vec![V2SearchOverlay::New {
+                    local_id: meta.note_id.clone(),
+                    local_revision: 2,
+                    title: "Draft".to_string(),
+                    path: "draft.md".to_string(),
+                    content: "comet rocket\n".to_string(),
+                }],
+            })
+            .unwrap();
+
+        assert_eq!(response.hits.len(), 2);
+        assert!(response.hits.iter().any(|hit| matches!(
+            &hit.identity,
+            V2SearchHitIdentity::Canonical { note_id, .. } if note_id == &meta.note_id
+        )));
+        assert!(response.hits.iter().any(|hit| matches!(
+            &hit.identity,
+            V2SearchHitIdentity::NewLocalDraft {
+                local_id,
+                local_revision: 2,
+                ..
+            } if local_id == &meta.note_id
+        )));
+    }
+
+    #[test]
+    fn v2_quick_open_returns_pinned_note_metadata() {
+        let vault = test_vault_with_note("A.md", "# Moon\n\ncontent\n");
+        let meta = vault.lock_catalog().live_notes().unwrap().remove(0);
+        let response = vault
+            .v2_quick_open(V2QuickOpenRequest {
+                query: String::new(),
+                pinned_note_ids: vec![meta.note_id.clone()],
+                recent_note_ids: Vec::new(),
+                limit: 10,
+            })
+            .unwrap();
+
+        assert_eq!(response.hits.len(), 1);
+        assert_eq!(response.hits[0].note_id, meta.note_id);
+        assert_eq!(response.hits[0].source_hash, meta.content_hash);
+        assert_eq!(response.hits[0].title, "Moon");
+        assert_eq!(response.hits[0].score, 0.0);
+    }
+
+    #[test]
+    fn failed_search_index_does_not_reject_accepted_note_write() {
+        let dir = tempfile::tempdir().unwrap().keep();
+        let state_path = dir.join("state");
+        fs::create_dir_all(&state_path).unwrap();
+        fs::write(state_path.join("search"), "not a directory").unwrap();
+        let vault = VaultRuntime::open(
+            0,
+            &VaultConfig {
+                name: "Test".to_string(),
+                path: dir.clone(),
+                state_path: state_path.clone(),
+                excluded_folders: Vec::new(),
+            },
+            LogHub::new(crate::logging::LogMode::Off),
+        )
+        .unwrap();
+        let content = "# A\n\naccepted\n";
+        let response = vault
+            .v2_create_note(V2CreateNoteRequest {
+                mutation_id: "search-failure-create".to_string(),
+                path: "A.md".to_string(),
+                content: content.to_string(),
+                source_hash: history::source_hash(content),
+            })
+            .unwrap();
+
+        assert!(matches!(
+            response.outcome,
+            V2MutationOutcome::Accepted { result: Some(_) }
+        ));
+        let status = vault.search_status().unwrap();
+        assert!(status.dirty);
+        assert!(status.degraded);
     }
 
     #[test]
@@ -3825,6 +4303,23 @@ mod tests {
             vault.bootstrap(vec![], 0).unwrap().notes[0].note_id,
             legacy_note.note_id
         );
+    }
+
+    fn test_vault_with_note(path: &str, content: &str) -> VaultRuntime {
+        let dir = tempfile::tempdir().unwrap().keep();
+        fs::write(dir.join(path), content).unwrap();
+        let state_path = dir.join("state");
+        VaultRuntime::open(
+            0,
+            &VaultConfig {
+                name: "Test".to_string(),
+                path: dir.clone(),
+                state_path,
+                excluded_folders: Vec::new(),
+            },
+            LogHub::new(crate::logging::LogMode::Off),
+        )
+        .unwrap()
     }
 
     fn test_vault() -> VaultRuntime {

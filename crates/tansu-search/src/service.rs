@@ -345,7 +345,7 @@ fn worker_loop(
                     });
                     hits
                 });
-                if result.is_err() {
+                if matches!(&result, Err(error) if !matches!(error, SearchError::QueryTooLong { .. })) {
                     state.dirty.store(true, Ordering::Release);
                     state.degraded.store(true, Ordering::Release);
                     state
@@ -706,6 +706,25 @@ mod tests {
             fuzziness: Fuzziness::Disabled,
             ..SearchOptions::default()
         }
+    }
+
+    #[test]
+    fn rejected_search_query_does_not_mark_the_index_degraded() {
+        let temp = tempfile::tempdir().unwrap();
+        let service = SearchService::open(temp.path()).unwrap();
+        let error = service
+            .search("x".repeat(1025), options(), Vec::new())
+            .unwrap_err();
+
+        assert!(matches!(error, SearchError::QueryTooLong { .. }));
+        assert_eq!(
+            service.status(),
+            SearchStatus {
+                dirty: false,
+                degraded: false,
+            }
+        );
+        assert!(!service.needs_reconciliation());
     }
 
     fn snapshot(identity: NoteIdentity, source: &str, local_revision: u64) -> DirtyNoteSnapshot {

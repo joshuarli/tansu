@@ -9,6 +9,7 @@ mod tokenizer;
 mod types;
 
 pub use error::SearchError;
+pub use overlay::{MAX_OVERLAY_BYTES, MAX_OVERLAY_NOTES};
 pub use service::{MAX_REBUILD_NOTES, MAX_REBUILD_SOURCE_BYTES, SearchService};
 pub use types::{
     DirtyNoteSnapshot, DocumentInput, ExcerptRange, FieldScoreBreakdown, Fuzziness, MatchInfo,

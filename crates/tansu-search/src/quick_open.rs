@@ -72,6 +72,7 @@ pub(crate) fn search(
                     hit: QuickOpenHit {
                         identity: identity.clone(),
                         priority,
+                        score,
                         ranges,
                     },
                     field_order,
@@ -187,6 +188,7 @@ fn empty_query(
                 hits.push(QuickOpenHit {
                     identity: (*identity).clone(),
                     priority,
+                    score: 0,
                     ranges: Vec::new(),
                 });
                 if hits.len() >= limit.get() {
