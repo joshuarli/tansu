@@ -2,6 +2,8 @@ use std::fs::{self, File};
 use std::io::ErrorKind;
 use std::path::{Component, Path, PathBuf};
 use std::io::{Read, Write};
+#[cfg(unix)]
+use std::sync::atomic::{AtomicU64, Ordering};
 
 #[cfg(unix)]
 use std::ffi::CString;
@@ -428,24 +430,56 @@ pub fn write_vault_asset_new(root: &Path, name: &str, bytes: &[u8]) -> Result<()
     let Component::Normal(name) = parts[parts.len() - 1] else {
         return Err(Error::BadRequest("invalid vault path".to_string()));
     };
-    let name = CString::new(name.as_bytes())
+    let destination = CString::new(name.as_bytes())
         .map_err(|_| Error::BadRequest("asset path contains a nul byte".to_string()))?;
-    // SAFETY: the directory descriptor is live, name is nul-terminated, and mode is supplied.
-    let fd = unsafe {
-        openat(
-            directory.as_raw_fd(),
-            name.as_ptr(),
-            O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC,
-            0o600_u32,
-        )
+    static NEXT_TEMP_ID: AtomicU64 = AtomicU64::new(0);
+    let directory_fd = directory.as_raw_fd();
+    let (temp_name, mut file) = loop {
+        let temp = CString::new(format!(
+            ".asset-{}-{}.tmp",
+            std::process::id(),
+            NEXT_TEMP_ID.fetch_add(1, Ordering::Relaxed)
+        ))
+        .expect("generated asset temp name has no nul byte");
+        // SAFETY: directory is live, the temp name is nul-terminated, and the mode is supplied.
+        let fd = unsafe {
+            openat(
+                directory_fd,
+                temp.as_ptr(),
+                O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC,
+                0o600_u32,
+            )
+        };
+        if fd >= 0 {
+            // SAFETY: openat returned a new descriptor that is transferred to File exactly once.
+            break (temp, unsafe { File::from_raw_fd(fd) });
+        }
+        let error = std::io::Error::last_os_error();
+        if error.kind() != ErrorKind::AlreadyExists {
+            return Err(Error::Io(error));
+        }
     };
-    if fd < 0 {
-        return Err(Error::Io(std::io::Error::last_os_error()));
+    let write_result = file.write_all(bytes).and_then(|()| file.sync_all());
+    drop(file);
+    if let Err(error) = write_result {
+        let cleanup = unlink_at(directory_fd, &temp_name);
+        return match cleanup {
+            Ok(()) => Err(Error::Io(error)),
+            Err(cleanup_error) => Err(Error::Internal(format!(
+                "asset write failed: {error}; temporary asset cleanup failed: {cleanup_error}"
+            ))),
+        };
     }
-    // SAFETY: openat returned a new descriptor that is transferred to File exactly once.
-    let mut file = unsafe { File::from_raw_fd(fd) };
-    file.write_all(bytes)?;
-    file.sync_all()?;
+    if let Err(error) = link_at(directory_fd, &temp_name, directory_fd, &destination) {
+        let cleanup = unlink_at(directory_fd, &temp_name);
+        return match cleanup {
+            Ok(()) => Err(error),
+            Err(cleanup_error) => Err(Error::Internal(format!(
+                "asset publish failed: {error}; temporary asset cleanup failed: {cleanup_error}"
+            ))),
+        };
+    }
+    unlink_at(directory_fd, &temp_name)?;
     directory.sync_all()?;
     Ok(())
 }

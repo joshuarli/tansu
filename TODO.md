@@ -23,15 +23,6 @@ Next: 21
 - **Effort:** M
 - **Design:** `docs/rfcs/0001-webauthn-counter-policy.md`
 
-### TNS-5 · P2 · Recover prepared image uploads after restart
-
-- **Area:** Data recovery
-- **Where:** `src/vault.rs:758-760`, `src/vault.rs:1075-1097`, `src/vault.rs:1113-1127`, `src/paths.rs:433-450`
-- **Problem:** Startup deletes prepared mutations even though image upload writes its asset before accepting the mutation. A crash in that interval loses the recovery record; retrying the same ID then hits the existing filename. Interrupted writes can also leave partial bytes at the final path.
-- **Recommendation:** Preserve and recover prepared image mutations, and publish each asset atomically so interruption cannot leave a partial destination.
-- **Fix with:** durable-state, os-boundaries, lifecycle-concurrency
-- **Effort:** M
-
 ### TNS-6 · P2 · Reconcile case-fold collisions by exact path
 
 - **Area:** Vault reconciliation

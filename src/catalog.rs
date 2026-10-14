@@ -694,9 +694,9 @@ impl Catalog {
             .map_err(Into::into)
     }
 
-    pub fn clear_prepared_mutations(&mut self) -> Result<()> {
+    pub fn clear_unrecoverable_prepared_mutations(&mut self) -> Result<()> {
         self.conn.execute(
-            "DELETE FROM mutation_operations WHERE state='prepared'",
+            "DELETE FROM mutation_operations WHERE state='prepared' AND kind!='image_upload'",
             [],
         )?;
         Ok(())

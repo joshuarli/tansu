@@ -755,7 +755,7 @@ impl VaultRuntime {
         } else {
             settings.excluded_folders
         };
-        catalog.clear_prepared_mutations()?;
+        catalog.clear_unrecoverable_prepared_mutations()?;
         repair_pending_mutations(&config.path, &config.state_path, &mut catalog)?;
         reconcile_vault(&config.path, &config.state_path, &mut catalog, &excluded)?;
         let notes = catalog.live_notes()?;
@@ -5167,6 +5167,65 @@ mod tests {
         assert!(uploaded.name.starts_with("z-images/"));
         assert_eq!(vault.read_asset(&uploaded.name).unwrap(), b"webp");
         assert!(vault.read_asset("../bad.webp").is_err());
+    }
+
+    #[test]
+    fn prepared_image_upload_survives_restart_and_retry() {
+        let dir = tempfile::tempdir().unwrap().keep();
+        let state_path = dir.join("state");
+        let config = VaultConfig {
+            name: "Test".to_string(),
+            path: dir.clone(),
+            state_path: state_path.clone(),
+            excluded_folders: Vec::new(),
+        };
+        let bytes = b"webp";
+        let mutation_id = "interrupted-image-upload";
+        let body_hash = history::disk_hash(bytes);
+        let payload_hash = v2_request_hash("image_upload", None, &body_hash).unwrap();
+        let digest = history::disk_hash(mutation_id.as_bytes());
+        let name = format!(
+            "z-images/image-{}.webp",
+            digest.strip_prefix("blake3-v2:").unwrap()
+        );
+        let initial = VaultRuntime::open(
+            0,
+            &config,
+            LogHub::new(crate::logging::LogMode::Off),
+        )
+        .unwrap();
+        drop(initial);
+        let mut catalog = Catalog::open(&state_path.join("vault.db")).unwrap();
+        catalog
+            .prepare_mutation(MutationIntent {
+                mutation_id,
+                payload_hash: &payload_hash.current,
+                kind: "image_upload",
+                note_id: None,
+                path: Some(&name),
+                old_path: None,
+                expected_disk_hash: None,
+                source_hash: None,
+                disk_hash: Some(&body_hash),
+            })
+            .unwrap();
+        write_vault_asset_new(&dir, &name, bytes).unwrap();
+        drop(catalog);
+
+        let restarted = VaultRuntime::open(
+            0,
+            &config,
+            LogHub::new(crate::logging::LogMode::Off),
+        )
+        .unwrap();
+        let response = restarted.v2_upload_image(mutation_id, bytes).unwrap();
+
+        assert_eq!(response.name, name);
+        assert_eq!(restarted.read_asset(&response.name).unwrap(), bytes);
+        assert_eq!(
+            restarted.lock_catalog().mutation(mutation_id).unwrap().unwrap().state,
+            "accepted"
+        );
     }
 
     #[test]
