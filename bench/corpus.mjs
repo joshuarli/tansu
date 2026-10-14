@@ -30,7 +30,7 @@ export function renderStressNote(sizeBytes) {
   return `${prefix}${"x".repeat(remainingBytes)}`;
 }
 
-export async function generateCorpus(seed = 0x5eed1234) {
+async function generateCorpus(seed = 0x5eed1234) {
   await resetCorpusOutput();
   const outputRoot = DEFAULT_OUTPUT;
 
@@ -52,7 +52,7 @@ export async function generateCorpus(seed = 0x5eed1234) {
   return outputRoot;
 }
 
-export async function validateCorpus(seed = 0x5eed1234) {
+async function validateCorpus(seed = 0x5eed1234) {
   const outputRoot = DEFAULT_OUTPUT;
 
   for (const vaultName of await readdir(FIXTURE_ROOT)) {
@@ -97,7 +97,7 @@ export async function validateCorpus(seed = 0x5eed1234) {
   return true;
 }
 
-export async function writeCorpusNotes(corpusRoot, seed, count) {
+async function writeCorpusNotes(corpusRoot, seed, count) {
   await mkdir(corpusRoot, { recursive: true });
   for (let index = 0; index < count; index += 1) {
     const number = String(index + 1).padStart(5, "0");
@@ -105,7 +105,7 @@ export async function writeCorpusNotes(corpusRoot, seed, count) {
   }
 }
 
-export async function resetCorpusOutput() {
+async function resetCorpusOutput() {
   await rm(DEFAULT_OUTPUT, { recursive: true, force: true });
   await mkdir(DEFAULT_OUTPUT, { recursive: true });
 }
