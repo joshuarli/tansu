@@ -1,4 +1,6 @@
 import type { NoteId, RevisionEventId } from "../state.ts";
+import type { FindMatch, OutlineHeading } from "../editor/source-navigation.js";
+import type { V2QuickOpenResponse, V2SearchHit } from "../types.generated.ts";
 import type { LocalDraftId, VaultId } from "./identity.ts";
 import type { TabIdentity } from "./tab-identity.ts";
 
@@ -15,6 +17,7 @@ export type CommandId =
   | "import"
   | "revisions"
   | "settings"
+  | "find"
   | "source";
 
 export type CommandItem = {
@@ -45,6 +48,21 @@ export type ViewEvent =
   | { type: "search.input"; query: string }
   | { type: "search.open" }
   | { type: "search.overlayInput"; query: string }
+  | { type: "search.hitOpen"; hit: V2SearchHit }
+  | { type: "quickOpen.open" }
+  | { type: "quickOpen.input"; query: string }
+  | { type: "quickOpen.hitOpen"; hit: V2QuickOpenResponse["hits"][number] }
+  | { type: "find.open" }
+  | { type: "find.input"; query: string }
+  | { type: "find.select"; match: FindMatch }
+  | { type: "outline.select"; heading: OutlineHeading }
+  | { type: "sidebar.toggle" }
+  | { type: "outline.toggle" }
+  | { type: "auth.login" }
+  | { type: "auth.enroll" }
+  | { type: "auth.logout" }
+  | { type: "auth.capability"; value: string }
+  | { type: "storage.persist" }
   | { type: "command.open" }
   | { type: "command.filter"; query: string }
   | { type: "command.run"; id: CommandId }

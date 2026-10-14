@@ -11,13 +11,16 @@ import {
   type State,
   type Tab,
 } from "./state.ts";
-import { localDraftId, vaultId } from "./app/identity.ts";
+import { vaultId } from "./app/identity.ts";
 import { sameTabIdentity, type TabIdentity } from "./app/tab-identity.ts";
-import type { V2SearchHit } from "./types.generated.ts";
+import type { V2QuickOpenResponse, V2SearchHit } from "./types.generated.ts";
+import type { FindMatch, Outline } from "./editor/source-navigation.js";
 
 export type ViewActions = {
   dispatch: (event: ViewEvent) => void;
   commandItems: () => CommandItem[];
+  findMatches: () => readonly FindMatch[];
+  outline: () => Outline;
 };
 
 export function renderApp(state: State, actions: ViewActions): HTMLElement[] {
@@ -34,6 +37,48 @@ export function renderLoading(): HTMLElement {
   const loading = el("main", "loading", "Loading");
   loading.dataset["viewRegion"] = "loading";
   return loading;
+}
+
+export function renderAuthGate(state: State, actions: ViewActions): HTMLElement {
+  const capability = document.createElement("input");
+  capability.dataset["key"] = "enrollment-capability";
+  capability.type = "password";
+  capability.autocomplete = "one-time-code";
+  capability.placeholder = "Enrollment capability";
+  capability.value = state.authCapability;
+  capability.addEventListener("input", () => actions.dispatch({ type: "auth.capability", value: capability.value }));
+  const available = typeof navigator !== "undefined" && navigator.credentials !== undefined &&
+    typeof window !== "undefined" && window.isSecureContext;
+  const panel = el(
+    "main",
+    "auth-gate",
+    el("div", "auth-card",
+      el("p", "eyebrow", "Tansu2 vault"),
+      el("h1", "auth-title", "Unlock your notes"),
+      el("p", "auth-copy", "Use a passkey registered for this server."),
+      state.authError === null ? el("span", "") : el("p", "auth-error", state.authError),
+      button(
+        state.authBusy === "login" ? "Waiting for passkey…" : "Sign in with passkey",
+        "Sign in with passkey",
+        () => actions.dispatch({ type: "auth.login" }),
+        "primary-button",
+      ),
+      el("div", "auth-divider", "First credential"),
+      el("label", "field-label", span("Enrollment capability"), capability),
+      button(
+        state.authBusy === "enroll" ? "Waiting for passkey…" : "Register first passkey",
+        "Register first passkey",
+        () => actions.dispatch({ type: "auth.enroll" }),
+        "text-button",
+      ),
+      available ? span("") : el("p", "auth-error", "Passkeys require a supported browser in a secure context."),
+    ),
+  );
+  panel.dataset["viewRegion"] = "auth";
+  for (const control of panel.querySelectorAll<HTMLButtonElement>("button")) {
+    control.disabled = !available || state.authBusy !== null;
+  }
+  return panel;
 }
 
 export function updateAppView(root: HTMLElement, regions: HTMLElement[]): void {
@@ -158,7 +203,11 @@ export function updateStatusBar(status: HTMLElement, state: State): void {
 }
 
 function renderSidebar(state: State, actions: ViewActions): HTMLElement {
-  const sidebar = el("aside", state.readingMode ? "sidebar reading-sidebar" : "sidebar");
+  const sidebar = el(
+    "aside",
+    ["sidebar", state.readingMode ? "reading-sidebar" : "", state.sidebarCollapsed ? "sidebar-collapsed" : ""]
+      .filter(Boolean).join(" "),
+  );
   const vaultSelect = document.createElement("select");
   vaultSelect.className = "vault-select";
   vaultSelect.dataset["key"] = "vault-select";
@@ -232,9 +281,43 @@ function renderSidebar(state: State, actions: ViewActions): HTMLElement {
     () => actions.dispatch({ type: "command.open" }),
     "icon-button",
   );
-  const controls = el("div", "sidebar-controls", searchButton, create, read, palette);
+  const collapse = button(
+    state.sidebarCollapsed ? "›" : "‹",
+    state.sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar",
+    () => actions.dispatch({ type: "sidebar.toggle" }),
+    "icon-button sidebar-collapse",
+  );
+  const controls = el("div", "sidebar-controls", searchButton, create, read, palette, collapse);
 
   sidebar.append(vaultControl, controls, search);
+  if (state.searchQuery.trim() !== "") {
+    const results = el("div", "note-list search-results");
+    for (const hit of state.searchHits ?? []) results.append(searchHitRow(hit, actions));
+    if (state.searchHits !== null && state.searchHits.length === 0) results.append(span("No matches", "empty-outline"));
+    sidebar.append(section("Search", results));
+  }
+  const outline = state.outlineCollapsed ? { headings: [], complete: true } : actions.outline();
+  const outlineList = el("div", "outline-list");
+  for (const heading of outline.headings) {
+    const item = button(
+      heading.text,
+      `Go to heading ${heading.text}`,
+      () => actions.dispatch({ type: "outline.select", heading }),
+      "outline-row",
+    );
+    item.style.setProperty("--outline-level", String(heading.level));
+    outlineList.append(item);
+  }
+  if (outline.headings.length === 0) outlineList.append(span("No headings", "empty-outline"));
+  const outlineHeading = button(
+    state.outlineCollapsed ? "Outline ›" : "Outline ‹",
+    state.outlineCollapsed ? "Expand outline" : "Collapse outline",
+    () => actions.dispatch({ type: "outline.toggle" }),
+    "outline-toggle",
+  );
+  const outlineSection = el("section", "sidebar-section outline-section", outlineHeading);
+  if (!state.outlineCollapsed) outlineSection.append(outlineList);
+  sidebar.append(outlineSection);
   sidebar.append(section("Pinned", noteList(state, [...state.pinned], actions)));
   sidebar.append(section("Recent", noteList(state, recentNoteIds(state), actions)));
   return sidebar;
@@ -313,6 +396,7 @@ function renderMain(state: State, actions: ViewActions): HTMLElement {
     const hideCloseHint = bindTabCloseHint(tabEl, closeHint, identity, actions);
     tabEl.append(
       span(tab.title),
+      span(tab.kind === "saved" && state.pinned.has(tab.noteId) ? "◆" : "", "tab-pinned"),
       span(tabIsDirty(tab) ? "•" : ""),
       tab.saving ? span("Saving", "tab-saving") : span(""),
       tab.conflict ? span("!", "tab-conflict") : span(""),
@@ -473,6 +557,42 @@ function renderOverlays(state: State, actions: ViewActions): HTMLElement {
     host.append(backdrop(actions), el("div", "command-panel search-panel", input, list));
     queueMicrotask(() => input.focus());
   }
+  if (state.quickOpen) {
+    const input = document.createElement("input");
+    input.className = "command-input";
+    input.dataset["key"] = "quick-open-input";
+    input.value = state.quickOpenQuery;
+    input.placeholder = "Open note by title or path";
+    input.addEventListener("input", () => actions.dispatch({ type: "quickOpen.input", query: input.value }));
+    const list = el("div", "command-list quick-open-results");
+    for (const hit of state.quickOpenHits ?? []) list.append(quickOpenHitRow(hit, actions));
+    host.append(backdrop(actions), el("div", "command-panel quick-open-panel", input, list));
+    queueMicrotask(() => input.focus());
+  }
+  if (state.findOpen) {
+    const input = document.createElement("input");
+    input.className = "command-input";
+    input.dataset["key"] = "current-note-find";
+    input.value = state.findQuery;
+    input.placeholder = "Find in this note";
+    input.addEventListener("input", () => actions.dispatch({ type: "find.input", query: input.value }));
+    const list = el("div", "command-list find-results");
+    const active = activeTab(state);
+    const source = active === undefined ? "" : loadedDraft(active) ?? "";
+    for (const match of actions.findMatches().slice(0, 100)) {
+      const line = source.slice(0, match.from).split("\n").length;
+      const text = source.split("\n")[line - 1]?.trim() ?? "";
+      list.append(button(
+        `Line ${line}: ${text}`,
+        `Reveal match on line ${line}`,
+        () => actions.dispatch({ type: "find.select", match }),
+        "command-row",
+      ));
+    }
+    if (state.findQuery !== "" && list.childElementCount === 0) list.append(el("div", "empty-panel", "No matches"));
+    host.append(backdrop(actions), el("div", "command-panel find-panel", input, list));
+    queueMicrotask(() => input.focus());
+  }
   if (state.revisionsOpen) {
     host.append(backdrop(actions), renderRevisionsPanel(state, actions));
   }
@@ -608,6 +728,20 @@ function renderSettingsPanel(state: State, actions: ViewActions): HTMLElement {
     el("label", "field-label", span("Autosave delay ms"), autosave),
     el("label", "field-label", span("Undo stack max"), undo),
     el("label", "field-label", span("Image WebP quality"), quality),
+    el(
+      "div",
+      "storage-preference",
+      span(state.storagePersisted === null
+        ? "Browser storage may be cleared under storage pressure."
+        : state.storagePersisted ? "Persistent browser storage is enabled." : "The browser declined persistent storage."),
+      button("Request persistent storage", "Request persistent storage", () => actions.dispatch({ type: "storage.persist" }), "text-button"),
+    ),
+    el(
+      "div",
+      "auth-settings",
+      button("Add passkey", "Add passkey", () => actions.dispatch({ type: "auth.enroll" }), "text-button"),
+      button("Lock this session", "Lock this session", () => actions.dispatch({ type: "auth.logout" }), "text-button"),
+    ),
     el(
       "div",
       "modal-actions",
@@ -757,44 +891,43 @@ function renderContextMenu(state: State, actions: ViewActions): HTMLElement {
   return menu;
 }
 
-function searchNoteRow(
-  noteId: string,
-  title: string,
-  path: string,
-  actions: ViewActions,
-): HTMLElement {
-  const row = button(
-    "",
-    path,
-    () => {
-      actions.dispatch({ type: "overlay.close" });
-      actions.dispatch({ type: "note.open", noteId: toNoteId(noteId) });
-    },
-    "command-row search-result-row",
-  );
-  row.dataset["key"] = `note:${noteId}`;
-  row.append(span(title, "search-result-title"), span(path, "search-result-path"));
-  return row;
-}
-
 function searchHitRow(hit: V2SearchHit, actions: ViewActions): HTMLElement {
   const identity = hit.identity;
   if (identity.kind === "newLocalDraft") {
     const row = button(
       "",
       hit.path || hit.title,
-      () => actions.dispatch({
-        type: "localDraft.open",
-        localDraftId: localDraftId(identity.localId),
-      }),
+      () => actions.dispatch({ type: "search.hitOpen", hit }),
       "command-row search-result-row local-search-result",
     );
     row.dataset["key"] = `local-draft:${identity.localId}`;
     row.append(span(hit.title), renderSnippet(hit));
     return row;
   }
-  const row = searchNoteRow(identity.noteId, hit.title, hit.path, actions);
+  const row = button(
+    "",
+    hit.path,
+    () => actions.dispatch({ type: "search.hitOpen", hit }),
+    "note-row command-row search-result-row",
+  );
+  row.dataset["key"] = `search:${identity.kind}:${identity.noteId}`;
+  row.append(span(hit.title, "search-result-title"), span(hit.path, "search-result-path"));
   row.append(renderScore(hit), renderSnippet(hit));
+  return row;
+}
+
+function quickOpenHitRow(
+  hit: V2QuickOpenResponse["hits"][number],
+  actions: ViewActions,
+): HTMLElement {
+  const row = button(
+    "",
+    hit.path,
+    () => actions.dispatch({ type: "quickOpen.hitOpen", hit }),
+    "command-row search-result-row",
+  );
+  row.dataset["key"] = `quick-open:${hit.noteId}`;
+  row.append(span(hit.title, "search-result-title"), span(hit.path, "search-result-path"));
   return row;
 }
 

@@ -133,8 +133,23 @@ export type V2VaultClient = {
 };
 
 export type V2ApiClient = {
+  auth: V2AuthClient;
   bootstrap: (signal?: AbortSignal) => Promise<V2BootstrapResponse>;
   forVault: (serverInstanceId: string, vaultId: string) => V2VaultClient;
+};
+
+export type V2AuthCeremony = {
+  ceremonyId: string;
+  expiresAt: number;
+  publicKey: Record<string, unknown>;
+};
+
+export type V2AuthClient = {
+  beginLogin: (signal?: AbortSignal) => Promise<V2AuthCeremony>;
+  finishLogin: (ceremonyId: string, credential: unknown, signal?: AbortSignal) => Promise<void>;
+  beginEnrollment: (capability?: string, signal?: AbortSignal) => Promise<V2AuthCeremony>;
+  finishEnrollment: (ceremonyId: string, credential: unknown, signal?: AbortSignal) => Promise<void>;
+  logout: (signal?: AbortSignal) => Promise<void>;
 };
 
 export type V2Transport = {
@@ -142,11 +157,90 @@ export type V2Transport = {
   wait: (milliseconds: number, signal?: AbortSignal) => Promise<void>;
 };
 
+function decodeAuthCeremony(value: unknown): V2AuthCeremony {
+  const body = record(value, "authentication ceremony");
+  return {
+    ceremonyId: nonEmptyString(field(body, "ceremonyId"), "ceremonyId"),
+    expiresAt: integer(field(body, "expiresAt"), "expiresAt"),
+    publicKey: record(field(body, "publicKey"), "publicKey options"),
+  };
+}
+
+function decodeAuthFinish(value: unknown): { ok: true } {
+  const body = record(value, "authentication response");
+  if (field(body, "ok") !== true) throw new V2ProtocolError("Authentication response was not successful");
+  return { ok: true };
+}
+
 export function createV2ApiClient(transport: Partial<V2Transport> = {}): V2ApiClient {
   const request = transport.fetch ?? globalThis.fetch.bind(globalThis);
   const wait = transport.wait ?? waitForReconnect;
 
   return {
+    auth: {
+      beginLogin: (signal) => getJson(
+        request,
+        "/api/v2/auth/login/options",
+        decodeAuthCeremony,
+        undefined,
+        signal,
+        "POST",
+        "{}",
+      ),
+      finishLogin: async (ceremonyId, credential, signal) => {
+        await getJson(
+          request,
+          "/api/v2/auth/login/finish",
+          decodeAuthFinish,
+          undefined,
+          signal,
+          "POST",
+          JSON.stringify({ ceremonyId, credential }),
+        );
+      },
+      beginEnrollment: (capability, signal) => {
+        const body = capability === undefined ? {} : { capability };
+        const headers = new Headers();
+        if (capability === undefined) {
+          const csrf = readCsrfCookie();
+          if (csrf !== null) headers.set("X-Tansu-CSRF", csrf);
+        }
+        return getJson(
+          request,
+          "/api/v2/auth/enrollment/options",
+          decodeAuthCeremony,
+          headers,
+          signal,
+          "POST",
+          JSON.stringify(body),
+        );
+      },
+      finishEnrollment: async (ceremonyId, credential, signal) => {
+        await getJson(
+          request,
+          "/api/v2/auth/enrollment/finish",
+          decodeAuthFinish,
+          undefined,
+          signal,
+          "POST",
+          JSON.stringify({ ceremonyId, credential }),
+        );
+      },
+      logout: async (signal) => {
+        const headers = new Headers();
+        const csrf = readCsrfCookie();
+        if (csrf !== null) headers.set("X-Tansu-CSRF", csrf);
+        await getJson(
+          request,
+          "/api/v2/auth/logout",
+          decodeAuthFinish,
+          headers,
+          signal,
+          "POST",
+          "{}",
+        );
+      },
+    },
     bootstrap: (signal) => getJson(request, "/api/v2/bootstrap", decodeV2Bootstrap, undefined, signal),
     forVault(serverId, vault) {
       const identity: ServerIdentity = {

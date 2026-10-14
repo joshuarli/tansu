@@ -19,6 +19,7 @@ export function commandItems(state: State): CommandItem[] {
     { id: "reopen", label: "Reopen closed tab" },
     { id: "reading", label: state.readingMode ? "Edit mode" : "Reading mode" },
     { id: "search", label: "Search notes" },
+    { id: "find", label: "Find in this note" },
     { id: "import", label: "Import HTML" },
     { id: "revisions", label: "Revisions" },
     { id: "settings", label: "Settings" },

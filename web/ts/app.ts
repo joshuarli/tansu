@@ -6,6 +6,7 @@ import { defaultServices, type AppServices } from "./app/services.ts";
 import { localDraftId, noteId, serverInstanceId, vaultId, type DocumentIdentity, type LocalDraftId, type ServerIdentity, type WorkspaceId } from "./app/identity.ts";
 import { sameTabIdentity, toTabKey, type TabIdentity } from "./app/tab-identity.ts";
 import { logClientEvent } from "./dev-log.ts";
+import { V2ApiError } from "./app/v2-api.ts";
 import type { EditorHandle, EditorSession } from "./editor/codemirror-adapter.ts";
 import { createCalloutExtension, createWikiImageExtension, type EditorConfig } from "./editor/tansu-extensions.ts";
 import { normalizeTag } from "./markdown-tags.ts";
@@ -27,8 +28,8 @@ import {
   type State,
   type Tab,
 } from "./state.ts";
-import { disposeAppView, renderApp, renderLoading, updateAppView, updateStatusBar, type ViewActions } from "./view.ts";
-import type { Settings, V2BootstrapResponse, V2MutationResponse, V2NoteDocument, V2NoteMeta, V2SearchOverlay, V2ServerEvent } from "./types.generated.ts";
+import { disposeAppView, renderApp, renderAuthGate, renderLoading, updateAppView, updateStatusBar, type ViewActions } from "./view.ts";
+import type { Settings, V2BootstrapResponse, V2MutationResponse, V2NoteDocument, V2NoteMeta, V2QuickOpenResponse, V2SearchHit, V2SearchOverlay, V2ServerEvent } from "./types.generated.ts";
 import type { DraftJournalRecord, WorkspaceState } from "./app/workspace-store.ts";
 
 const SESSION_SAVE_DELAY_MS = 250;
@@ -59,10 +60,17 @@ export class TansuApp {
   private disposeTask: Promise<void> | null = null;
   private searchRequestSeq = 0;
   private searchOverlayRequestSeq = 0;
+  private quickOpenRequestSeq = 0;
   private bootGeneration = 0;
   private sessionGeneration = 0;
   private transitioningVault = false;
   private disposed = false;
+  private overlayReturn: {
+    element: HTMLElement | null;
+    tab: Tab | undefined;
+    editorFocused: boolean;
+    selection: { anchor: number; head: number } | null;
+  } | null = null;
 
   constructor(
     private readonly root: HTMLElement,
@@ -80,6 +88,7 @@ export class TansuApp {
     this.state.imageUploads.clear();
     this.searchRequestSeq += 1;
     this.searchOverlayRequestSeq += 1;
+    this.quickOpenRequestSeq += 1;
     this.eventSubscription?.close();
     this.eventSubscription = null;
     this.cancelAutoSaves();
@@ -91,6 +100,10 @@ export class TansuApp {
     try {
       global = await this.services.api.bootstrap();
     } catch (error) {
+      if (error instanceof V2ApiError && error.kind?.code === "auth_required") {
+        await this.lockForAuthentication();
+        return;
+      }
       this.restoreCurrentVault(generation);
       throw error;
     }
@@ -153,6 +166,7 @@ export class TansuApp {
     this.identity = nextIdentity;
     this.vaultClient = nextClient;
     this.state.boot = { ...vaultBootstrap, serverInstanceId: global.serverInstanceId, vaults: global.vaults };
+    this.state.authRequired = false;
     this.state.notes = new Map(vaultBootstrap.notes.map((meta) => [meta.noteId, meta]));
     this.state.pinned = new Set(imported.pinnedNoteIds.filter((id) => this.state.notes.has(id)));
     this.state.recent = imported.recentNoteIds.filter((id) => this.state.notes.has(id));
@@ -222,25 +236,25 @@ export class TansuApp {
       void this.journal?.flushAll();
     };
     const onKeyDown = (event: KeyboardEvent) => {
-      if (this.transitioningVault) return;
-      const inEditor = event.target instanceof Node && this.editorMount.contains(event.target);
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+      if (this.transitioningVault || this.state.authRequired || this.state.boot === null) return;
+      const modifier = event.metaKey || event.ctrlKey;
+      const key = event.key.toLowerCase();
+      if (modifier && key === "k" && !event.altKey && !event.shiftKey) {
         event.preventDefault();
-        this.state.commandOpen = true;
-        this.state.searchOpen = false;
-        this.state.commandFilter = "";
-        this.render();
-      } else if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "p") {
+        this.dispatch({ type: "command.open" });
+      } else if (modifier && key === "p" && !event.altKey && !event.shiftKey) {
         event.preventDefault();
-        this.state.searchOpen = true;
-        this.state.commandOpen = false;
-        this.state.searchOverlayQuery = "";
-        this.state.searchOverlayHits = null;
-        this.render();
-      } else if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
+        this.dispatch({ type: "quickOpen.open" });
+      } else if (modifier && event.shiftKey && key === "f" && !event.altKey) {
+        event.preventDefault();
+        this.dispatch({ type: "search.open" });
+      } else if (modifier && !event.shiftKey && !event.altKey && key === "f") {
+        event.preventDefault();
+        this.dispatch({ type: "find.open" });
+      } else if (modifier && key === "s" && !event.altKey && !event.shiftKey) {
         event.preventDefault();
         this.runAsync(this.manualSave(), "Save failed");
-      } else if (!inEditor && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "n") {
+      } else if (modifier && event.altKey && !event.shiftKey && key === "n") {
         event.preventDefault();
         this.runAsync(this.commandCreate(), "Create failed");
       } else if (event.key === "Escape" && this.hasOverlay()) {
@@ -382,14 +396,24 @@ export class TansuApp {
   private render(): void {
     if (this.disposed) return;
     this.captureActiveEditor();
-    const view = this.state.boot === null ? [renderLoading()] : renderApp(this.state, this.viewActions());
+    this.root.dataset["sidebarCollapsed"] = String(this.state.sidebarCollapsed);
+    const view = this.state.authRequired
+      ? [renderAuthGate(this.state, this.viewActions())]
+      : this.state.boot === null ? [renderLoading()] : renderApp(this.state, this.viewActions());
+    if (this.state.authRequired) {
+      this.editor?.detachSession();
+      this.activeEditorKey = null;
+      this.attachedEditor = null;
+      this.editorMount.hidden = true;
+      this.editorMount.inert = true;
+    }
     const placeholder = view.flatMap((node) => [...node.querySelectorAll<HTMLElement>("#editor-mount")])[0] ??
       view.find((node) => node.id === "editor-mount");
     if (placeholder !== undefined && placeholder !== null && this.state.boot !== null && !this.editorMount.isConnected) {
       placeholder.replaceWith(this.editorMount);
     }
     updateAppView(this.root, view);
-    if (this.state.boot !== null) {
+    if (this.state.boot !== null && !this.state.authRequired) {
       this.ensureEditor();
       this.attachActiveEditor();
       this.scheduleWorkspaceSave();
@@ -471,10 +495,7 @@ export class TansuApp {
       },
       onFindRequested: () => {
         if (generation !== this.bootGeneration || this.transitioningVault || !currentVault()) return;
-        this.state.searchOpen = true;
-        this.state.searchOverlayQuery = "";
-        this.state.searchOverlayHits = null;
-        this.render();
+        this.dispatch({ type: "find.open" });
       },
     };
   }
@@ -639,6 +660,10 @@ export class TansuApp {
       if (this.disposed || tab.session !== session || !this.state.tabs.includes(tab) ||
         this.identity?.serverInstanceId !== serverIdentity.serverInstanceId ||
         this.identity.vaultId !== serverIdentity.vaultId || this.vaultClient !== client) return;
+      if (error instanceof V2ApiError && error.kind?.code === "auth_required") {
+        await this.lockForAuthentication();
+        return;
+      }
       if (cachedDocument !== null) {
         if (checkpoint !== null) session.recover(cachedDocument, checkpoint);
         else session.loaded(cachedDocument, tab.selection);
@@ -694,13 +719,19 @@ export class TansuApp {
     const wasSaving = tab.saving;
     tab.draft = "draft" in value && value.draft !== null ? value.draft.source : null;
     if ("draft" in value && value.draft !== null) tab.selection = value.draft.selection;
-    tab.dirty = value.status === "dirty" || value.status === "saving" || value.status === "conflict" || value.status === "unavailable" && value.draft !== null;
+    tab.dirty = value.status === "dirty" || value.status === "saving" || value.status === "conflict" ||
+      value.status === "unavailable" && value.draft !== null ||
+      value.status === "auth-locked" && value.draft.mutationId !== null;
     tab.saving = value.status === "saving";
     tab.savePending = value.status === "saving" && value.phase === "pendingMaterialization";
     tab.conflict = value.status === "conflict";
     tab.conflictDraftId = value.status === "conflict" && value.conflictDraft !== null ? value.conflictDraft.draftId as SavedTab["conflictDraftId"] : null;
     if ("title" in value) tab.title = value.titleDraft ?? value.title;
     if ("path" in value) tab.path = value.path;
+    if (value.status === "auth-locked") {
+      this.runAsync(this.lockForAuthentication(), "Local recovery storage failed", false);
+      return;
+    }
     this.render();
     this.scheduleWorkspaceSave();
     if (value.status === "clean" && tab.doc !== null) {
@@ -900,6 +931,109 @@ export class TansuApp {
     if (request !== this.searchOverlayRequestSeq || this.state.searchOverlayQuery.trim() !== query ||
       !this.isCurrentVault(serverIdentity, client)) return;
     this.state.searchOverlayHits = response.hits;
+    this.render();
+  }
+
+  private async updateQuickOpen(): Promise<void> {
+    const request = ++this.quickOpenRequestSeq;
+    const query = this.state.quickOpenQuery.trim();
+    const client = this.vaultClient;
+    const serverIdentity = this.identity;
+    if (client === null || serverIdentity === null) {
+      this.state.quickOpenHits = null;
+      this.render();
+      return;
+    }
+    const response = await client.quickOpen({
+      query,
+      pinnedNoteIds: [...this.state.pinned],
+      recentNoteIds: this.state.recent,
+      limit: 50,
+    });
+    if (request !== this.quickOpenRequestSeq || this.state.quickOpenQuery.trim() !== query ||
+      !this.isCurrentVault(serverIdentity, client)) return;
+    this.state.quickOpenHits = response.hits;
+    this.render();
+  }
+
+  private async openQuickOpenHit(hit: V2QuickOpenResponse["hits"][number]): Promise<void> {
+    const client = this.vaultClient;
+    const serverIdentity = this.identity;
+    if (client === null || serverIdentity === null) return;
+    const document = await client.openNote(hit.noteId);
+    if (!this.isCurrentVault(serverIdentity, client)) return;
+    if (document.meta.sourceHash !== hit.sourceHash) {
+      await this.updateQuickOpen();
+      return;
+    }
+    this.state.notes.set(document.meta.noteId, document.meta);
+    await this.openNote(toNoteId(hit.noteId));
+    const active = activeTab(this.state);
+    const source = active === undefined ? null : loadedDraft(active);
+    if (source === null || await canonicalSourceHash(source) !== hit.sourceHash) {
+      await this.updateQuickOpen();
+      return;
+    }
+    this.state.quickOpen = false;
+    this.overlayReturn = null;
+    this.editor?.focus();
+    this.render();
+  }
+
+  private refreshSearchResults(): Promise<void> {
+    return this.state.searchOpen ? this.updateSearchOverlay() : this.updateSearch();
+  }
+
+  private async openSearchHit(hit: V2SearchHit): Promise<void> {
+    const identity = hit.identity;
+    if (identity.kind === "newLocalDraft") {
+      const tab = this.state.tabs.find((candidate) => candidate.kind === "local-draft" && candidate.localDraftId === identity.localId);
+      const source = tab === undefined ? null : loadedDraft(tab);
+      if (tab === undefined || source === null || await canonicalSourceHash(source) !== identity.sourceHash) {
+        await this.refreshSearchResults();
+        return;
+      }
+      await this.openLocalDraft(localDraftId(identity.localId));
+    } else if (identity.kind === "savedOverlay") {
+      const tab = tabById(this.state, identity.noteId);
+      const source = tab === undefined ? null : loadedDraft(tab);
+      if (tab === undefined || source === null || await canonicalSourceHash(source) !== identity.sourceHash) {
+        await this.refreshSearchResults();
+        return;
+      }
+      await this.openNote(toNoteId(identity.noteId));
+    } else {
+      const client = this.vaultClient;
+      const serverIdentity = this.identity;
+      if (client === null || serverIdentity === null) return;
+      const existing = tabById(this.state, identity.noteId);
+      const known = this.state.notes.get(identity.noteId);
+      if ((existing !== undefined && existing.doc !== null) || known?.sourceHash !== identity.sourceHash) {
+        const document = await client.openNote(identity.noteId);
+        if (!this.isCurrentVault(serverIdentity, client)) return;
+        if (document.meta.sourceHash !== identity.sourceHash) {
+          await this.refreshSearchResults();
+          return;
+        }
+        this.state.notes.set(document.meta.noteId, document.meta);
+      }
+      await this.openNote(toNoteId(identity.noteId));
+    }
+    const active = activeTab(this.state);
+    const source = active === undefined ? null : loadedDraft(active);
+    if (source === null || await canonicalSourceHash(source) !== identity.sourceHash) {
+      await this.refreshSearchResults();
+      return;
+    }
+    if (hit.sourceRange !== null) {
+      this.editor?.revealSelection({ anchor: hit.sourceRange.startUtf16, head: hit.sourceRange.endUtf16 });
+    }
+    this.state.searchOpen = false;
+    this.state.quickOpen = false;
+    this.state.commandOpen = false;
+    this.state.findOpen = false;
+    this.overlayReturn = null;
+    this.editor?.focus();
     this.render();
   }
 
@@ -1247,7 +1381,10 @@ export class TansuApp {
         return;
       }
       case "search.open": {
+        this.captureOverlayReturn();
         this.state.searchOpen = true;
+        this.state.quickOpen = false;
+        this.state.findOpen = false;
         this.state.commandOpen = false;
         this.state.searchOverlayQuery = "";
         this.render();
@@ -1258,9 +1395,93 @@ export class TansuApp {
         this.runAsync(this.updateSearchOverlay(), "Search failed");
         return;
       }
+      case "search.hitOpen": {
+        this.runAsync(this.openSearchHit(event.hit), "Search result could not be opened");
+        return;
+      }
+      case "quickOpen.open": {
+        this.captureOverlayReturn();
+        this.state.quickOpen = true;
+        this.state.searchOpen = false;
+        this.state.findOpen = false;
+        this.state.commandOpen = false;
+        this.state.quickOpenQuery = "";
+        this.state.quickOpenHits = null;
+        this.runAsync(this.updateQuickOpen(), "Quick open failed");
+        this.render();
+        return;
+      }
+      case "quickOpen.input": {
+        this.state.quickOpenQuery = event.query;
+        this.runAsync(this.updateQuickOpen(), "Quick open failed");
+        return;
+      }
+      case "quickOpen.hitOpen": {
+        this.runAsync(this.openQuickOpenHit(event.hit), "Quick-open result could not be opened");
+        return;
+      }
+      case "find.open": {
+        this.captureOverlayReturn();
+        this.state.findOpen = true;
+        this.state.searchOpen = false;
+        this.state.quickOpen = false;
+        this.state.commandOpen = false;
+        this.render();
+        return;
+      }
+      case "find.input": {
+        this.state.findQuery = event.query;
+        this.render();
+        return;
+      }
+      case "find.select": {
+        this.editor?.revealFindMatch(event.match);
+        this.state.findOpen = false;
+        this.overlayReturn = null;
+        this.render();
+        this.editor?.focus();
+        return;
+      }
+      case "outline.select": {
+        this.editor?.revealSelection({ anchor: event.heading.from, head: event.heading.from });
+        return;
+      }
+      case "sidebar.toggle": {
+        this.state.sidebarCollapsed = !this.state.sidebarCollapsed;
+        this.render();
+        return;
+      }
+      case "outline.toggle": {
+        this.state.outlineCollapsed = !this.state.outlineCollapsed;
+        this.render();
+        return;
+      }
+      case "auth.capability": {
+        this.state.authCapability = event.value;
+        return;
+      }
+      case "auth.login": {
+        this.runAsync(this.performPasskeyAction("login"), "Sign in failed", false);
+        return;
+      }
+      case "auth.enroll": {
+        this.runAsync(this.performPasskeyAction("enroll"), "Passkey registration failed", false);
+        return;
+      }
+      case "auth.logout": {
+        this.runAsync(this.logout(), "Lock session failed", false);
+        return;
+      }
+      case "storage.persist": {
+        this.runAsync(this.requestPersistentStorage(), "Storage permission request failed");
+        return;
+      }
       case "command.open": {
+        this.captureOverlayReturn();
         this.state.commandOpen = true;
         this.state.searchOpen = false;
+        this.state.quickOpen = false;
+        this.state.findOpen = false;
         this.state.commandFilter = "";
         this.render();
         return;
@@ -1395,14 +1616,14 @@ export class TansuApp {
   private executeCommand(id: CommandId): void {
     this.state.commandOpen = false;
     this.render();
+    if (["save", "pin", "reopen", "reading", "import", "source"].includes(id)) this.restoreOverlayReturn();
     switch (id) {
       case "create": {
         this.runAsync(this.commandCreate(), "Create failed");
         break;
       }
       case "open": {
-        this.state.searchOpen = true;
-        this.render();
+        this.dispatch({ type: "quickOpen.open" });
         break;
       }
       case "save": {
@@ -1434,8 +1655,11 @@ export class TansuApp {
         break;
       }
       case "search": {
-        this.state.searchOpen = true;
-        this.render();
+        this.dispatch({ type: "search.open" });
+        break;
+      }
+      case "find": {
+        this.dispatch({ type: "find.open" });
         break;
       }
       case "import": {
@@ -1547,7 +1771,12 @@ export class TansuApp {
   }
 
   private viewActions(): ViewActions {
-    return { dispatch: (event) => this.dispatch(event), commandItems: () => this.filteredCommands() };
+    return {
+      dispatch: (event) => this.dispatch(event),
+      commandItems: () => this.filteredCommands(),
+      findMatches: () => this.editor?.find(this.state.findQuery) ?? [],
+      outline: () => this.editor?.outline() ?? { headings: [], complete: true },
+    };
   }
 
   private notify(message: string): void {
@@ -1615,6 +1844,10 @@ export class TansuApp {
 
   private runAsync(promise: Promise<unknown>, message: string, track = true): void {
     const handled = promise.catch((error: unknown) => {
+      if (error instanceof V2ApiError && error.kind?.code === "auth_required") {
+        void this.lockForAuthentication();
+        return;
+      }
       logClientEvent("error", "client.error", { error: errorSummary(error), message });
       this.notify(message);
     });
@@ -1627,17 +1860,132 @@ export class TansuApp {
     if (dialog?.kind === "rename") tabById(this.state, dialog.noteId)?.session?.editTitle(null);
     this.state.commandOpen = false;
     this.state.searchOpen = false;
+    this.state.quickOpen = false;
+    this.state.findOpen = false;
     this.state.revisionsOpen = false;
     this.state.settingsOpen = false;
     this.state.conflictDraft = null;
     this.state.noteDialog = null;
     this.state.contextMenu = null;
     this.render();
+    this.restoreOverlayReturn();
     if (dialog?.kind === "rename") await this.journal?.flushAll();
   }
 
   private hasOverlay(): boolean {
-    return this.state.commandOpen || this.state.searchOpen || this.state.revisionsOpen || this.state.settingsOpen || this.state.conflictDraft !== null || this.state.noteDialog !== null || this.state.contextMenu !== null;
+    return this.state.commandOpen || this.state.searchOpen || this.state.quickOpen || this.state.findOpen || this.state.revisionsOpen || this.state.settingsOpen || this.state.conflictDraft !== null || this.state.noteDialog !== null || this.state.contextMenu !== null;
+  }
+
+  private captureOverlayReturn(): void {
+    if (this.overlayReturn !== null) return;
+    const element = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const tab = activeTab(this.state);
+    const snapshot = this.editor?.getSnapshot();
+    this.overlayReturn = {
+      element,
+      tab,
+      editorFocused: element !== null && this.editorMount.contains(element),
+      selection: snapshot?.selection ?? tab?.selection ?? null,
+    };
+  }
+
+  private restoreOverlayReturn(): void {
+    const target = this.overlayReturn;
+    this.overlayReturn = null;
+    if (target === null) return;
+    if (target.editorFocused && target.tab !== undefined && activeTab(this.state) === target.tab && target.selection !== null) {
+      this.editor?.revealSelection(target.selection);
+      this.editor?.focus();
+      return;
+    }
+    if (target.element?.isConnected) target.element.focus();
+  }
+
+  private async performPasskeyAction(action: "login" | "enroll"): Promise<void> {
+    if (this.state.authBusy !== null) return;
+    const capability = action === "enroll" && this.state.authRequired
+      ? this.state.authCapability.trim()
+      : undefined;
+    this.state.authBusy = action;
+    this.state.authError = null;
+    this.render();
+    try {
+      if (action === "login") await this.services.passkeys.login();
+      else await this.services.passkeys.enroll(capability === "" ? undefined : capability);
+      this.state.authCapability = "";
+      this.state.authRequired = false;
+      if (this.state.boot === null) await this.boot();
+      else this.notify("Passkey registered");
+    } catch (error) {
+      this.state.authError = error instanceof Error ? error.message : String(error);
+    } finally {
+      this.state.authBusy = null;
+      this.render();
+    }
+  }
+
+  private async logout(): Promise<void> {
+    if (this.state.authBusy !== null) return;
+    this.state.authBusy = "logout";
+    this.transitioningVault = true;
+    this.configureActiveEditor(true);
+    this.render();
+    try {
+      await this.drainInFlightActions();
+      if (this.identity !== null) await this.flushOutgoingWorkspace(this.identity);
+      await this.services.passkeys.logout();
+      this.eventSubscription?.close();
+      this.eventSubscription = null;
+      this.cancelAutoSaves();
+      this.transitioningVault = false;
+      this.state.boot = null;
+      this.state.authRequired = true;
+      this.state.authError = null;
+      this.render();
+    } catch (error) {
+      this.transitioningVault = false;
+      this.configureActiveEditor(false);
+      throw error;
+    } finally {
+      this.state.authBusy = null;
+      this.render();
+    }
+  }
+
+  private async lockForAuthentication(): Promise<void> {
+    if (this.disposed || this.state.authRequired) return;
+    this.captureActiveEditor();
+    const identity = this.identity;
+    const pending = identity === null ? Promise.resolve() : this.flushOutgoingWorkspace(identity);
+    this.state.authRequired = true;
+    this.state.authBusy = null;
+    this.state.authError = null;
+    this.state.boot = null;
+    this.state.searchOpen = false;
+    this.state.quickOpen = false;
+    this.state.findOpen = false;
+    this.state.commandOpen = false;
+    this.state.revisionsOpen = false;
+    this.state.settingsOpen = false;
+    this.state.conflictDraft = null;
+    this.state.noteDialog = null;
+    this.state.contextMenu = null;
+    this.eventSubscription?.close();
+    this.eventSubscription = null;
+    this.cancelAutoSaves();
+    this.transitioningVault = false;
+    this.render();
+    try {
+      await pending;
+    } catch (error) {
+      this.state.authError = `Recovery state could not be flushed: ${error instanceof Error ? error.message : String(error)}`;
+      this.render();
+    }
+  }
+
+  private async requestPersistentStorage(): Promise<void> {
+    this.state.storagePersisted = await this.services.storage.requestPersistent();
+    this.render();
   }
 
 }

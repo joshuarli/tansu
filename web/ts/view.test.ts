@@ -12,7 +12,8 @@ import {
   type State,
 } from "./state.ts";
 import type { Settings, V2ConflictDraftDocument, V2NoteMeta, V2RevisionMeta } from "./types.generated.ts";
-import { renderApp, renderLoading, renderStatusBar } from "./view.ts";
+import { renderApp, renderAuthGate, renderLoading, renderStatusBar } from "./view.ts";
+import type { Outline } from "./editor/source-navigation.js";
 
 const VAULT_ID = vaultId("vault-1");
 
@@ -129,6 +130,43 @@ describe("view rendering", () => {
     expect(vaultControl.classList.contains("open")).toBeFalsy();
   });
 
+  it("renders outline and current-note find actions without replacing the editor region", () => {
+    const state = baseState();
+    const tab = tabFromDocument({ meta: note("n1", "one.md", "One"), content: "# One\nbody\n" });
+    state.tabs = [tab];
+    state.activeTab = tabIdentity(tab);
+    state.findOpen = true;
+    state.findQuery = "body";
+    const actions = actionSpies();
+    actions.outline.mockReturnValue({
+      complete: true,
+      headings: [{ level: 1, line: 1, text: "One", from: 0, to: 5 }],
+    });
+    actions.findMatches.mockReturnValue([{ from: 6, to: 10 }]);
+    const root = render(state, actions);
+
+    expect(root.querySelector(".outline-row")?.textContent).toBe("One");
+    expect(root.querySelector(".find-panel")?.textContent).toContain("Line 2: body");
+    root.querySelector<HTMLButtonElement>(".outline-row")?.click();
+    root.querySelector<HTMLButtonElement>(".find-results .command-row")?.click();
+    expectDispatched(actions, { type: "outline.select", heading: { level: 1, line: 1, text: "One", from: 0, to: 5 } });
+    expectDispatched(actions, { type: "find.select", match: { from: 6, to: 10 } });
+    expect(root.querySelector("#editor-mount")).not.toBeNull();
+  });
+
+  it("renders the initial passkey enrollment capability gate", () => {
+    const state = createState(VAULT_ID);
+    state.authRequired = true;
+    state.authError = "Credential was rejected";
+    const actions = actionSpies();
+    const gate = renderAuthGate(state, actions);
+    gate.querySelector<HTMLInputElement>("input")!.value = "capability";
+    gate.querySelector<HTMLInputElement>("input")!.dispatchEvent(new Event("input", { bubbles: true }));
+
+    expect(gate.textContent).toContain("Credential was rejected");
+    expectDispatched(actions, { type: "auth.capability", value: "capability" });
+  });
+
   it("renders reading mode with minimal editing chrome", () => {
     const state = baseState();
     const tab = tabFromDocument({ meta: note("n1", "one.md", "One"), content: "# One\n" });
@@ -240,7 +278,10 @@ describe("view rendering", () => {
     expect(actions.commandItems).toHaveBeenCalledWith();
     expectDispatched(actions, { type: "search.overlayInput", query: "beta" });
     expectDispatched(actions, { type: "overlay.close" });
-    expectDispatched(actions, { type: "note.open", noteId: toNoteId("n1") });
+    expect(actions.dispatch).toHaveBeenCalledWith(expect.objectContaining({
+      type: "search.hitOpen",
+      hit: expect.objectContaining({ excerpt: "hit alpha", identity: expect.objectContaining({ noteId: "n1" }) }),
+    }));
     expectDispatched(actions, { type: "revisions.select", eventId: toRevisionEventId(7) });
     expectDispatched(actions, { type: "revisions.restore" });
     expectDispatched(actions, {
@@ -301,6 +342,8 @@ function render(state: State, actions = actionSpies()): HTMLElement {
 type ViewActionSpies = {
   dispatch: ReturnType<typeof vi.fn<(event: ViewEvent) => void>>;
   commandItems: ReturnType<typeof vi.fn<() => CommandItem[]>>;
+  findMatches: ReturnType<typeof vi.fn<() => readonly { from: number; to: number }[]>>;
+  outline: ReturnType<typeof vi.fn<() => Outline>>;
 };
 
 function actionSpies(): ViewActionSpies {
@@ -308,6 +351,8 @@ function actionSpies(): ViewActionSpies {
   return {
     dispatch: vi.fn<(event: ViewEvent) => void>(),
     commandItems: vi.fn<() => CommandItem[]>(() => commands),
+    findMatches: vi.fn<() => readonly { from: number; to: number }[]>(() => []),
+    outline: vi.fn<() => Outline>(() => ({ headings: [], complete: true })),
   };
 }
 

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { startApp, TansuApp } from "./app.ts";
 import { defaultServices, type AppServices } from "./app/services.ts";
+import { canonicalSourceHash } from "./save-delta.ts";
 import { V2ApiError, type LegacyWorkspacePayload, type V2VaultClient, type V2VaultSnapshot } from "./app/v2-api.ts";
 import { serverInstanceId, vaultId, workspaceId } from "./app/identity.ts";
 import type { EditorConfig } from "./editor/tansu-extensions.ts";
@@ -15,6 +16,7 @@ import type {
   V2MutationResponse,
   V2NoteDocument,
   V2NoteMeta,
+  V2QuickOpenResponse,
   V2RevisionMeta,
   V2SaveNoteRequest,
   V2SearchRequest,
@@ -110,6 +112,167 @@ describe("v2 desktop shell", () => {
     load.resolve(documentFor(note, "# One\n"));
     await flushAsync();
     expect(root.textContent).toContain("One");
+  });
+
+  it("shows the passkey gate after auth expires and returns to the vault after login", async () => {
+    vi.stubGlobal("navigator", { ...navigator, credentials: {} });
+    vi.stubGlobal("isSecureContext", true);
+    const services = createServices();
+    api.bootstrap.mockRejectedValueOnce(new V2ApiError("Authentication required", 401, { code: "auth_required" }));
+    const login = vi.fn(async () => {});
+    services.passkeys.login = login;
+    const { app, root } = mountApp(services);
+
+    await app.boot();
+    expect(root.querySelector(".auth-gate")?.textContent).toContain("Unlock your notes");
+    root.querySelector<HTMLButtonElement>('[title="Sign in with passkey"]')?.click();
+    await until(() => root.querySelector(".sidebar") !== null);
+
+    expect(login).toHaveBeenCalledTimes(1);
+    expect(root.querySelector(".auth-gate")).toBeNull();
+  });
+
+  it("enrolls the first passkey with the one-time capability", async () => {
+    vi.stubGlobal("navigator", { ...navigator, credentials: {} });
+    vi.stubGlobal("isSecureContext", true);
+    const services = createServices();
+    api.bootstrap.mockRejectedValueOnce(new V2ApiError("Authentication required", 401, { code: "auth_required" }));
+    const enroll = vi.fn(async (_capability?: string) => {});
+    services.passkeys.enroll = enroll;
+    const { app, root } = mountApp(services);
+    await app.boot();
+    const capability = root.querySelector<HTMLInputElement>(".auth-card input")!;
+    capability.value = "first-use-capability";
+    capability.dispatchEvent(new Event("input", { bubbles: true }));
+    root.querySelector<HTMLButtonElement>('[title="Register first passkey"]')?.click();
+    await until(() => root.querySelector(".sidebar") !== null);
+
+    expect(enroll).toHaveBeenCalledWith("first-use-capability");
+  });
+
+  it("locks the shell after a protected save reports an expired session", async () => {
+    const note = noteMeta("note-1", "one.md", "One");
+    const client = configureVault([note], legacySession([
+      { noteId: note.noteId, title: note.title, path: note.path, cursorOffset: null, sourceMode: false },
+    ], note.noteId));
+    client.saveNote.mockRejectedValue(new V2ApiError("Authentication required", 401, { code: "auth_required" }));
+    const { app, root } = mountApp();
+    app.bindGlobalEvents();
+    await app.boot();
+    editorMock.instances[0]!.simulateEdit("# Local draft\n");
+    await flushEditorCapture();
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "s", ctrlKey: true, cancelable: true }));
+    await until(() => root.querySelector(".auth-gate") !== null);
+
+    expect(root.textContent).toContain("Unlock your notes");
+    expect(root.querySelector(".editor-mount")).toBeNull();
+    expect(memory.savedDrafts.get(note.noteId)?.source).toBe("# Local draft\n");
+  });
+
+  it("locks the session from settings after flushing workspace state", async () => {
+    const services = createServices();
+    const logout = vi.fn(async () => {});
+    services.passkeys.logout = logout;
+    configureVault([]);
+    const { app, root } = mountApp(services);
+    await app.boot();
+    await runCommand(root, "settings");
+    root.querySelector<HTMLButtonElement>('[title="Lock this session"]')?.click();
+    await until(() => root.querySelector(".auth-gate") !== null);
+
+    expect(logout).toHaveBeenCalledTimes(1);
+    expect(memory.workspaces.size).toBeGreaterThan(0);
+  });
+
+  it("requests persistent storage from the settings user gesture", async () => {
+    const services = createServices();
+    const requestPersistent = vi.fn(async () => true);
+    services.storage.requestPersistent = requestPersistent;
+    configureVault([]);
+    const { app, root } = mountApp(services);
+    await app.boot();
+    await runCommand(root, "settings");
+    root.querySelector<HTMLButtonElement>('[title="Request persistent storage"]')?.click();
+    await until(() => root.textContent?.includes("Persistent browser storage is enabled.") === true);
+
+    expect(requestPersistent).toHaveBeenCalledTimes(1);
+  });
+
+  it("opens current-note find with Mod+F and restores editor focus and selection on Escape", async () => {
+    const note = noteMeta("note-1", "one.md", "One");
+    configureVault([note], legacySession([
+      { noteId: note.noteId, title: note.title, path: note.path, cursorOffset: 5, sourceMode: false },
+    ], note.noteId));
+    const { app, root } = mountApp();
+    app.bindGlobalEvents();
+    await app.boot();
+    const editor = editorMock.instances[0]!;
+    const editorMount = root.querySelector<HTMLElement>("#editor-mount")!;
+    const focusTarget = document.createElement("input");
+    editorMount.append(focusTarget);
+    focusTarget.focus();
+    vi.mocked(editor.find).mockReturnValue([{ from: 2, to: 5 }]);
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "f", ctrlKey: true, cancelable: true }));
+    await flushAsync();
+
+    expect(root.querySelector(".find-panel")?.textContent).toContain("Line 1");
+    expect(root.querySelector(".search-panel")).toBeNull();
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", cancelable: true }));
+    await flushAsync();
+    expect(editor.revealSelection).toHaveBeenCalledWith({ anchor: 5, head: 5 });
+    expect(editor.focus).toHaveBeenCalled();
+
+    vi.mocked(editor.revealSelection).mockClear();
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "f", ctrlKey: true, cancelable: true }));
+    await flushAsync();
+    root.querySelector<HTMLButtonElement>(".find-results .command-row")?.click();
+    expect(editor.revealFindMatch).toHaveBeenCalledWith({ from: 2, to: 5 });
+    expect(editor.revealSelection).not.toHaveBeenCalled();
+    expect(editor.focus).toHaveBeenCalled();
+    expect(root.querySelector("#editor-mount")).toBe(editorMount);
+    expect(editorMock.instances).toHaveLength(1);
+  });
+
+  it("keeps Mod+P quick-open separate from vault search and validates source identity", async () => {
+    const source = "# One\n";
+    const note = { ...noteMeta("note-1", "one.md", "One"), sourceHash: await canonicalSourceHash(source) };
+    const client = configureVault([note]);
+    client.openNote.mockResolvedValue(documentFor(note, source));
+    client.quickOpen.mockResolvedValue({ hits: [{ noteId: note.noteId, sourceHash: note.sourceHash, title: note.title, path: note.path, score: 1 }] });
+    const { app, root } = mountApp();
+    app.bindGlobalEvents();
+    await app.boot();
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "p", ctrlKey: true, cancelable: true }));
+    await until(() => root.querySelector(".quick-open-panel") !== null);
+
+    expect(root.querySelector(".search-panel")).toBeNull();
+    expect(client.quickOpen).toHaveBeenCalledWith({ query: "", pinnedNoteIds: [], recentNoteIds: [], limit: 50 });
+    root.querySelector<HTMLButtonElement>(".quick-open-results button")?.click();
+    await until(() => editorMock.instances[0]?.getSnapshot()?.source === source);
+    expect(root.querySelector(".quick-open-panel")).toBeNull();
+    expect(editorMock.instances[0]?.focus).toHaveBeenCalled();
+  });
+
+  it("requeries stale search hits without applying their source range", async () => {
+    const note = noteMeta("note-1", "one.md", "One");
+    const client = configureVault([note]);
+    client.search.mockResolvedValue(searchResponse([{
+      ...searchHit(note),
+      sourceRange: { startUtf16: 0, endUtf16: 3 },
+    }]));
+    client.openNote.mockResolvedValue(documentFor(noteMeta(note.noteId, note.path, note.title, [], 2, HASH_B), "# New\n"));
+    const { app, root } = mountApp();
+    await app.boot();
+    root.querySelector<HTMLButtonElement>('[title="Search notes"]')?.click();
+    const input = root.querySelector<HTMLInputElement>(".search-panel input")!;
+    input.value = "one";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    await until(() => root.querySelector(".search-panel .search-result-row") !== null);
+    root.querySelector<HTMLButtonElement>(".search-panel .search-result-row")?.click();
+    await until(() => client.search.mock.calls.length === 2);
+
+    expect(editorMock.instances[0]?.revealSelection).not.toHaveBeenCalled();
+    expect(root.querySelector(".search-panel")).not.toBeNull();
   });
 
   it("uses a valid cached document immediately and preserves a local edit when canonical content changes", async () => {
@@ -705,12 +868,13 @@ describe("v2 desktop shell", () => {
   });
 
   it("uses note identity for cached search hits and waits for three characters", async () => {
-    const note = noteMeta("note-1", "folder/one.md", "One");
+    const source = "# Cached\n";
+    const note = { ...noteMeta("note-1", "folder/one.md", "One"), sourceHash: await canonicalSourceHash(source) };
     const client = configureVault([note]);
     const load = deferred<V2NoteDocument>();
     client.openNote.mockReturnValue(load.promise);
-    client.search.mockResolvedValue(searchResponse([searchHit(note)]));
-    memory.cached.set(note.noteId, { sourceHash: note.sourceHash, content: "# Cached\n" });
+    client.search.mockResolvedValue(searchResponse([{ ...searchHit(note), sourceRange: { startUtf16: 2, endUtf16: 8 } }]));
+    memory.cached.set(note.noteId, { sourceHash: note.sourceHash, content: source });
     const { app, root } = mountApp();
     await app.boot();
     const sidebar = root.querySelector<HTMLInputElement>(".search-input")!;
@@ -736,7 +900,7 @@ describe("v2 desktop shell", () => {
     root.querySelector<HTMLButtonElement>(".search-result-row")?.click();
     await until(() => editorMock.instances[0]?.getSnapshot()?.source === "# Cached\n");
     expect(client.openNote).toHaveBeenCalledWith(note.noteId);
-    load.resolve(documentFor(note, "# Canonical\n"));
+    load.resolve(documentFor(note, source));
   });
 
   it("renames and pins locally, then deletes with a V2 precondition", async () => {
@@ -1011,7 +1175,7 @@ describe("v2 desktop shell", () => {
     expect(editor.formatSelection).toHaveBeenCalled();
     expect(editor.undo).toHaveBeenCalled();
     expect(editor.redo).toHaveBeenCalled();
-    window.dispatchEvent(new KeyboardEvent("keydown", { key: "n", metaKey: true }));
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "n", metaKey: true, altKey: true }));
     await until(() => root.querySelector(".note-dialog-panel") !== null);
   });
 
@@ -1301,7 +1465,7 @@ function createTestClient(id: string) {
     settings: vi.fn(async () => settings()),
     saveSettings: vi.fn(async (request: V2SettingsRequest) => ({ mutationId: request.mutationId, settings: request.settings })),
     search: vi.fn(async (_request: V2SearchRequest) => searchResponse([])),
-    quickOpen: vi.fn(async () => ({ hits: [] })),
+    quickOpen: vi.fn(async (_request: Parameters<V2VaultClient["quickOpen"]>[0]): Promise<V2QuickOpenResponse> => ({ hits: [] })),
     uploadImage: vi.fn(async (mutationId: string) => ({ mutationId, name: "z-images/a.webp", markdown: "![[a.webp]]" })),
     loadAsset: vi.fn(async () => new Blob(["image"], { type: "image/webp" })),
     eventHandlers: null as Parameters<V2VaultClient["connectEvents"]>[1] | null,
@@ -1427,10 +1591,12 @@ function createServices(): AppServices {
   };
   return {
     api: api as unknown as AppServices["api"],
+    passkeys: { login: vi.fn(async () => {}), enroll: vi.fn(async () => {}), logout: vi.fn(async () => {}) },
     editor: { createEditor: (_container: HTMLElement, config?: EditorConfig) => createFakeEditor(config) },
     htmlImport,
     workspace,
     performance: { markNextPaint: () => {}, markPerformance: () => {} },
+    storage: { requestPersistent: vi.fn(async () => false) },
   } as unknown as AppServices;
 }
 

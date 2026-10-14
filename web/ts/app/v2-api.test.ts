@@ -17,6 +17,41 @@ const sourceHash = hash("a");
 const diskHash = hash("b", "blake3-v2:");
 
 describe("v2 API client", () => {
+  it("keeps passkey ceremonies and logout on same-origin v2 auth routes", async () => {
+    const calls: Array<{ path: string; init: RequestInit }> = [];
+    const responses = [
+      jsonResponse({ ceremonyId: "login-1", expiresAt: 50, publicKey: { challenge: "AQID" } }),
+      jsonResponse({ ok: true, csrfToken: "csrf-1" }),
+      jsonResponse({ ceremonyId: "enroll-1", expiresAt: 51, publicKey: { challenge: "BAUG" } }),
+      jsonResponse({ ok: true, csrfToken: null }),
+      jsonResponse({ ok: true }),
+    ];
+    const fetcher = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      calls.push({ path: String(input), init: init ?? {} });
+      const response = responses.shift();
+      if (response === undefined) throw new Error("No mock auth response remains");
+      return response;
+    }) as typeof fetch;
+    const auth = createV2ApiClient({ fetch: fetcher }).auth;
+
+    const login = await auth.beginLogin();
+    await auth.finishLogin(login.ceremonyId, { id: "credential" });
+    const enrollment = await auth.beginEnrollment("one-time-capability");
+    await auth.finishEnrollment(enrollment.ceremonyId, { id: "registration" });
+    await auth.logout();
+
+    expect(calls.map((call) => [call.path, call.init.method])).toStrictEqual([
+      ["/api/v2/auth/login/options", "POST"],
+      ["/api/v2/auth/login/finish", "POST"],
+      ["/api/v2/auth/enrollment/options", "POST"],
+      ["/api/v2/auth/enrollment/finish", "POST"],
+      ["/api/v2/auth/logout", "POST"],
+    ]);
+    expect(new Headers(calls[2]?.init.headers).get("X-Tansu-CSRF")).toBeNull();
+    expect(JSON.parse(String(calls[2]?.init.body))).toStrictEqual({ capability: "one-time-capability" });
+    expect(calls.every((call) => call.init.credentials === "same-origin")).toBeTruthy();
+  });
+
   it("decodes the one-time legacy workspace import seed", () => {
     const bootstrap = decodeV2VaultBootstrap({
       vault: { vaultId: "vault-1", name: "Notes" },

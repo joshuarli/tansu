@@ -5,6 +5,7 @@ import type {
   V2RevisionDocument,
   V2RevisionMeta,
   V2SearchHit,
+  V2QuickOpenResponse,
   V2VaultBootstrapResponse,
   V2VaultMeta,
 } from "./types.generated.ts";
@@ -75,6 +76,10 @@ export type ContextMenuState = {
 };
 
 export type State = {
+  authRequired: boolean;
+  authBusy: "login" | "enroll" | "logout" | null;
+  authError: string | null;
+  authCapability: string;
   boot: ShellBootstrap | null;
   serverInstanceId: string | null;
   vault: VaultId;
@@ -87,6 +92,11 @@ export type State = {
   searchQuery: string;
   searchHits: V2SearchHit[] | null;
   searchOpen: boolean;
+  quickOpen: boolean;
+  quickOpenQuery: string;
+  quickOpenHits: V2QuickOpenResponse["hits"] | null;
+  findOpen: boolean;
+  findQuery: string;
   searchOverlayQuery: string;
   searchOverlayHits: V2SearchHit[] | null;
   commandOpen: boolean;
@@ -96,6 +106,9 @@ export type State = {
   revisionDocument: V2RevisionDocument | null;
   conflictDraft: V2ConflictDraftDocument | null;
   settingsOpen: boolean;
+  storagePersisted: boolean | null;
+  sidebarCollapsed: boolean;
+  outlineCollapsed: boolean;
   noteDialog: NoteDialog | null;
   contextMenu: ContextMenuState | null;
   notice: string | null;
@@ -105,6 +118,10 @@ export type State = {
 
 export function createState(vault: VaultId): State {
   return {
+    authRequired: false,
+    authBusy: null,
+    authError: null,
+    authCapability: "",
     boot: null,
     serverInstanceId: null,
     vault,
@@ -117,6 +134,11 @@ export function createState(vault: VaultId): State {
     searchQuery: "",
     searchHits: null,
     searchOpen: false,
+    quickOpen: false,
+    quickOpenQuery: "",
+    quickOpenHits: null,
+    findOpen: false,
+    findQuery: "",
     searchOverlayQuery: "",
     searchOverlayHits: null,
     commandOpen: false,
@@ -126,6 +148,9 @@ export function createState(vault: VaultId): State {
     revisionDocument: null,
     conflictDraft: null,
     settingsOpen: false,
+    storagePersisted: null,
+    sidebarCollapsed: false,
+    outlineCollapsed: false,
     noteDialog: null,
     contextMenu: null,
     notice: null,
