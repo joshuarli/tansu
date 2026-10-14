@@ -17,6 +17,7 @@ import type {
   V2NoteDocument,
   V2NoteMeta,
   V2QuickOpenResponse,
+  V2RevisionDocument,
   V2RevisionMeta,
   V2SaveNoteRequest,
   V2SearchRequest,
@@ -1216,6 +1217,59 @@ describe("v2 desktop shell", () => {
     expect(root.textContent).not.toContain("Save conflict");
     await until(() => memory.cached.get(note.noteId)?.content === "# Restored\n");
     expect(memory.cached.get(note.noteId)?.content).toBe("# Restored\n");
+  });
+
+  it("ignores a revision list that resolves after switching notes", async () => {
+    const first = noteMeta("first", "first.md", "First");
+    const second = noteMeta("second", "second.md", "Second");
+    const revision = { noteId: first.noteId, revision: 4, kind: "save" as const, source: "user" as const, sourceHash: HASH_B, createdAtMs: 5 };
+    const client = configureVault([first, second], legacySession([
+      { noteId: first.noteId, title: first.title, path: first.path, cursorOffset: null, sourceMode: false },
+      { noteId: second.noteId, title: second.title, path: second.path, cursorOffset: null, sourceMode: false },
+    ], first.noteId));
+    const revisions = deferred<V2RevisionMeta[]>();
+    client.listRevisions.mockReturnValue(revisions.promise);
+    const { app, root } = mountApp();
+    await app.boot();
+
+    await runCommand(root, "revisions");
+    await until(() => client.listRevisions.mock.calls.length === 1);
+    root.querySelector<HTMLButtonElement>('.tab[title="Second"]')?.click();
+    await flushAsync();
+    revisions.resolve([revision]);
+    await flushAsync();
+
+    expect(root.querySelector('.tab.active')?.getAttribute("title")).toBe("Second");
+    expect(root.querySelector(".revision-row")).toBeNull();
+  });
+
+  it("ignores a revision preview that resolves after switching notes", async () => {
+    const first = noteMeta("first", "first.md", "First");
+    const second = noteMeta("second", "second.md", "Second");
+    const revision = { noteId: first.noteId, revision: 4, kind: "save" as const, source: "user" as const, sourceHash: HASH_B, createdAtMs: 5 };
+    const client = configureVault([first, second], legacySession([
+      { noteId: first.noteId, title: first.title, path: first.path, cursorOffset: null, sourceMode: false },
+      { noteId: second.noteId, title: second.title, path: second.path, cursorOffset: null, sourceMode: false },
+    ], first.noteId));
+    client.listRevisions.mockResolvedValue([revision]);
+    const preview = deferred<V2RevisionDocument>();
+    client.openRevision.mockReturnValue(preview.promise);
+    const { app, root } = mountApp();
+    await app.boot();
+
+    await runCommand(root, "revisions");
+    root.querySelector<HTMLButtonElement>(".revision-row")?.click();
+    await until(() => client.openRevision.mock.calls.length === 1);
+    root.querySelector<HTMLButtonElement>('.tab[title="Second"]')?.click();
+    await flushAsync();
+    preview.resolve({ revision, content: "# First revision\n" });
+    await flushAsync();
+    root.querySelector<HTMLButtonElement>(".revisions-panel .primary-button")?.click();
+    await flushAsync();
+
+    expect(root.querySelector('.tab.active')?.getAttribute("title")).toBe("Second");
+    expect(root.querySelector(".diff-preview")).toBeNull();
+    expect(client.restoreRevision).not.toHaveBeenCalled();
   });
 
   it("clears the exact checkpoint and replaces the editor after restoring a conflict draft", async () => {

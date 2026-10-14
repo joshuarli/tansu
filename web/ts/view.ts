@@ -690,8 +690,16 @@ function backdrop(actions: ViewActions): HTMLElement {
 }
 
 function renderRevisionsPanel(state: State, actions: ViewActions): HTMLElement {
+  const active = activeTab(state);
+  const revisionList = active?.kind === "saved" && state.revisionNoteId === active.noteId
+    ? state.revisionList?.filter((revision) => revision.noteId === active.noteId) ?? null
+    : null;
+  const revisionDocument = active?.kind === "saved" && state.revisionNoteId === active.noteId &&
+      state.revisionDocument?.revision.noteId === active.noteId
+    ? state.revisionDocument
+    : null;
   const list = el("div", "revision-list");
-  for (const revision of state.revisionList ?? []) {
+  for (const revision of revisionList ?? []) {
     list.append(
       button(
         `${revision.kind}  revision ${revision.revision}`,
@@ -701,18 +709,17 @@ function renderRevisionsPanel(state: State, actions: ViewActions): HTMLElement {
             type: "revisions.select",
             eventId: toRevisionEventId(revision.revision),
           }),
-        state.revisionDocument?.revision.revision === revision.revision
+        revisionDocument?.revision.revision === revision.revision
           ? "revision-row active"
           : "revision-row",
       ),
     );
   }
-  const active = activeTab(state);
   const current = active === undefined ? "" : (loadedDraft(active) ?? "");
   const preview =
-    state.revisionDocument === null
+    revisionDocument === null
       ? el("div", "empty-panel", "Select a revision")
-      : el("pre", "diff-preview", diffPreview(current, state.revisionDocument.content));
+      : el("pre", "diff-preview", diffPreview(current, revisionDocument.content));
   return el(
     "div",
     "modal-panel revisions-panel",

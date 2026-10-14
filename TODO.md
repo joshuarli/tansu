@@ -23,15 +23,6 @@ Next: 21
 - **Effort:** M
 - **Design:** `docs/rfcs/0001-webauthn-counter-policy.md`
 
-### TNS-13 · P2 · Bind revision actions to the note that loaded them
-
-- **Area:** Revision UI state
-- **Where:** `web/ts/app.ts:1304-1325`
-- **Problem:** Revision list and document state are shared across tabs. If the active note changes while a list request is pending, the UI can show one note's list while preview and restore actions use the new active note.
-- **Recommendation:** Store the originating note identity with revision state and ignore stale responses after a note switch.
-- **Fix with:** lifecycle-concurrency
-- **Effort:** S
-
 ### TNS-14 · P2 · Isolate release write permission from build jobs
 
 - **Area:** Release security

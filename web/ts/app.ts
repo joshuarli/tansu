@@ -1310,17 +1310,29 @@ export class TansuApp {
 
   private async commandRevisions(): Promise<void> {
     const tab = activeTab(this.state);
-    if (tab?.kind !== "saved" || this.vaultClient === null) return;
+    const identity = this.identity;
+    const client = this.vaultClient;
+    if (tab?.kind !== "saved" || identity === null || client === null) return;
     this.state.revisionsOpen = true;
-    this.state.revisionList = await this.vaultClient.listRevisions(tab.noteId);
+    this.state.revisionNoteId = tab.noteId;
+    this.state.revisionList = null;
     this.state.revisionDocument = null;
+    const revisions = await client.listRevisions(tab.noteId);
+    if (!this.isCurrentVault(identity, client) || activeTab(this.state) !== tab || this.state.revisionNoteId !== tab.noteId) return;
+    this.state.revisionList = revisions;
     this.render();
   }
 
   private async selectRevision(revision: number): Promise<void> {
     const tab = activeTab(this.state);
-    if (tab?.kind !== "saved" || this.vaultClient === null) return;
-    this.state.revisionDocument = await this.vaultClient.openRevision(tab.noteId, revision);
+    const identity = this.identity;
+    const client = this.vaultClient;
+    if (tab?.kind !== "saved" || identity === null || client === null || this.state.revisionNoteId !== tab.noteId ||
+      !this.state.revisionList?.some((item) => item.noteId === tab.noteId && item.revision === revision)) return;
+    const document = await client.openRevision(tab.noteId, revision);
+    if (!this.isCurrentVault(identity, client) || activeTab(this.state) !== tab || this.state.revisionNoteId !== tab.noteId ||
+      document.revision.noteId !== tab.noteId || document.revision.revision !== revision) return;
+    this.state.revisionDocument = document;
     this.render();
   }
 
@@ -1328,13 +1340,19 @@ export class TansuApp {
     const tab = activeTab(this.state);
     const selected = this.state.revisionDocument;
     const status = tab?.kind === "saved" ? tab.session?.state : undefined;
-    if (tab?.kind !== "saved" || selected === null || status === undefined || !("base" in status)) return;
-    const response = await this.vaultClient!.restoreRevision(tab.noteId, selected.revision.revision, {
+    const identity = this.identity;
+    const client = this.vaultClient;
+    if (tab?.kind !== "saved" || selected === null || selected.revision.noteId !== tab.noteId ||
+      this.state.revisionNoteId !== tab.noteId || status === undefined || !("base" in status) ||
+      identity === null || client === null) return;
+    const response = await client.restoreRevision(tab.noteId, selected.revision.revision, {
       mutationId: mutationId(),
       precondition: { baseRevision: status.base.revision, baseSourceHash: status.base.sourceHash, baseDiskHash: status.base.diskHash },
     });
     await this.handleMutation(response, tab, status.draft.localRevision);
-    this.state.revisionsOpen = false;
+    if (this.isCurrentVault(identity, client) && activeTab(this.state) === tab && this.state.revisionNoteId === tab.noteId) {
+      this.state.revisionsOpen = false;
+    }
   }
 
   private async viewConflictDraft(): Promise<void> {

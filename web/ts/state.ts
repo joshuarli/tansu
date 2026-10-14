@@ -105,6 +105,7 @@ export type State = {
   commandOpen: boolean;
   commandFilter: string;
   revisionsOpen: boolean;
+  revisionNoteId: NoteId | null;
   revisionList: V2RevisionMeta[] | null;
   revisionDocument: V2RevisionDocument | null;
   conflictDraft: V2ConflictDraftDocument | null;
@@ -149,6 +150,7 @@ export function createState(vault: VaultId): State {
     commandOpen: false,
     commandFilter: "",
     revisionsOpen: false,
+    revisionNoteId: null,
     revisionList: null,
     revisionDocument: null,
     conflictDraft: null,
