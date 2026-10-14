@@ -16,6 +16,7 @@ use tansu_webauthn::{AuthChallenge, AuthenticationFinish, RegChallenge, StoredCr
 use crate::CancellationToken;
 
 const AUTH_TOKEN_HASH_VERSION: i64 = 2;
+const MAX_PENDING_CEREMONIES: i64 = 256;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AuthError {
@@ -25,6 +26,7 @@ pub enum AuthError {
     CsrfRejected,
     Expired,
     CeremonyUsed,
+    CeremonyLimit,
     Storage(String),
     WebAuthn(String),
 }
@@ -38,6 +40,7 @@ impl std::fmt::Display for AuthError {
             Self::CsrfRejected => f.write_str("CSRF token rejected"),
             Self::Expired => f.write_str("authentication state expired"),
             Self::CeremonyUsed => f.write_str("ceremony already used"),
+            Self::CeremonyLimit => f.write_str("too many pending authentication ceremonies"),
         }
     }
 }
@@ -395,6 +398,11 @@ impl AuthStore {
             }
             (Some(capability_hash), None)
         };
+        let pending_ceremonies = prune_expired_ceremonies(&transaction, now)?;
+        if pending_ceremonies >= MAX_PENDING_CEREMONIES {
+            transaction.commit().map_err(storage)?;
+            return Err(AuthError::CeremonyLimit);
+        }
         let state = serde_json::to_vec(&StoredRegistration { state: state.clone() }).map_err(storage)?;
         transaction.execute(
             "INSERT INTO ceremonies(id_hash, kind, state, expires_at, capability_hash, session_hash) VALUES (?1, 'registration', ?2, ?3, ?4, ?5)",
@@ -478,6 +486,11 @@ impl AuthStore {
         let expires_at = now.checked_add(ttl_secs).ok_or_else(|| AuthError::InvalidRequest("ceremony expiry overflow".into()))?;
         let mut connection = self.connection.lock().expect("auth DB mutex poisoned");
         let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate).map_err(storage)?;
+        let pending_ceremonies = prune_expired_ceremonies(&transaction, now)?;
+        if pending_ceremonies >= MAX_PENDING_CEREMONIES {
+            transaction.commit().map_err(storage)?;
+            return Err(AuthError::CeremonyLimit);
+        }
         let state = serde_json::to_vec(&StoredAuthentication { state: state.clone() }).map_err(storage)?;
         transaction.execute(
             "INSERT INTO ceremonies(id_hash, kind, state, expires_at) VALUES (?1, 'authentication', ?2, ?3)",
@@ -1033,6 +1046,11 @@ fn session_authorized(transaction: &Transaction<'_>, session_hash: &[u8], now: u
     }))
 }
 
+fn prune_expired_ceremonies(transaction: &Transaction<'_>, now: u64) -> Result<i64, AuthError> {
+    transaction.execute("DELETE FROM ceremonies WHERE expires_at <= ?1", params![to_i64(now)?]).map_err(storage)?;
+    transaction.query_row("SELECT COUNT(*) FROM ceremonies", [], |row| row.get(0)).map_err(storage)
+}
+
 fn read_ceremony(transaction: &Transaction<'_>, id_hash: &[u8]) -> Result<Option<CeremonyRow>, AuthError> {
     transaction.query_row(
         "SELECT kind, state, expires_at, capability_hash, session_hash FROM ceremonies WHERE id_hash = ?1",
@@ -1140,6 +1158,33 @@ mod tests {
     fn token_hashes_use_blake3() {
         let token = "00".repeat(32);
         assert_eq!(token_hash(&token).unwrap(), blake3_hash(token.as_bytes()).as_bytes());
+    }
+
+    #[test]
+    fn authentication_ceremonies_are_pruned_and_bounded() {
+        let (_root, store) = store();
+        let state = AuthChallenge {
+            challenge: "login".into(),
+            allowed_credential_ids: vec![vec![1]],
+            owner_handle: vec![7, 8],
+        };
+        for _ in 0..MAX_PENDING_CEREMONIES {
+            store.begin_authentication(&state, 10, 300).unwrap();
+        }
+        assert!(matches!(
+            store.begin_authentication(&state, 10, 300),
+            Err(AuthError::CeremonyLimit)
+        ));
+        assert_eq!(authentication_ceremony_count(&store), MAX_PENDING_CEREMONIES);
+
+        store.begin_authentication(&state, 311, 300).unwrap();
+        assert_eq!(authentication_ceremony_count(&store), 1);
+    }
+
+    fn authentication_ceremony_count(store: &AuthStore) -> i64 {
+        store.connection.lock().unwrap()
+            .query_row("SELECT COUNT(*) FROM ceremonies WHERE kind = 'authentication'", [], |row| row.get(0))
+            .unwrap()
     }
 
     #[test]

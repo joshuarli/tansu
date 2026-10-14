@@ -983,6 +983,7 @@ fn auth_error_kind(error: AuthError, request_id: &str) -> V2ApiErrorKind {
         AuthError::OriginRejected => V2ApiErrorKind::OriginRejected,
         AuthError::CsrfRejected => V2ApiErrorKind::CsrfRejected,
         AuthError::Expired | AuthError::CeremonyUsed => V2ApiErrorKind::Forbidden,
+        AuthError::CeremonyLimit => V2ApiErrorKind::RateLimited { retry_after_ms: 1000 },
         AuthError::Storage(_) => V2ApiErrorKind::Internal { request_id: request_id.to_string() },
     }
 }
@@ -1589,6 +1590,17 @@ mod tests {
             assert_eq!(response.status(), status);
             assert!(String::from_utf8_lossy(response.body()).contains(expected));
         }
+    }
+
+    #[test]
+    fn ceremony_limit_uses_rate_limited_response_with_retry_delay() {
+        let response = auth_error(AuthError::CeremonyLimit, "request-id");
+
+        assert_eq!(response.status(), 429);
+        assert_eq!(
+            api_error_field(&response),
+            serde_json::json!({ "code": "rate_limited", "retryAfterMs": 1000 }),
+        );
     }
 
     #[test]

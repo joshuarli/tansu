@@ -3,15 +3,6 @@
 Prefix: TNS
 Next: 21
 
-### TNS-2 · P2 · Bound pending authentication ceremonies
-
-- **Area:** Authentication storage
-- **Where:** `src/http.rs:901-921`, `src/http.rs:1009-1016`, `src/auth.rs:475-487`
-- **Problem:** The unauthenticated login-options route stores a ceremony row on every request. Rows expire after five minutes, but expiry is checked only when a ceremony is finished and no code prunes abandoned rows, so reachable callers can grow `auth.db` without bound.
-- **Recommendation:** Prune expired rows during issuance and cap or rate-limit pending ceremonies.
-- **Fix with:** durable-state, lifecycle-concurrency
-- **Effort:** M
-
 ### TNS-3 · P2 · Validate RP IDs against public suffix rules
 
 - **Area:** Authentication configuration
