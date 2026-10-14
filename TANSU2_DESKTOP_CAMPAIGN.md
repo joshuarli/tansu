@@ -358,13 +358,15 @@ The reference suite had 26 cases. Six server and UI cases remain. The delta-save
 | `adapts legacy autosave, reload, and double-newline loss regressions` | V2 app tests cover autosave. The lifecycle case verifies exact source after restart. Old randomized contenteditable editing sequences were removed. |
 | `adapts legacy save and shortcut integration coverage` | The V2 UI case keeps the Meta or Control search and command shortcuts. The lifecycle case uses the V2 save shortcut. Old `/api/session` and `/api/notes` request checks were retired with those routes. |
 | `covers lists, tasks, and undoable structural editing across the exposed markdown surface` | `editor-session.test.ts` checks a task checkbox changes Markdown in one edit. Markdown tests cover syntax. The old list and task DOM transformations were removed. |
-| `pastes and resizes images through model markdown` | The V2 browser case covers image upload and asset download. `editor-source-operations.test.ts` covers image resizing. App clipboard-to-upload wiring is absent and remains a separate APP finding. |
+| `pastes and resizes images through model markdown` | The V2 browser case covers asset upload and download, clipboard paste through the active vault, insertion, and save. `editor-source-operations.test.ts` covers image resizing. |
 | `covers block gutter copy, range selection, replacement, delete, escape, and undo` | The CodeMirror adapter test covers copying and cutting authored source. The new editor has no legacy block-gutter control, so block-handle actions were removed. |
 | `restores markdown and cursor through undo and redo checkpoints` | `editor-session.test.ts` covers independent per-note history. `web/ts/app.test.ts` covers tab selection and scroll restoration. Old DOM cursor markers were removed. |
 
 The old exact-delta request test now exercises `PATCH /api/v2/vaults/:vaultId/notes/:noteId` with a revision precondition, UTF-16 range, and `sourceHash`. The large-note case keeps keyboard editing and V2 persistence, but drops its fixed 2.5-second limit because the campaign runs timing gates only on an idle host.
 
-The startup image-render assertion, delete-modal close assertion, and external watcher event assertion remain in the browser suite. The image render and modal close failures expose APP integration defects. The watcher timeout exposes the SRV event publication gap. All three fail in Chromium, Firefox, and WebKit. None is replaced by a direct API assertion.
+The startup image render, delete-modal close, and external watcher event assertions remain in the browser suite. APP and SRV integration fixes preserve those user flows. The browser file now passes all nine cases in Chromium, Firefox, and WebKit.
+
+2026-10-14 | I1 | All nine V2 server browser cases passed in Chromium, Firefox, and WebKit, including open, edit, save, search, rename, restart, conflict recovery, revision restore, image paste, delta save, and watcher reconciliation.
 
 # For the owner afterwards
 
