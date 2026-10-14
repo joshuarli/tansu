@@ -988,6 +988,30 @@ describe("v2 desktop shell", () => {
     expect(root.textContent).not.toContain("one.md");
   });
 
+  it("shows skipped draft coverage in sidebar and overlay search results", async () => {
+    const client = configureVault([]);
+    const partialCoverage = { status: "partial" as const, skippedNoteCount: 2 };
+    client.search
+      .mockResolvedValueOnce(searchResponse([], partialCoverage))
+      .mockResolvedValueOnce(searchResponse([], partialCoverage));
+    const { app, root } = mountApp();
+    await app.boot();
+
+    const sidebarSearch = root.querySelector<HTMLInputElement>(".search-input")!;
+    sidebarSearch.value = "alpha";
+    sidebarSearch.dispatchEvent(new Event("input", { bubbles: true }));
+    await flushAsync();
+    expect(root.querySelector(".search-results")?.textContent).toContain("Draft search skipped 2 drafts");
+
+    root.querySelector<HTMLButtonElement>('[title="Search notes"]')?.click();
+    const overlaySearch = root.querySelector<HTMLInputElement>(".search-panel input")!;
+    overlaySearch.value = "beta";
+    overlaySearch.dispatchEvent(new Event("input", { bubbles: true }));
+    await flushAsync();
+
+    expect(root.querySelector(".search-panel")?.textContent).toContain("Draft search skipped 2 drafts");
+  });
+
   it("uses note identity for cached search hits and waits for three characters", async () => {
     const source = "# Cached\n";
     const note = { ...noteMeta("note-1", "folder/one.md", "One"), sourceHash: await canonicalSourceHash(source) };
@@ -1836,7 +1860,7 @@ function documentFor(meta: V2NoteMeta, content: string): V2NoteDocument { return
 function accepted(mutationId: string, meta: V2NoteMeta | null): V2MutationResponse { return { mutationId, outcome: { state: "accepted", result: meta } }; }
 function conflictDraft(id: string) { return { draftId: 9, noteId: id, baseRevision: 1, baseSourceHash: HASH_A, sourceHash: HASH_B, createdAtMs: 1 }; }
 function searchHit(meta: V2NoteMeta) { return { identity: { kind: "canonical" as const, noteId: meta.noteId, revision: meta.revision, sourceHash: meta.sourceHash }, title: meta.title, path: meta.path, score: 1, excerpt: meta.title, excerptRanges: [{ startUtf16: 0, endUtf16: meta.title.length }], sourceRange: null }; }
-function searchResponse(hits: V2SearchResponse["hits"]): V2SearchResponse { return { hits, overlayCoverage: { status: "complete" } }; }
+function searchResponse(hits: V2SearchResponse["hits"], overlayCoverage: V2SearchResponse["overlayCoverage"] = { status: "complete" }): V2SearchResponse { return { hits, overlayCoverage }; }
 function settings(): Settings { return { excludedFolders: [], searchTitleWeight: 3, searchHeadingWeight: 2, searchTagWeight: 2, searchContentWeight: 1, recencyBoost: 0, autosaveDelayMs: 900, undoStackMax: 100, imageWebpQuality: 0.8 }; }
 function legacyTab(tab: SessionState["openTabs"][number]): WorkspaceTab { return { kind: "saved", noteId: tab.noteId, title: tab.title, path: tab.path, selection: tab.cursorOffset === null ? null : { anchor: tab.cursorOffset, head: tab.cursorOffset }, scrollTop: 0, mode: tab.sourceMode ? "source" : "live" }; }
 function workspaceKey(server: string, vault: string): string { return `${server}:${vault}`; }

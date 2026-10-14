@@ -951,6 +951,7 @@ export class TansuApp {
     const serverIdentity = this.identity;
     if (query.length < MIN_SEARCH_QUERY_CHARS || client === null || serverIdentity === null) {
       this.state.searchHits = null;
+      this.state.searchCoverage = null;
       this.render();
       return;
     }
@@ -958,6 +959,7 @@ export class TansuApp {
     if (request !== this.searchRequestSeq || this.state.searchQuery.trim() !== query ||
       !this.isCurrentVault(serverIdentity, client)) return;
     this.state.searchHits = response.hits;
+    this.state.searchCoverage = response.overlayCoverage;
     this.render();
   }
 
@@ -968,6 +970,7 @@ export class TansuApp {
     const serverIdentity = this.identity;
     if (query.length < MIN_SEARCH_QUERY_CHARS || client === null || serverIdentity === null) {
       this.state.searchOverlayHits = null;
+      this.state.searchOverlayCoverage = null;
       this.render();
       return;
     }
@@ -975,6 +978,7 @@ export class TansuApp {
     if (request !== this.searchOverlayRequestSeq || this.state.searchOverlayQuery.trim() !== query ||
       !this.isCurrentVault(serverIdentity, client)) return;
     this.state.searchOverlayHits = response.hits;
+    this.state.searchOverlayCoverage = response.overlayCoverage;
     this.render();
   }
 

@@ -4,6 +4,7 @@ import type {
   V2NoteMeta,
   V2RevisionDocument,
   V2RevisionMeta,
+  V2OverlayCoverage,
   V2SearchHit,
   V2QuickOpenResponse,
   V2VaultBootstrapResponse,
@@ -91,6 +92,7 @@ export type State = {
   activeTab: TabIdentity | null;
   searchQuery: string;
   searchHits: V2SearchHit[] | null;
+  searchCoverage: V2OverlayCoverage | null;
   searchOpen: boolean;
   quickOpen: boolean;
   quickOpenQuery: string;
@@ -99,6 +101,7 @@ export type State = {
   findQuery: string;
   searchOverlayQuery: string;
   searchOverlayHits: V2SearchHit[] | null;
+  searchOverlayCoverage: V2OverlayCoverage | null;
   commandOpen: boolean;
   commandFilter: string;
   revisionsOpen: boolean;
@@ -133,6 +136,7 @@ export function createState(vault: VaultId): State {
     activeTab: null,
     searchQuery: "",
     searchHits: null,
+    searchCoverage: null,
     searchOpen: false,
     quickOpen: false,
     quickOpenQuery: "",
@@ -141,6 +145,7 @@ export function createState(vault: VaultId): State {
     findQuery: "",
     searchOverlayQuery: "",
     searchOverlayHits: null,
+    searchOverlayCoverage: null,
     commandOpen: false,
     commandFilter: "",
     revisionsOpen: false,

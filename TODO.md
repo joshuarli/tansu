@@ -23,15 +23,6 @@ Next: 21
 - **Effort:** M
 - **Design:** `docs/rfcs/0001-webauthn-counter-policy.md`
 
-### TNS-12 · P2 · Show partial draft-search coverage
-
-- **Area:** Search correctness
-- **Where:** `web/ts/app/v2-api.ts:846-853`, `web/ts/app.ts:944-975`, `web/ts/view.ts:608-616`
-- **Problem:** The API decodes `overlayCoverage`, including skipped draft counts, but both search handlers discard it. The UI can present incomplete draft-overlay results as complete.
-- **Recommendation:** Carry coverage state with results and show when the overlay skipped drafts.
-- **Fix with:** none
-- **Effort:** S
-
 ### TNS-13 · P2 · Bind revision actions to the note that loaded them
 
 - **Area:** Revision UI state

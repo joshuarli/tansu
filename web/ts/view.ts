@@ -13,7 +13,7 @@ import {
 } from "./state.ts";
 import { vaultId } from "./app/identity.ts";
 import { sameTabIdentity, type TabIdentity } from "./app/tab-identity.ts";
-import type { V2QuickOpenResponse, V2SearchHit } from "./types.generated.ts";
+import type { V2OverlayCoverage, V2QuickOpenResponse, V2SearchHit } from "./types.generated.ts";
 import type { FindMatch, Outline } from "./editor/source-navigation.js";
 
 export type ViewActions = {
@@ -300,6 +300,8 @@ function renderSidebar(state: State, actions: ViewActions): HTMLElement {
     const results = el("div", "note-list search-results");
     for (const hit of state.searchHits ?? []) results.append(searchHitRow(hit, actions));
     if (state.searchHits !== null && state.searchHits.length === 0) results.append(span("No matches", "empty-outline"));
+    const coverage = draftCoverageMessage(state.searchCoverage);
+    if (coverage !== null) results.append(coverage);
     sidebar.append(section("Search", results));
   }
   const outline = state.outlineCollapsed || activeTab(state) === undefined
@@ -608,6 +610,8 @@ function renderOverlays(state: State, actions: ViewActions): HTMLElement {
       for (const hit of state.searchOverlayHits ?? []) {
         list.append(searchHitRow(hit, actions));
       }
+      const coverage = draftCoverageMessage(state.searchOverlayCoverage);
+      if (coverage !== null) list.append(coverage);
     }
     host.append(backdrop(actions), el("div", "command-panel search-panel", input, list));
     queueMicrotask(() => input.focus());
@@ -969,6 +973,12 @@ function searchHitRow(hit: V2SearchHit, actions: ViewActions): HTMLElement {
   row.append(span(hit.title, "search-result-title"), span(hit.path, "search-result-path"));
   row.append(renderScore(hit), renderSnippet(hit));
   return row;
+}
+
+function draftCoverageMessage(coverage: V2OverlayCoverage | null): HTMLElement | null {
+  if (coverage?.status !== "partial") return null;
+  const count = coverage.skippedNoteCount;
+  return span(`Draft search skipped ${count} ${count === 1 ? "draft" : "drafts"}`, "empty-outline");
 }
 
 function quickOpenHitRow(
