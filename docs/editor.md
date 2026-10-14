@@ -5,8 +5,8 @@
 `EditorState` for each open note. CodeMirror owns the Markdown source and
 transactions. The DOM is a view and never supplies saved source.
 
-The app imports the CodeMirror adapter directly. The old engine and tests remain
-until their retirement review is complete.
+The app imports the CodeMirror adapter directly. The fixture large-note
+benchmark uses the same adapter.
 
 ## Source and sessions
 

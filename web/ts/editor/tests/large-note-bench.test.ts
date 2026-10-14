@@ -2,19 +2,14 @@ import { mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { performance } from "node:perf_hooks";
 
-import { expect, afterAll, describe, beforeAll, test } from "vitest";
+import { expect, afterEach, describe, test } from "vitest";
 
-import { createEditor } from "../editor.ts";
-import { renderMarkdown } from "../markdown.ts";
-import { domToMarkdown } from "../serialize.ts";
-import { setupDOM } from "./test-helper.ts";
+import { createCodeMirrorEditor } from "../codemirror-adapter.ts";
 
 const benchDescribe = process.env["MD_WYSIWYG_BENCH"] === "1" ? describe : describe.skip;
-const FIXTURE_VAULT = resolve(
-  import.meta.dirname,
-  "../../../../tests/fixtures/test-vaults/vault-one",
-);
-const RESULTS_DIR = resolve(import.meta.dirname, "../../../../bench/results");
+const FIXTURE_VAULT = resolve(import.meta.dirname, "../../../../tests/fixtures/test-vaults/vault-one");
+const RESULTS_DIR = resolve(import.meta.dirname, "../../../../.work/tmp/bench-results");
+let disposeEditor: (() => void) | null = null;
 
 function fixtureCorpus(): string {
   return readdirSync(FIXTURE_VAULT)
@@ -24,52 +19,39 @@ function fixtureCorpus(): string {
     .join("\n\n");
 }
 
-benchDescribe("Tansu editor large note benchmark", () => {
-  let cleanup: () => void;
+benchDescribe("Tansu CodeMirror large note benchmark", () => {
+  afterEach(() => disposeEditor?.());
 
-  beforeAll(() => {
-    cleanup = setupDOM();
-  });
-
-  afterAll(() => {
-    cleanup();
-  });
-
-  test("reports render, serialize, and editor roundtrip timings", () => {
+  test("reports mount, source replacement, and snapshot timings", () => {
     const markdown = fixtureCorpus();
-
-    const renderStart = performance.now();
-    const html = renderMarkdown(markdown);
-    const renderMs = performance.now() - renderStart;
-
     const host = document.createElement("div");
-    host.innerHTML = html;
+    document.body.append(host);
+    const mountStart = performance.now();
+    const editor = createCodeMirrorEditor(host);
+    const session = editor.createSession("large-note", "");
+    editor.attachSession(session);
+    const mountMs = performance.now() - mountStart;
+    disposeEditor = () => {
+      editor.dispose();
+      host.remove();
+      disposeEditor = null;
+    };
 
-    const serializeStart = performance.now();
-    const serialized = domToMarkdown(host);
-    const serializeMs = performance.now() - serializeStart;
-
-    const editorHost = document.createElement("div");
-    document.body.append(editorHost);
-    const editor = createEditor(editorHost);
-
-    const setValueStart = performance.now();
-    editor.setValue(markdown);
-    const setValueMs = performance.now() - setValueStart;
-
-    const getValueStart = performance.now();
-    const roundtrip = editor.getValue();
-    const getValueMs = performance.now() - getValueStart;
-
+    const replacementStart = performance.now();
+    const reload = editor.reloadIfClean(session, markdown);
+    const replaceSourceMs = performance.now() - replacementStart;
+    const snapshotStart = performance.now();
+    const snapshot = editor.getSnapshot();
+    const snapshotMs = performance.now() - snapshotStart;
     const result = {
-      benchmark: "tansu-editor-large-note",
+      benchmark: "tansu-codemirror-large-note",
       generatedAt: new Date().toISOString(),
       chars: markdown.length,
-      renderMs: Number(renderMs.toFixed(2)),
-      serializeMs: Number(serializeMs.toFixed(2)),
-      editorSetValueMs: Number(setValueMs.toFixed(2)),
-      editorGetValueMs: Number(getValueMs.toFixed(2)),
+      mountMs: Number(mountMs.toFixed(2)),
+      replaceSourceMs: Number(replaceSourceMs.toFixed(2)),
+      snapshotMs: Number(snapshotMs.toFixed(2)),
     };
+
     mkdirSync(RESULTS_DIR, { recursive: true });
     writeFileSync(
       resolve(RESULTS_DIR, `editor-large-note-${Date.now()}.json`),
@@ -78,10 +60,8 @@ benchDescribe("Tansu editor large note benchmark", () => {
     );
     console.info(JSON.stringify(result));
 
-    expect(serialized.length).toBeGreaterThan(0);
-    expect(roundtrip.length).toBeGreaterThan(0);
-
-    editor.destroy();
-    editorHost.remove();
+    expect(reload.kind).toBe("reloaded");
+    expect(snapshot?.source).toBe(markdown);
+    expect(snapshot?.dirty).toBeFalsy();
   }, 20_000);
 });
