@@ -11,7 +11,7 @@ use rusqlite::backup::Backup;
 use rusqlite::{Connection, OpenFlags, OptionalExtension, Transaction, TransactionBehavior, params};
 use rustix::fs::{AtFlags, Mode, OFlags, RenameFlags, openat, renameat_with, unlinkat};
 use serde::{Deserialize, Serialize};
-use tansu_webauthn::{AuthChallenge, AuthenticationFinish, RegChallenge, StoredCredential};
+use tansu_webauthn::{AuthChallenge, AuthenticationFinish, CounterResult, RegChallenge, StoredCredential};
 
 use crate::CancellationToken;
 
@@ -275,6 +275,13 @@ impl AuthStore {
                  credential_id BLOB PRIMARY KEY,
                  value BLOB NOT NULL
              );
+             CREATE TABLE IF NOT EXISTS credential_counter_anomalies (
+                 credential_id BLOB PRIMARY KEY,
+                 previous_count INTEGER NOT NULL CHECK(previous_count BETWEEN 0 AND 4294967295),
+                 observed_count INTEGER NOT NULL CHECK(observed_count BETWEEN 0 AND previous_count),
+                 backup_eligible INTEGER NOT NULL CHECK(backup_eligible IN (0, 1)),
+                 recorded_at INTEGER NOT NULL CHECK(recorded_at >= 0)
+             );
              CREATE TABLE IF NOT EXISTS auth_identity (
                  singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
                  external_origin TEXT NOT NULL,
@@ -527,18 +534,41 @@ impl AuthStore {
         }
         let state: StoredAuthentication = serde_json::from_slice(&row.state).map_err(storage)?;
         transaction.execute("DELETE FROM ceremonies WHERE id_hash = ?1", params![id_hash]).map_err(storage)?;
-        let result = if row.expires_at <= now {
-            Err(AuthError::Expired)
+        let (result, credentials) = if row.expires_at <= now {
+            (Err(AuthError::Expired), Vec::new())
         } else {
             let credentials = read_credentials(&transaction)?;
-            finish(&state.state, &credentials)
+            (finish(&state.state, &credentials), credentials)
         };
         let result = match result {
-            Ok(finish) => {
+            Ok(mut finish) => {
                 if !state.state.allowed_credential_ids.iter().any(|credential_id| credential_id == &finish.credential.cred_id) {
                     transaction.commit().map_err(storage)?;
                     return Err(AuthError::Unauthorized);
                 }
+                let Some(stored_credential) = credentials.iter().find(|credential| credential.cred_id == finish.credential.cred_id) else {
+                    transaction.commit().map_err(storage)?;
+                    return Err(AuthError::Unauthorized);
+                };
+                match finish.counter {
+                    CounterResult::NonIncreasing { .. } if !stored_credential.backup_eligible => {
+                        transaction.commit().map_err(storage)?;
+                        return Err(AuthError::Unauthorized);
+                    }
+                    CounterResult::NonIncreasing { previous, observed } => {
+                        record_counter_anomaly(
+                            &transaction,
+                            &finish.credential.cred_id,
+                            previous,
+                            observed,
+                            stored_credential.backup_eligible,
+                            now,
+                        )?;
+                        finish.credential.sign_count = finish.credential.sign_count.max(previous).max(observed);
+                    }
+                    CounterResult::Unsupported | CounterResult::Increased { .. } => {}
+                }
+                finish.credential.sign_count = finish.credential.sign_count.max(stored_credential.sign_count);
                 store_credential(&transaction, &finish.credential)?;
                 create_session(&transaction, now, self.session_ttl_secs)?
             }
@@ -941,6 +971,7 @@ fn bind_auth_identity(connection: &Connection, policy: &AuthPolicy) -> Result<()
             transaction.execute("DELETE FROM sessions", []).map_err(storage)?;
             transaction.execute("DELETE FROM ceremonies", []).map_err(storage)?;
             transaction.execute("DELETE FROM enrollment_capabilities", []).map_err(storage)?;
+            transaction.execute("DELETE FROM credential_counter_anomalies", []).map_err(storage)?;
             transaction.execute(
                 "UPDATE auth_identity SET external_origin = ?1, rp_id = ?2 WHERE singleton = 1",
                 params![external_origin, rp_id],
@@ -1094,6 +1125,25 @@ fn store_credential(transaction: &Transaction<'_>, credential: &StoredCredential
     Ok(())
 }
 
+fn record_counter_anomaly(
+    transaction: &Transaction<'_>,
+    credential_id: &[u8],
+    previous_count: u32,
+    observed_count: u32,
+    backup_eligible: bool,
+    recorded_at: u64,
+) -> Result<(), AuthError> {
+    transaction.execute(
+        "INSERT INTO credential_counter_anomalies(credential_id, previous_count, observed_count, backup_eligible, recorded_at)
+         VALUES (?1, ?2, ?3, ?4, ?5)
+         ON CONFLICT(credential_id) DO UPDATE SET previous_count = excluded.previous_count,
+             observed_count = excluded.observed_count, backup_eligible = excluded.backup_eligible,
+             recorded_at = excluded.recorded_at",
+        params![credential_id, previous_count, observed_count, backup_eligible, to_i64(recorded_at)?],
+    ).map_err(storage)?;
+    Ok(())
+}
+
 fn create_session(transaction: &Transaction<'_>, now: u64, ttl_secs: u64) -> Result<SessionMaterial, AuthError> {
     let cookie_value = random_token()?;
     let csrf_token = random_token()?;
@@ -1185,6 +1235,151 @@ mod tests {
 
         store.begin_authentication(&state, 311, 300).unwrap();
         assert_eq!(authentication_ceremony_count(&store), 1);
+    }
+
+    #[test]
+    fn non_increasing_single_device_counter_rejects_without_rollback_or_session() {
+        let (_root, store) = store();
+        let mut stored = credential(1);
+        stored.sign_count = 5;
+        seed_credential(&store, &stored);
+        let state = auth_challenge();
+        let ticket = store.begin_authentication(&state, 10, 30).unwrap();
+
+        let result = store.finish_authentication(&ticket.id, 11, |_, _| {
+            let mut updated = stored.clone();
+            updated.sign_count = 3;
+            Ok(AuthenticationFinish {
+                credential: updated,
+                counter: CounterResult::NonIncreasing { previous: 5, observed: 3 },
+            })
+        });
+
+        assert_eq!(result, Err(AuthError::Unauthorized));
+        assert_eq!(store.credentials().unwrap()[0].sign_count, 5);
+        assert_eq!(session_count(&store), 0);
+        assert_eq!(store.finish_authentication(&ticket.id, 12, |_, _| unreachable!()), Err(AuthError::CeremonyUsed));
+    }
+
+    #[test]
+    fn non_increasing_backup_eligible_counter_records_anomaly_and_keeps_maximum() {
+        let (_root, store) = store();
+        let mut stored = credential(1);
+        stored.sign_count = 5;
+        stored.backup_eligible = true;
+        seed_credential(&store, &stored);
+        let ticket = store.begin_authentication(&auth_challenge(), 10, 30).unwrap();
+
+        let session = store.finish_authentication(&ticket.id, 11, |_, _| {
+            let mut updated = stored.clone();
+            updated.sign_count = 3;
+            Ok(AuthenticationFinish {
+                credential: updated,
+                counter: CounterResult::NonIncreasing { previous: 5, observed: 3 },
+            })
+        }).unwrap();
+
+        assert!(!session.cookie_value.is_empty());
+        assert_eq!(store.credentials().unwrap()[0].sign_count, 5);
+        let next_ticket = store.begin_authentication(&auth_challenge(), 12, 30).unwrap();
+        store.finish_authentication(&next_ticket.id, 13, |_, _| {
+            let mut updated = stored.clone();
+            updated.sign_count = 4;
+            Ok(AuthenticationFinish {
+                credential: updated,
+                counter: CounterResult::NonIncreasing { previous: 5, observed: 4 },
+            })
+        }).unwrap();
+        assert_eq!(store.credentials().unwrap()[0].sign_count, 5);
+        let connection = store.connection.lock().unwrap();
+        let anomaly: (Vec<u8>, i64, i64, bool, i64) = connection.query_row(
+            "SELECT credential_id, previous_count, observed_count, backup_eligible, recorded_at FROM credential_counter_anomalies",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
+        ).unwrap();
+        assert_eq!(anomaly, (vec![1], 5, 4, true, 13));
+        let anomalies: i64 = connection.query_row("SELECT COUNT(*) FROM credential_counter_anomalies", [], |row| row.get(0)).unwrap();
+        assert_eq!(anomalies, 1);
+        let sessions: i64 = connection.query_row("SELECT COUNT(*) FROM sessions", [], |row| row.get(0)).unwrap();
+        assert_eq!(sessions, 2);
+    }
+
+    #[test]
+    fn failed_backup_eligible_authentication_rolls_back_anomaly_and_session() {
+        let (_root, store) = store();
+        let mut stored = credential(1);
+        stored.sign_count = 5;
+        stored.backup_eligible = true;
+        seed_credential(&store, &stored);
+        store.connection.lock().unwrap().execute_batch(
+            "CREATE TRIGGER reject_session_insert BEFORE INSERT ON sessions
+             BEGIN SELECT RAISE(ABORT, 'session insert rejected'); END;",
+        ).unwrap();
+        let ticket = store.begin_authentication(&auth_challenge(), 10, 30).unwrap();
+
+        let result = store.finish_authentication(&ticket.id, 11, |_, _| {
+            let mut updated = stored.clone();
+            updated.sign_count = 3;
+            Ok(AuthenticationFinish {
+                credential: updated,
+                counter: CounterResult::NonIncreasing { previous: 5, observed: 3 },
+            })
+        });
+
+        assert!(matches!(result, Err(AuthError::Storage(_))));
+        assert_eq!(store.credentials().unwrap()[0].sign_count, 5);
+        assert_eq!(session_count(&store), 0);
+        assert_eq!(authentication_ceremony_count(&store), 1);
+        let anomalies: i64 = store.connection.lock().unwrap()
+            .query_row("SELECT COUNT(*) FROM credential_counter_anomalies", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(anomalies, 0);
+    }
+
+    #[test]
+    fn opening_old_auth_schema_adds_counter_anomaly_table_without_version_change() {
+        let (root, store) = store();
+        let version: i64 = store.connection.lock().unwrap()
+            .pragma_query_value(None, "user_version", |row| row.get(0)).unwrap();
+        store.connection.lock().unwrap().execute("DROP TABLE IF EXISTS credential_counter_anomalies", []).unwrap();
+        drop(store);
+
+        let reopened = AuthStore::open(
+            root.path().join("auth"),
+            AuthPolicy::authenticated("https://notes.example.com", "example.com", "Tansu").unwrap(),
+            3600,
+            300,
+        ).unwrap();
+        let connection = reopened.connection.lock().unwrap();
+        let table: i64 = connection.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'credential_counter_anomalies'",
+            [],
+            |row| row.get(0),
+        ).unwrap();
+        let reopened_version: i64 = connection.pragma_query_value(None, "user_version", |row| row.get(0)).unwrap();
+        assert_eq!(table, 1);
+        assert_eq!(reopened_version, version);
+    }
+
+    fn auth_challenge() -> AuthChallenge {
+        AuthChallenge {
+            challenge: "login".into(),
+            allowed_credential_ids: vec![vec![1]],
+            owner_handle: vec![7, 8],
+        }
+    }
+
+    fn seed_credential(store: &AuthStore, credential: &StoredCredential) {
+        let mut connection = store.connection.lock().unwrap();
+        let transaction = connection.transaction().unwrap();
+        store_credential(&transaction, credential).unwrap();
+        transaction.commit().unwrap();
+    }
+
+    fn session_count(store: &AuthStore) -> i64 {
+        store.connection.lock().unwrap()
+            .query_row("SELECT COUNT(*) FROM sessions", [], |row| row.get(0))
+            .unwrap()
     }
 
     fn authentication_ceremony_count(store: &AuthStore) -> i64 {

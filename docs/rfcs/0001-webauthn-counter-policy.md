@@ -1,6 +1,6 @@
 # RFC 0001: WebAuthn counter policy
 
-**Status:** Proposed
+**Status:** Accepted
 
 ## Problem
 
@@ -10,12 +10,12 @@ non-increasing nonzero counter as a possible cloned authenticator, malfunction,
 or assertion-ordering race. The result is a risk signal, not proof of cloning.
 Backup-eligible passkeys make a single rejection rule too broad.
 
-## Decision
+## Policy constraints
 
-Choose the response to a non-increasing counter before changing session
-issuance. The policy must distinguish unsupported zero counters, single-device
-credentials, and backup-eligible credentials, and must not lower the stored
-counter.
+The policy must distinguish unsupported counters, single-device credentials,
+and backup-eligible credentials. It must not lower the stored counter, and an
+anomaly must be persisted in the same transaction as any credential and session
+update.
 
 ## Options
 
@@ -30,9 +30,12 @@ counter.
    avoids false lockouts but leaves counter signals out of the authorization
    decision.
 
-## Recommendation
+## Decision
 
-Use option 2, keep the highest observed counter, and record the credential's
-backup eligibility and the counter values with the anomaly. The owner should
-confirm whether an anomaly also requires a fresh verification before applying
-the policy.
+Use option 2. Reject a non-increasing counter for a single-device credential
+with the existing unauthorized response and consume its ceremony. For a
+backup-eligible credential, accept a cryptographically valid assertion without
+extra verification, record the previous and observed counters with backup
+eligibility, and issue the session atomically with the anomaly record. Store at
+most the latest anomaly per credential. In every accepted case, retain the
+highest observed counter.

@@ -3,16 +3,6 @@
 Prefix: TNS
 Next: 21
 
-### TNS-4 · P2 · Apply a policy to non-increasing passkey counters
-
-- **Area:** Authentication
-- **Where:** `crates/tansu-webauthn/src/lib.rs:375-377`, `src/auth.rs:517-524`
-- **Problem:** The verifier returns `CounterResult::NonIncreasing`, but authentication ignores it, stores the credential, and issues a session. A non-increasing nonzero counter can indicate a cloned authenticator, while a passkey may be synced or assertions may race.
-- **Recommendation:** Decide how single-device and backup-eligible credentials handle this signal, then reject, require additional verification, or record the anomaly before issuing a session.
-- **Fix with:** durable-state
-- **Effort:** M
-- **Design:** `docs/rfcs/0001-webauthn-counter-policy.md`
-
 ### TNS-15 · P3 · Run CI on code changes
 
 - **Area:** CI

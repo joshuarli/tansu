@@ -15,8 +15,11 @@ value clears credentials, sessions, enrollment capabilities, and pending
 ceremonies in one database transaction. Enroll credentials again after changing
 either value.
 
-The verifier reports non-increasing signature counters, but the auth store
-currently does not act on that result. The policy proposal is in
+For a non-increasing signature counter, Tansu2 rejects single-device
+credentials with the usual unauthorized response and consumes the ceremony.
+For backup-eligible passkeys, it accepts a cryptographically valid assertion,
+records the latest counter anomaly for that credential, and issues the session
+in one database transaction. The stored counter never decreases. See
 [RFC 0001](rfcs/0001-webauthn-counter-policy.md).
 
 ## Enrollment and sessions
