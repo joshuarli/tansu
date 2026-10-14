@@ -17,12 +17,10 @@ check: types-check
 lint: lint-ts lint-rs
 
 lint-ts: types-check
-	pnpm exec oxfmt --write --config oxfmt.config.mjs
 	pnpm exec oxlint --fix --config oxlint.config.mjs
 	pnpm exec knip --reporter compact
 
 lint-rs:
-	cargo fmt --check
 	cargo clippy --fix --allow-dirty --all-targets --message-format=short
 
 coverage-rs:

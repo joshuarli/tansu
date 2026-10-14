@@ -5,7 +5,6 @@
   "scripts": {
     "bundle": "node scripts/build-web.mjs production",
     "bundle-dev": "node scripts/build-web.mjs development",
-    "format:check": "oxfmt --check --config oxfmt.config.mjs",
     "lint": "oxlint",
     "playwright:install": "node scripts/install-playwright-browsers.mjs",
     "test": "vitest run",
@@ -21,7 +20,6 @@
     "esbuild": "0.28.0",
     "happy-dom": "^20.9.0",
     "knip": "^6.14.2",
-    "oxfmt": "0.51.0",
     "oxlint": "1.66.0",
     "playwright": "1.60.0",
     "vitest": "4.1.7"

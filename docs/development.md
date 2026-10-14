@@ -56,9 +56,7 @@ Full focused list:
 
 ```sh
 pnpm exec tsgo --noEmit --pretty false
-pnpm exec oxfmt --check --config oxfmt.config.mjs
 pnpm exec oxlint
-cargo fmt --check
 cargo check -q
 cargo test -q
 pnpm run test

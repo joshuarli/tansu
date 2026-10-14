@@ -3,7 +3,6 @@ import { defineConfig } from "oxlint";
 export default defineConfig({
   ignorePatterns: [
     "web/ts/api.generated.ts",
-    "oxfmt.config.mjs",
     "oxlint.config.mjs",
     "vitest*.config.ts",
   ],
@@ -49,7 +48,6 @@ export default defineConfig({
     // Disabled: conflicts with no-import-type-side-effects; use import type { X } for type-only imports
     "import/consistent-type-specifier-style": "off",
 
-    // Import ordering handled by oxfmt
     "sort-imports": "off",
     "import/first": "off",
     "import/exports-last": "off",
@@ -85,7 +83,6 @@ export default defineConfig({
     // Magic numbers are normal in tests and low-level algorithms
     "no-magic-numbers": "off",
 
-    // Object key sorting is cosmetic; handled by formatter
     "sort-keys": "off",
     "sort-vars": "off",
 
@@ -234,7 +231,6 @@ export default defineConfig({
     // prefer type over interface
     "consistent-type-definitions": "off",
 
-    // Conflicts with oxfmt: oxfmt lowercases hex digits, this rule wants uppercase
     "unicorn/number-literal-case": "off",
 
     "unicorn/prefer-add-event-listener": "off",
