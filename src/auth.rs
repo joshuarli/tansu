@@ -11,7 +11,7 @@ use rusqlite::backup::Backup;
 use rusqlite::{Connection, OpenFlags, OptionalExtension, Transaction, TransactionBehavior, params};
 use rustix::fs::{AtFlags, Mode, OFlags, RenameFlags, openat, renameat_with, unlinkat};
 use serde::{Deserialize, Serialize};
-use tansu_webauthn::{AuthChallenge, AuthenticationFinish, CounterResult, RegChallenge, StoredCredential};
+use tansu_webauthn::{AuthChallenge, AuthenticationFinish, RegChallenge, StoredCredential};
 
 use crate::CancellationToken;
 
@@ -1111,6 +1111,7 @@ fn storage(error: impl std::fmt::Display) -> AuthError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tansu_webauthn::CounterResult;
 
     fn store() -> (tempfile::TempDir, AuthStore) {
         let root = tempfile::tempdir().unwrap();
