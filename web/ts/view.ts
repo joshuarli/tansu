@@ -35,8 +35,14 @@ export function renderApp(state: State, actions: ViewActions): HTMLElement[] {
 
 export function renderLoading(): HTMLElement {
   const loading = el("main", "loading", "Loading");
-  loading.dataset["viewRegion"] = "loading";
+  loading.dataset["viewRegion"] = "startup";
   return loading;
+}
+
+export function renderNoVaultConfigured(): HTMLElement {
+  const empty = el("main", "empty-state", el("h1", "empty-title", "No vault is configured"));
+  empty.dataset["viewRegion"] = "startup";
+  return empty;
 }
 
 export function renderAuthGate(state: State, actions: ViewActions): HTMLElement {

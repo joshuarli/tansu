@@ -114,6 +114,92 @@ describe("v2 desktop shell", () => {
     expect(root.textContent).toContain("One");
   });
 
+  it("shows the empty-vault notice when bootstrap has no configured vaults", async () => {
+    vi.useFakeTimers();
+    api.bootstrap.mockResolvedValueOnce({ apiVersion: 2, serverInstanceId: "server-1", vaults: [] });
+    const { app, root } = mountApp();
+
+    await app.boot();
+
+    expect(root.querySelector(".sidebar")).toBeNull();
+    expect(root.querySelector(".empty-state h1")?.textContent).toBe("No vault is configured");
+    await vi.advanceTimersByTimeAsync(2500);
+    expect(root.querySelector(".empty-state h1")?.textContent).toBe("No vault is configured");
+    expect(root.querySelector(".loading")).toBeNull();
+    expect(api.forVault).not.toHaveBeenCalled();
+  });
+
+  it("flushes workspace and draft state before the page unloads", async () => {
+    const note = noteMeta("note-1", "one.md", "One");
+    configureVault([note], legacySession([
+      { noteId: note.noteId, title: note.title, path: note.path, cursorOffset: null, sourceMode: false },
+    ], note.noteId));
+    const services = createServices();
+    const journal = { flushAll: vi.fn(async () => {}) } as unknown as ReturnType<AppServices["workspace"]["createJournal"]>;
+    vi.spyOn(services.workspace, "createJournal").mockReturnValue(journal);
+    const { app } = mountApp(services);
+    app.bindGlobalEvents();
+    await app.boot();
+    window.dispatchEvent(new Event("beforeunload"));
+    await until(() => memory.workspaceWrites.length > 0);
+
+    expect(memory.workspaceWrites.at(-1)?.tabs).toMatchObject([{ kind: "saved", noteId: note.noteId }]);
+    expect(journal.flushAll).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the current vault mounted when bootstrap temporarily returns no vaults", async () => {
+    const note = noteMeta("note-1", "one.md", "One");
+    const client = configureVault([note], legacySession([
+      { noteId: note.noteId, title: note.title, path: note.path, cursorOffset: null, sourceMode: false },
+    ], note.noteId));
+    const { app, root } = mountApp();
+    await app.boot();
+    await flushAsync();
+    api.bootstrap.mockResolvedValueOnce({ apiVersion: 2, serverInstanceId: "server-1", vaults: [] });
+
+    await app.boot();
+
+    expect(root.querySelector(".sidebar")).not.toBeNull();
+    expect(root.textContent).toContain("No vault is configured");
+    expect(client.connectEvents).toHaveBeenCalledTimes(2);
+  });
+
+  it("opens the command palette from Mod+K and closes it with Escape", async () => {
+    configureVault([]);
+    const { app, root } = mountApp();
+    app.bindGlobalEvents();
+    await app.boot();
+
+    const open = new KeyboardEvent("keydown", { key: "k", ctrlKey: true, cancelable: true });
+    window.dispatchEvent(open);
+    await flushAsync();
+    expect(open.defaultPrevented).toBeTruthy();
+    expect(root.querySelector(".command-panel")).not.toBeNull();
+
+    const close = new KeyboardEvent("keydown", { key: "Escape", cancelable: true });
+    window.dispatchEvent(close);
+    await flushAsync();
+    expect(close.defaultPrevented).toBeTruthy();
+    expect(root.querySelector(".command-panel")).toBeNull();
+  });
+
+  it("closes a note context menu when the user clicks outside it", async () => {
+    const note = noteMeta("note-1", "one.md", "One");
+    configureVault([note]);
+    const { app, root } = mountApp();
+    app.bindGlobalEvents();
+    await app.boot();
+    const row = root.querySelector<HTMLElement>(".note-row");
+    if (row === null) throw new Error("Expected a note row");
+
+    row.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 20, clientY: 20 }));
+    await flushAsync();
+    expect(root.querySelector(".context-menu-item")).not.toBeNull();
+    document.body.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await flushAsync();
+    expect(root.querySelector(".context-menu-item")).toBeNull();
+  });
+
   it("shows the passkey gate after auth expires and returns to the vault after login", async () => {
     vi.stubGlobal("navigator", { ...navigator, credentials: {} });
     vi.stubGlobal("isSecureContext", true);

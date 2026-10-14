@@ -28,7 +28,7 @@ import {
   type State,
   type Tab,
 } from "./state.ts";
-import { disposeAppView, renderApp, renderAuthGate, renderLoading, updateAppView, updateStatusBar, type ViewActions } from "./view.ts";
+import { disposeAppView, renderApp, renderAuthGate, renderLoading, renderNoVaultConfigured, updateAppView, updateStatusBar, type ViewActions } from "./view.ts";
 import type { Settings, V2BootstrapResponse, V2MutationResponse, V2NoteDocument, V2NoteMeta, V2QuickOpenResponse, V2SearchHit, V2SearchOverlay, V2ServerEvent } from "./types.generated.ts";
 import type { DraftJournalRecord, WorkspaceState } from "./app/workspace-store.ts";
 
@@ -64,6 +64,7 @@ export class TansuApp {
   private bootGeneration = 0;
   private sessionGeneration = 0;
   private transitioningVault = false;
+  private noVaultConfigured = false;
   private disposed = false;
   private overlayReturn: {
     element: HTMLElement | null;
@@ -113,13 +114,17 @@ export class TansuApp {
     if (selected === undefined) {
       if (this.identity === null) {
         this.state.boot = null;
+        this.noVaultConfigured = true;
         this.transitioningVault = false;
         this.render();
       }
-      else this.restoreCurrentVault(generation);
-      this.notify("No vault is configured");
+      else {
+        this.restoreCurrentVault(generation);
+        this.notify("No vault is configured");
+      }
       return;
     }
+    this.noVaultConfigured = false;
     const nextIdentity: ServerIdentity = {
       serverInstanceId: serverInstanceId(global.serverInstanceId),
       vaultId: vaultId(selected.vaultId),
@@ -399,6 +404,7 @@ export class TansuApp {
     this.root.dataset["sidebarCollapsed"] = String(this.state.sidebarCollapsed);
     const view = this.state.authRequired
       ? [renderAuthGate(this.state, this.viewActions())]
+      : this.noVaultConfigured ? [renderNoVaultConfigured()]
       : this.state.boot === null ? [renderLoading()] : renderApp(this.state, this.viewActions());
     if (this.state.authRequired) {
       this.editor?.detachSession();
