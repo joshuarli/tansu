@@ -61,3 +61,79 @@ export type PathValidationReason = "empty" | "absolute" | "traversal" | "dot_tan
 
 export type UnresolvedReason = "case_fold_collision" | "invalid_utf8" | "missing_snapshot" | "corrupt_snapshot" | "file_catalog_mismatch";
 
+export type V2VaultMeta = { vaultId: string, name: string, };
+
+export type V2BootstrapResponse = { apiVersion: number, serverInstanceId: string, vaults: Array<V2VaultMeta>, };
+
+export type V2VaultBootstrapResponse = { vault: V2VaultMeta, notes: Array<V2NoteMeta>, settings: Settings, searchStatus: SearchStatus, };
+
+export type V2NoteMeta = { noteId: string, path: string, title: string, tags: Array<string>, revision: number, sourceHash: string, diskHash: string, sourceHashFormatVersion: number, diskHashFormatVersion: number, updatedAtMs: number, };
+
+export type V2NoteDocument = { meta: V2NoteMeta, content: string, };
+
+export type V2NotePrecondition = { baseRevision: number, baseSourceHash: string, baseDiskHash: string, };
+
+export type V2CreateNoteRequest = { mutationId: string, path: string, content: string, sourceHash: string, };
+
+export type V2SaveNoteRequest = { mutationId: string, precondition: V2NotePrecondition, content: string, sourceHash: string, };
+
+export type V2SaveNoteDeltaRequest = { mutationId: string, precondition: V2NotePrecondition, sourceHash: string, edits: Array<TextEdit>, };
+
+export type V2RenameNoteRequest = { mutationId: string, precondition: V2NotePrecondition, path: string, };
+
+export type V2DeleteNoteRequest = { mutationId: string, precondition: V2NotePrecondition, };
+
+export type V2RestoreRevisionRequest = { mutationId: string, precondition: V2NotePrecondition, };
+
+export type V2RestoreConflictRequest = { mutationId: string, precondition: V2NotePrecondition, };
+
+export type V2ConflictDraftMeta = { draftId: number, noteId: string, baseRevision: number, baseSourceHash: string, sourceHash: string, createdAtMs: number, };
+
+export type V2ConflictDraftDocument = { draft: V2ConflictDraftMeta, content: string, };
+
+export type V2RevisionMeta = { revision: number, noteId: string, kind: NoteEventKind, source: NoteEventSource, sourceHash: string | null, createdAtMs: number, };
+
+export type V2RevisionDocument = { revision: V2RevisionMeta, content: string, };
+
+export type V2SettingsRequest = { mutationId: string, settings: Settings, };
+
+export type V2SettingsResponse = { mutationId: string, settings: Settings, };
+
+export type V2ImageUploadResponse = { mutationId: string, name: string, markdown: string, };
+
+export type V2MutationOutcome = { "state": "accepted", result: V2NoteMeta | null, } | { "state": "pendingMaterialization", operationId: string, } | { "state": "conflict", current: V2NoteDocument, draft: V2ConflictDraftMeta, };
+
+export type V2MutationResponse = { mutationId: string, outcome: V2MutationOutcome, };
+
+export type V2SearchMode = "default" | "typo_only";
+
+export type V2SearchOverlay = { "kind": "saved", noteId: string, baseRevision: number, baseSourceHash: string, localRevision: number, title: string, path: string, content: string, } | { "kind": "new", localId: string, localRevision: number, title: string, path: string, content: string, };
+
+export type V2SearchRequest = { query: string, mode: V2SearchMode, limit: number, overlays: Array<V2SearchOverlay>, };
+
+export type V2ExcerptRange = { startUtf16: number, endUtf16: number, };
+
+export type V2SourceRange = { startUtf16: number, endUtf16: number, };
+
+export type V2SearchHitIdentity = { "kind": "canonical", noteId: string, revision: number, sourceHash: string, } | { "kind": "savedOverlay", noteId: string, localRevision: number, sourceHash: string, } | { "kind": "newLocalDraft", localId: string, localRevision: number, sourceHash: string, };
+
+export type V2SearchHit = { identity: V2SearchHitIdentity, title: string, path: string, score: number, excerpt: string, excerptRanges: Array<V2ExcerptRange>, sourceRange: V2SourceRange | null, };
+
+export type V2OverlayCoverage = { "status": "complete" } | { "status": "partial", skippedNoteCount: number, };
+
+export type V2SearchResponse = { hits: Array<V2SearchHit>, overlayCoverage: V2OverlayCoverage, };
+
+export type V2QuickOpenRequest = { query: string, pinnedNoteIds: Array<string>, recentNoteIds: Array<string>, limit: number, };
+
+export type V2QuickOpenHit = { noteId: string, sourceHash: string, title: string, path: string, score: number, };
+
+export type V2QuickOpenResponse = { hits: Array<V2QuickOpenHit>, };
+
+export type V2ServerEventUpdate = { "kind": "ready" } | { "kind": "vaultChanged", notes: Array<V2NoteMeta>, } | { "kind": "noteChanged", note: V2NoteMeta, } | { "kind": "noteDeleted", noteId: string, } | { "kind": "searchChanged", dirty: boolean, degraded: boolean, } | { "kind": "resyncRequired" };
+
+export type V2ServerEvent = { eventVersion: number, resyncRequired: boolean, update: V2ServerEventUpdate, };
+
+export type V2ApiErrorResponse = { error: V2ApiErrorKind, };
+
+export type V2ApiErrorKind = { "code": "api_version_unsupported", requestedVersion: number | null, supportedVersion: number, } | { "code": "vault_not_found", vaultId: string, } | { "code": "server_instance_mismatch", expected: string, received: string, } | { "code": "mutation_id_reuse", mutationId: string, } | { "code": "path_invalid", reason: PathValidationReason, } | { "code": "path_collision", path: string, } | { "code": "note_not_found", noteId: string, } | { "code": "save_conflict", current: V2NoteDocument, draft: V2ConflictDraftMeta, } | { "code": "unresolved_note", noteId: string, reason: UnresolvedReason, } | { "code": "source_hash_mismatch", expected: string, received: string, } | { "code": "disk_hash_mismatch", expected: string, received: string, } | { "code": "request_too_large", limitBytes: number, } | { "code": "auth_required" } | { "code": "forbidden" } | { "code": "csrf_rejected" } | { "code": "origin_rejected" } | { "code": "rate_limited", retryAfterMs: number, } | { "code": "not_implemented" } | { "code": "bad_request", message: string, } | { "code": "internal", requestId: string, };
+

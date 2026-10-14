@@ -319,6 +319,12 @@ Append-only, one line per judgment call a reader would miss.
 2026-10-14 | G1 | Keep the cache benchmark's nine samples; the overlong run was an unbounded wait for a filename missing from the copied fixture, not representative sampling work.
 2026-10-14 | P0 | Start the campaign from the actual `a875868` checkout; the prepared `1ecf383` baseline exists as an ancestor but is not the checked-out commit.
 2026-10-14 | G1 | Keep the root package as the only workspace member until the first crate lands; `crates/*` fails Cargo metadata when the directory has no members, and a placeholder crate would be dead code.
+2026-10-14 | G3 | Keep `sourceHash` over LF editor source including a leading BOM, and `diskHash` over exact bytes, so line-ending-only external edits remain detectable.
+2026-10-14 | G3 | Retain idempotency records for the life of vault state; a delayed retry must resolve to the original outcome after a client restart.
+2026-10-14 | G3 | Apply dirty overlays as an ordered prefix capped at 20 notes and 2 MiB, then return a skipped count while still searching canonical notes.
+2026-10-14 | G3 | Keep tabs, pins, and recents browser-local; only transient search requests carry unsaved source to the server.
+2026-10-14 | G3 | Derive `resyncRequired` from the event update variant in a server-only constructor, so serialized events cannot contradict their update.
+2026-10-14 | G3 | Cap search and quick-open queries at 1,024 UTF-8 bytes, results at 100, and excerpts at 512 bytes to bound request and response work.
 
 # Campaign log
 
