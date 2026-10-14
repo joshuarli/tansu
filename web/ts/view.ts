@@ -491,6 +491,16 @@ function renderOverlays(state: State, actions: ViewActions): HTMLElement {
   if (state.notice !== null) {
     host.append(el("div", "toast", state.notice));
   }
+  if (state.imageUploads.size > 0) {
+    const status = el(
+      "div",
+      "toast image-upload-status",
+      state.imageUploads.size === 1 ? "Uploading image…" : `Uploading ${state.imageUploads.size} images…`,
+    );
+    status.setAttribute("role", "status");
+    status.setAttribute("aria-live", "polite");
+    host.append(status);
+  }
   return host;
 }
 

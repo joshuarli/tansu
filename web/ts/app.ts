@@ -77,6 +77,7 @@ export class TansuApp {
   async boot(requestedVault?: string): Promise<void> {
     const generation = ++this.bootGeneration;
     this.transitioningVault = true;
+    this.state.imageUploads.clear();
     this.searchRequestSeq += 1;
     this.searchOverlayRequestSeq += 1;
     this.eventSubscription?.close();
@@ -431,6 +432,29 @@ export class TansuApp {
         }
       },
       onLinkOpen: (url) => window.open(url, "_blank", "noopener,noreferrer"),
+      uploadPastedImage: async ({ image, signal }) => {
+        if (generation !== this.bootGeneration || this.transitioningVault || !currentVault()) {
+          throw new DOMException("Image upload was canceled because the vault changed", "AbortError");
+        }
+        const response = await client!.uploadImage(mutationId(), image, signal);
+        return { name: response.name, markdown: response.markdown };
+      },
+      onImagePasteStateChange: (paste) => {
+        if (generation !== this.bootGeneration || this.transitioningVault || !currentVault()) return;
+        if (paste.status === "uploading") {
+          this.state.imageUploads.add(paste.uploadId);
+          this.render();
+          return;
+        }
+        this.state.imageUploads.delete(paste.uploadId);
+        if (paste.status === "failed") {
+          this.notify(`Image upload failed: ${paste.message}`);
+        } else if (paste.status === "stale") {
+          this.notify("Image was not inserted because its note changed.");
+        } else {
+          this.render();
+        }
+      },
       onSave: () => {
         if (generation === this.bootGeneration && !this.transitioningVault && currentVault()) {
           this.runAsync(this.manualSave(), "Save failed");
@@ -447,7 +471,6 @@ export class TansuApp {
           if (generation !== this.bootGeneration || this.transitioningVault ||
             !currentVault() || !this.state.tabs.includes(tab) || this.attachedEditor?.tab !== tab) return;
           this.captureActiveEditor();
-          if (tab.kind === "saved" && tabIsDirty(tab)) this.scheduleAutoSave(tab);
           this.renderStatusOnly();
           this.scheduleWorkspaceSave();
         }, EDITOR_CAPTURE_DELAY_MS);
@@ -535,8 +558,10 @@ export class TansuApp {
     if (tab.kind === "saved") {
       const before = tab.session?.state;
       if (before !== undefined && "draft" in before && before.draft !== null) {
-        if (before.draft.source !== source) tab.session?.edit(source, snapshot.selection);
-        else if (!sameSelection(before.draft.selection, snapshot.selection)) tab.session?.updateSelection(snapshot.selection);
+        if (before.draft.source !== source) {
+          tab.session?.edit(source, snapshot.selection);
+          if (tab.session !== null && tabIsDirty(tab)) this.scheduleAutoSave(tab);
+        } else if (!sameSelection(before.draft.selection, snapshot.selection)) tab.session?.updateSelection(snapshot.selection);
       }
     } else if (!tab.session?.state.promotionPending) {
       tab.session?.edit(source, snapshot.selection);
@@ -1088,6 +1113,8 @@ export class TansuApp {
     this.state.notes.delete(id);
     this.state.pinned.delete(id);
     this.state.recent = this.state.recent.filter((item) => item !== id);
+    this.state.noteDialog = null;
+    this.render();
     await this.services.workspace.deleteCachedNoteBodies({ ...this.identity!, noteId: id });
     await this.closeTab({ kind: "saved", noteId: id }, false);
   }
@@ -1469,7 +1496,10 @@ export class TansuApp {
     this.assetController = controller;
     const key = tab.key;
     const generation = this.bootGeneration;
-    const names = new Set([...source.matchAll(/(?:^|[(/])(?:\/?z-images\/[^\s)"'>]+)/g)].map((match) => match[0].replace(/^[(/]*/, "").replace(/^\//, "")));
+    const names = new Set(
+      [...source.matchAll(/(?:^|\[|\(|\/)((?:\/?z-images\/)[^\s)"'>\]|]+)/g)]
+        .map((match) => match[1]!.replace(/^\//, "")),
+    );
     if (this.vaultClient === null) return;
     for (const name of names) {
       try {

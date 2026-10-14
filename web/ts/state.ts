@@ -99,6 +99,7 @@ export type State = {
   noteDialog: NoteDialog | null;
   contextMenu: ContextMenuState | null;
   notice: string | null;
+  imageUploads: Set<number>;
   readingMode: boolean;
 };
 
@@ -128,6 +129,7 @@ export function createState(vault: VaultId): State {
     noteDialog: null,
     contextMenu: null,
     notice: null,
+    imageUploads: new Set(),
     readingMode: false,
   };
 }

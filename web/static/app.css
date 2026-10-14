@@ -1056,6 +1056,10 @@ button {
   pointer-events: none;
 }
 
+.image-upload-status {
+  bottom: 58px;
+}
+
 @media (max-width: 760px) {
   #app {
     grid-template-columns: 1fr;

@@ -79,8 +79,8 @@ describe("real server harness", () => {
     serverInstanceId = bootstrap.serverInstanceId;
     vaultOneId = bootstrap.vaults.find((vault) => vault.name === "One")?.vaultId ?? "";
     vaultTwoId = bootstrap.vaults.find((vault) => vault.name === "Two")?.vaultId ?? "";
-    expect(vaultOneId).not.toBe("");
-    expect(vaultTwoId).not.toBe("");
+    if (vaultOneId === "") throw new Error("missing seeded vault One");
+    if (vaultTwoId === "") throw new Error("missing seeded vault Two");
     browser = await e2eBrowser.launch();
   });
 
@@ -141,7 +141,7 @@ describe("real server harness", () => {
     await page.waitForSelector(".main");
     await bootstrapRequest;
     expect(startupRequests[0]).toBe("GET /api/v2/bootstrap");
-    expect(startupRequests.some((request) => request.includes(`/vaults/${vaultOneId}/events?after=`))).toBe(true);
+    expect(startupRequests.some((request) => request.includes(`/vaults/${vaultOneId}/events?after=`))).toBeTruthy();
     expect(
       startupRequests.filter((request) => request.startsWith(`GET /api/v2/vaults/${vaultOneId}/notes/`)).length,
     ).toBeLessThanOrEqual(3);
@@ -429,6 +429,32 @@ describe("real server harness", () => {
     const asset = await v2Request(vaultOneId, `/assets?name=${encodeURIComponent(uploaded.name)}`);
     expect(asset.ok).toBeTruthy();
     await expect(asset.arrayBuffer()).resolves.toHaveProperty("byteLength", 3);
+    await expect.poll(() => page.locator(".cm-content").textContent()).toContain("old");
+    await page.locator('.toolbar [title="Source"]').click();
+    await page.keyboard.press("Control+End");
+    const pastedUpload = page.waitForResponse((response) =>
+      new URL(response.url()).pathname.endsWith("/images") && response.status() === 201
+    );
+    const pastedSave = page.waitForResponse(
+      (response) => response.request().method() === "PUT" && response.status() === 200,
+      { timeout: 5_000 },
+    );
+    await page.locator(".cm-content").evaluate((content) => {
+      const clipboard = new DataTransfer();
+      clipboard.items.add(new File([new Uint8Array([4, 5, 6])], "pasted.webp", { type: "image/webp" }));
+      content.dispatchEvent(new ClipboardEvent("paste", {
+        bubbles: true,
+        cancelable: true,
+        clipboardData: clipboard,
+      }));
+    });
+    const pasted = await pastedUpload.then((response) => response.json());
+    await expect.poll(() => page.locator(".cm-content").textContent(), { timeout: 3_000 })
+      .toContain(pasted.name);
+    await expect.poll(() => page.locator(".tab.active").textContent()).toContain("•");
+    await page.locator('.toolbar [title="Save"]').click();
+    await pastedSave;
+    await expect.poll(() => page.locator(".statusbar").textContent()).toContain("Saved");
     await page.close();
   });
 

@@ -747,6 +747,7 @@ describe("v2 desktop shell", () => {
     root.querySelector<HTMLButtonElement>(".note-dialog-panel .danger-button")?.click();
     await flushAsync();
     expect(client.deleteNote).toHaveBeenCalledWith(note.noteId, expect.objectContaining({ precondition: { baseRevision: 2, baseSourceHash: HASH_B, baseDiskHash: DISK_HASH } }));
+    expect(root.querySelector(".note-dialog-panel")).toBeNull();
   });
 
   it("reports title-checkpoint cleanup failures after an accepted rename", async () => {
@@ -999,7 +1000,7 @@ describe("v2 desktop shell", () => {
     const client = configureVault([note], legacySession([
       { noteId: note.noteId, title: note.title, path: note.path, cursorOffset: null, sourceMode: false },
     ], note.noteId));
-    client.openNote.mockResolvedValue(documentFor(note, "![asset](z-images/photo.webp)\n"));
+    client.openNote.mockResolvedValue(documentFor(note, "![[z-images/photo.webp|132]]\n"));
     const createUrl = vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:image");
     const revokeUrl = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
     const { app } = mountApp();
@@ -1009,6 +1010,67 @@ describe("v2 desktop shell", () => {
     expect(createUrl).toHaveBeenCalledWith(expect.any(Blob));
     await app.dispose();
     expect(revokeUrl).toHaveBeenCalledWith("blob:image");
+  });
+
+  it("uploads pasted images through the current vault and reports status", async () => {
+    const note = noteMeta("note-1", "one.md", "One");
+    const client = configureVault([note], legacySession([
+      { noteId: note.noteId, title: note.title, path: note.path, cursorOffset: null, sourceMode: false },
+    ], note.noteId));
+    const image = new Blob(["webp"], { type: "image/webp" });
+    const { app, root } = mountApp();
+    await app.boot();
+    const editor = editorMock.instances[0]!;
+    const upload = editor.config["uploadPastedImage"] as NonNullable<EditorConfig["uploadPastedImage"]>;
+    const onState = editor.config["onImagePasteStateChange"] as NonNullable<EditorConfig["onImagePasteStateChange"]>;
+    const signal = new AbortController().signal;
+
+    await expect(upload({
+      image,
+      noteId: note.noteId,
+      revision: 0,
+      selection: { anchor: 0, head: 0 },
+      signal,
+    })).resolves.toMatchObject({ name: "z-images/a.webp", markdown: "![[a.webp]]" });
+    expect(client.uploadImage).toHaveBeenCalledWith(expect.any(String), image, signal);
+
+    onState({ uploadId: 1, noteId: note.noteId, revision: 0, selection: { anchor: 0, head: 0 }, status: "uploading", previewUrl: "blob:preview" });
+    expect(root.querySelector(".image-upload-status")?.textContent).toContain("Uploading image");
+    onState({ uploadId: 1, noteId: note.noteId, revision: 0, selection: { anchor: 0, head: 0 }, status: "failed", message: "offline" });
+    expect(root.querySelector(".toast")?.textContent).toContain("Image upload failed: offline");
+    expect(root.querySelector(".image-upload-status")).toBeNull();
+  });
+
+  it("autosaves image insertion when upload status rerenders the shell", async () => {
+    vi.useFakeTimers();
+    const note = noteMeta("note-1", "one.md", "One");
+    const client = configureVault([note], legacySession([
+      { noteId: note.noteId, title: note.title, path: note.path, cursorOffset: null, sourceMode: false },
+    ], note.noteId));
+    const { app } = mountApp();
+    await app.boot();
+    await flushAsync();
+    await vi.advanceTimersByTimeAsync(250);
+    await flushAsync();
+
+    const editor = editorMock.instances[0]!;
+    const onState = editor.config["onImagePasteStateChange"] as NonNullable<EditorConfig["onImagePasteStateChange"]>;
+    const paste = {
+      uploadId: 1,
+      noteId: note.noteId,
+      revision: 0,
+      selection: { anchor: 0, head: 0 },
+    };
+    onState({ ...paste, status: "uploading", previewUrl: "blob:preview" });
+    editor.simulateEdit("![[z-images/image.webp]]\n");
+    onState({ ...paste, status: "inserted" });
+    await vi.advanceTimersByTimeAsync(900);
+    await flushAsync();
+
+    expect(client.saveNote).toHaveBeenCalledWith(
+      note.noteId,
+      expect.objectContaining({ content: "![[z-images/image.webp]]\n" }),
+    );
   });
 
   it("debounces workspace session writes while typing", async () => {
