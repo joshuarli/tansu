@@ -55,6 +55,18 @@ export async function canonicalContentHash(content: string): Promise<string> {
   return `sha256:${hex}`;
 }
 
+export async function canonicalSourceHash(content: string): Promise<string> {
+  const bytes = new TextEncoder().encode(normalizeMarkdownNewlines(content));
+  if (globalThis.crypto?.subtle === undefined) {
+    throw new Error("Web Crypto is unavailable");
+  }
+  const digest = await globalThis.crypto.subtle.digest("SHA-256", bytes);
+  const hex = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join(
+    "",
+  );
+  return `sha256-v2:${hex}`;
+}
+
 function canonicalMarkdownString(content: string): string {
   return normalizeMarkdownNewlines(content).replaceAll(/\n/g, "\r\n");
 }

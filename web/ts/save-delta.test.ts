@@ -1,6 +1,6 @@
 import { expect, describe, it } from "vitest";
 
-import { buildSaveNoteDeltaRequest, canonicalContentHash, computeTextEdits } from "./save-delta.ts";
+import { buildSaveNoteDeltaRequest, canonicalContentHash, canonicalSourceHash, computeTextEdits } from "./save-delta.ts";
 
 describe("save delta", () => {
   it("computes a single exact replacement edit", () => {
@@ -52,5 +52,13 @@ describe("save delta", () => {
       checkpoint: false,
       edits: [{ start: { line: 0, character: 2 }, end: { line: 0, character: 3 }, text: "B" }],
     });
+  });
+
+  it("uses the v2 source hash format over LF-normalized editor source", async () => {
+    const lf = await canonicalSourceHash("# A\n");
+
+    await expect(canonicalSourceHash("# A\r\n")).resolves.toBe(lf);
+    expect(lf).toMatch(/^sha256-v2:[0-9a-f]{64}$/);
+    expect(lf).not.toBe(await canonicalContentHash("# A\n"));
   });
 });

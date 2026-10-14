@@ -51,6 +51,8 @@ Legacy index routes selected with `X-Tansu-Vault` return
 `api_version_unsupported`; they never redirect an index to a v2 vault ID.
 Browser session state, pins, and recents are client-local in v2. Clients keep
 pins and recents in their private workspace state.
+The browser stores workspace and draft data in IndexedDB without encryption.
+Passkeys do not encrypt that data.
 
 ### Source and hashes
 
