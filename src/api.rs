@@ -112,9 +112,8 @@ fn dispatch_v2_api(app: &App, request: &HttpRequest) -> std::result::Result<Http
         V2VaultError::Api(V2ApiErrorKind::NotImplemented)
     })?;
     let vault_id = decode_path_segment(vault_id).map_err(V2VaultError::Api)?;
-    let vault = app.vault_by_id(&vault_id).map_err(|_| {
-        V2VaultError::Api(V2ApiErrorKind::VaultNotFound { vault_id: vault_id.clone() })
-    })?;
+    let vault = app.vault_by_id(&vault_id)
+        .map_err(|error| map_v2_vault_lookup_error(error, &vault_id))?;
     let decoded_parts = route
         .split('/')
         .map(decode_path_segment)
@@ -198,6 +197,15 @@ fn dispatch_v2_api(app: &App, request: &HttpRequest) -> std::result::Result<Http
             Ok(HttpResponse::bytes(200, "image/webp", vault.v2_read_asset(&name)?))
         }
         _ => Err(V2VaultError::Api(V2ApiErrorKind::NotImplemented)),
+    }
+}
+
+fn map_v2_vault_lookup_error(error: Error, vault_id: &str) -> V2VaultError {
+    match error {
+        Error::NotFound(_) => V2VaultError::Api(V2ApiErrorKind::VaultNotFound {
+            vault_id: vault_id.to_string(),
+        }),
+        error => V2VaultError::Internal(error),
     }
 }
 
@@ -499,6 +507,18 @@ mod tests {
 
         let bad = api_error_response(Error::BadRequest("bad".to_string()));
         assert_eq!(bad.status(), 400);
+    }
+
+    #[test]
+    fn vault_lookup_only_maps_not_found_to_vault_not_found() {
+        assert!(matches!(
+            map_v2_vault_lookup_error(Error::NotFound("lookup".to_string()), "vault-1"),
+            V2VaultError::Api(V2ApiErrorKind::VaultNotFound { vault_id }) if vault_id == "vault-1"
+        ));
+        assert!(matches!(
+            map_v2_vault_lookup_error(Error::Internal("database unavailable".to_string()), "vault-1"),
+            V2VaultError::Internal(Error::Internal(message)) if message == "database unavailable"
+        ));
     }
 
     #[test]
