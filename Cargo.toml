@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [workspace]
-members = ["."]
+members = [".", "crates/*"]
 
 [dependencies]
 fastrand = "2.4"
@@ -16,6 +16,7 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 sha2 = "0.11"
 tantivy = { version = "0.26", default-features = false, features = ["mmap", "lz4-compression"] }
+tansu-search = { path = "crates/tansu-search" }
 toml = { version = "1.1.2", default-features = false, features = ["parse", "serde"] }
 ts-rs = "12.0"
 

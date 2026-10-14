@@ -1,0 +1,8 @@
+query	reference_note_ids	tansu_note_ids
+quick	guide,typo	guide,typo
+"quick brown"	guide,typo	guide,typo
+cafe	guide	guide
+powder	powder,typo	powder,typo
+dessert	-	apple,desserts
+start	apple,desserts,guide	apple,desserts,guide
+aliasneedle	-	-
