@@ -49,7 +49,7 @@ describe("LocalDraftSession", () => {
     session.edit("Draft body", null);
     const originalMutationId = session.state.mutationId;
 
-    expect(await session.beginPromotion()).toBe(false);
+    await expect(session.beginPromotion()).resolves.toBeFalsy();
     session.editTitle("Note");
     await session.beginPromotion();
 
@@ -71,7 +71,7 @@ describe("LocalDraftSession", () => {
     });
 
     expect(originalMutationId).not.toBe(session.state.mutationId);
-    expect(recovered.state.promotionPending).toBe(true);
+    expect(recovered.state.promotionPending).toBeTruthy();
     expect(recovered.state.mutationId).toBe(session.state.mutationId);
     expect(recovered.exportSource()).toBe("Draft body");
   });
@@ -80,7 +80,7 @@ describe("LocalDraftSession", () => {
     const { session } = fixture(vi.fn(() => Promise.reject(new Error("quota"))));
     session.edit("Recoverable source", null, "structural");
 
-    await expect(session.beginPromotion()).resolves.toBe(false);
+    await expect(session.beginPromotion()).resolves.toBeFalsy();
     expect(session.state.storage).toBe("failed");
     expect(session.state.storageError).toMatchObject({ message: "quota" });
     expect(session.exportSource()).toBe("Recoverable source");

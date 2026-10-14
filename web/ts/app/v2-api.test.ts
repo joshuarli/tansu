@@ -11,8 +11,7 @@ import {
   isRetryableV2Error,
   type V2Transport,
 } from "./v2-api.ts";
-import type { V2NoteMeta, V2ServerEvent } from "../types.generated.ts";
-import type { V2ApiErrorKind } from "../types.generated.ts";
+import type { V2ApiErrorKind, V2NoteMeta, V2ServerEvent } from "../types.generated.ts";
 
 const sourceHash = hash("a");
 const diskHash = hash("b", "sha256:");

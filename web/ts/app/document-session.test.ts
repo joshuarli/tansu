@@ -195,7 +195,7 @@ describe("document sessions", () => {
     session.recover(document(2, "# Canonical\n", 2), draftRecord(1, "# Recovered\n"));
     const acceptedDocument = document(3, "# Recovered\n", 3);
 
-    expect(session.applyAcceptedMutation(acceptedDocument, 2)).toBe(true);
+    expect(session.applyAcceptedMutation(acceptedDocument, 2)).toBeTruthy();
     expect(session.state.status).toBe("clean");
     expect(session.exportSource()).toBe("# Recovered\n");
     expect(services.clearCheckpoint).toHaveBeenCalledWith(identity, 2, "mutation-recovered");
@@ -206,7 +206,7 @@ describe("document sessions", () => {
     const session = new DocumentSession(identity, 4, workspace, services);
     session.recover(document(2, "# Canonical\n", 2), draftRecord(1, "# Recovered\n"));
 
-    expect(session.applyAcceptedMutation(document(3, "# Recovered\n", 3), 1)).toBe(false);
+    expect(session.applyAcceptedMutation(document(3, "# Recovered\n", 3), 1)).toBeFalsy();
     expect(session.state.status).toBe("conflict");
     expect(session.exportSource()).toBe("# Recovered\n");
     expect(services.clearCheckpoint).not.toHaveBeenCalled();

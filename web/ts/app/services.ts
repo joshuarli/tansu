@@ -2,7 +2,6 @@ import { createCodeMirrorEditor, type EditorHandle } from "../editor/codemirror-
 import type { EditorConfig } from "../editor/tansu-extensions.ts";
 import { pickHtmlImport } from "../html-import.ts";
 import { markNextPaint, markPerformance } from "../performance.ts";
-import { createV2ApiClient } from "./v2-api.ts";
 import {
   cacheNoteBody,
   createDraftCheckpointClearer,
@@ -19,14 +18,11 @@ import {
   importLegacyWorkspaceOnce,
   promoteLocalDraftCheckpoint,
   saveWorkspaceState,
+  type DraftJournalRecord,
+  type LocalDraftJournalRecord,
 } from "./workspace-store.ts";
-import { serverInstanceId, vaultId } from "./identity.ts";
-import type { DocumentIdentity, ServerIdentity, WorkspaceId } from "./identity.ts";
-import type {
-  DraftJournalRecord,
-  LocalDraftJournalRecord,
-} from "./workspace-store.ts";
-import type { V2ApiClient } from "./v2-api.ts";
+import { serverInstanceId, vaultId, type DocumentIdentity, type ServerIdentity, type WorkspaceId } from "./identity.ts";
+import { createV2ApiClient, type V2ApiClient } from "./v2-api.ts";
 
 export type AppServices = {
   api: V2ApiClient;

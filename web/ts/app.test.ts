@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { startApp, TansuApp } from "./app.ts";
 import { defaultServices, type AppServices } from "./app/services.ts";
-import { V2ApiError, type V2VaultClient, type V2VaultSnapshot } from "./app/v2-api.ts";
+import { V2ApiError, type LegacyWorkspacePayload, type V2VaultClient, type V2VaultSnapshot } from "./app/v2-api.ts";
 import { serverInstanceId, vaultId, workspaceId } from "./app/identity.ts";
 import type { EditorConfig } from "./editor/tansu-extensions.ts";
 import type { EditorHandle, EditorSession, EditorSnapshot } from "./editor/codemirror-adapter.ts";
@@ -22,7 +22,6 @@ import type {
   V2SettingsRequest,
   V2VaultBootstrapResponse,
 } from "./types.generated.ts";
-import type { LegacyWorkspacePayload } from "./app/v2-api.ts";
 import type { DraftJournalRecord, LocalDraftJournalRecord, WorkspaceState, WorkspaceTab } from "./app/workspace-store.ts";
 
 const HASH_A = `sha256-v2:${"a".repeat(64)}`;
@@ -54,49 +53,49 @@ const api = {
 const editorMock = { instances: [] as FakeEditor[] };
 const htmlImport = { pickHtmlImport: vi.fn(async () => null as { path: string; content: string } | null) };
 
-beforeEach(() => {
-  clients.clear();
-  memory.workspaces.clear();
-  memory.cached.clear();
-  memory.savedDrafts.clear();
-  memory.localDrafts.clear();
-  memory.promoted.length = 0;
-  memory.workspaceWrites.length = 0;
-  memory.failWrites = false;
-  editorMock.instances.length = 0;
-  api.bootstrap.mockReset().mockResolvedValue({
-    apiVersion: 2,
-    serverInstanceId: "server-1",
-    vaults: [{ vaultId: DEFAULT_VAULT, name: "Notes" }, { vaultId: "vault-2", name: "Other notes" }],
-  });
-  api.forVault.mockClear();
-  htmlImport.pickHtmlImport.mockReset().mockResolvedValue(null);
-  let sequence = 0;
-  vi.stubGlobal("crypto", {
-    randomUUID: vi.fn(() => `mutation-${++sequence}`),
-    subtle: {
-      digest: vi.fn(async (_algorithm: AlgorithmIdentifier, input: BufferSource) => {
-        const bytes = new Uint8Array(input as ArrayBuffer);
-        const digest = new Uint8Array(32);
-        bytes.forEach((byte, index) => {
-          const position = index % digest.length;
-          digest[position] = (digest[position] ?? 0) ^ byte;
-        });
-        return digest.buffer;
-      }),
-    },
-  });
-  document.body.replaceChildren();
-});
-
-afterEach(async () => {
-  await Promise.all(apps.splice(0).map((app) => app.dispose()));
-  vi.useRealTimers();
-  vi.unstubAllGlobals();
-  document.body.replaceChildren();
-});
-
 describe("v2 desktop shell", () => {
+  beforeEach(() => {
+    clients.clear();
+    memory.workspaces.clear();
+    memory.cached.clear();
+    memory.savedDrafts.clear();
+    memory.localDrafts.clear();
+    memory.promoted.length = 0;
+    memory.workspaceWrites.length = 0;
+    memory.failWrites = false;
+    editorMock.instances.length = 0;
+    api.bootstrap.mockReset().mockResolvedValue({
+      apiVersion: 2,
+      serverInstanceId: "server-1",
+      vaults: [{ vaultId: DEFAULT_VAULT, name: "Notes" }, { vaultId: "vault-2", name: "Other notes" }],
+    });
+    api.forVault.mockClear();
+    htmlImport.pickHtmlImport.mockReset().mockResolvedValue(null);
+    let sequence = 0;
+    vi.stubGlobal("crypto", {
+      randomUUID: vi.fn(() => `mutation-${++sequence}`),
+      subtle: {
+        digest: vi.fn(async (_algorithm: AlgorithmIdentifier, input: BufferSource) => {
+          const bytes = new Uint8Array(input as ArrayBuffer);
+          const digest = new Uint8Array(32);
+          bytes.forEach((byte, index) => {
+            const position = index % digest.length;
+            digest[position] = (digest[position] ?? 0) ^ byte;
+          });
+          return digest.buffer;
+        }),
+      },
+    });
+    document.body.replaceChildren();
+  });
+
+  afterEach(async () => {
+    await Promise.all(apps.splice(0).map((app) => app.dispose()));
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+    document.body.replaceChildren();
+  });
+
   it("deduplicates a render-triggered V2 note load", async () => {
     const note = noteMeta("note-1", "one.md", "One");
     const client = configureVault([note]);
@@ -142,7 +141,7 @@ describe("v2 desktop shell", () => {
     client.openNote.mockResolvedValue(documentFor(note, "short"));
     const { app } = mountApp();
     await app.boot();
-    expect(editorMock.instances[0]?.getSnapshot()?.selection).toEqual({ anchor: 5, head: 5 });
+    expect(editorMock.instances[0]?.getSnapshot()?.selection).toStrictEqual({ anchor: 5, head: 5 });
   });
 
   it("ignores a stale cached body and stays loading until V2 content arrives", async () => {
@@ -211,13 +210,13 @@ describe("v2 desktop shell", () => {
     root.querySelector<HTMLButtonElement>('[title="Two"]')?.click();
     await until(() => root.querySelector(".workspace .loading") !== null);
     expect(root.querySelector("#editor-mount")).toBe(editorMount);
-    expect(editorMount.hidden).toBe(true);
-    expect(editorMount.inert).toBe(true);
+    expect(editorMount.hidden).toBeTruthy();
+    expect(editorMount.inert).toBeTruthy();
 
     pending.resolve(documentFor(second, "# Two\n"));
     await until(() => editor.getSnapshot()?.source === "# Two\n");
     expect(root.querySelector("#editor-mount")).toBe(editorMount);
-    expect(editorMount.hidden).toBe(false);
+    expect(editorMount.hidden).toBeFalsy();
     expect(editor.getSnapshot()?.noteId).toBe("saved:two");
   });
 
@@ -236,8 +235,8 @@ describe("v2 desktop shell", () => {
 
     expect(root.querySelector(".empty-state")?.textContent).toContain("No note selected");
     expect(root.querySelector("#editor-mount")).toBe(editorMount);
-    expect(editorMount.hidden).toBe(true);
-    expect(editorMount.inert).toBe(true);
+    expect(editorMount.hidden).toBeTruthy();
+    expect(editorMount.inert).toBeTruthy();
     expect(editor.getSnapshot()).toBeNull();
   });
 
@@ -434,7 +433,7 @@ describe("v2 desktop shell", () => {
     await flushAsync();
     root.querySelector<HTMLButtonElement>('[title="Search notes"]')?.click();
 
-    expect([...root.children]).toEqual(regions);
+    expect([...root.children]).toStrictEqual(regions);
     expect(root.querySelector("#editor-mount")).toBe(editorMount);
     expect(root.querySelector(".statusbar")).toBe(status);
     expect(root.querySelector<HTMLButtonElement>(".tab.active")).toBe(tab);
@@ -491,7 +490,7 @@ describe("v2 desktop shell", () => {
     await vi.advanceTimersByTimeAsync(1000);
     await flushAsync();
 
-    expect(memory.workspaces.get(workspaceKey("server-1", DEFAULT_VAULT))?.tabs).toEqual([
+    expect(memory.workspaces.get(workspaceKey("server-1", DEFAULT_VAULT))?.tabs).toStrictEqual([
       expect.objectContaining({ kind: "saved", noteId: first.noteId }),
     ]);
     expect(newClient.saveNote).not.toHaveBeenCalled();
@@ -520,7 +519,7 @@ describe("v2 desktop shell", () => {
     let switched = false;
     void switching.then(() => { switched = true; });
     await flushAsync();
-    expect(switched).toBe(false);
+    expect(switched).toBeFalsy();
     expect(newClient.saveNote).not.toHaveBeenCalled();
 
     const request = oldClient.saveNote.mock.calls[0]![1];
@@ -601,7 +600,7 @@ describe("v2 desktop shell", () => {
     root.querySelector<HTMLButtonElement>('[title="Save"]')?.click();
     await until(() => memory.cached.get(note.noteId)?.content === "# Saved\n");
     const request = client.saveNote.mock.calls[0]![1];
-    expect(memory.cached.get(note.noteId)).toEqual({ sourceHash: request.sourceHash, content: "# Saved\n" });
+    expect(memory.cached.get(note.noteId)).toStrictEqual({ sourceHash: request.sourceHash, content: "# Saved\n" });
   });
 
   it("keeps a local draft identity and mutation stable until V2 create is accepted", async () => {
@@ -621,7 +620,7 @@ describe("v2 desktop shell", () => {
     await flushAsync();
     const request = client.createNote.mock.calls[0]![0];
     expect(request).toMatchObject({ path: "meeting-notes.md", content: "", sourceHash: expect.stringMatching(/^sha256-v2:/) });
-    expect(root.querySelector<HTMLInputElement>(".note-dialog-panel input")?.disabled).toBe(true);
+    expect(root.querySelector<HTMLInputElement>(".note-dialog-panel input")?.disabled).toBeTruthy();
     expect(root.querySelector<HTMLButtonElement>(".note-dialog-panel .primary-button")?.textContent).toBe("Retry create");
     pending.resolve({ mutationId: request.mutationId, outcome: { state: "pendingMaterialization", operationId: "op-1" } });
     await flushAsync();
@@ -918,7 +917,7 @@ describe("v2 desktop shell", () => {
     }));
     expect(editorMock.instances[0]?.getSnapshot()?.source).toBe("# Draft\n");
     expect(root.textContent).not.toContain("Save conflict");
-    expect(memory.savedDrafts.has(note.noteId)).toBe(false);
+    expect(memory.savedDrafts.has(note.noteId)).toBeFalsy();
   });
 
   it("clamps settings, retains non-finite values, and updates tags in the editor", async () => {
@@ -1068,7 +1067,7 @@ describe("v2 desktop shell", () => {
     ], note.noteId));
     client.saveNote.mockRejectedValueOnce(new Error("offline"));
     const services = createServices();
-    const pendingFlush = deferred<void>();
+    const pendingFlush = deferred<undefined>();
     const journal = { flushAll: vi.fn(() => pendingFlush.promise) } as unknown as ReturnType<AppServices["workspace"]["createJournal"]>;
     vi.spyOn(services.workspace, "createJournal").mockReturnValue(journal);
     const root = document.createElement("div");
@@ -1082,14 +1081,16 @@ describe("v2 desktop shell", () => {
 
     const disposing = app.dispose();
     let disposed = false;
-    void disposing.then(() => disposed = true);
+    void disposing.then(() => {
+      disposed = true;
+    });
     expect(journal.flushAll).toHaveBeenCalledTimes(1);
     expect(vi.getTimerCount()).toBe(0);
     await flushAsync();
-    expect(disposed).toBe(false);
-    pendingFlush.resolve();
+    expect(disposed).toBeFalsy();
+    pendingFlush.resolve(undefined);
     await disposing;
-    expect(disposed).toBe(true);
+    expect(disposed).toBeTruthy();
   });
 
   it("removes the global vault menu listeners when disposed while open", async () => {
@@ -1097,7 +1098,7 @@ describe("v2 desktop shell", () => {
     await app.boot();
     const removeListener = vi.spyOn(window, "removeEventListener");
     root.querySelector<HTMLElement>(".vault-control")?.click();
-    expect(root.querySelector(".vault-control")?.classList.contains("open")).toBe(true);
+    expect(root.querySelector(".vault-control")?.classList.contains("open")).toBeTruthy();
     await app.dispose();
     expect(removeListener).toHaveBeenCalledWith("pointerdown", expect.any(Function), true);
     expect(removeListener).toHaveBeenCalledWith("keydown", expect.any(Function), true);
@@ -1165,7 +1166,7 @@ describe("v2 desktop shell", () => {
     root.querySelector<HTMLButtonElement>('[title="Recreate note from draft"]')?.click();
     await until(() => [...memory.localDrafts.values()].some((record) => record.source === "# Recover me\n") &&
       !memory.savedDrafts.has(lost.noteId));
-    expect([...memory.localDrafts.values()].some((record) => record.source === "# Recover me\n")).toBe(true);
+    expect([...memory.localDrafts.values()].some((record) => record.source === "# Recover me\n")).toBeTruthy();
     expect(memory.savedDrafts.get(lost.noteId)).toBeUndefined();
     await app.dispose();
   });

@@ -1,8 +1,6 @@
-import { importHtml, type HtmlImportParseResult, type ImportedHtml } from "./html-importer.ts";
+import { importHtml, type HtmlImportParseResult, type ImportPath } from "./html-importer.ts";
 
-import type { ImportPath } from "./html-importer.ts";
-
-export type { ImportedHtml } from "./html-importer.ts";
+export type ImportedHtml = NonNullable<Awaited<ReturnType<typeof importHtml>>>;
 
 export async function pickHtmlImport(notes: Iterable<ImportPath>): Promise<ImportedHtml | null> {
   const file = await pickHtmlFile();

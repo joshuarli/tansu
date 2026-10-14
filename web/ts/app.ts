@@ -190,8 +190,7 @@ export class TansuApp {
   }
 
   private trackAction<T>(action: Promise<T>): Promise<T> {
-    let tracked: Promise<T>;
-    tracked = action.finally(() => this.inFlightActions.delete(tracked));
+    const tracked = action.finally(() => this.inFlightActions.delete(tracked));
     this.inFlightActions.add(tracked);
     return tracked;
   }
@@ -739,7 +738,7 @@ export class TansuApp {
   private async closeTab(identity: TabIdentity, remember = true): Promise<void> {
     this.captureActiveEditor();
     const index = this.state.tabs.findIndex((tab) => sameTabIdentity(tabIdentity(tab), identity));
-    if (index < 0) return;
+    if (index === -1) return;
     const candidate = this.state.tabs[index];
     if (candidate === undefined) return;
     const sessionState = candidate.session?.state;
@@ -994,7 +993,7 @@ export class TansuApp {
     saved.session = this.createDocumentSession(saved, promoted);
     this.state.notes.set(document.meta.noteId, document.meta);
     const index = this.state.tabs.indexOf(tab);
-    if (index >= 0) this.state.tabs.splice(index, 1, saved);
+    if (index !== -1) this.state.tabs.splice(index, 1, saved);
     this.state.activeTab = { kind: "saved", noteId: saved.noteId };
     tab.session = null;
     this.cacheDocument(document);
@@ -1218,13 +1217,43 @@ export class TansuApp {
   private dispatch(event: ViewEvent): void {
     if (this.disposed || this.transitioningVault && event.type !== "vault.switch") return;
     switch (event.type) {
-      case "vault.switch": this.runAsync(this.boot(event.vaultId), "Load failed", false); return;
-      case "search.input": this.state.searchQuery = event.query; this.runAsync(this.updateSearch(), "Search failed"); return;
-      case "search.open": this.state.searchOpen = true; this.state.commandOpen = false; this.state.searchOverlayQuery = ""; this.render(); return;
-      case "search.overlayInput": this.state.searchOverlayQuery = event.query; this.runAsync(this.updateSearchOverlay(), "Search failed"); return;
-      case "command.open": this.state.commandOpen = true; this.state.searchOpen = false; this.state.commandFilter = ""; this.render(); return;
-      case "command.filter": this.state.commandFilter = event.query; this.render(); return;
-      case "command.run": this.executeCommand(event.id); return;
+      case "vault.switch": {
+        this.runAsync(this.boot(event.vaultId), "Load failed", false);
+        return;
+      }
+      case "search.input": {
+        this.state.searchQuery = event.query;
+        this.runAsync(this.updateSearch(), "Search failed");
+        return;
+      }
+      case "search.open": {
+        this.state.searchOpen = true;
+        this.state.commandOpen = false;
+        this.state.searchOverlayQuery = "";
+        this.render();
+        return;
+      }
+      case "search.overlayInput": {
+        this.state.searchOverlayQuery = event.query;
+        this.runAsync(this.updateSearchOverlay(), "Search failed");
+        return;
+      }
+      case "command.open": {
+        this.state.commandOpen = true;
+        this.state.searchOpen = false;
+        this.state.commandFilter = "";
+        this.render();
+        return;
+      }
+      case "command.filter": {
+        this.state.commandFilter = event.query;
+        this.render();
+        return;
+      }
+      case "command.run": {
+        this.executeCommand(event.id);
+        return;
+      }
       case "dialog.input": {
         const dialog = this.state.noteDialog;
         if (dialog?.kind === "create" || dialog?.kind === "rename") {
@@ -1234,15 +1263,44 @@ export class TansuApp {
         } else if (dialog?.kind === "tag") dialog.value = event.value;
         return;
       }
-      case "dialog.submit": this.runAsync(this.submitNoteDialog(event.value), "Action failed"); return;
-      case "settings.submit": this.runAsync(this.saveSettings(event.settings), "Settings failed"); return;
-      case "overlay.close": this.runAsync(this.closeOverlays(), "Local recovery storage failed"); return;
-      case "context.close": this.state.contextMenu = null; this.render(); return;
-      case "context.open": this.state.contextMenu = { noteId: event.noteId, x: event.x, y: event.y }; this.render(); return;
-      case "tab.activate": this.runAsync(this.activateTab(event.tab), "Open failed"); return;
-      case "tab.close": this.runAsync(this.closeTab(event.tab), "Close failed"); return;
-      case "note.open": this.runAsync(this.openNote(event.noteId), "Open failed"); return;
-      case "localDraft.open": this.runAsync(this.openLocalDraft(event.localDraftId), "Open failed"); return;
+      case "dialog.submit": {
+        this.runAsync(this.submitNoteDialog(event.value), "Action failed");
+        return;
+      }
+      case "settings.submit": {
+        this.runAsync(this.saveSettings(event.settings), "Settings failed");
+        return;
+      }
+      case "overlay.close": {
+        this.runAsync(this.closeOverlays(), "Local recovery storage failed");
+        return;
+      }
+      case "context.close": {
+        this.state.contextMenu = null;
+        this.render();
+        return;
+      }
+      case "context.open": {
+        this.state.contextMenu = { noteId: event.noteId, x: event.x, y: event.y };
+        this.render();
+        return;
+      }
+      case "tab.activate": {
+        this.runAsync(this.activateTab(event.tab), "Open failed");
+        return;
+      }
+      case "tab.close": {
+        this.runAsync(this.closeTab(event.tab), "Close failed");
+        return;
+      }
+      case "note.open": {
+        this.runAsync(this.openNote(event.noteId), "Open failed");
+        return;
+      }
+      case "localDraft.open": {
+        this.runAsync(this.openLocalDraft(event.localDraftId), "Open failed");
+        return;
+      }
       case "note.rename": {
         const current = activeTab(this.state);
         const id = event.noteId ?? (current?.kind === "saved" ? current.noteId : undefined);
@@ -1261,18 +1319,56 @@ export class TansuApp {
         if (id !== undefined) this.runAsync(this.togglePin(id), "Pin failed");
         return;
       }
-      case "note.addTag": this.state.noteDialog = { kind: "tag", value: "" }; this.render(); return;
-      case "tags.update": this.editor?.updateTags(event.tags); return;
-      case "reading.toggle": this.state.readingMode = !this.state.readingMode; this.render(); return;
-      case "editor.toolbar": this.dispatchEditorToolbar(event.command); return;
-      case "revisions.open": this.runAsync(this.commandRevisions(), "Revisions failed"); return;
-      case "revisions.select": this.runAsync(this.selectRevision(event.eventId), "Revision failed"); return;
-      case "revisions.restore": this.runAsync(this.restoreSelectedRevision(), "Restore failed"); return;
-      case "conflict.view": this.runAsync(this.viewConflictDraft(), "Conflict draft failed"); return;
-      case "conflict.restore": this.runAsync(this.restoreConflictDraft(), "Restore failed"); return;
-      case "draft.export": this.exportActiveDraft(); return;
-      case "draft.recreate": this.runAsync(this.recreateUnavailableDraft(), "Recreate failed"); return;
-      case "render.request": this.render(); return;
+      case "note.addTag": {
+        this.state.noteDialog = { kind: "tag", value: "" };
+        this.render();
+        return;
+      }
+      case "tags.update": {
+        this.editor?.updateTags(event.tags);
+        return;
+      }
+      case "reading.toggle": {
+        this.state.readingMode = !this.state.readingMode;
+        this.render();
+        return;
+      }
+      case "editor.toolbar": {
+        this.dispatchEditorToolbar(event.command);
+        return;
+      }
+      case "revisions.open": {
+        this.runAsync(this.commandRevisions(), "Revisions failed");
+        return;
+      }
+      case "revisions.select": {
+        this.runAsync(this.selectRevision(event.eventId), "Revision failed");
+        return;
+      }
+      case "revisions.restore": {
+        this.runAsync(this.restoreSelectedRevision(), "Restore failed");
+        return;
+      }
+      case "conflict.view": {
+        this.runAsync(this.viewConflictDraft(), "Conflict draft failed");
+        return;
+      }
+      case "conflict.restore": {
+        this.runAsync(this.restoreConflictDraft(), "Restore failed");
+        return;
+      }
+      case "draft.export": {
+        this.exportActiveDraft();
+        return;
+      }
+      case "draft.recreate": {
+        this.runAsync(this.recreateUnavailableDraft(), "Recreate failed");
+        return;
+      }
+      case "render.request": {
+        this.render();
+        return;
+      }
     }
   }
 
@@ -1280,19 +1376,65 @@ export class TansuApp {
     this.state.commandOpen = false;
     this.render();
     switch (id) {
-      case "create": this.runAsync(this.commandCreate(), "Create failed"); break;
-      case "open": this.state.searchOpen = true; this.render(); break;
-      case "save": this.runAsync(this.manualSave(), "Save failed"); break;
-      case "rename": { const tab = activeTab(this.state); if (tab?.kind === "saved") this.runAsync(this.renameDialog(tab.noteId), "Rename failed"); break; }
-      case "delete": { const tab = activeTab(this.state); if (tab?.kind === "saved") this.dispatch({ type: "note.delete", noteId: tab.noteId }); break; }
-      case "pin": { const tab = activeTab(this.state); if (tab?.kind === "saved") this.runAsync(this.togglePin(tab.noteId), "Pin failed"); break; }
-      case "reopen": this.reopenClosed(); break;
-      case "reading": this.state.readingMode = !this.state.readingMode; this.render(); break;
-      case "search": this.state.searchOpen = true; this.render(); break;
-      case "import": this.runAsync(this.importHtml(), "Import failed"); break;
-      case "revisions": this.runAsync(this.commandRevisions(), "Revisions failed"); break;
-      case "settings": this.state.settingsOpen = true; this.render(); break;
-      case "source": this.toggleSourceMode(); break;
+      case "create": {
+        this.runAsync(this.commandCreate(), "Create failed");
+        break;
+      }
+      case "open": {
+        this.state.searchOpen = true;
+        this.render();
+        break;
+      }
+      case "save": {
+        this.runAsync(this.manualSave(), "Save failed");
+        break;
+      }
+      case "rename": {
+        const tab = activeTab(this.state);
+        if (tab?.kind === "saved") this.runAsync(this.renameDialog(tab.noteId), "Rename failed");
+        break;
+      }
+      case "delete": {
+        const tab = activeTab(this.state);
+        if (tab?.kind === "saved") this.dispatch({ type: "note.delete", noteId: tab.noteId });
+        break;
+      }
+      case "pin": {
+        const tab = activeTab(this.state);
+        if (tab?.kind === "saved") this.runAsync(this.togglePin(tab.noteId), "Pin failed");
+        break;
+      }
+      case "reopen": {
+        this.reopenClosed();
+        break;
+      }
+      case "reading": {
+        this.state.readingMode = !this.state.readingMode;
+        this.render();
+        break;
+      }
+      case "search": {
+        this.state.searchOpen = true;
+        this.render();
+        break;
+      }
+      case "import": {
+        this.runAsync(this.importHtml(), "Import failed");
+        break;
+      }
+      case "revisions": {
+        this.runAsync(this.commandRevisions(), "Revisions failed");
+        break;
+      }
+      case "settings": {
+        this.state.settingsOpen = true;
+        this.render();
+        break;
+      }
+      case "source": {
+        this.toggleSourceMode();
+        break;
+      }
     }
   }
 
