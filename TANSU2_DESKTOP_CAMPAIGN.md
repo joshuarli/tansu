@@ -1,6 +1,7 @@
 # Tansu2 desktop redesign campaign
 
-**Status:** ready for an unattended executor. **Prepared:** 2026-10-14 against `1ecf383` on `master`; work from the actual checkout.
+**Status:** winding down — 2026-10-14. Finish only the O5 item already in progress; start no new items.
+**Prepared:** 2026-10-14 against `1ecf383` on `master`; work from the actual checkout.
 **Target:** `~/d/tansu2`. **Read-only references:** `~/d/ferrisearch` @ `039b6b2` (search core), `~/d/laputa-systems/laputa/mirror/webauthn-minimal` @ laputa `ef53ce3` (WebAuthn), `~/d/tansu` (optional visual reference). The campaign must run without any of them present after vendoring.
 
 **Goal:** a calm desktop-browser Markdown workspace over ordinary files: CodeMirror 6 + vendored Atomic live preview replacing the custom contentEditable editor; Ferrisearch-derived search; hardened storage, identity, and recovery; a Hyper transport with passkey auth; one standalone binary with embedded assets.
