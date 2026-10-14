@@ -28,8 +28,12 @@ ENV PATH="/root/.cargo/bin:/usr/lib/llvm22/bin:${PATH}" \
   SQLITE3_STATIC=1 \
   SQLITE3_LIB_DIR=/opt/tansu-sqlite/lib \
   SQLITE3_INCLUDE_DIR=/opt/tansu-sqlite/include \
-  LIBSQLITE3_SYS_USE_PKG_CONFIG=0 \
-  RUSTFLAGS="-C target-feature=+crt-static -C linker=clang -C link-arg=-fuse-ld=lld -C link-arg=-static"
+  LIBSQLITE3_SYS_USE_PKG_CONFIG=0
+
+RUN printf '#!/bin/sh\nexec clang --target=%s -fuse-ld=lld -static "$@"\n' "${TARGET}" > /usr/local/bin/tansu-linker \
+  && chmod 0755 /usr/local/bin/tansu-linker \
+  && mkdir -p /root/.cargo \
+  && printf '[target."%s"]\nlinker = "/usr/local/bin/tansu-linker"\nrustflags = ["-C", "target-feature=+crt-static"]\n' "${TARGET}" > /root/.cargo/config.toml
 
 WORKDIR /work
 
