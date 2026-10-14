@@ -1,11 +1,7 @@
-/// Shared test utilities: DOM setup via happy-dom.
-
 import { Window } from "happy-dom";
 
 const MINIMAL_HTML = `<!doctype html><html><head></head><body></body></html>`;
 
-/// Install happy-dom globals so modules that access document/window at
-/// import time will work. Returns a cleanup function.
 export function setupDOM(): () => void {
   const win = new Window({ url: "http://localhost:3000" });
   win.document.write(MINIMAL_HTML);
@@ -37,14 +33,19 @@ export function setupDOM(): () => void {
     (globalThis as Record<string, unknown>)[key] = (win as unknown as Record<string, unknown>)[key];
   }
 
-  originals["navigator"] = (globalThis as Record<string, unknown>)["navigator"];
-  (globalThis as Record<string, unknown>)["navigator"] = win.navigator;
+  const navigatorDescriptor = Object.getOwnPropertyDescriptor(globalThis, "navigator");
+  Object.defineProperty(globalThis, "navigator", { configurable: true, value: win.navigator, writable: true });
   originals["location"] = (globalThis as Record<string, unknown>)["location"];
   (globalThis as Record<string, unknown>)["location"] = win.location;
 
   return () => {
     for (const [key, val] of Object.entries(originals)) {
       (globalThis as Record<string, unknown>)[key] = val;
+    }
+    if (navigatorDescriptor) {
+      Object.defineProperty(globalThis, "navigator", navigatorDescriptor);
+    } else {
+      Reflect.deleteProperty(globalThis, "navigator");
     }
     win.close();
   };

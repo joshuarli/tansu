@@ -2,10 +2,10 @@
 set -eu
 
 prefix="${1:-/opt/tansu-sqlite}"
-work_dir="${SQLITE_BUILD_DIR:-/tmp/tansu-sqlite-build}"
-version="${SQLITE_VERSION:-3.51.3}"
-autoconf="${SQLITE_AUTOCONF:-3510300}"
-sha3="${SQLITE_SHA3_256:-581215771b32ea4c4062e6fb9842c4aa43d0a7fb2b6670ff6fa4ebb807781204}"
+work_dir="${SQLITE_BUILD_DIR:-.work/tmp/tansu-sqlite-build}"
+version="${SQLITE_VERSION:-3.54.0}"
+autoconf="${SQLITE_AUTOCONF:-3540000}"
+sha3="${SQLITE_SHA3_256:-f5e3e724e9c9b3b5d512c76b02082091a59eeea9becd169a9fbf4d376403acce}"
 year="${SQLITE_RELEASE_YEAR:-2026}"
 cc="${CC:-clang}"
 ar="${AR:-llvm-ar}"

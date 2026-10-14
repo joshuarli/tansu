@@ -72,7 +72,7 @@ TARGET=aarch64-unknown-linux-musl make build-linux-musl-docker
 ```
 
 The pinned SQLite inputs and compile flags are in
-`scripts/build-sqlite-static.sh`. The current build uses SQLite `3.51.3` as a
+`scripts/build-sqlite-static.sh`. The current build uses SQLite `3.54.0` as a
 static archive with no optional extension modules enabled. JSON, FTS, RTree,
 DBSTAT, URI filename handling, loadable extensions, authorization hooks,
 EXPLAIN, integrity checks, UTF-16 APIs, compile-option diagnostics, deprecated

@@ -18,6 +18,15 @@ export default defineConfig({
     nursery: "off",
   },
   rules: {
+    "eslint/one-var": "off",
+    "eslint/prefer-named-capture-group": "off",
+    "typescript/method-signature-style": "off",
+    "unicorn/import-style": "off",
+    "unicorn/max-nested-calls": "off",
+    "unicorn/prefer-dom-node-text-content": "off",
+    "vitest/expect-expect": "off",
+    "vitest/padding-around-test-blocks": "off",
+
     // TS-aware unused vars: allows _prefixed params as intentional no-ops
     "typescript/no-unused-vars": ["error", { argsIgnorePattern: "^_" }],
     "no-unused-vars": "off",
