@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { chromium, firefox, webkit } from "playwright";
 
 import { createTestFixture } from "../scripts/test-fixture.mjs";
+import { directorySize } from "./directory-size.mjs";
 
 const REPO_ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const BENCH_DIR = join(REPO_ROOT, "bench");
@@ -395,19 +396,6 @@ function printSummary(summary, output) {
 
 async function fileSize(path) {
   return (await stat(path)).size;
-}
-
-async function directorySize(path) {
-  let total = 0;
-  for (const entry of await readdir(path, { withFileTypes: true })) {
-    const child = join(path, entry.name);
-    if (entry.isDirectory()) {
-      total += await directorySize(child);
-    } else {
-      total += (await stat(child)).size;
-    }
-  }
-  return total;
 }
 
 function rssBytes(pid) {

@@ -315,6 +315,8 @@ Atomic `https://github.com/kenforthewin/atomic-editor/tree/b6ed65f01bde4510031bc
 
 Append-only, one line per judgment call a reader would miss.
 
+2026-10-14 | G1 | Ignore only `ENOENT` for entries that disappear during benchmark directory sizing; Tantivy atomically replaces index files while the measurement runs.
+
 # Campaign log
 
 Append-only, one line per phase end.
