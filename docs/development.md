@@ -34,8 +34,12 @@ dev and e2e log stream.
 
 ## Build
 
-`deno task build` creates the production frontend bundle at
-`web/static/app.js`. Build the Linux server for musl with Docker:
+`deno task build` creates fingerprinted frontend bundles and a manifest under
+`web/dist/`. Run it before Rust commands that compile the server, including
+`make check` and `make test`. Cargo embeds the files listed by that manifest
+and does not run Node or Deno.
+
+Build the Linux server for musl with Docker:
 
 ```sh
 make build-linux-musl-docker
@@ -53,5 +57,5 @@ make types-check
 ```
 
 `src/api_types.rs` generates `web/ts/types.generated.ts`. Do not edit that file.
-The dev setup also generates `.dev/` and `web/static/app.js`. The type generator
-writes ignored bindings under `bindings/`.
+The dev setup also generates `.dev/` and `web/dist/`. The type generator writes
+ignored bindings under `bindings/`.

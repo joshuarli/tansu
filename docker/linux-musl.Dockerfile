@@ -33,9 +33,11 @@ ENV PATH="/root/.cargo/bin:/usr/lib/llvm22/bin:${PATH}" \
 WORKDIR /work
 
 COPY rust-toolchain.toml Cargo.toml Cargo.lock ./
+COPY build.rs ./build.rs
 COPY src ./src
 COPY crates ./crates
 COPY scripts ./scripts
+COPY web/dist ./web/dist
 
 RUN rustup target add "${TARGET}"
 RUN SQLITE_VERSION="${SQLITE_VERSION}" \

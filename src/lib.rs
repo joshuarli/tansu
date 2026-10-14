@@ -12,11 +12,13 @@ compile_error!(
 
 pub mod api;
 pub mod api_types;
+pub mod auth;
 pub mod app;
 pub mod catalog;
 pub mod config;
 pub mod history;
 pub mod http;
+pub mod embedded_assets;
 pub mod logging;
 pub mod paths;
 pub mod reconcile;

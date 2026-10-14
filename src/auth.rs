@@ -1,0 +1,933 @@
+use std::collections::HashMap;
+use std::fs::{self, OpenOptions};
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
+
+use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, params};
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+use tansu_webauthn::{AuthChallenge, AuthenticationFinish, RegChallenge, StoredCredential};
+use tokio::sync::watch;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AuthError {
+    InvalidRequest(String),
+    Unauthorized,
+    Expired,
+    CeremonyUsed,
+    Storage(String),
+    WebAuthn(String),
+}
+
+impl std::fmt::Display for AuthError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidRequest(message) | Self::Storage(message) | Self::WebAuthn(message) => f.write_str(message),
+            Self::Unauthorized => f.write_str("authentication required"),
+            Self::Expired => f.write_str("authentication state expired"),
+            Self::CeremonyUsed => f.write_str("ceremony already used"),
+        }
+    }
+}
+
+impl std::error::Error for AuthError {}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AuthPolicy {
+    LoopbackDevelopment,
+    Authenticated {
+        external_origin: String,
+        host: String,
+        rp_id: String,
+        rp_name: String,
+    },
+}
+
+impl AuthPolicy {
+    pub fn loopback_development() -> Self {
+        Self::LoopbackDevelopment
+    }
+
+    pub fn authenticated(external_origin: &str, rp_id: &str, rp_name: &str) -> Result<Self, AuthError> {
+        let (scheme, host) = split_origin(external_origin)?;
+        if scheme != "https" {
+            return Err(AuthError::InvalidRequest("authenticated mode requires an HTTPS origin".into()));
+        }
+        let rp_id = rp_id.to_ascii_lowercase();
+        let hostname = host.split(':').next().unwrap_or(&host).trim_matches(['[', ']']);
+        if hostname != rp_id && !hostname.ends_with(&format!(".{rp_id}")) {
+            return Err(AuthError::InvalidRequest("RP ID must match the configured origin host".into()));
+        }
+        Ok(Self::Authenticated {
+            external_origin: external_origin.to_string(),
+            host,
+            rp_id,
+            rp_name: rp_name.to_string(),
+        })
+    }
+
+    pub fn rp(&self) -> Option<(&str, &str, &str)> {
+        match self {
+            Self::LoopbackDevelopment => None,
+            Self::Authenticated { external_origin, host: _, rp_id, rp_name } => {
+                Some((rp_id, external_origin, rp_name))
+            }
+        }
+    }
+
+    fn persisted_identity(&self) -> (&str, &str) {
+        match self {
+            Self::LoopbackDevelopment => ("", ""),
+            Self::Authenticated { external_origin, rp_id, .. } => (external_origin, rp_id),
+        }
+    }
+
+    fn validate_origin_host(&self, host: &str, origin: Option<&str>, state_changing: bool) -> Result<(), AuthError> {
+        match self {
+            Self::Authenticated { external_origin, host: expected_host, .. } => {
+                if !host.eq_ignore_ascii_case(expected_host) || origin.is_some_and(|origin| origin != external_origin) {
+                    return Err(AuthError::Unauthorized);
+                }
+                if state_changing && origin != Some(external_origin) {
+                    return Err(AuthError::Unauthorized);
+                }
+            }
+            Self::LoopbackDevelopment => {
+                if !is_loopback_host(&host.to_ascii_lowercase()) {
+                    return Err(AuthError::Unauthorized);
+                }
+                let Some(origin) = origin else {
+                    if state_changing {
+                        return Err(AuthError::Unauthorized);
+                    }
+                    return Ok(());
+                };
+                let (scheme, origin_host) = split_origin(origin)?;
+                if scheme != "http" || !is_loopback_host(&origin_host) || !host.eq_ignore_ascii_case(&origin_host) {
+                    return Err(AuthError::Unauthorized);
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionMaterial {
+    pub cookie_value: String,
+    pub csrf_token: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VerifiedSession {
+    pub verified_at: u64,
+    pub expires_at: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RequestAction {
+    Read,
+    StateChange,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SessionRequirement {
+    Optional,
+    Required,
+}
+
+pub struct AuthRequestContext<'a> {
+    pub host: &'a str,
+    pub origin: Option<&'a str>,
+    pub action: RequestAction,
+    pub session_cookie: Option<&'a str>,
+    pub csrf_token: Option<&'a str>,
+    pub session_requirement: SessionRequirement,
+    pub now: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CeremonyTicket {
+    pub id: String,
+    pub expires_at: u64,
+}
+
+#[derive(Clone)]
+pub struct SessionLease {
+    pub(crate) expires_at: u64,
+    pub(crate) revoked: watch::Receiver<bool>,
+    _registration: Arc<LeaseRegistration>,
+}
+
+struct ActiveLease {
+    sender: watch::Sender<bool>,
+    leases: usize,
+}
+
+struct LeaseRegistration {
+    session_hash: Vec<u8>,
+    active_leases: std::sync::Weak<Mutex<HashMap<Vec<u8>, ActiveLease>>>,
+}
+
+impl Drop for LeaseRegistration {
+    fn drop(&mut self) {
+        let Some(active_leases) = self.active_leases.upgrade() else { return; };
+        let mut active_leases = active_leases.lock().expect("lease mutex poisoned");
+        if let Some(active) = active_leases.get_mut(&self.session_hash) {
+            active.leases = active.leases.saturating_sub(1);
+            if active.leases == 0 {
+                active_leases.remove(&self.session_hash);
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct StoredRegistration {
+    state: RegChallenge,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct StoredAuthentication {
+    state: AuthChallenge,
+}
+
+#[derive(Debug)]
+struct CeremonyRow {
+    kind: String,
+    state: Vec<u8>,
+    expires_at: u64,
+    capability_hash: Option<Vec<u8>>,
+    session_hash: Option<Vec<u8>>,
+}
+
+pub struct AuthStore {
+    connection: Mutex<Connection>,
+    policy: AuthPolicy,
+    session_ttl_secs: u64,
+    recent_verification_secs: u64,
+    active_leases: Arc<Mutex<HashMap<Vec<u8>, ActiveLease>>>,
+}
+
+impl AuthStore {
+    pub fn open(
+        state_directory: impl AsRef<Path>,
+        policy: AuthPolicy,
+        session_ttl_secs: u64,
+        recent_verification_secs: u64,
+    ) -> Result<Self, AuthError> {
+        let path = secure_auth_directory(state_directory.as_ref())?.join("auth.db");
+        secure_file(&path)?;
+        let connection = Connection::open(&path).map_err(storage)?;
+        connection.execute_batch(
+            "PRAGMA journal_mode = WAL;
+             PRAGMA synchronous = FULL;
+             CREATE TABLE IF NOT EXISTS enrollment_capabilities (
+                 token_hash BLOB PRIMARY KEY,
+                 expires_at INTEGER NOT NULL
+             );
+             CREATE TABLE IF NOT EXISTS sessions (
+                 token_hash BLOB PRIMARY KEY,
+                 csrf_hash BLOB NOT NULL,
+                 created_at INTEGER NOT NULL,
+                 verified_at INTEGER NOT NULL,
+                 expires_at INTEGER NOT NULL,
+                 revoked INTEGER NOT NULL DEFAULT 0
+             );
+             CREATE TABLE IF NOT EXISTS ceremonies (
+                 id_hash BLOB PRIMARY KEY,
+                 kind TEXT NOT NULL,
+                 state BLOB NOT NULL,
+                 expires_at INTEGER NOT NULL,
+                 capability_hash BLOB,
+                 session_hash BLOB
+             );
+             CREATE TABLE IF NOT EXISTS credentials (
+                 credential_id BLOB PRIMARY KEY,
+                 value BLOB NOT NULL
+             );
+             CREATE TABLE IF NOT EXISTS auth_identity (
+                 singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
+                 external_origin TEXT NOT NULL,
+                 rp_id TEXT NOT NULL
+             );",
+        ).map_err(storage)?;
+        bind_auth_identity(&connection, &policy)?;
+        Ok(Self {
+            connection: Mutex::new(connection),
+            policy,
+            session_ttl_secs,
+            recent_verification_secs,
+            active_leases: Arc::new(Mutex::new(HashMap::new())),
+        })
+    }
+
+    pub fn policy(&self) -> &AuthPolicy {
+        &self.policy
+    }
+
+    pub fn validate_request(&self, request: AuthRequestContext<'_>) -> Result<Option<VerifiedSession>, AuthError> {
+        let state_changing = request.action == RequestAction::StateChange;
+        self.policy.validate_origin_host(request.host, request.origin, state_changing)?;
+        let Some(cookie) = request.session_cookie else {
+            if request.session_requirement == SessionRequirement::Required {
+                return Err(AuthError::Unauthorized);
+            }
+            return Ok(None);
+        };
+        let session_hash = token_hash(cookie)?;
+        let connection = self.connection.lock().expect("auth DB mutex poisoned");
+        let session = read_session(&connection, &session_hash)?;
+        let Some(session) = session else {
+            return Err(AuthError::Unauthorized);
+        };
+        if session.revoked || session.expires_at <= request.now {
+            return Err(AuthError::Unauthorized);
+        }
+        if state_changing {
+            let csrf_token = request.csrf_token.ok_or(AuthError::Unauthorized)?;
+            let csrf_hash = token_hash(csrf_token)?;
+            if !constant_time_eq(&csrf_hash, &session.csrf_hash) {
+                return Err(AuthError::Unauthorized);
+            }
+        }
+        Ok(Some(VerifiedSession {
+            verified_at: session.verified_at,
+            expires_at: session.expires_at,
+        }))
+    }
+
+    pub fn create_enrollment_capability(&self, now: u64, ttl_secs: u64) -> Result<(String, u64), AuthError> {
+        let capability = random_token()?;
+        let capability_hash = token_hash(&capability)?;
+        let expires_at = now.checked_add(ttl_secs).ok_or_else(|| AuthError::InvalidRequest("capability expiry overflow".into()))?;
+        let mut connection = self.connection.lock().expect("auth DB mutex poisoned");
+        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate).map_err(storage)?;
+        if credential_count(&transaction)? != 0 {
+            return Err(AuthError::InvalidRequest("initial enrollment is already complete".into()));
+        }
+        transaction.execute("DELETE FROM enrollment_capabilities", []).map_err(storage)?;
+        transaction.execute(
+            "INSERT INTO enrollment_capabilities(token_hash, expires_at) VALUES (?1, ?2)",
+            params![capability_hash, to_i64(expires_at)?],
+        ).map_err(storage)?;
+        transaction.commit().map_err(storage)?;
+        Ok((capability, expires_at))
+    }
+
+    pub fn begin_registration(
+        &self,
+        state: &RegChallenge,
+        capability: Option<&str>,
+        session_cookie: Option<&str>,
+        now: u64,
+        ttl_secs: u64,
+    ) -> Result<CeremonyTicket, AuthError> {
+        if !matches!(self.policy, AuthPolicy::Authenticated { .. }) {
+            return Err(AuthError::InvalidRequest("passkeys are disabled in loopback development mode".into()));
+        }
+        let ceremony_id = random_token()?;
+        let id_hash = token_hash(&ceremony_id)?;
+        let expires_at = now.checked_add(ttl_secs).ok_or_else(|| AuthError::InvalidRequest("ceremony expiry overflow".into()))?;
+        let mut connection = self.connection.lock().expect("auth DB mutex poisoned");
+        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate).map_err(storage)?;
+        let has_credentials = credential_count(&transaction)? != 0;
+        let (capability_hash, session_hash) = if has_credentials {
+            let session_cookie = session_cookie.ok_or(AuthError::Unauthorized)?;
+            let session_hash = token_hash(session_cookie)?;
+            let session = read_session(&transaction, &session_hash)?.ok_or(AuthError::Unauthorized)?;
+            if session.revoked || session.expires_at <= now || !session.verified_at.checked_add(self.recent_verification_secs).is_some_and(|deadline| deadline >= now) {
+                return Err(AuthError::Unauthorized);
+            }
+            (None, Some(session_hash))
+        } else {
+            let capability = capability.ok_or(AuthError::Unauthorized)?;
+            let capability_hash = token_hash(capability)?;
+            let expires_at: Option<i64> = transaction.query_row(
+                "SELECT expires_at FROM enrollment_capabilities WHERE token_hash = ?1",
+                params![capability_hash],
+                |row| row.get(0),
+            ).optional().map_err(storage)?;
+            if expires_at.is_none_or(|expires_at| expires_at as u64 <= now) {
+                return Err(AuthError::Unauthorized);
+            }
+            (Some(capability_hash), None)
+        };
+        let state = serde_json::to_vec(&StoredRegistration { state: state.clone() }).map_err(storage)?;
+        transaction.execute(
+            "INSERT INTO ceremonies(id_hash, kind, state, expires_at, capability_hash, session_hash) VALUES (?1, 'registration', ?2, ?3, ?4, ?5)",
+            params![id_hash, state, to_i64(expires_at)?, capability_hash, session_hash],
+        ).map_err(storage)?;
+        transaction.commit().map_err(storage)?;
+        Ok(CeremonyTicket { id: ceremony_id, expires_at })
+    }
+
+    pub fn finish_registration<F>(
+        &self,
+        ceremony_id: &str,
+        now: u64,
+        finish: F,
+    ) -> Result<Option<SessionMaterial>, AuthError>
+    where
+        F: FnOnce(&RegChallenge) -> Result<StoredCredential, AuthError>,
+    {
+        let id_hash = token_hash(ceremony_id)?;
+        let mut connection = self.connection.lock().expect("auth DB mutex poisoned");
+        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate).map_err(storage)?;
+        let row = read_ceremony(&transaction, &id_hash)?;
+        let Some(row) = row else { return Err(AuthError::CeremonyUsed); };
+        if row.kind != "registration" {
+            transaction.execute("DELETE FROM ceremonies WHERE id_hash = ?1", params![id_hash]).map_err(storage)?;
+            transaction.commit().map_err(storage)?;
+            return Err(AuthError::InvalidRequest("wrong ceremony type".into()));
+        }
+        let state: StoredRegistration = serde_json::from_slice(&row.state).map_err(storage)?;
+        transaction.execute("DELETE FROM ceremonies WHERE id_hash = ?1", params![id_hash]).map_err(storage)?;
+        let capability_expiry = if let Some(capability_hash) = &row.capability_hash {
+            transaction.query_row(
+                "SELECT expires_at FROM enrollment_capabilities WHERE token_hash = ?1",
+                params![capability_hash],
+                |row| row.get::<_, i64>(0),
+            ).optional().map_err(storage)?
+        } else {
+            None
+        };
+        if let Some(capability_hash) = &row.capability_hash {
+            transaction.execute("DELETE FROM enrollment_capabilities WHERE token_hash = ?1", params![capability_hash]).map_err(storage)?;
+        }
+        let result = if row.expires_at <= now {
+            Err(AuthError::Expired)
+        } else if row.capability_hash.is_some() {
+            if capability_expiry.is_none_or(|expires_at| expires_at as u64 <= now) {
+                Err(AuthError::Expired)
+            } else {
+                finish(&state.state)
+            }
+        } else if let Some(session_hash) = &row.session_hash {
+            if session_authorized(&transaction, session_hash, now, self.recent_verification_secs)? {
+                finish(&state.state)
+            } else {
+                Err(AuthError::Unauthorized)
+            }
+        } else {
+            Err(AuthError::Unauthorized)
+        };
+        let result = match result {
+            Ok(credential) => {
+                store_credential(&transaction, &credential)?;
+                if row.capability_hash.is_some() {
+                    Some(create_session(&transaction, now, self.session_ttl_secs)?)
+                } else {
+                    None
+                }
+            }
+            Err(error) => {
+                transaction.commit().map_err(storage)?;
+                return Err(error);
+            }
+        };
+        transaction.commit().map_err(storage)?;
+        Ok(result)
+    }
+
+    pub fn begin_authentication(&self, state: &AuthChallenge, now: u64, ttl_secs: u64) -> Result<CeremonyTicket, AuthError> {
+        let ceremony_id = random_token()?;
+        let id_hash = token_hash(&ceremony_id)?;
+        let expires_at = now.checked_add(ttl_secs).ok_or_else(|| AuthError::InvalidRequest("ceremony expiry overflow".into()))?;
+        let mut connection = self.connection.lock().expect("auth DB mutex poisoned");
+        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate).map_err(storage)?;
+        let state = serde_json::to_vec(&StoredAuthentication { state: state.clone() }).map_err(storage)?;
+        transaction.execute(
+            "INSERT INTO ceremonies(id_hash, kind, state, expires_at) VALUES (?1, 'authentication', ?2, ?3)",
+            params![id_hash, state, to_i64(expires_at)?],
+        ).map_err(storage)?;
+        transaction.commit().map_err(storage)?;
+        Ok(CeremonyTicket { id: ceremony_id, expires_at })
+    }
+
+    pub fn finish_authentication<F>(
+        &self,
+        ceremony_id: &str,
+        now: u64,
+        finish: F,
+    ) -> Result<SessionMaterial, AuthError>
+    where
+        F: FnOnce(&AuthChallenge, &[StoredCredential]) -> Result<AuthenticationFinish, AuthError>,
+    {
+        let id_hash = token_hash(ceremony_id)?;
+        let mut connection = self.connection.lock().expect("auth DB mutex poisoned");
+        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate).map_err(storage)?;
+        let row = read_ceremony(&transaction, &id_hash)?;
+        let Some(row) = row else { return Err(AuthError::CeremonyUsed); };
+        if row.kind != "authentication" {
+            transaction.execute("DELETE FROM ceremonies WHERE id_hash = ?1", params![id_hash]).map_err(storage)?;
+            transaction.commit().map_err(storage)?;
+            return Err(AuthError::InvalidRequest("wrong ceremony type".into()));
+        }
+        let state: StoredAuthentication = serde_json::from_slice(&row.state).map_err(storage)?;
+        transaction.execute("DELETE FROM ceremonies WHERE id_hash = ?1", params![id_hash]).map_err(storage)?;
+        let result = if row.expires_at <= now {
+            Err(AuthError::Expired)
+        } else {
+            let credentials = read_credentials(&transaction)?;
+            finish(&state.state, &credentials)
+        };
+        let result = match result {
+            Ok(finish) => {
+                if !state.state.allowed_credential_ids.iter().any(|credential_id| credential_id == &finish.credential.cred_id) {
+                    transaction.commit().map_err(storage)?;
+                    return Err(AuthError::Unauthorized);
+                }
+                store_credential(&transaction, &finish.credential)?;
+                create_session(&transaction, now, self.session_ttl_secs)?
+            }
+            Err(error) => {
+                transaction.commit().map_err(storage)?;
+                return Err(error);
+            }
+        };
+        transaction.commit().map_err(storage)?;
+        Ok(result)
+    }
+
+    pub fn credentials(&self) -> Result<Vec<StoredCredential>, AuthError> {
+        let connection = self.connection.lock().expect("auth DB mutex poisoned");
+        read_credentials(&connection)
+    }
+
+    pub fn revoke_session(&self, cookie_value: &str) -> Result<(), AuthError> {
+        let session_hash = token_hash(cookie_value)?;
+        let active_leases = self.active_leases.lock().expect("lease mutex poisoned");
+        let connection = self.connection.lock().expect("auth DB mutex poisoned");
+        connection.execute(
+            "UPDATE sessions SET revoked = 1 WHERE token_hash = ?1",
+            params![session_hash],
+        ).map_err(storage)?;
+        if let Some(active) = active_leases.get(&session_hash) {
+            let _ = active.sender.send(true);
+        }
+        Ok(())
+    }
+
+    pub fn session_lease(&self, cookie_value: &str, now: u64) -> Result<SessionLease, AuthError> {
+        let session_hash = token_hash(cookie_value)?;
+        let mut leases = self.active_leases.lock().expect("lease mutex poisoned");
+        let connection = self.connection.lock().expect("auth DB mutex poisoned");
+        let session = read_session(&connection, &session_hash)?.ok_or(AuthError::Unauthorized)?;
+        if session.revoked || session.expires_at <= now {
+            return Err(AuthError::Unauthorized);
+        }
+        leases.entry(session_hash.clone()).or_insert_with(|| ActiveLease {
+            sender: watch::channel(false).0,
+            leases: 0,
+        }).leases += 1;
+        let receiver = leases.get(&session_hash).expect("active lease inserted").sender.subscribe();
+        Ok(SessionLease {
+            expires_at: session.expires_at,
+            revoked: receiver,
+            _registration: Arc::new(LeaseRegistration {
+                session_hash,
+                active_leases: Arc::downgrade(&self.active_leases),
+            }),
+        })
+    }
+
+    pub fn session_cookie(&self, material: &SessionMaterial) -> String {
+        format!("__Host-tansu_session={}; HttpOnly; Secure; Path=/; SameSite=Strict", material.cookie_value)
+    }
+}
+
+fn bind_auth_identity(connection: &Connection, policy: &AuthPolicy) -> Result<(), AuthError> {
+    let (external_origin, rp_id) = policy.persisted_identity();
+    let transaction = connection.unchecked_transaction().map_err(storage)?;
+    let stored: Option<(String, String)> = transaction.query_row(
+        "SELECT external_origin, rp_id FROM auth_identity WHERE singleton = 1",
+        [],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    ).optional().map_err(storage)?;
+    match stored {
+        Some((stored_origin, stored_rp_id)) if stored_origin != external_origin || stored_rp_id != rp_id => {
+            transaction.execute("DELETE FROM credentials", []).map_err(storage)?;
+            transaction.execute("DELETE FROM sessions", []).map_err(storage)?;
+            transaction.execute("DELETE FROM ceremonies", []).map_err(storage)?;
+            transaction.execute("DELETE FROM enrollment_capabilities", []).map_err(storage)?;
+            transaction.execute(
+                "UPDATE auth_identity SET external_origin = ?1, rp_id = ?2 WHERE singleton = 1",
+                params![external_origin, rp_id],
+            ).map_err(storage)?;
+        }
+        Some(_) => {}
+        None => {
+            transaction.execute(
+                "INSERT INTO auth_identity(singleton, external_origin, rp_id) VALUES (1, ?1, ?2)",
+                params![external_origin, rp_id],
+            ).map_err(storage)?;
+        }
+    }
+    transaction.commit().map_err(storage)
+}
+
+#[derive(Debug)]
+struct SessionRow {
+    csrf_hash: Vec<u8>,
+    verified_at: u64,
+    expires_at: u64,
+    revoked: bool,
+}
+
+fn split_origin(origin: &str) -> Result<(&str, String), AuthError> {
+    let (scheme, authority) = origin.split_once("://").ok_or_else(|| AuthError::InvalidRequest("origin must have a scheme and authority".into()))?;
+    if !matches!(scheme, "https" | "http") || authority.is_empty() || authority.contains(['/', '?', '#', '@']) {
+        return Err(AuthError::InvalidRequest("invalid origin".into()));
+    }
+    let host = authority.to_ascii_lowercase();
+    if host.chars().any(char::is_whitespace) || !valid_host_authority(&host) {
+        return Err(AuthError::InvalidRequest("invalid origin host".into()));
+    }
+    Ok((scheme, host))
+}
+
+fn valid_host_authority(host: &str) -> bool {
+    if let Some(after_bracket) = host.strip_prefix('[').and_then(|host| host.split_once(']').map(|(_, after)| after)) {
+        return after_bracket.is_empty() || after_bracket.strip_prefix(':').is_some_and(|port| valid_port(port));
+    }
+    match host.rsplit_once(':') {
+        Some((hostname, port)) => !hostname.is_empty() && valid_hostname(hostname) && valid_port(port),
+        None => valid_hostname(host),
+    }
+}
+
+fn valid_hostname(host: &str) -> bool {
+    !host.is_empty() && host.bytes().all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-'))
+}
+
+fn valid_port(port: &str) -> bool {
+    port.parse::<u16>().is_ok_and(|port| port != 0)
+}
+
+fn is_loopback_host(host: &str) -> bool {
+    host.starts_with("localhost:") || host == "localhost" || host.starts_with("127.0.0.1:") || host == "127.0.0.1" || host.starts_with("[::1]:") || host == "[::1]"
+}
+
+fn secure_auth_directory(state_directory: &Path) -> Result<PathBuf, AuthError> {
+    fs::create_dir_all(state_directory).map_err(storage)?;
+    let metadata = fs::symlink_metadata(state_directory).map_err(storage)?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err(AuthError::InvalidRequest("auth state path must be a real directory".into()));
+    }
+    let directory = fs::canonicalize(state_directory).map_err(storage)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&directory, fs::Permissions::from_mode(0o700)).map_err(storage)?;
+    }
+    Ok(directory)
+}
+
+fn secure_file(path: &Path) -> Result<(), AuthError> {
+    let metadata = fs::symlink_metadata(path);
+    if metadata.as_ref().is_ok_and(|metadata| metadata.file_type().is_symlink() || !metadata.is_file()) {
+        return Err(AuthError::InvalidRequest("auth database must be a regular file".into()));
+    }
+    let file = if metadata.as_ref().is_ok_and(|metadata| metadata.is_file()) {
+        OpenOptions::new().write(true).open(path).map_err(storage)?
+    } else {
+        OpenOptions::new().write(true).create_new(true).open(path).map_err(storage)?
+    };
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        file.set_permissions(fs::Permissions::from_mode(0o600)).map_err(storage)?;
+    }
+    Ok(())
+}
+
+fn read_session(connection: &Connection, session_hash: &[u8]) -> Result<Option<SessionRow>, AuthError> {
+    connection.query_row(
+        "SELECT csrf_hash, verified_at, expires_at, revoked FROM sessions WHERE token_hash = ?1",
+        params![session_hash],
+        |row| Ok(SessionRow {
+            csrf_hash: row.get(0)?,
+            verified_at: row.get::<_, i64>(1)? as u64,
+            expires_at: row.get::<_, i64>(2)? as u64,
+            revoked: row.get::<_, i64>(3)? != 0,
+        }),
+    ).optional().map_err(storage)
+}
+
+fn session_authorized(transaction: &Transaction<'_>, session_hash: &[u8], now: u64, recent_secs: u64) -> Result<bool, AuthError> {
+    let session = read_session(transaction, session_hash)?;
+    Ok(session.is_some_and(|session| {
+        !session.revoked && session.expires_at > now && session.verified_at.checked_add(recent_secs).is_some_and(|deadline| deadline >= now)
+    }))
+}
+
+fn read_ceremony(transaction: &Transaction<'_>, id_hash: &[u8]) -> Result<Option<CeremonyRow>, AuthError> {
+    transaction.query_row(
+        "SELECT kind, state, expires_at, capability_hash, session_hash FROM ceremonies WHERE id_hash = ?1",
+        params![id_hash],
+        |row| Ok(CeremonyRow {
+            kind: row.get(0)?,
+            state: row.get(1)?,
+            expires_at: row.get::<_, i64>(2)? as u64,
+            capability_hash: row.get(3)?,
+            session_hash: row.get(4)?,
+        }),
+    ).optional().map_err(storage)
+}
+
+fn credential_count(transaction: &Transaction<'_>) -> Result<u64, AuthError> {
+    transaction.query_row("SELECT COUNT(*) FROM credentials", [], |row| row.get::<_, i64>(0))
+        .map(|count| count as u64).map_err(storage)
+}
+
+fn read_credentials(connection: &Connection) -> Result<Vec<StoredCredential>, AuthError> {
+    let mut statement = connection.prepare("SELECT value FROM credentials ORDER BY credential_id").map_err(storage)?;
+    let values = statement.query_map([], |row| row.get::<_, Vec<u8>>(0)).map_err(storage)?;
+    values.map(|value| {
+        let value = value.map_err(storage)?;
+        serde_json::from_slice(&value).map_err(storage)
+    }).collect()
+}
+
+fn store_credential(transaction: &Transaction<'_>, credential: &StoredCredential) -> Result<(), AuthError> {
+    let value = serde_json::to_vec(credential).map_err(storage)?;
+    transaction.execute(
+        "INSERT INTO credentials(credential_id, value) VALUES (?1, ?2) ON CONFLICT(credential_id) DO UPDATE SET value = excluded.value",
+        params![credential.cred_id, value],
+    ).map_err(storage)?;
+    Ok(())
+}
+
+fn create_session(transaction: &Transaction<'_>, now: u64, ttl_secs: u64) -> Result<SessionMaterial, AuthError> {
+    let cookie_value = random_token()?;
+    let csrf_token = random_token()?;
+    let cookie_hash = token_hash(&cookie_value)?;
+    let csrf_hash = token_hash(&csrf_token)?;
+    let expires_at = now.checked_add(ttl_secs).ok_or_else(|| AuthError::InvalidRequest("session expiry overflow".into()))?;
+    transaction.execute(
+        "INSERT INTO sessions(token_hash, csrf_hash, created_at, verified_at, expires_at) VALUES (?1, ?2, ?3, ?3, ?4)",
+        params![cookie_hash, csrf_hash, to_i64(now)?, to_i64(expires_at)?],
+    ).map_err(storage)?;
+    Ok(SessionMaterial { cookie_value, csrf_token })
+}
+
+fn random_token() -> Result<String, AuthError> {
+    let mut bytes = [0_u8; 32];
+    getrandom::fill(&mut bytes).map_err(|error| AuthError::Storage(format!("OS random source failed: {error}")))?;
+    Ok(bytes.iter().map(|byte| format!("{byte:02x}")).collect())
+}
+
+fn token_hash(token: &str) -> Result<Vec<u8>, AuthError> {
+    if token.len() != 64 || !token.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err(AuthError::Unauthorized);
+    }
+    Ok(Sha256::digest(token.as_bytes()).to_vec())
+}
+
+fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
+    left.len() == right.len() && left.iter().zip(right).fold(0_u8, |acc, (left, right)| acc | (left ^ right)) == 0
+}
+
+fn to_i64(value: u64) -> Result<i64, AuthError> {
+    i64::try_from(value).map_err(|_| AuthError::InvalidRequest("timestamp out of range".into()))
+}
+
+fn storage(error: impl std::fmt::Display) -> AuthError {
+    AuthError::Storage(error.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn store() -> (tempfile::TempDir, AuthStore) {
+        let root = tempfile::tempdir().unwrap();
+        let store = AuthStore::open(
+            root.path().join("auth"),
+            AuthPolicy::authenticated("https://notes.example.com", "example.com", "Tansu" ).unwrap(),
+            3600,
+            300,
+        ).unwrap();
+        (root, store)
+    }
+
+    fn credential(id: u8) -> StoredCredential {
+        StoredCredential {
+            cred_id: vec![id],
+            aaguid: [0; 16],
+            x: [0; 32],
+            y: [0; 32],
+            sign_count: 0,
+            backup_eligible: false,
+            backup_state: false,
+        }
+    }
+
+    fn request<'a>(
+        host: &'a str,
+        origin: Option<&'a str>,
+        action: RequestAction,
+        session_cookie: Option<&'a str>,
+        csrf_token: Option<&'a str>,
+        session_requirement: SessionRequirement,
+        now: u64,
+    ) -> AuthRequestContext<'a> {
+        AuthRequestContext {
+            host,
+            origin,
+            action,
+            session_cookie,
+            csrf_token,
+            session_requirement,
+            now,
+        }
+    }
+
+    #[test]
+    fn enforces_exact_origin_host_and_csrf_for_mutations() {
+        let (_root, store) = store();
+        assert_eq!(store.validate_request(request("notes.example.com", Some("https://notes.example.com"), RequestAction::StateChange, None, None, SessionRequirement::Optional, 1)), Ok(None));
+        assert!(store.validate_request(request("evil.example.com", Some("https://notes.example.com"), RequestAction::Read, None, None, SessionRequirement::Optional, 1)).is_err());
+        assert!(store.validate_request(request("notes.example.com", Some("https://evil.example.com"), RequestAction::Read, None, None, SessionRequirement::Optional, 1)).is_err());
+        assert!(store.validate_request(request("notes.example.com", None, RequestAction::StateChange, None, None, SessionRequirement::Optional, 1)).is_err());
+    }
+
+    #[test]
+    fn capability_is_hash_only_one_time_and_expiring() {
+        let (_root, store) = store();
+        let (capability, expires_at) = store.create_enrollment_capability(10, 30).unwrap();
+        let hash = token_hash(&capability).unwrap();
+        let connection = store.connection.lock().unwrap();
+        let stored: Vec<u8> = connection.query_row("SELECT token_hash FROM enrollment_capabilities", [], |row| row.get(0)).unwrap();
+        assert_eq!(stored, hash);
+        assert_eq!(expires_at, 40);
+        drop(connection);
+        assert!(store.create_enrollment_capability(10, 30).is_ok());
+    }
+
+    #[test]
+    fn session_cookie_is_host_scoped_secure_and_revocable() {
+        let (_root, store) = store();
+        let (capability, _) = store.create_enrollment_capability(10, 30).unwrap();
+        let state = RegChallenge { challenge: "challenge".into(), user_id: "owner".into(), username: "owner".into() };
+        let ticket = store.begin_registration(&state, Some(&capability), None, 11, 30).unwrap();
+        let session = store.finish_registration(&ticket.id, 12, |_| Ok(credential(1))).unwrap().unwrap();
+        let cookie = store.session_cookie(&session);
+        assert!(cookie.contains("HttpOnly; Secure; Path=/; SameSite=Strict"));
+        assert!(store.validate_request(request("notes.example.com", Some("https://notes.example.com"), RequestAction::StateChange, Some(&session.cookie_value), Some(&session.csrf_token), SessionRequirement::Required, 13)).unwrap().is_some());
+        let mut lease = store.session_lease(&session.cookie_value, 13).unwrap();
+        assert_eq!(lease.expires_at, 3612);
+        store.revoke_session(&session.cookie_value).unwrap();
+        assert!(*lease.revoked.borrow_and_update());
+        assert!(store.validate_request(request("notes.example.com", Some("https://notes.example.com"), RequestAction::Read, Some(&session.cookie_value), None, SessionRequirement::Required, 14)).is_err());
+    }
+
+    #[test]
+    fn capability_cannot_be_replayed_and_failed_finish_consumes_it() {
+        let (_root, store) = store();
+        let (capability, _) = store.create_enrollment_capability(10, 30).unwrap();
+        let state = RegChallenge { challenge: "challenge".into(), user_id: "owner".into(), username: "owner".into() };
+        let ticket = store.begin_registration(&state, Some(&capability), None, 11, 30).unwrap();
+        assert_eq!(store.finish_registration(&ticket.id, 12, |_| Err(AuthError::WebAuthn("bad assertion".into()))), Err(AuthError::WebAuthn("bad assertion".into())));
+        assert_eq!(store.finish_registration(&ticket.id, 13, |_| Ok(credential(1))), Err(AuthError::CeremonyUsed));
+        assert!(store.begin_registration(&state, Some(&capability), None, 14, 30).is_err());
+    }
+
+    #[test]
+    fn concurrent_registration_finishes_consume_the_ceremony_once() {
+        let (_root, store) = store();
+        let store = Arc::new(store);
+        let (capability, _) = store.create_enrollment_capability(10, 30).unwrap();
+        let state = RegChallenge { challenge: "challenge".into(), user_id: "owner".into(), username: "owner".into() };
+        let ticket = store.begin_registration(&state, Some(&capability), None, 11, 30).unwrap();
+        let start = Arc::new(std::sync::Barrier::new(3));
+        let finishes = (0..2).map(|_| {
+            let store = store.clone();
+            let start = start.clone();
+            let ceremony_id = ticket.id.clone();
+            std::thread::spawn(move || {
+                start.wait();
+                store.finish_registration(&ceremony_id, 12, |_| Ok(credential(1)))
+            })
+        }).collect::<Vec<_>>();
+        start.wait();
+        let outcomes = finishes.into_iter().map(|finish| finish.join().unwrap()).collect::<Vec<_>>();
+        assert_eq!(outcomes.iter().filter(|outcome| outcome.is_ok()).count(), 1);
+        assert_eq!(outcomes.iter().filter(|outcome| matches!(outcome, Err(AuthError::CeremonyUsed))).count(), 1);
+        assert_eq!(store.credentials().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn ceremony_expiry_and_verified_session_policy_are_enforced() {
+        let (_root, store) = store();
+        let (capability, _) = store.create_enrollment_capability(1, 10).unwrap();
+        let state = RegChallenge { challenge: "challenge".into(), user_id: "owner".into(), username: "owner".into() };
+        let ticket = store.begin_registration(&state, Some(&capability), None, 2, 10).unwrap();
+        assert_eq!(store.finish_registration(&ticket.id, 13, |_| Ok(credential(1))), Err(AuthError::Expired));
+        assert_eq!(store.finish_registration(&ticket.id, 14, |_| Ok(credential(1))), Err(AuthError::CeremonyUsed));
+    }
+
+    #[test]
+    fn authenticated_mode_rejects_non_https_and_unrelated_rp_ids() {
+        assert!(AuthPolicy::authenticated("http://notes.example.com", "example.com", "Tansu").is_err());
+        assert!(AuthPolicy::authenticated("https://notes.example.com", "elsewhere.test", "Tansu").is_err());
+        let policy = AuthPolicy::authenticated("https://notes.example.com", "example.com", "Tansu").unwrap();
+        assert_eq!(policy.rp(), Some(("example.com", "https://notes.example.com", "Tansu")));
+    }
+
+    #[test]
+    fn changing_origin_invalidates_credentials_sessions_and_pending_enrollment() {
+        let root = tempfile::tempdir().unwrap();
+        let state_path = root.path().join("auth");
+        let policy = AuthPolicy::authenticated("https://notes.example.com", "example.com", "Tansu").unwrap();
+        let store = AuthStore::open(&state_path, policy, 3600, 300).unwrap();
+        let (capability, _) = store.create_enrollment_capability(10, 30).unwrap();
+        let state = RegChallenge { challenge: "challenge".into(), user_id: "owner".into(), username: "owner".into() };
+        let ticket = store.begin_registration(&state, Some(&capability), None, 11, 30).unwrap();
+        let session = store.finish_registration(&ticket.id, 12, |_| Ok(credential(1))).unwrap().unwrap();
+        let pending = store.begin_registration(&state, None, Some(&session.cookie_value), 13, 30).unwrap();
+        drop(store);
+
+        let policy = AuthPolicy::authenticated("https://app.notes.example.com", "example.com", "Tansu").unwrap();
+        let store = AuthStore::open(&state_path, policy, 3600, 300).unwrap();
+        assert!(store.credentials().unwrap().is_empty());
+        assert!(store.validate_request(request(
+            "app.notes.example.com",
+            Some("https://app.notes.example.com"),
+            RequestAction::Read,
+            Some(&session.cookie_value),
+            None,
+            SessionRequirement::Required,
+            13,
+        )).is_err());
+        assert_eq!(store.finish_registration(&pending.id, 14, |_| Ok(credential(2))), Err(AuthError::CeremonyUsed));
+        assert!(store.create_enrollment_capability(13, 30).is_ok());
+    }
+
+    #[test]
+    fn loopback_policy_accepts_only_loopback_origin_and_matching_host() {
+        let policy = AuthPolicy::loopback_development();
+        assert!(policy.validate_origin_host("127.0.0.1:3000", Some("http://127.0.0.1:3000"), false).is_ok());
+        assert!(policy.validate_origin_host("example.com", Some("http://example.com"), false).is_err());
+        assert!(policy.validate_origin_host("localhost:3000", Some("http://localhost:4000"), false).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_symlink_auth_state_and_database_paths() {
+        use std::os::unix::fs::symlink;
+        let root = tempfile::tempdir().unwrap();
+        let external = root.path().join("external");
+        fs::create_dir(&external).unwrap();
+        let linked_directory = root.path().join("linked");
+        symlink(&external, &linked_directory).unwrap();
+        assert!(AuthStore::open(&linked_directory, AuthPolicy::loopback_development(), 60, 10).is_err());
+        let real_directory = root.path().join("real");
+        fs::create_dir(&real_directory).unwrap();
+        let linked_database = real_directory.join("auth.db");
+        symlink(external.join("outside.db"), &linked_database).unwrap();
+        assert!(AuthStore::open(&real_directory, AuthPolicy::loopback_development(), 60, 10).is_err());
+        assert!(!external.join("outside.db").exists());
+    }
+}

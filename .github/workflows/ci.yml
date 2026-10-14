@@ -25,5 +25,8 @@ jobs:
       - name: Install Playwright browsers
         run: deno task playwright:install
 
+      - name: Build embedded web assets
+        run: deno task build
+
       - name: Validate
         run: make ci
