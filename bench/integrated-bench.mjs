@@ -16,6 +16,8 @@ import { stopProcessGroup } from "./process-group.mjs";
 const REPO_ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const BENCH_DIR = join(REPO_ROOT, "bench");
 const RESULTS_DIR = join(REPO_ROOT, ".work", "tmp", "bench-results");
+const SEARCH_QUERY = "GlobalFoundries";
+const SEARCH_RESULT_PATH = "2025-05-16-ai-arrives-in-the-middle-east-us-strikes-a-deal-with-uae-and-ksa.md";
 
 const args = parseArgs(process.argv.slice(2));
 const warmups = Number(args.warmups ?? 2);
@@ -132,11 +134,22 @@ async function runBrowserBenchmarks(browser, baseUrl, fixture, identity, first, 
       const document = await vaultJson(baseUrl, identity, `/notes/${encodeURIComponent(first.noteId)}`);
       await saveNote(baseUrl, identity, first.noteId, document.meta, `${document.content}\nbench ${randomUUID()}\n`);
     });
-    out.search = await measure(async () => {
-      await vaultJson(baseUrl, identity, "/search", {
+    await page.locator('.sidebar-controls [title="Search notes"]').click();
+    const searchInput = page.locator(".search-panel input");
+    const searchTiming = await measureSearchPaint(page, searchInput, SEARCH_QUERY, SEARCH_RESULT_PATH);
+    out.searchPainted = searchTiming.paintedMs;
+    out.searchRequest = searchTiming.requestMs;
+    out.searchRequestEnd = searchTiming.requestEndMs;
+    out.searchResultInserted = searchTiming.resultInsertedMs;
+    out.searchLongTask = searchTiming.longTaskMs;
+    out.searchApi = await measure(async () => {
+      const response = await vaultJson(baseUrl, identity, "/search", {
         method: "POST",
-        body: { query: "GlobalFoundries", mode: "default", limit: 20, overlays: [] },
+        body: { query: SEARCH_QUERY, mode: "default", limit: 50, overlays: [] },
       });
+      if (!response.hits.some((hit) => hit.path === SEARCH_RESULT_PATH)) {
+        throw new Error("search API response did not include the expected fixture note");
+      }
     });
     out.conflictRestore = await measure(async () => {
       const base = await vaultJson(baseUrl, identity, `/notes/${encodeURIComponent(first.noteId)}`);
@@ -218,6 +231,91 @@ async function measure(fn) {
     const start = performance.now();
     await fn();
     values.push(performance.now() - start);
+  }
+  return values;
+}
+
+async function measureSearchPaint(page, input, query, expectedPath) {
+  await page.evaluate(() => {
+    globalThis.__tansuSearchLongTasks = [];
+    globalThis.__tansuSearchLongTaskObserver = new PerformanceObserver((list) => {
+      globalThis.__tansuSearchLongTasks.push(...list.getEntries().map(({ startTime, duration }) => ({ startTime, duration })));
+    });
+    globalThis.__tansuSearchLongTaskObserver.observe({ type: "longtask", buffered: true });
+  });
+  const measureOne = async () => {
+    await input.fill("");
+    await page.locator(".search-panel .search-result-row").first().waitFor({ state: "detached" });
+    await page.evaluate(() => {
+      performance.clearResourceTimings();
+      performance.clearMarks("tansu:search:start");
+      performance.clearMeasures("tansu:search:painted");
+      performance.mark("tansu:search:start");
+      globalThis.__tansuSearchResultInsertedAt = null;
+      globalThis.__tansuSearchMutationObserver?.disconnect();
+      globalThis.__tansuSearchMutationObserver = new MutationObserver(() => {
+        if (document.querySelector(".search-panel .search-result-row") !== null) {
+          globalThis.__tansuSearchResultInsertedAt ??= performance.now();
+        }
+      });
+      globalThis.__tansuSearchMutationObserver.observe(
+        document.querySelector(".search-panel .command-list"),
+        { childList: true, subtree: true },
+      );
+    });
+    await input.fill(query);
+    return await page.evaluate(async (expectedPath) => {
+      const expectedResult = () => [...document.querySelectorAll(".search-panel .search-result-row")]
+        .find((row) => row.textContent?.includes(expectedPath) && row.getClientRects().length > 0);
+      if (expectedResult() === undefined) {
+        await new Promise((resolve) => {
+          const list = document.querySelector(".search-panel .command-list");
+          if (list === null) throw new Error("search result list is missing");
+          const observer = new MutationObserver(() => {
+            if (expectedResult() !== undefined) {
+              observer.disconnect();
+              resolve();
+            }
+          });
+          observer.observe(list, { childList: true, subtree: true });
+        });
+      }
+      if (expectedResult() === undefined) throw new Error("search results did not contain the expected note");
+      const start = performance.getEntriesByName("tansu:search:start", "mark").at(-1);
+      const observer = globalThis.__tansuSearchLongTaskObserver;
+      globalThis.__tansuSearchLongTasks.push(...observer.takeRecords().map(({ startTime, duration }) => ({ startTime, duration })));
+      const request = performance.getEntriesByType("resource")
+        .filter((entry) => new URL(entry.name).pathname.endsWith("/search"))
+        .at(-1);
+      if (start === undefined || request === undefined) throw new Error("search request timing is missing");
+      const paintedMs = await new Promise((resolve) => {
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+          resolve(performance.measure("tansu:search:painted", "tansu:search:start").duration);
+        }));
+      });
+      globalThis.__tansuSearchMutationObserver.disconnect();
+      return {
+        paintedMs,
+        requestMs: request.duration,
+        requestEndMs: request.responseEnd - start.startTime,
+        resultInsertedMs: globalThis.__tansuSearchResultInsertedAt === null
+          ? -1
+          : globalThis.__tansuSearchResultInsertedAt - start.startTime,
+        longTaskMs: Math.max(0, ...globalThis.__tansuSearchLongTasks
+          .filter((task) => task.startTime >= start.startTime && task.startTime < start.startTime + paintedMs)
+          .map((task) => task.duration)),
+      };
+    }, expectedPath);
+  };
+  for (let i = 0; i < warmups; i += 1) await measureOne();
+  const values = { paintedMs: [], requestMs: [], requestEndMs: [], resultInsertedMs: [], longTaskMs: [] };
+  for (let i = 0; i < runs; i += 1) {
+    const sample = await measureOne();
+    values.paintedMs.push(sample.paintedMs);
+    values.requestMs.push(sample.requestMs);
+    values.requestEndMs.push(sample.requestEndMs);
+    values.resultInsertedMs.push(sample.resultInsertedMs);
+    values.longTaskMs.push(sample.longTaskMs);
   }
   return values;
 }

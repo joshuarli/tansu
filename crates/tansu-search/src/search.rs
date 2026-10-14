@@ -1,5 +1,6 @@
 use std::ops::Range;
 
+use regex::Regex;
 use tantivy::collector::TopDocs;
 use tantivy::query::{
     BooleanQuery, BoostQuery, FuzzyTermQuery, Occur, PhrasePrefixQuery, PhraseQuery, Query,
@@ -15,7 +16,7 @@ use crate::index::IndexManager;
 use crate::schema::doc_text;
 use crate::tokenizer::{DiacriticFilter, FerrisearchTokenizer};
 use crate::types::{
-    ExcerptRange, FieldScoreBreakdown, Fuzziness, MatchInfo, NoteRange, SearchMode,
+    ExcerptRange, FieldScoreBreakdown, Fuzziness, NoteRange, SearchMode,
     SearchOptions, SearchResult,
 };
 
@@ -31,7 +32,6 @@ struct ParsedQuery {
 
 struct ByteMatch {
     range: Range<usize>,
-    fuzzy: bool,
 }
 
 pub(crate) fn execute(
@@ -97,10 +97,12 @@ pub(crate) fn execute(
         (results, effective_fuzziness)
     };
 
+    let exact_matcher = exact_matcher(&all_terms);
     let result_context = SearchResultContext {
         searcher: &searcher,
         index,
         terms: &all_terms,
+        exact_matcher: exact_matcher.as_ref(),
         fuzzy_terms: &parsed.terms,
         fuzziness,
         options,
@@ -220,6 +222,7 @@ struct SearchResultContext<'a> {
     searcher: &'a Searcher,
     index: &'a IndexManager,
     terms: &'a [String],
+    exact_matcher: Option<&'a Regex>,
     fuzzy_terms: &'a [String],
     fuzziness: Fuzziness,
     options: SearchOptions,
@@ -234,6 +237,7 @@ fn make_result(
         searcher,
         index,
         terms,
+        exact_matcher,
         fuzzy_terms,
         fuzziness,
         options,
@@ -249,7 +253,9 @@ fn make_result(
         .and_then(|value| i64::try_from(value).ok())
         .ok_or(SearchError::CorruptIndex)?;
     let content = doc_text(&document, index.fields().content);
-    let mut byte_matches = find_exact_matches(&content, terms);
+    let mut byte_matches = exact_matcher
+        .map(|matcher| find_exact_matches(&content, matcher))
+        .unwrap_or_default();
     let fuzzy_matches = find_fuzzy_matches(&content, fuzzy_terms, fuzziness);
     if options.mode == SearchMode::TypoOnly {
         if !has_fuzzy_field_match(index, &document, fuzzy_terms, fuzziness) {
@@ -261,20 +267,11 @@ fn make_result(
         byte_matches.sort_by_key(|matched| (matched.range.start, matched.range.end));
         byte_matches.dedup_by(|left, right| left.range == right.range);
     }
-    let matches = byte_matches
-        .into_iter()
-        .map(|matched| {
-            let start = utf16_offset(&content, matched.range.start)?;
-            let end = utf16_offset(&content, matched.range.end)?;
-            Ok(MatchInfo {
-                match_text: content[matched.range.clone()].to_owned(),
-                range: NoteRange::new(start, end)?,
-                fuzzy: matched.fuzzy,
-            })
-        })
-        .collect::<Result<Vec<_>, SearchError>>()?;
-    let (excerpt, excerpt_ranges) = build_excerpt(&content, &matches)?;
-    let source_reveal_range = matches.first().map(|matched| matched.range.clone());
+    let (excerpt, excerpt_ranges) = build_excerpt(&content, &byte_matches)?;
+    let source_reveal_range = byte_matches
+        .first()
+        .map(|matched| utf16_range(&content, matched.range.clone()))
+        .transpose()?;
     let field_scores = options.score_breakdown.then(|| {
         field_scores(
             index,
@@ -441,9 +438,9 @@ fn tokenize_query_text(input: &str) -> Vec<(usize, String)> {
     tokens
 }
 
-fn find_exact_matches(content: &str, terms: &[String]) -> Vec<ByteMatch> {
-    if terms.is_empty() || content.is_empty() {
-        return Vec::new();
+fn exact_matcher(terms: &[String]) -> Option<Regex> {
+    if terms.is_empty() {
+        return None;
     }
     let mut sorted = terms.iter().map(String::as_str).collect::<Vec<_>>();
     sorted.sort_by_key(|term| std::cmp::Reverse(term.len()));
@@ -453,20 +450,21 @@ fn find_exact_matches(content: &str, terms: &[String]) -> Vec<ByteMatch> {
         .map(|term| regex::escape(term))
         .collect::<Vec<_>>()
         .join("|");
-    let Ok(regex) = regex::Regex::new(&format!("(?i){expression}")) else {
+    Regex::new(&format!("(?i){expression}")).ok()
+}
+
+fn find_exact_matches(content: &str, matcher: &Regex) -> Vec<ByteMatch> {
+    if content.is_empty() {
         return Vec::new();
-    };
+    }
     let (normalized, mapping) = strip_diacritics_with_mapping(content);
-    regex
+    matcher
         .find_iter(&normalized)
         .take(MAX_MATCHES)
         .filter_map(|matched| {
             let start = *mapping.get(matched.start())?;
             let end = *mapping.get(matched.end())?;
-            (start < end).then_some(ByteMatch {
-                range: start..end,
-                fuzzy: false,
-            })
+            (start < end).then_some(ByteMatch { range: start..end })
         })
         .collect()
 }
@@ -502,10 +500,7 @@ fn find_fuzzy_matches(content: &str, terms: &[String], fuzziness: Fuzziness) -> 
             continue;
         };
         if start < end {
-            matches.push(ByteMatch {
-                range: start..end,
-                fuzzy: true,
-            });
+            matches.push(ByteMatch { range: start..end });
         }
     }
     matches
@@ -516,8 +511,14 @@ fn strip_diacritics_with_mapping(text: &str) -> (String, Vec<usize>) {
     let mut mapping = vec![0];
     for (start, original) in text.char_indices() {
         let end = start + original.len_utf8();
+        if original.is_ascii() {
+            result.push(original);
+            mapping.push(end);
+            continue;
+        }
+        let mut buffer = [0; 4];
         let normalized = original
-            .to_string()
+            .encode_utf8(&mut buffer)
             .nfd()
             .filter(|character| !unicode_normalization::char::is_combining_mark(*character))
             .nfc()
@@ -580,12 +581,12 @@ fn osa_distance(left: &str, right: &str) -> usize {
 
 fn build_excerpt(
     content: &str,
-    matches: &[MatchInfo],
+    matches: &[ByteMatch],
 ) -> Result<(String, Vec<ExcerptRange>), SearchError> {
     let Some(first) = matches.first() else {
         return Ok((String::new(), Vec::new()));
     };
-    let first_start = byte_offset(content, first.range.start())?;
+    let first_start = first.range.start;
     let candidate_start = floor_char_boundary(content, first_start.saturating_sub(200));
     let start = content[candidate_start..first_start]
         .rfind(char::is_whitespace)
@@ -623,38 +624,20 @@ fn build_excerpt(
     }
     let mut ranges = Vec::new();
     for matched in matches {
-        let match_start = byte_offset(content, matched.range.start())?;
-        let match_end = byte_offset(content, matched.range.end())?;
+        let match_start = matched.range.start;
+        let match_end = matched.range.end;
         if match_start < start || match_end > end {
             continue;
         }
         let local_start = inner_start + match_start - start;
         let local_end = inner_start + match_end - start;
-        let start_utf16 = utf16_offset(&excerpt, local_start)?;
-        let end_utf16 = utf16_offset(&excerpt, local_end)?;
-        ranges.push(ExcerptRange::new(start_utf16, end_utf16)?);
+        let range = utf16_range(&excerpt, local_start..local_end)?;
+        ranges.push(ExcerptRange::new(range.start(), range.end())?);
     }
     if inner_end > MAX_EXCERPT_BYTES || excerpt.len() > MAX_EXCERPT_BYTES {
         return Err(SearchError::CorruptIndex);
     }
     Ok((excerpt, ranges))
-}
-
-fn byte_offset(content: &str, utf16_offset: u32) -> Result<usize, SearchError> {
-    let mut offset = 0u32;
-    for (byte, character) in content.char_indices() {
-        if offset == utf16_offset {
-            return Ok(byte);
-        }
-        offset = offset
-            .checked_add(character.len_utf16() as u32)
-            .ok_or(SearchError::CorruptIndex)?;
-    }
-    if offset == utf16_offset {
-        Ok(content.len())
-    } else {
-        Err(SearchError::CorruptIndex)
-    }
 }
 
 fn utf16_offset(content: &str, byte_offset: usize) -> Result<u32, SearchError> {
@@ -669,6 +652,20 @@ fn utf16_offset(content: &str, byte_offset: usize) -> Result<u32, SearchError> {
         .ok_or(SearchError::CorruptIndex)
 }
 
+fn utf16_range(content: &str, byte_range: Range<usize>) -> Result<NoteRange, SearchError> {
+    let matched = content
+        .get(byte_range.clone())
+        .ok_or(SearchError::CorruptIndex)?;
+    let start = utf16_offset(content, byte_range.start)?;
+    let end = matched
+        .chars()
+        .try_fold(start, |offset, character| {
+            offset.checked_add(character.len_utf16() as u32)
+        })
+        .ok_or(SearchError::CorruptIndex)?;
+    NoteRange::new(start, end)
+}
+
 fn floor_char_boundary(content: &str, mut index: usize) -> usize {
     while !content.is_char_boundary(index) {
         index -= 1;
@@ -680,7 +677,7 @@ fn floor_char_boundary(content: &str, mut index: usize) -> usize {
 mod tests {
     use super::*;
     use crate::index::IndexManager;
-    use crate::types::{DocumentInput, NoteIdentity, SearchLimit};
+    use crate::types::{DocumentInput, MatchInfo, NoteIdentity, SearchLimit};
 
     fn make_doc(
         note_id: &str,
@@ -1206,7 +1203,9 @@ mod tests {
     }
 
     fn extract(content: &str, terms: &[String], _ignore_diacritics: bool) -> Vec<MatchInfo> {
-        find_exact_matches(content, terms)
+        exact_matcher(terms)
+            .map(|matcher| find_exact_matches(content, &matcher))
+            .unwrap_or_default()
             .into_iter()
             .map(|matched| {
                 let start = utf16_offset(content, matched.range.start).unwrap();
@@ -1214,7 +1213,7 @@ mod tests {
                 MatchInfo {
                     match_text: content[matched.range.clone()].to_owned(),
                     range: NoteRange::new(start, end).unwrap(),
-                    fuzzy: matched.fuzzy,
+                    fuzzy: false,
                 }
             })
             .collect()
@@ -1264,6 +1263,14 @@ mod tests {
         assert_eq!(matches.len(), 2);
         assert_eq!(matches[0].match_text, "café");
         assert_eq!(matches[1].match_text, "résumé");
+    }
+
+    #[test]
+    fn find_matches_combining_mark_preserves_source_offsets() {
+        let matches = extract("x e\u{301} 😀", &["e".into()], true);
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].match_text, "e\u{301}");
+        assert_eq!((matches[0].range.start(), matches[0].range.end()), (2, 4));
     }
 
     #[test]

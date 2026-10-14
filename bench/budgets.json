@@ -28,9 +28,12 @@
       "medianMs": 2000,
       "p95Ms": 5000
     },
-    "chromium.search": {
+    "chromium.searchApi": {
       "medianMs": 2000,
       "p95Ms": 5000
+    },
+    "chromium.searchPainted": {
+      "p95Ms": 99.99
     },
     "chromium.conflictRestore": {
       "medianMs": 3000,
