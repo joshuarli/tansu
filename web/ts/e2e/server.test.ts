@@ -480,11 +480,12 @@ describe("real server harness", () => {
     await page.locator(".cm-content").evaluate((content) => {
       const clipboard = new DataTransfer();
       clipboard.items.add(new File([new Uint8Array([4, 5, 6])], "pasted.webp", { type: "image/webp" }));
-      content.dispatchEvent(new ClipboardEvent("paste", {
+      const paste = new Event("paste", {
         bubbles: true,
         cancelable: true,
-        clipboardData: clipboard,
-      }));
+      });
+      Object.defineProperty(paste, "clipboardData", { value: clipboard });
+      content.dispatchEvent(paste);
     });
     const pasted = await pastedUpload.then((response) => response.json());
     await expect.poll(() => page.locator(".cm-content").textContent(), { timeout: 3_000 })

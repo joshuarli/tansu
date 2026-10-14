@@ -328,6 +328,7 @@ Append-only, one line per judgment call a reader would miss.
 2026-10-14 | G1 | Refresh block metadata after native input because Firefox could select a stale gutter id; two diagnostic full-suite runs also hit transient editor polling timeouts, while the final three-engine runs passed.
 2026-10-14 | INT | Keep the seeded-image, delete-modal, and watcher assertions live while their APP and SRV integration defects remain. Do not replace those user flows with API-only checks.
 2026-10-14 | INT | Publish watcher metadata only for added or changed notes, and report removals separately; a full-vault payload exceeded the SSE event bound and was converted into a resync.
+2026-10-14 | INT | Construct paste events with an explicitly attached `DataTransfer`; Firefox ignores `clipboardData` in synthetic `ClipboardEvent` initialization.
 
 # Campaign log
 
