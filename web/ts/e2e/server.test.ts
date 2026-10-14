@@ -293,32 +293,50 @@ describe("real server harness", () => {
   it("streams vault-scoped note changes over SSE", async () => {
     const page = await newLoggedPage();
     await page.goto(baseUrl);
-    const after = await currentV2EventVersion(vaultOneId);
     const title = `SSE ${randomUUID()}`;
     const pathMarker = title.slice(4).toLowerCase();
     await page.evaluate(async (args) => {
-      const response = await fetch(`/api/v2/vaults/${args.vaultId}/events?after=${args.after}`, {
-        headers: { "X-Tansu-Server-Instance": args.serverInstanceId },
-      });
-      if (!response.ok || response.body === null) throw new Error(`event stream failed: ${response.status}`);
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
       const eventPromise = (async () => {
-        let buffer = "";
+        let cursor = 0;
         while (true) {
-          const result = await reader.read();
-          if (result.done) throw new Error("event stream closed before note change");
-          buffer += decoder.decode(result.value, { stream: true });
-          const frames = buffer.split("\n\n");
-          buffer = frames.pop() ?? "";
-          for (const frame of frames) {
-            const data = frame.split("\n").find((line) => line.startsWith("data: "))?.slice(6);
-            if (!data) continue;
-            const event = JSON.parse(data) as { update: { kind: string; note?: { path: string } } };
-            if (event.update.kind === "noteChanged" && event.update.note?.path.includes(args.pathMarker)) {
-              await reader.cancel();
-              return event.update.kind;
+          const response = await fetch(`/api/v2/vaults/${args.vaultId}/events?after=${cursor}`, {
+            headers: { "X-Tansu-Server-Instance": args.serverInstanceId },
+          });
+          if (!response.ok || response.body === null) throw new Error(`event stream failed: ${response.status}`);
+          const reader = response.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = "";
+          let resync = false;
+          while (true) {
+            const result = await reader.read();
+            if (result.done) {
+              if (resync) break;
+              throw new Error("event stream closed before note change");
             }
+            buffer += decoder.decode(result.value, { stream: true });
+            const frames = buffer.split("\n\n");
+            buffer = frames.pop() ?? "";
+            for (const frame of frames) {
+              const data = frame.split("\n").find((line) => line.startsWith("data: "))?.slice(6);
+              if (!data) continue;
+              const event = JSON.parse(data) as {
+                eventVersion: number;
+                resyncRequired: boolean;
+                update: { kind: string; note?: { path: string } };
+              };
+              if (event.resyncRequired) {
+                cursor = event.eventVersion;
+                resync = true;
+                await reader.cancel();
+                break;
+              }
+              if (event.update.kind === "noteChanged" && event.update.note?.path.includes(args.pathMarker)) {
+                await reader.cancel();
+                return event.update.kind;
+              }
+              cursor = event.eventVersion;
+            }
+            if (resync) break;
           }
         }
       })();
@@ -327,7 +345,6 @@ describe("real server harness", () => {
     }, {
       vaultId: vaultOneId,
       serverInstanceId,
-      after,
       pathMarker,
     });
     await createCodeMirrorNote(page, title);
@@ -342,32 +359,50 @@ describe("real server harness", () => {
   it("reconciles external filesystem edits for the active vault", async () => {
     const page = await newLoggedPage();
     await page.goto(baseUrl);
-    const after = await currentV2EventVersion(vaultOneId);
     const eventPromise = page.evaluate(async (args) => {
-      const response = await fetch(`/api/v2/vaults/${args.vaultId}/events?after=${args.after}`, {
-        headers: { "X-Tansu-Server-Instance": args.serverInstanceId },
-      });
-      if (!response.ok || response.body === null) throw new Error(`event stream failed: ${response.status}`);
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
+      let cursor = 0;
       while (true) {
-        const result = await reader.read();
-        if (result.done) throw new Error("event stream closed before vault change");
-        buffer += decoder.decode(result.value, { stream: true });
-        const frames = buffer.split("\n\n");
-        buffer = frames.pop() ?? "";
-        for (const frame of frames) {
-          const data = frame.split("\n").find((line) => line.startsWith("data: "))?.slice(6);
-          if (!data) continue;
-          const event = JSON.parse(data) as { update: { kind: string; notes?: { path: string }[] } };
-          if (event.update.kind === "vaultChanged" && event.update.notes?.some((note) => note.path.endsWith("outside.md"))) {
-            await reader.cancel();
-            return "vaultChanged";
+        const response = await fetch(`/api/v2/vaults/${args.vaultId}/events?after=${cursor}`, {
+          headers: { "X-Tansu-Server-Instance": args.serverInstanceId },
+        });
+        if (!response.ok || response.body === null) throw new Error(`event stream failed: ${response.status}`);
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        let resync = false;
+        while (true) {
+          const result = await reader.read();
+          if (result.done) {
+            if (resync) break;
+            throw new Error("event stream closed before vault change");
           }
+          buffer += decoder.decode(result.value, { stream: true });
+          const frames = buffer.split("\n\n");
+          buffer = frames.pop() ?? "";
+          for (const frame of frames) {
+            const data = frame.split("\n").find((line) => line.startsWith("data: "))?.slice(6);
+            if (!data) continue;
+            const event = JSON.parse(data) as {
+              eventVersion: number;
+              resyncRequired: boolean;
+              update: { kind: string; notes?: { path: string }[] };
+            };
+            if (event.resyncRequired) {
+              cursor = event.eventVersion;
+              resync = true;
+              await reader.cancel();
+              break;
+            }
+            if (event.update.kind === "vaultChanged" && event.update.notes?.some((note) => note.path.endsWith("outside.md"))) {
+              await reader.cancel();
+              return "vaultChanged";
+            }
+            cursor = event.eventVersion;
+          }
+          if (resync) break;
         }
       }
-    }, { vaultId: vaultOneId, serverInstanceId, after });
+    }, { vaultId: vaultOneId, serverInstanceId });
     await new Promise((resolve) => setTimeout(resolve, 900));
     await writeFile(join(vaultOnePath, "outside.md"), "# Outside\n\nedit\n", "utf8");
     await expect(eventPromise).resolves.toBe("vaultChanged");
@@ -755,23 +790,6 @@ async function v2Request(vaultId: string, path: string, init: RequestInit = {}):
     ...init,
     headers,
   });
-}
-
-async function currentV2EventVersion(vaultId: string): Promise<number> {
-  const response = await v2Request(
-    vaultId,
-    `/events?after=${Number.MAX_SAFE_INTEGER}`,
-    { headers: { Accept: "text/event-stream" } },
-  );
-  if (!response.ok) throw new Error(`event cursor request failed: ${response.status}`);
-  const frame = await response.text();
-  const data = frame.split("\n").find((line) => line.startsWith("data: "))?.slice(6);
-  if (data === undefined) throw new Error("event cursor response had no data");
-  const event = JSON.parse(data) as { eventVersion: number; resyncRequired: boolean };
-  if (!event.resyncRequired || !Number.isSafeInteger(event.eventVersion)) {
-    throw new Error("event cursor response did not contain a valid resync version");
-  }
-  return event.eventVersion;
 }
 
 async function waitForReady(url: string): Promise<void> {
