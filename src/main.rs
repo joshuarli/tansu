@@ -7,8 +7,8 @@ use tansu2::app::App;
 use tansu2::auth::{AuthError, AuthStore};
 use tansu2::config::{AuthConfig, Config, load_config, prepare_auth_state_directory};
 use tansu2::http::{
-    EventEnvelope, EventSource, EventSubscription, EventSubscriptionStream, ServerServices,
-    serve, serve_with_services,
+    EventEnvelope, EventSource, EventSourceError, EventSubscription, EventSubscriptionStream,
+    ServerServices, serve, serve_with_services,
 };
 use tansu2::vault::{V2EventEnvelope, V2EventSubscription};
 
@@ -169,11 +169,14 @@ impl EventSource for AppEventSource {
         &self,
         vault_id: &str,
         after_event_version: Option<u64>,
-    ) -> std::result::Result<EventSubscription, String> {
-        let subscription = self
-            .0
-            .subscribe_v2_events(vault_id, after_event_version)
-            .map_err(|error| error.to_string())?;
+    ) -> std::result::Result<EventSubscription, EventSourceError> {
+        let vault = self.0.vault_by_id(vault_id).map_err(|error| match error {
+            tansu2::Error::NotFound(_) => EventSourceError::VaultNotFound,
+            error => EventSourceError::Internal(error.to_string()),
+        })?;
+        let subscription = vault
+            .subscribe_v2_events(after_event_version)
+            .map_err(|error| EventSourceError::Internal(error.to_string()))?;
         Ok(EventSubscription {
             replay: subscription.replay.into_iter().map(event_envelope).collect(),
             current_version: subscription.current_version,

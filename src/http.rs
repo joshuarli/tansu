@@ -162,6 +162,12 @@ pub trait EventSubscriptionStream: Send + 'static {
     ) -> std::result::Result<EventEnvelope, std::sync::mpsc::RecvTimeoutError>;
 }
 
+#[derive(Debug)]
+pub enum EventSourceError {
+    VaultNotFound,
+    Internal(String),
+}
+
 #[derive(Clone)]
 pub struct StreamAuthorization {
     pub expires_at: u64,
@@ -174,7 +180,7 @@ pub trait EventSource: Send + Sync + 'static {
         &self,
         vault_id: &str,
         after_event_version: Option<u64>,
-    ) -> std::result::Result<EventSubscription, String>;
+    ) -> std::result::Result<EventSubscription, EventSourceError>;
 }
 
 #[derive(Clone, Default)]
@@ -936,7 +942,15 @@ async fn event_response(
     };
     let subscription = match source.subscribe(&vault_id, after_event_version) {
         Ok(subscription) => subscription,
-        Err(_) => return v2_internal_error(&request_id).with_no_store().into_hyper(),
+        Err(EventSourceError::VaultNotFound) => {
+            return v2_api_error_response(
+                V2ApiErrorKind::VaultNotFound { vault_id },
+                &request_id,
+            ).with_no_store().into_hyper();
+        }
+        Err(EventSourceError::Internal(_)) => {
+            return v2_internal_error(&request_id).with_no_store().into_hyper();
+        }
     };
     if subscription.events.capacity() > MAX_SSE_SOURCE_QUEUE {
         return v2_internal_error(&request_id).with_no_store().into_hyper();
@@ -1598,6 +1612,62 @@ mod tests {
     }
 
     #[test]
+    fn event_route_maps_missing_vaults_to_typed_not_found() {
+        let root = tempfile::tempdir().unwrap();
+        let vault_path = root.path().join("vault");
+        std::fs::create_dir_all(&vault_path).unwrap();
+        let app = App::new(Config {
+            vaults: vec![VaultConfig {
+                name: "Test".into(),
+                path: vault_path,
+                state_path: root.path().join("state"),
+                excluded_folders: Vec::new(),
+            }],
+            auth: None,
+        }).unwrap();
+        let server_instance_id = app.server_instance_id().to_string();
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let address = listener.local_addr().unwrap();
+        let (stop, shutdown) = watch::channel(false);
+        let server = thread::spawn(move || {
+            let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+            runtime.block_on(serve_listener_with_limits(
+                app,
+                listener,
+                ServerServices {
+                    auth: None,
+                    events: Some(Arc::new(LookupErrorEventSource)),
+                },
+                shutdown,
+                TransportLimits::default(),
+            )).unwrap();
+        });
+
+        let send = |vault_id: &str| {
+            let mut stream = TcpStream::connect(address).unwrap();
+            write!(
+                stream,
+                "GET /api/v2/vaults/{vault_id}/events HTTP/1.1\r\nHost: localhost\r\nX-Tansu-Server-Instance: {server_instance_id}\r\nConnection: close\r\n\r\n"
+            ).unwrap();
+            let mut response = String::new();
+            stream.read_to_string(&mut response).unwrap();
+            response
+        };
+
+        let not_found = send("missing");
+        assert!(not_found.starts_with("HTTP/1.1 404"), "{not_found}");
+        assert!(not_found.contains("vault_not_found"), "{not_found}");
+        assert!(not_found.to_ascii_lowercase().contains("x-tansu-api-version: 2"), "{not_found}");
+
+        let internal = send("broken");
+        assert!(internal.starts_with("HTTP/1.1 500"), "{internal}");
+        assert!(internal.contains("\"code\":\"internal\""), "{internal}");
+
+        stop.send(true).unwrap();
+        server.join().unwrap();
+    }
+
+    #[test]
     fn legacy_api_requests_fail_with_version_error_before_mutating() {
         let root = tempfile::tempdir().unwrap();
         let vault_path = root.path().join("vault");
@@ -1718,7 +1788,7 @@ mod tests {
             &self,
             _: &str,
             _: Option<u64>,
-        ) -> std::result::Result<EventSubscription, String> {
+        ) -> std::result::Result<EventSubscription, EventSourceError> {
             let (_sender, events) = std::sync::mpsc::sync_channel(2);
             Ok(EventSubscription {
                 replay: Vec::new(),
@@ -1726,6 +1796,18 @@ mod tests {
                 resync_required: false,
                 events: Box::new(MockEventStream { receiver: events, capacity: 2, dropped: None }),
             })
+        }
+    }
+
+    #[derive(Clone)]
+    struct LookupErrorEventSource;
+
+    impl EventSource for LookupErrorEventSource {
+        fn subscribe(&self, vault_id: &str, _: Option<u64>) -> std::result::Result<EventSubscription, EventSourceError> {
+            match vault_id {
+                "missing" => Err(EventSourceError::VaultNotFound),
+                _ => Err(EventSourceError::Internal("event storage unavailable".to_string())),
+            }
         }
     }
 
