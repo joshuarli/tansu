@@ -1,5 +1,5 @@
 import type { SessionState, V2NoteDocument, V2NoteMeta } from "../types.generated.ts";
-import type { DocumentIdentity, ServerIdentity, WorkspaceId } from "./identity.ts";
+import { localDraftId, type DocumentIdentity, type LocalDraftId, type ServerIdentity, type WorkspaceId } from "./identity.ts";
 
 const DATABASE_NAME = "tansu2-client-state-v2";
 const DATABASE_VERSION = 1;
@@ -20,13 +20,27 @@ export type CachedNoteBody = {
   cachedAtMs: number;
 };
 
-export type WorkspaceTab = {
-  noteId: string;
+type WorkspaceTabFields = {
   title: string;
   path: string;
   selection: { anchor: number; head: number } | null;
   scrollTop: number;
   mode: "live" | "source";
+};
+
+export type WorkspaceTab = WorkspaceTabFields & (
+  | { kind: "saved"; noteId: string }
+  | { kind: "local-draft"; localDraftId: LocalDraftId }
+);
+
+export type WorkspaceTabIdentity =
+  | { kind: "saved"; noteId: string }
+  | { kind: "local-draft"; localDraftId: LocalDraftId };
+
+export type LegacyWorkspace = {
+  session: SessionState;
+  pinnedNoteIds: string[];
+  recentNoteIds: string[];
 };
 
 export type WorkspaceState = {
@@ -35,7 +49,7 @@ export type WorkspaceState = {
   vaultId: string;
   workspaceId: string;
   tabs: WorkspaceTab[];
-  activeNoteId: string | null;
+  activeTab: WorkspaceTabIdentity | null;
   closedTabs: WorkspaceTab[];
   pinnedNoteIds: string[];
   recentNoteIds: string[];
@@ -55,8 +69,26 @@ export type DraftJournalRecord = {
   baseDiskHash: string;
   localRevision: number;
   mutationId: string;
+  titleRevision?: number;
+  titleMutationId?: string;
   source: string;
   titleDraft: string | null;
+  selection: { anchor: number; head: number } | null;
+  checkpointedAtMs: number;
+};
+
+export type LocalDraftJournalRecord = {
+  formatVersion: 2;
+  kind: "local";
+  serverInstanceId: string;
+  vaultId: string;
+  workspaceId: string;
+  localDraftId: LocalDraftId;
+  localRevision: number;
+  mutationId: string;
+  source: string;
+  titleDraft: string;
+  promotionPending: boolean;
   selection: { anchor: number; head: number } | null;
   checkpointedAtMs: number;
 };
@@ -74,7 +106,7 @@ export class ClientStorageFailureError extends Error {
 }
 
 export class DraftJournal {
-  private readonly pending = new Map<string, DraftJournalRecord>();
+  private readonly pending = new Map<string, DraftJournalRecord | LocalDraftJournalRecord>();
   private readonly timers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly writes = new Map<string, Promise<boolean>>();
   private readonly failureHandlers = new Map<string, (error: unknown) => void>();
@@ -85,10 +117,27 @@ export class DraftJournal {
     private readonly debounceMs = 200,
     private readonly write: (record: DraftJournalRecord) => Promise<boolean> = writeDraftCheckpoint,
     private readonly clear: typeof clearDraftCheckpoint = clearDraftCheckpoint,
+    private readonly writeLocal: (record: LocalDraftJournalRecord) => Promise<boolean> = writeLocalDraftCheckpoint,
+    private readonly clearLocal: typeof clearLocalDraftCheckpoint = clearLocalDraftCheckpoint,
+    private readonly clearTitle: typeof clearTitleDraftCheckpoint = clearTitleDraftCheckpoint,
   ) {}
 
   schedule(record: DraftJournalRecord, onFailure = this.onFailure): undefined {
     const valid = decodeDraftJournalRecord(record);
+    this.scheduleRecord(valid, onFailure);
+    return undefined;
+  }
+
+  scheduleLocal(record: LocalDraftJournalRecord, onFailure = this.onFailure): undefined {
+    const valid = decodeLocalDraftJournalRecord(record);
+    this.scheduleRecord(valid, onFailure);
+    return undefined;
+  }
+
+  private scheduleRecord(
+    valid: DraftJournalRecord | LocalDraftJournalRecord,
+    onFailure: (error: unknown) => void,
+  ): void {
     const key = draftKey(valid);
     this.pending.set(key, valid);
     this.failureHandlers.set(key, onFailure);
@@ -100,11 +149,22 @@ export class DraftJournal {
       this.timers.delete(key);
       void this.flushKey(key).catch(() => undefined);
     }, this.debounceMs));
-    return undefined;
   }
 
   checkpoint(record: DraftJournalRecord, onFailure = this.onFailure): Promise<boolean> {
     const valid = decodeDraftJournalRecord(record);
+    return this.checkpointRecord(valid, onFailure);
+  }
+
+  checkpointLocal(record: LocalDraftJournalRecord, onFailure = this.onFailure): Promise<boolean> {
+    const valid = decodeLocalDraftJournalRecord(record);
+    return this.checkpointRecord(valid, onFailure);
+  }
+
+  private checkpointRecord(
+    valid: DraftJournalRecord | LocalDraftJournalRecord,
+    onFailure: (error: unknown) => void,
+  ): Promise<boolean> {
     const key = draftKey(valid);
     this.failureHandlers.set(key, onFailure);
     const timer = this.timers.get(key);
@@ -140,7 +200,58 @@ export class DraftJournal {
     acceptedLocalRevision: number,
     acceptedMutationId: string,
   ): Promise<boolean> {
-    const key = draftIdentityKey(identity, workspace, noteId);
+    const key = draftIdentityKey("saved", identity, workspace, noteId);
+    return this.clearPendingCheckpoint(key, acceptedLocalRevision, acceptedMutationId, () =>
+      this.clear(identity, workspace, noteId, acceptedLocalRevision, acceptedMutationId)
+    );
+  }
+
+  async clearLocalCheckpoint(
+    identity: ServerIdentity,
+    workspace: WorkspaceId,
+    id: LocalDraftId,
+    acceptedLocalRevision: number,
+    acceptedMutationId: string,
+  ): Promise<boolean> {
+    const key = draftIdentityKey("local", identity, workspace, id);
+    return this.clearPendingCheckpoint(key, acceptedLocalRevision, acceptedMutationId, () =>
+      this.clearLocal(identity, workspace, id, acceptedLocalRevision, acceptedMutationId)
+    );
+  }
+
+  async clearTitleDraftCheckpoint(
+    identity: ServerIdentity,
+    workspace: WorkspaceId,
+    noteId: string,
+    titleRevision: number,
+    titleMutationId: string,
+  ): Promise<boolean> {
+    const key = draftIdentityKey("saved", identity, workspace, noteId);
+    const pending = this.pending.get(key);
+    if (pending !== undefined) {
+      if ("kind" in pending || pending.titleRevision !== titleRevision ||
+        pending.titleMutationId !== titleMutationId) {
+        return false;
+      }
+      const timer = this.timers.get(key);
+      if (timer !== undefined) {
+        clearTimeout(timer);
+        this.timers.delete(key);
+      }
+      this.pending.set(key, { ...pending, titleDraft: null });
+      return this.flushKey(key);
+    }
+    return this.clearAfterWrites(key, () =>
+      this.clearTitle(identity, workspace, noteId, titleRevision, titleMutationId)
+    );
+  }
+
+  private async clearPendingCheckpoint(
+    key: string,
+    acceptedLocalRevision: number,
+    acceptedMutationId: string,
+    clear: () => Promise<boolean>,
+  ): Promise<boolean> {
     const pending = this.pending.get(key);
     if (pending !== undefined) {
       if (pending.localRevision !== acceptedLocalRevision || pending.mutationId !== acceptedMutationId) {
@@ -153,10 +264,12 @@ export class DraftJournal {
       }
       this.pending.delete(key);
     }
+    return this.clearAfterWrites(key, clear);
+  }
+
+  private async clearAfterWrites(key: string, clear: () => Promise<boolean>): Promise<boolean> {
     const previous = this.writes.get(key);
-    const next = (previous ?? Promise.resolve(false)).then(() =>
-      this.clear(identity, workspace, noteId, acceptedLocalRevision, acceptedMutationId)
-    );
+    const next = (previous ?? Promise.resolve(false)).then(clear);
     this.writes.set(key, next);
     try {
       return await next;
@@ -189,7 +302,7 @@ export class DraftJournal {
   }
 
   async dispose(): Promise<void> {
-    for (const detach of [...this.detachListeners]) {
+    for (const detach of this.detachListeners) {
       detach();
     }
     await this.flushAll();
@@ -209,7 +322,7 @@ export class DraftJournal {
     const next = (previous ?? Promise.resolve(false))
       .catch(() => false)
       .then(async () => {
-        const written = await this.write(record);
+        const written = "kind" in record ? await this.writeLocal(record) : await this.write(record);
         if (!written) {
           throw new ClientStorageFailureError("transaction", "A newer draft checkpoint is already stored");
         }
@@ -263,6 +376,55 @@ export function createDraftCheckpointClearer(
       identity,
       workspace,
       identity.noteId,
+      acceptedLocalRevision,
+      acceptedMutationId,
+    );
+}
+
+export function createTitleDraftCheckpointClearer(
+  journal: DraftJournal,
+  workspace: WorkspaceId,
+): (
+  identity: DocumentIdentity,
+  titleRevision: number,
+  titleMutationId: string,
+) => Promise<boolean> {
+  return (identity, titleRevision, titleMutationId) =>
+    journal.clearTitleDraftCheckpoint(
+      identity,
+      workspace,
+      identity.noteId,
+      titleRevision,
+      titleMutationId,
+    );
+}
+
+export function createLocalDraftCheckpointWriter(
+  journal: DraftJournal,
+): (
+  record: LocalDraftJournalRecord,
+  urgency: "typing" | "structural",
+  onFailure: (error: unknown) => void,
+) => undefined | Promise<boolean> {
+  return (record, urgency, onFailure) => urgency === "typing"
+    ? journal.scheduleLocal(record, onFailure)
+    : journal.checkpointLocal(record, onFailure);
+}
+
+export function createLocalDraftCheckpointClearer(
+  journal: DraftJournal,
+  workspace: WorkspaceId,
+): (
+  identity: ServerIdentity,
+  localDraftId: LocalDraftId,
+  acceptedLocalRevision: number,
+  acceptedMutationId: string,
+) => Promise<boolean> {
+  return (identity, id, acceptedLocalRevision, acceptedMutationId) =>
+    journal.clearLocalCheckpoint(
+      identity,
+      workspace,
+      id,
       acceptedLocalRevision,
       acceptedMutationId,
     );
@@ -382,12 +544,12 @@ export async function saveWorkspaceState(state: WorkspaceState): Promise<void> {
   }
 }
 
-export async function importLegacySessionOnce(
+export async function importLegacyWorkspaceOnce(
   identity: ServerIdentity,
   workspace: WorkspaceId,
-  session: SessionState,
+  legacyWorkspace: LegacyWorkspace | null,
 ): Promise<WorkspaceState> {
-  const legacy = decodeLegacySession(session);
+  const legacy = legacyWorkspace === null ? null : decodeLegacyWorkspace(legacyWorkspace);
   const db = await openDatabase();
   try {
     const transaction = db.transaction(WORKSPACES, "readwrite");
@@ -404,9 +566,15 @@ export async function importLegacySessionOnce(
     const empty = emptyWorkspace(identity, workspace);
     const imported = decodeWorkspaceState({
       ...(previous ?? empty),
-      tabs: previous?.tabs ?? legacy.openTabs.map(workspaceTabFromLegacy),
-      activeNoteId: previous?.activeNoteId ?? legacy.activeNoteId,
-      closedTabs: previous?.closedTabs ?? legacy.closedTabs.map(workspaceTabFromLegacy),
+      tabs: previous === null ? legacy?.session.openTabs.map(workspaceTabFromLegacy) ?? [] : previous.tabs,
+      activeTab: previous === null
+        ? legacy?.session.activeNoteId === null || legacy === null
+          ? null
+          : { kind: "saved", noteId: legacy.session.activeNoteId }
+        : previous.activeTab,
+      closedTabs: previous === null ? legacy?.session.closedTabs.map(workspaceTabFromLegacy) ?? [] : previous.closedTabs,
+      pinnedNoteIds: previous === null ? legacy?.pinnedNoteIds ?? [] : previous.pinnedNoteIds,
+      recentNoteIds: previous === null ? legacy?.recentNoteIds ?? [] : previous.recentNoteIds,
       legacySessionImported: true,
     });
     store.put({ ...imported, savedAtMs: Date.now() });
@@ -428,11 +596,13 @@ export async function writeDraftCheckpoint(record: DraftJournalRecord): Promise<
     const store = transaction.objectStore(DRAFTS);
     const key = draftKeyTuple(valid);
     const raw = await requestResult(store.get(key) as IDBRequest<unknown>);
-    if (raw !== undefined && decodeDraftJournalRecord(raw).localRevision > valid.localRevision) {
+    const existing = raw === undefined ? null : decodeDraftJournalRecord(raw);
+    const merged = existing === null ? valid : mergeDraftJournalRecords(existing, valid);
+    if (merged === null) {
       await done;
       return false;
     }
-    store.put(valid);
+    store.put(merged);
     await done;
     return true;
   } catch (error) {
@@ -440,6 +610,219 @@ export async function writeDraftCheckpoint(record: DraftJournalRecord): Promise<
   } finally {
     db.close();
   }
+}
+
+export async function promoteLocalDraftCheckpoint(
+  identity: DocumentIdentity,
+  workspace: WorkspaceId,
+  id: LocalDraftId,
+  acceptedDocument: V2NoteDocument,
+): Promise<DraftJournalRecord | null> {
+  const document = decodeV2NoteDocument(acceptedDocument);
+  if (document.meta.noteId !== identity.noteId) {
+    throw new ClientStorageFailureError("corrupt", "Accepted note identity does not match its key");
+  }
+  const db = await openDatabase();
+  try {
+    const transaction = db.transaction([DRAFTS, WORKSPACES], "readwrite");
+    const done = transactionDone(transaction);
+    const store = transaction.objectStore(DRAFTS);
+    const workspaceStore = transaction.objectStore(WORKSPACES);
+    const localKey = [2, identity.serverInstanceId, identity.vaultId, workspace, id];
+    const [localRaw, workspaceRaw] = await Promise.all([
+      requestResult(store.get(localKey) as IDBRequest<unknown>),
+      requestResult(workspaceStore.get(workspaceKey(identity, workspace)) as IDBRequest<unknown>),
+    ]);
+    if (localRaw === undefined) {
+      await done;
+      return null;
+    }
+    const local = decodeLocalDraftJournalRecord(localRaw);
+    if (local.serverInstanceId !== identity.serverInstanceId || local.vaultId !== identity.vaultId ||
+      local.workspaceId !== workspace || local.localDraftId !== id) {
+      throw corrupt("Local draft identity does not match its storage key");
+    }
+    const titleIsUnaccepted = local.titleDraft !== document.meta.title;
+    const promoted: DraftJournalRecord = {
+      formatVersion: 1,
+      serverInstanceId: identity.serverInstanceId,
+      vaultId: identity.vaultId,
+      workspaceId: workspace,
+      noteId: identity.noteId,
+      baseRevision: document.meta.revision,
+      baseSourceHash: document.meta.sourceHash,
+      baseDiskHash: document.meta.diskHash,
+      localRevision: local.localRevision,
+      mutationId: local.mutationId,
+      ...(titleIsUnaccepted
+        ? { titleRevision: local.localRevision, titleMutationId: local.mutationId }
+        : {}),
+      source: local.source,
+      titleDraft: titleIsUnaccepted ? local.titleDraft : null,
+      selection: local.selection,
+      checkpointedAtMs: Date.now(),
+    };
+    const savedKey = [1, identity.serverInstanceId, identity.vaultId, workspace, identity.noteId];
+    const savedRaw = await requestResult(store.get(savedKey) as IDBRequest<unknown>);
+    const existing = savedRaw === undefined ? null : decodeDraftJournalRecord(savedRaw);
+    const merged = existing === null ? promoted : mergeDraftJournalRecords(existing, promoted);
+    if (merged === null) {
+      await done;
+      return null;
+    }
+    if (workspaceRaw !== undefined) {
+      const workspaceState = decodeWorkspaceState(workspaceRaw);
+      assertWorkspaceKey(workspaceState, identity, workspace);
+      const promoteTab = (tab: WorkspaceTab): WorkspaceTab =>
+        tab.kind === "local-draft" && tab.localDraftId === id
+          ? {
+            ...tab,
+            kind: "saved",
+            noteId: identity.noteId,
+            title: titleIsUnaccepted ? local.titleDraft : document.meta.title,
+            path: document.meta.path,
+          }
+          : tab;
+      workspaceStore.put({
+        ...workspaceState,
+        tabs: workspaceState.tabs.map(promoteTab),
+        activeTab: workspaceState.activeTab?.kind === "local-draft" && workspaceState.activeTab.localDraftId === id
+          ? { kind: "saved", noteId: identity.noteId }
+          : workspaceState.activeTab,
+        closedTabs: workspaceState.closedTabs.map(promoteTab),
+        savedAtMs: Date.now(),
+      });
+    }
+    store.put(merged);
+    store.delete(localKey);
+    await done;
+    return merged;
+  } catch (error) {
+    throw storageFailure(error);
+  } finally {
+    db.close();
+  }
+}
+
+export async function writeLocalDraftCheckpoint(record: LocalDraftJournalRecord): Promise<boolean> {
+  const valid = decodeLocalDraftJournalRecord(record);
+  const db = await openDatabase();
+  try {
+    const transaction = db.transaction(DRAFTS, "readwrite");
+    const done = transactionDone(transaction);
+    const store = transaction.objectStore(DRAFTS);
+    const key = localDraftKeyTuple(valid);
+    const raw = await requestResult(store.get(key) as IDBRequest<unknown>);
+    const existing = raw === undefined ? null : decodeLocalDraftJournalRecord(raw);
+    if (existing !== null && existing.localRevision > valid.localRevision) {
+      await done;
+      return false;
+    }
+    const promotionPending = existing?.mutationId === valid.mutationId && existing.promotionPending
+      ? true
+      : valid.promotionPending;
+    store.put({ ...valid, promotionPending, noteId: valid.localDraftId });
+    await done;
+    return true;
+  } catch (error) {
+    throw storageFailure(error);
+  } finally {
+    db.close();
+  }
+}
+
+function mergeDraftJournalRecords(
+  existing: DraftJournalRecord,
+  incoming: DraftJournalRecord,
+): DraftJournalRecord | null {
+  const incomingBodyWins = incoming.localRevision >= existing.localRevision;
+  const body = incomingBodyWins ? incoming : existing;
+  const title = latestTitleCheckpoint(existing, incoming, incomingBodyWins);
+  const incomingTitleChanged = title.incoming && !sameTitleCheckpoint(existing, title.checkpoint);
+  if (!incomingBodyWins && !incomingTitleChanged) {
+    return null;
+  }
+  const {
+    titleDraft: _bodyTitleDraft,
+    titleRevision: _bodyTitleRevision,
+    titleMutationId: _bodyTitleMutationId,
+    ...bodyFields
+  } = body;
+  return {
+    ...bodyFields,
+    ...title.checkpoint,
+    checkpointedAtMs: Math.max(existing.checkpointedAtMs, incoming.checkpointedAtMs),
+  };
+}
+
+type TitleCheckpoint = Pick<DraftJournalRecord, "titleDraft"> &
+  Partial<Pick<DraftJournalRecord, "titleRevision" | "titleMutationId">>;
+
+type TitleCheckpointSelection = {
+  checkpoint: TitleCheckpoint;
+  incoming: boolean;
+};
+
+function latestTitleCheckpoint(
+  existing: DraftJournalRecord,
+  incoming: DraftJournalRecord,
+  incomingBodyWins: boolean,
+): TitleCheckpointSelection {
+  const existingRevision = existing.titleRevision;
+  const incomingRevision = incoming.titleRevision;
+  if (existingRevision !== undefined && incomingRevision !== undefined && existingRevision !== incomingRevision) {
+    const incomingIsNewer = incomingRevision > existingRevision;
+    return titleCheckpointSelection(incomingIsNewer ? incoming : existing, incomingIsNewer);
+  }
+  if (existingRevision === undefined && incomingRevision !== undefined) {
+    return titleCheckpointSelection(incoming, true);
+  }
+  if (incomingRevision === undefined && existingRevision !== undefined) {
+    return titleCheckpointSelection(existing, false);
+  }
+  if (existing.titleMutationId !== undefined && incoming.titleMutationId !== undefined &&
+    existing.titleMutationId !== incoming.titleMutationId) {
+    throw corrupt("Title draft mutation identity changed without advancing its revision");
+  }
+  let selected: DraftJournalRecord;
+  if (existing.titleDraft === null && incoming.titleDraft !== null) {
+    selected = existing;
+  } else if (incoming.titleDraft === null && existing.titleDraft !== null) {
+    selected = incoming;
+  } else if (existing.titleDraft !== incoming.titleDraft) {
+    if (existingRevision !== undefined && incomingRevision !== undefined) {
+      throw corrupt("Title draft changed without advancing its revision");
+    }
+    selected = incomingBodyWins ? incoming : existing;
+  } else {
+    selected = incomingBodyWins ? incoming : existing;
+  }
+  const checkpoint: TitleCheckpoint = {
+    titleDraft: selected.titleDraft,
+    ...(existingRevision === undefined && incomingRevision === undefined
+      ? {}
+      : { titleRevision: existingRevision ?? incomingRevision }),
+    ...(existing.titleMutationId === undefined && incoming.titleMutationId === undefined
+      ? {}
+      : { titleMutationId: existing.titleMutationId ?? incoming.titleMutationId }),
+  };
+  return { checkpoint, incoming: selected === incoming };
+}
+
+function titleCheckpointSelection(record: DraftJournalRecord, incoming: boolean): TitleCheckpointSelection {
+  return {
+    checkpoint: {
+      titleDraft: record.titleDraft,
+      ...(record.titleRevision === undefined ? {} : { titleRevision: record.titleRevision }),
+      ...(record.titleMutationId === undefined ? {} : { titleMutationId: record.titleMutationId }),
+    },
+    incoming,
+  };
+}
+
+function sameTitleCheckpoint(left: DraftJournalRecord, right: TitleCheckpoint): boolean {
+  return left.titleDraft === right.titleDraft && left.titleRevision === right.titleRevision &&
+    left.titleMutationId === right.titleMutationId;
 }
 
 export async function getDraftCheckpoint(
@@ -466,6 +849,39 @@ export async function getDraftCheckpoint(
     if (record.serverInstanceId !== identity.serverInstanceId || record.vaultId !== identity.vaultId ||
       record.workspaceId !== workspace || record.noteId !== noteId) {
       throw corrupt("Draft identity does not match its storage key");
+    }
+    return record;
+  } catch (error) {
+    throw storageFailure(error);
+  } finally {
+    db.close();
+  }
+}
+
+export async function getLocalDraftCheckpoint(
+  identity: ServerIdentity,
+  workspace: WorkspaceId,
+  id: LocalDraftId,
+): Promise<LocalDraftJournalRecord | null> {
+  const db = await openDatabase();
+  try {
+    const transaction = db.transaction(DRAFTS, "readonly");
+    const done = transactionDone(transaction);
+    const request = transaction.objectStore(DRAFTS).get([
+      2,
+      identity.serverInstanceId,
+      identity.vaultId,
+      workspace,
+      id,
+    ]) as IDBRequest<unknown>;
+    const [value] = await Promise.all([requestResult(request), done]);
+    if (value === undefined) {
+      return null;
+    }
+    const record = decodeLocalDraftJournalRecord(value);
+    if (record.serverInstanceId !== identity.serverInstanceId || record.vaultId !== identity.vaultId ||
+      record.workspaceId !== workspace || record.localDraftId !== id) {
+      throw corrupt("Local draft identity does not match its storage key");
     }
     return record;
   } catch (error) {
@@ -512,6 +928,84 @@ export async function clearDraftCheckpoint(
   }
 }
 
+export async function clearLocalDraftCheckpoint(
+  identity: ServerIdentity,
+  workspace: WorkspaceId,
+  id: LocalDraftId,
+  acceptedLocalRevision: number,
+  acceptedMutationId: string,
+): Promise<boolean> {
+  const db = await openDatabase();
+  try {
+    const transaction = db.transaction(DRAFTS, "readwrite");
+    const done = transactionDone(transaction);
+    const store = transaction.objectStore(DRAFTS);
+    const key = [2, identity.serverInstanceId, identity.vaultId, workspace, id];
+    const raw = await requestResult(store.get(key) as IDBRequest<unknown>);
+    if (raw === undefined) {
+      await done;
+      return false;
+    }
+    const record = decodeLocalDraftJournalRecord(raw);
+    if (record.serverInstanceId !== identity.serverInstanceId || record.vaultId !== identity.vaultId ||
+      record.workspaceId !== workspace || record.localDraftId !== id) {
+      throw corrupt("Local draft identity does not match its storage key");
+    }
+    if (record.localRevision !== acceptedLocalRevision || record.mutationId !== acceptedMutationId) {
+      await done;
+      return false;
+    }
+    store.delete(key);
+    await done;
+    return true;
+  } catch (error) {
+    throw storageFailure(error);
+  } finally {
+    db.close();
+  }
+}
+
+export async function clearTitleDraftCheckpoint(
+  identity: ServerIdentity,
+  workspace: WorkspaceId,
+  noteId: string,
+  titleRevision: number,
+  titleMutationId: string,
+): Promise<boolean> {
+  const db = await openDatabase();
+  try {
+    const transaction = db.transaction(DRAFTS, "readwrite");
+    const done = transactionDone(transaction);
+    const store = transaction.objectStore(DRAFTS);
+    const key = [1, identity.serverInstanceId, identity.vaultId, workspace, noteId];
+    const raw = await requestResult(store.get(key) as IDBRequest<unknown>);
+    if (raw === undefined) {
+      await done;
+      return false;
+    }
+    const record = decodeDraftJournalRecord(raw);
+    if (record.serverInstanceId !== identity.serverInstanceId || record.vaultId !== identity.vaultId ||
+      record.workspaceId !== workspace || record.noteId !== noteId) {
+      throw corrupt("Draft identity does not match its storage key");
+    }
+    if (record.titleRevision !== titleRevision || record.titleMutationId !== titleMutationId) {
+      await done;
+      return false;
+    }
+    if (record.titleDraft === null) {
+      await done;
+      return true;
+    }
+    store.put({ ...record, titleDraft: null });
+    await done;
+    return true;
+  } catch (error) {
+    throw storageFailure(error);
+  } finally {
+    db.close();
+  }
+}
+
 export function createWorkspaceId(storage?: Storage): WorkspaceId {
   try {
     const target = storage ?? globalThis.localStorage;
@@ -540,7 +1034,13 @@ export function decodeWorkspaceState(value: unknown): WorkspaceState {
     vaultId: identityString(body["vaultId"], "vaultId"),
     workspaceId: identityString(body["workspaceId"], "workspaceId"),
     tabs: list(body["tabs"], "tabs", 500).map(decodeWorkspaceTab),
-    activeNoteId: body["activeNoteId"] === null ? null : identityString(body["activeNoteId"], "activeNoteId"),
+    activeTab: body["activeTab"] === undefined
+      ? body["activeNoteId"] === null
+        ? null
+        : { kind: "saved", noteId: identityString(body["activeNoteId"], "activeNoteId") }
+      : body["activeTab"] === null
+      ? null
+      : decodeWorkspaceTabIdentity(body["activeTab"]),
     closedTabs: list(body["closedTabs"], "closedTabs", 500).map(decodeWorkspaceTab),
     pinnedNoteIds: list(body["pinnedNoteIds"], "pinnedNoteIds", 500).map((id) => identityString(id, "pinned note id")),
     recentNoteIds: list(body["recentNoteIds"], "recentNoteIds", 500).map((id) => identityString(id, "recent note id")),
@@ -554,7 +1054,7 @@ export function decodeDraftJournalRecord(value: unknown): DraftJournalRecord {
   const body = object(value, "draft journal record");
   version(body["formatVersion"], 1, "draft journal");
   const source = text(body["source"], "source");
-  return {
+  const record: DraftJournalRecord = {
     formatVersion: 1,
     serverInstanceId: identityString(body["serverInstanceId"], "serverInstanceId"),
     vaultId: identityString(body["vaultId"], "vaultId"),
@@ -567,6 +1067,41 @@ export function decodeDraftJournalRecord(value: unknown): DraftJournalRecord {
     mutationId: boundedMutationId(body["mutationId"]),
     source,
     titleDraft: body["titleDraft"] === null ? null : text(body["titleDraft"], "titleDraft"),
+    selection: body["selection"] === null ? null : selection(body["selection"], source.length),
+    checkpointedAtMs: safeInteger(body["checkpointedAtMs"], "checkpointedAtMs"),
+  };
+  if (body["titleRevision"] !== undefined) {
+    record.titleRevision = safeInteger(body["titleRevision"], "titleRevision");
+  }
+  if (body["titleMutationId"] !== undefined) {
+    record.titleMutationId = boundedMutationId(body["titleMutationId"]);
+  }
+  return record;
+}
+
+export function decodeLocalDraftJournalRecord(value: unknown): LocalDraftJournalRecord {
+  const body = object(value, "local draft journal record");
+  version(body["formatVersion"], 2, "local draft journal");
+  if (body["kind"] !== "local") {
+    throw corrupt("Local draft journal kind is unknown");
+  }
+  const id = localDraftId(identityString(body["localDraftId"], "localDraftId"));
+  if (body["noteId"] !== undefined && body["noteId"] !== id) {
+    throw corrupt("Local draft key identity does not match its record");
+  }
+  const source = text(body["source"], "source");
+  return {
+    formatVersion: 2,
+    kind: "local",
+    serverInstanceId: identityString(body["serverInstanceId"], "serverInstanceId"),
+    vaultId: identityString(body["vaultId"], "vaultId"),
+    workspaceId: identityString(body["workspaceId"], "workspaceId"),
+    localDraftId: id,
+    localRevision: safeInteger(body["localRevision"], "localRevision"),
+    mutationId: boundedMutationId(body["mutationId"]),
+    source,
+    titleDraft: text(body["titleDraft"], "titleDraft"),
+    promotionPending: body["promotionPending"] === undefined ? false : bool(body["promotionPending"], "promotionPending"),
     selection: body["selection"] === null ? null : selection(body["selection"], source.length),
     checkpointedAtMs: safeInteger(body["checkpointedAtMs"], "checkpointedAtMs"),
   };
@@ -588,6 +1123,7 @@ export function decodeCachedNoteBody(value: unknown): CachedNoteBody {
 
 export function workspaceTabFromLegacy(tab: SessionState["openTabs"][number]): WorkspaceTab {
   return {
+    kind: "saved",
     noteId: identityString(tab.noteId, "noteId"),
     title: tab.title,
     path: tab.path,
@@ -621,17 +1157,43 @@ function decodeWorkspaceTab(value: unknown): WorkspaceTab {
   if (mode !== "live" && mode !== "source") {
     throw corrupt("Workspace mode is unknown");
   }
-  return {
-    noteId: identityString(body["noteId"], "noteId"),
+  const fields: WorkspaceTabFields = {
     title: text(body["title"], "title"),
     path: text(body["path"], "path"),
     selection: body["selection"] === null ? null : selection(body["selection"]),
     scrollTop: numberAtLeastZero(body["scrollTop"], "scrollTop"),
     mode,
   };
+  if (body["kind"] === "local-draft") {
+    return { ...fields, kind: "local-draft", localDraftId: localDraftId(identityString(body["localDraftId"], "localDraftId")) };
+  }
+  if (body["kind"] === undefined || body["kind"] === "saved") {
+    return { ...fields, kind: "saved", noteId: identityString(body["noteId"], "noteId") };
+  }
+  throw corrupt("Workspace tab kind is unknown");
 }
 
-function decodeLegacySession(value: SessionState): SessionState {
+function decodeWorkspaceTabIdentity(value: unknown): WorkspaceTabIdentity {
+  const body = object(value, "active workspace tab");
+  if (body["kind"] === "saved") {
+    return { kind: "saved", noteId: identityString(body["noteId"], "noteId") };
+  }
+  if (body["kind"] === "local-draft") {
+    return { kind: "local-draft", localDraftId: localDraftId(identityString(body["localDraftId"], "localDraftId")) };
+  }
+  throw corrupt("Active workspace tab kind is unknown");
+}
+
+function decodeLegacyWorkspace(value: unknown): LegacyWorkspace {
+  const body = object(value, "legacy workspace");
+  return {
+    session: decodeLegacySession(body["session"]),
+    pinnedNoteIds: list(body["pinnedNoteIds"], "pinnedNoteIds", 500).map((id) => identityString(id, "pinned note id")),
+    recentNoteIds: list(body["recentNoteIds"], "recentNoteIds", 500).map((id) => identityString(id, "recent note id")),
+  };
+}
+
+function decodeLegacySession(value: unknown): SessionState {
   const body = object(value, "legacy session");
   const tab = (item: unknown) => {
     const entry = object(item, "legacy session tab");
@@ -657,7 +1219,7 @@ function emptyWorkspace(identity: ServerIdentity, workspace: WorkspaceId): Works
     vaultId: identity.vaultId,
     workspaceId: workspace,
     tabs: [],
-    activeNoteId: null,
+    activeTab: null,
     closedTabs: [],
     pinnedNoteIds: [],
     recentNoteIds: [],
@@ -749,19 +1311,26 @@ function workspaceKey(identity: ServerIdentity, workspace: WorkspaceId): IDBVali
 }
 
 function draftKeyTuple(record: DraftJournalRecord): IDBValidKey {
-  return [1, record.serverInstanceId, record.vaultId, record.workspaceId, record.noteId];
+  return [record.formatVersion, record.serverInstanceId, record.vaultId, record.workspaceId, record.noteId];
 }
 
-function draftKey(record: DraftJournalRecord): string {
-  return draftIdentityKey(record, record.workspaceId, record.noteId);
+function localDraftKeyTuple(record: LocalDraftJournalRecord): IDBValidKey {
+  return [record.formatVersion, record.serverInstanceId, record.vaultId, record.workspaceId, record.localDraftId];
+}
+
+function draftKey(record: DraftJournalRecord | LocalDraftJournalRecord): string {
+  return "kind" in record
+    ? draftIdentityKey("local", record, record.workspaceId, record.localDraftId)
+    : draftIdentityKey("saved", record, record.workspaceId, record.noteId);
 }
 
 function draftIdentityKey(
+  kind: "saved" | "local",
   identity: { serverInstanceId: string; vaultId: string },
   workspace: string,
-  noteId: string,
+  id: string,
 ): string {
-  return JSON.stringify([identity.serverInstanceId, identity.vaultId, workspace, noteId]);
+  return JSON.stringify([kind, identity.serverInstanceId, identity.vaultId, workspace, id]);
 }
 
 function requestResult<T>(request: IDBRequest<T>): Promise<T> {

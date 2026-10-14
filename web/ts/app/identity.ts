@@ -6,6 +6,7 @@ export type ServerInstanceId = IdentityValue<"ServerInstanceId">;
 export type VaultId = IdentityValue<"VaultId">;
 export type WorkspaceId = IdentityValue<"WorkspaceId">;
 export type NoteId = IdentityValue<"NoteId">;
+export type LocalDraftId = IdentityValue<"LocalDraftId">;
 
 export type ServerIdentity = {
   serverInstanceId: ServerInstanceId;
@@ -30,6 +31,10 @@ export function workspaceId(value: string): WorkspaceId {
 
 export function noteId(value: string): NoteId {
   return nonEmptyIdentity(value, "note") as NoteId;
+}
+
+export function localDraftId(value: string): LocalDraftId {
+  return nonEmptyIdentity(value, "local draft") as LocalDraftId;
 }
 
 export function serverIdentityKey(identity: ServerIdentity): string {
