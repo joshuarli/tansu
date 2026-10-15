@@ -55,10 +55,11 @@ targets remain unresolved.
 Renaming a note changes its path and keeps its `noteId`. Tansu2 does not rewrite
 Markdown links that mention the old path.
 
-Wiki images use `![[name]]` or `![[name|320]]`. The configured URL resolver
-maps an opaque vault-local asset name to a URL. Dragging the resize handle
-replaces only that image construct in one undoable transaction. Widths stay
-between 48 and 2,400 pixels.
+Wiki images use `![[name]]` or `![[name|320]]`. Standard Markdown images with
+vault asset paths use the same configured URL resolver. HTTP and HTTPS image
+URLs remain remote. Dragging a wiki-image resize handle replaces only that
+image construct in one undoable transaction. Widths stay between 48 and 2,400
+pixels.
 
 The editor shares the shell's system font and color tokens. Wide Markdown tables
 keep each cell on one line and scroll horizontally inside the editor.
@@ -87,6 +88,8 @@ Atomic table edits resolve the current syntax-tree range for the edited cell.
 They replace only that cell's source span. Find treats the query as literal
 text, uses smart case, and returns UTF-16 source ranges. The outline reads
 headings from the Markdown syntax tree and skips frontmatter and fenced code.
+As the editor scrolls, the outline highlights the heading at the reading
+position and fades the highlight between headings.
 Tag updates edit only tags-only frontmatter. They leave the body and all other
 source unchanged.
 

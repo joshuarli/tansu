@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { chromium, firefox, webkit } from "playwright";
+import { chromium, webkit } from "playwright";
 
 import { createTestFixture } from "../scripts/test-fixture.mjs";
 import { canonicalSourceHash } from "../web/ts/save-delta.ts";
@@ -16,8 +16,8 @@ import { stopProcessGroup } from "./process-group.mjs";
 const REPO_ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const BENCH_DIR = join(REPO_ROOT, "bench");
 const RESULTS_DIR = join(REPO_ROOT, ".work", "tmp", "bench-results");
-const SEARCH_QUERY = "GlobalFoundries";
-const SEARCH_RESULT_PATH = "2025-05-16-ai-arrives-in-the-middle-east-us-strikes-a-deal-with-uae-and-ksa.md";
+const SEARCH_QUERY = "alpha";
+const SEARCH_RESULT_PATH = "search.md";
 const LARGE_NOTE_PATH = "tns-19-20-baseline.md";
 const LARGE_NOTE_BYTES = 1024 * 1024;
 const LARGE_NOTE_MATCHES = 100;
@@ -31,7 +31,7 @@ const browsers = String(args.browser ?? "chromium")
   .filter(Boolean);
 const checkBudgets = args["check-budgets"] !== "false" && args.calibrate !== "true";
 
-const browserTypes = { chromium, firefox, webkit };
+const browserTypes = { chromium, webkit };
 
 async function main() {
   execFileSync("deno", ["task", "build"], { cwd: REPO_ROOT, stdio: "inherit" });
@@ -403,8 +403,7 @@ async function measureSearchPaint(page, input, query, expectedPath) {
       const observer = globalThis.__tansuSearchLongTaskObserver;
       globalThis.__tansuSearchLongTasks.push(...observer.takeRecords().map(({ startTime, duration }) => ({ startTime, duration })));
       const request = performance.getEntriesByType("resource")
-        .filter((entry) => new URL(entry.name).pathname.endsWith("/search"))
-        .at(-1);
+        .findLast((entry) => new URL(entry.name).pathname.endsWith("/search"));
       if (start === undefined || request === undefined) throw new Error("search request timing is missing");
       const paintedMs = await new Promise((resolve) => {
         requestAnimationFrame(() => requestAnimationFrame(() => {

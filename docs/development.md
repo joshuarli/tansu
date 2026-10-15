@@ -20,42 +20,21 @@ make dev
 make check
 make test
 make test-e2e-chromium
+make test-e2e-webkit
 ```
 
-`make dev` serves the app on port `3000` with the shared fixture vaults and
-isolated `.dev/` config and data. It does not use your real vault configuration.
-See [Fixtures](fixtures.md) for fixture setup and [Logging](logging.md) for the
-dev and e2e log stream.
+`make dev` serves the app on port `3000` with one demo note and its WebP images.
+It generates isolated config, data, and a copied vault under `.dev/`; it does
+not use your real vault configuration. See [Fixtures](fixtures.md) for fixture
+setup and [Logging](logging.md) for the dev and e2e log stream.
 
 `make check` verifies generated types, TypeScript types, and Rust compilation.
-`make test` runs the TypeScript and Rust unit suites. The e2e targets are
-`make test-e2e-chromium`, `make test-e2e-firefox`, and
-`make test-e2e-webkit`.
+`make test` runs the TypeScript and Rust unit suites. The two e2e commands cover
+Chrome's and Safari's browser engines.
 
-## Authenticated-mode administration
-
-Authenticated mode is configured through `[auth]` in the config file described
-in [Configuration](configuration.md). `make dev` keeps its loopback behavior
-when that section is absent. With authenticated mode configured, run
-`tansu2 auth enroll` before starting the server to print the expiring,
-single-use first-registration capability. Stop the server before local auth
-commands; an exclusive OS file lock also rejects commands while the server is
-running.
-
-Create and restore passkey backups with:
-
-```sh
-tansu2 auth backup /path/to/auth-backup.db
-tansu2 auth restore /path/to/auth-backup.db
-```
-
-Backup creates a consistent SQLite file and refuses to overwrite its path.
-Restore validates the file, restores credentials, and clears sessions,
-enrollment capabilities, and pending ceremonies. These commands do not back up
-vault notes or history; see [Security](security.md) for path and recovery
-details.
-See [Deployment](deployment.md) for Tailscale Serve setup, full backup scope,
-passkey recovery limits, and rollback guidance.
+See [Configuration](configuration.md) for server settings and
+[Deployment](deployment.md) for passkey administration, remote access, and
+backup and recovery procedures.
 
 ## Build
 

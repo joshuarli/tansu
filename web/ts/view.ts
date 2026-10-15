@@ -22,6 +22,7 @@ export type ViewActions = {
   recentPreview: (noteId: string) => string | null;
   findMatches: () => readonly FindMatch[];
   outline: () => Outline;
+  activeHeadingFrom: number | null;
 };
 
 export function renderApp(state: State, actions: ViewActions): HTMLElement[] {
@@ -317,6 +318,8 @@ function renderSidebar(state: State, actions: ViewActions): HTMLElement {
       "outline-row",
     );
     item.style.setProperty("--outline-level", String(heading.level));
+    item.dataset["headingFrom"] = String(heading.from);
+    if (heading.from === actions.activeHeadingFrom) item.setAttribute("aria-current", "location");
     outlineList.append(item);
   }
   if (outline.headings.length === 0) outlineList.append(span("No headings", "empty-outline"));
@@ -679,7 +682,7 @@ function renderOverlays(state: State, actions: ViewActions): HTMLElement {
     input.addEventListener("input", () => actions.dispatch({ type: "quickOpen.input", query: input.value }));
     const hits = state.quickOpenHits ?? [];
     const orderedHits = state.quickOpenQuery.trim() === ""
-      ? [...hits].sort((left, right) => {
+      ? [...hits].toSorted((left, right) => {
         const leftIndex = state.recent.indexOf(left.noteId);
         const rightIndex = state.recent.indexOf(right.noteId);
         return (leftIndex === -1 ? Number.MAX_SAFE_INTEGER : leftIndex) -
@@ -1134,7 +1137,7 @@ function normalizeSnippet(
   ranges: V2SearchHit["excerptRanges"];
 } {
   const original = source.slice(start, end);
-  const offsets = new Array<number>(original.length + 1);
+  const offsets = Array.from<number | undefined>({ length: original.length + 1 });
   let text = "";
   let index = 0;
   while (index < original.length) {

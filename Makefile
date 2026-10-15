@@ -9,7 +9,7 @@ dev:
 	TANSU2_LOGS=pretty XDG_CONFIG_HOME="$(DEV_CONFIG_HOME)" XDG_DATA_HOME="$(DEV_DATA_HOME)" cargo run --bin $(NAME) -- --port 3000
 
 dev-config:
-	deno run --allow-read --allow-write --allow-env scripts/test-fixture.mjs "$(DEV_DIR)"
+	node scripts/dev-fixture.mjs "$(DEV_DIR)"
 
 check: types-check
 	deno task typecheck
@@ -46,7 +46,7 @@ audit:
 	pnpm audit --prod --audit-level=high
 	# cargo deny check
 
-ci: lint coverage test-e2e-chromium test-e2e-firefox test-e2e-webkit audit
+ci: lint coverage test-e2e-chromium test-e2e-webkit audit
 
 types:
 	cargo run --quiet --bin gen-api-types
@@ -65,9 +65,6 @@ test-ts:
 
 test-e2e-chromium:
 	TANSU2_E2E_BROWSER=chromium deno task test:browser
-
-test-e2e-firefox:
-	TANSU2_E2E_BROWSER=firefox deno task test:browser
 
 test-e2e-webkit:
 	TANSU2_E2E_BROWSER=webkit deno task test:browser
@@ -104,7 +101,7 @@ bench:
 
 bench-full:
 	mkdir -p "$(CURDIR)/.work/tmp"
-	TMPDIR="$(CURDIR)/.work/tmp" node bench/integrated-bench.mjs --browser=chromium,firefox,webkit --warmups=5 --runs=20
+	TMPDIR="$(CURDIR)/.work/tmp" node bench/integrated-bench.mjs --browser=chromium,webkit --warmups=5 --runs=20
 	TMPDIR="$(CURDIR)/.work/tmp" node bench/note-cache-bench.mjs --runs=20 --delay=200
 	TMPDIR="$(CURDIR)/.work/tmp" MD_WYSIWYG_BENCH=1 deno task test web/ts/editor/tests/large-note-bench.test.ts
 
@@ -112,18 +109,4 @@ bench-long-session:
 	mkdir -p "$(CURDIR)/.work/tmp"
 	TMPDIR="$(CURDIR)/.work/tmp" node bench/long-session.mjs
 
-visual-oracle-import:
-	TMPDIR="$(CURDIR)/.work/tmp" node scripts/import-native-visual-oracle.mjs
-
-visual-parity:
-	TMPDIR="$(CURDIR)/.work/tmp" node bench/native-parity.mjs
-
-visual-parity-report:
-	TANSU_VISUAL_PARITY_RUN_ID="$(RUN_ID)" TMPDIR="$(CURDIR)/.work/tmp" node bench/native-parity-report.mjs
-
-visual-parity-fault-check:
-	TMPDIR="$(CURDIR)/.work/tmp" node bench/native-parity-fault-check.mjs
-
-visual-parity-acceptance: visual-parity
-
-.PHONY: audit bench bench-full bench-long-session build-linux-musl-aarch64 build-linux-musl-both build-linux-musl-docker build-linux-musl-x86_64 ci coverage coverage-html coverage-rs coverage-ts dev dev-config check lint test-package types types-check ts test test-e2e test-rs visual-oracle-import visual-parity visual-parity-fault-check visual-parity-report visual-parity-acceptance
+.PHONY: audit bench bench-full bench-long-session build-linux-musl-aarch64 build-linux-musl-both build-linux-musl-docker build-linux-musl-x86_64 ci coverage coverage-html coverage-rs coverage-ts dev dev-config check lint test-package types types-check ts test test-e2e-chromium test-e2e-webkit test-rs

@@ -50,11 +50,7 @@ Auth data belongs in a private state directory outside search indexes and
 caches. The directory is restricted to its owner. The database is
 owner-readable and writable. Server configuration selects the directory.
 
-## Local administration and recovery
-
-Authenticated mode is opt-in through `[auth]`. Run `tansu2 auth enroll` to
-create the first enrollment capability. The command prints it once. It expires
-after ten minutes. Later credentials require a recently verified owner session.
+## Auth data
 
 On supported macOS and Linux targets, the server and local auth commands hold
 an exclusive OS file lock in the auth state directory. Stop the server before
@@ -78,10 +74,6 @@ and pending ceremonies.
 Auth backups contain public credential records, not authenticator private
 keys. They do not contain vault notes, app history, or search indexes. Protect
 backup files as private credentials. See [Deployment](deployment.md) for
-backup and recovery steps.
+enrollment and recovery procedures.
 
-Tailscale Serve can provide private HTTPS for remote tailnet devices while the
-Tansu2 listener stays on loopback. Tailscale identity headers do not authorize
-Tansu2 requests. Use passkey authentication and the configured origin checks.
-Do not expose the server with Tailscale Funnel. See [Deployment](deployment.md)
-for setup.
+For private remote access, see [Deployment](deployment.md).

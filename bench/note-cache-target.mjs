@@ -1,7 +1,7 @@
 import { stat } from "node:fs/promises";
 import { join } from "node:path";
 
-export const targetNotePath = "2021-06-21-globalfoundries-is-a-leading-edge.md";
+export const targetNotePath = "2026-02-05-claude-code-is-the-inflection-point.md";
 
 export async function requireTargetNote(vaultPath) {
   const path = join(vaultPath, targetNotePath);

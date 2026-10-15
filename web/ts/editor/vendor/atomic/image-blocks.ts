@@ -117,7 +117,10 @@ class ImageWidget extends WidgetType {
   }
 }
 
-function buildImageBlocks(state: EditorState): DecorationSet {
+function buildImageBlocks(
+  state: EditorState,
+  resolveImageUrl: (source: string) => string | null,
+): DecorationSet {
   const ranges: Range<Decoration>[] = [];
   // Push the parser to cover the whole doc so image nodes in
   // regions CM6 hasn't yet parsed get widgetized. Without this, for
@@ -152,11 +155,13 @@ function buildImageBlocks(state: EditorState): DecorationSet {
       const alt = match[1] ?? '';
       const src = match[2];
       if (!src) return;
+      const resolvedSrc = resolveImageUrl(src);
+      if (resolvedSrc === null) return;
 
       const line = state.doc.lineAt(node.from);
       ranges.push(
         Decoration.widget({
-          widget: new ImageWidget(src, alt),
+          widget: new ImageWidget(resolvedSrc, alt),
           block: true,
           // side: 1 places the block widget after the line's content,
           // so the image appears below its source line.
@@ -209,30 +214,19 @@ function changeAffectsImages(tr: Transaction, existing: DecorationSet): boolean 
   return affected;
 }
 
-const imageBlocksField = StateField.define<DecorationSet>({
-  create: (state) => buildImageBlocks(state),
-  update(deco, tr) {
-    // Tree-growth effect: the background parser caught up to a
-    // region that wasn't parsed when we last built. Rebuild so any
-    // newly-visible Image nodes get their widget.
-    for (const effect of tr.effects) {
-      if (effect.is(treeGrowthEffect)) return buildImageBlocks(tr.state);
-    }
-    // Selection and viewport changes don't affect the widget set
-    // (though they do affect whether the surrounding markdown is
-    // shown, which is handled by the inline-preview ViewPlugin).
-    if (!tr.docChanged) return deco;
-    // Most keystrokes on a large atom are in plain prose with no
-    // image nearby. Map existing decorations through the change and
-    // skip the full-doc walk unless the change actually touches an
-    // image.
-    const mapped = deco.map(tr.changes);
-    if (!changeAffectsImages(tr, deco)) return mapped;
-    return buildImageBlocks(tr.state);
-  },
-  provide: (f) => EditorView.decorations.from(f),
-});
-
-export function imageBlocks(): Extension {
+export function imageBlocks(resolveImageUrl: (source: string) => string | null): Extension {
+  const imageBlocksField = StateField.define<DecorationSet>({
+    create: (state) => buildImageBlocks(state, resolveImageUrl),
+    update(deco, tr) {
+      for (const effect of tr.effects) {
+        if (effect.is(treeGrowthEffect)) return buildImageBlocks(tr.state, resolveImageUrl);
+      }
+      if (!tr.docChanged) return deco;
+      const mapped = deco.map(tr.changes);
+      if (!changeAffectsImages(tr, deco)) return mapped;
+      return buildImageBlocks(tr.state, resolveImageUrl);
+    },
+    provide: (f) => EditorView.decorations.from(f),
+  });
   return [imageBlocksField, treeProgressPlugin];
 }

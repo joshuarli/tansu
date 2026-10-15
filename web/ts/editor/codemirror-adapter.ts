@@ -30,7 +30,7 @@ import { tables } from "./vendor/atomic/table-widget.js";
 import { wikiLinks } from "./vendor/atomic/wiki-links.js";
 import { calloutDecoration } from "./callout-decoration.js";
 import { sanitizeHtmlToMarkdown } from "./clipboard.js";
-import { findLiteral, outlineFromSyntaxTree, type FindMatch, type Outline } from "./source-navigation.js";
+import { findLiteral, outlineFromSyntaxTree, type FindMatch, type Outline, type OutlineHeading } from "./source-navigation.js";
 import { tagsSourceEdit } from "./tag-source.js";
 import {
   createCalloutExtension,
@@ -209,6 +209,20 @@ type ImagePasteOutcome =
 const sessions = new WeakMap<EditorSession, SessionData>();
 const defaultCallout = createCalloutExtension();
 
+function resolveMarkdownImageUrl(
+  source: string,
+  resolveVaultAsset: ((name: string) => string | null) | undefined,
+): string | null {
+  if (resolveVaultAsset === undefined) return source;
+  if (source.startsWith("//")) return source;
+  try {
+    const protocol = new URL(source).protocol;
+    return protocol === "http:" || protocol === "https:" ? source : null;
+  } catch {
+    return resolveVaultAsset(source);
+  }
+}
+
 function sessionData(session: EditorSession, owner: symbol): SessionData {
   const data = sessions.get(session);
   if (data === undefined || data.owner !== owner) {
@@ -226,6 +240,7 @@ function editorExtensions(config: EditorConfig, live: boolean): Extension[] {
     (extension): extension is Extract<EditorExtension, { kind: "wiki-images" }> =>
       extension.kind === "wiki-images",
   );
+  const resolveVaultAsset = imageExtensions[imageExtensions.length - 1]?.resolveUrl;
   const calloutExtensions = configured.filter(
     (extension): extension is Extract<EditorExtension, { kind: "callouts" }> =>
       extension.kind === "callouts",
@@ -260,7 +275,7 @@ function editorExtensions(config: EditorConfig, live: boolean): Extension[] {
   }
   extensions.push(
     inlinePreview(config.onLinkOpen ? { onLinkClick: config.onLinkOpen } : {}),
-    imageBlocks(),
+    imageBlocks((source) => resolveMarkdownImageUrl(source, resolveVaultAsset)),
     tables(config.onLinkOpen ? { onLinkClick: config.onLinkOpen } : {}),
     calloutDecoration({ icons: callout.icons }),
   );
@@ -605,6 +620,7 @@ export function createCodeMirrorEditor(container: HTMLElement, initialConfig: Ed
     const data = sessionData(activeSession, owner);
     data.state = update.state;
     data.scroll = { top: view.scrollDOM.scrollTop, left: view.scrollDOM.scrollLeft };
+    scheduleActiveHeadingSync();
     const userTransactions = update.transactions.filter(
       (transaction) => transaction.docChanged && transaction.annotation(transactionOrigin) === "userEdit",
     );
@@ -695,6 +711,41 @@ export function createCodeMirrorEditor(container: HTMLElement, initialConfig: Ed
   );
   const view = new EditorView({ state: initialState, parent: container });
   if (config.className) view.dom.classList.add(config.className);
+  let activeHeadingFrom: number | null | undefined;
+  let activeHeadingFrame: number | null = null;
+
+  function syncActiveHeading(): void {
+    const headings = activeSession === null ? [] : outlineFromSyntaxTree(view.state).headings;
+    const scroller = view.scrollDOM;
+    let active: OutlineHeading | null = null;
+    if (headings.length > 0) {
+      const atBottom = scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 1;
+      if (atBottom) {
+        active = headings[headings.length - 1] ?? null;
+      } else {
+        const threshold = scroller.scrollTop + Math.min(96, Math.max(24, scroller.clientHeight * 0.18));
+        for (const heading of headings) {
+          if (view.lineBlockAt(heading.from).top > threshold) break;
+          active = heading;
+        }
+        active ??= headings[0] ?? null;
+      }
+    }
+    const from = active?.from ?? null;
+    if (activeHeadingFrom === from) return;
+    activeHeadingFrom = from;
+    config.onActiveHeadingChange?.(active);
+  }
+
+  function scheduleActiveHeadingSync(): void {
+    if (activeHeadingFrame !== null) return;
+    activeHeadingFrame = requestAnimationFrame(() => {
+      activeHeadingFrame = null;
+      syncActiveHeading();
+    });
+  }
+
+  view.scrollDOM.addEventListener("scroll", scheduleActiveHeadingSync, { passive: true });
 
   function ensureActive(): SessionData | null {
     if (disposed) throw new TypeError("Editor has been disposed");
@@ -798,6 +849,7 @@ export function createCodeMirrorEditor(container: HTMLElement, initialConfig: Ed
       reconfigure(data, "modeChange");
       view.scrollDOM.scrollTop = data.scroll.top;
       view.scrollDOM.scrollLeft = data.scroll.left;
+      scheduleActiveHeadingSync();
     },
 
     detachSession() {
@@ -806,6 +858,7 @@ export function createCodeMirrorEditor(container: HTMLElement, initialConfig: Ed
       const detached = activeSession;
       activeSession = null;
       view.setState(initialState);
+      scheduleActiveHeadingSync();
       return detached;
     },
 
@@ -818,6 +871,7 @@ export function createCodeMirrorEditor(container: HTMLElement, initialConfig: Ed
         paste.controller.abort();
         markImagePasteFinished(paste);
       }
+      if (activeHeadingFrame !== null) cancelAnimationFrame(activeHeadingFrame);
       view.destroy();
     },
 
@@ -874,6 +928,7 @@ export function createCodeMirrorEditor(container: HTMLElement, initialConfig: Ed
         view.setState(data.state);
         view.scrollDOM.scrollTop = 0;
         view.scrollDOM.scrollLeft = 0;
+        scheduleActiveHeadingSync();
       }
       return { kind: "reloaded", revision: data.revision };
     },

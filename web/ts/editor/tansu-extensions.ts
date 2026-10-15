@@ -1,4 +1,5 @@
 import type { WikiNote } from "./wiki-target.js";
+import type { OutlineHeading } from "./source-navigation.js";
 
 export type EditorExtension =
   | { kind: "wiki-links" }
@@ -16,6 +17,7 @@ export type EditorConfig = {
   onLinkOpen?: (url: string) => void;
   onSave?: () => void;
   onFindRequested?: () => void;
+  onActiveHeadingChange?: (heading: OutlineHeading | null) => void;
   onChange?: (change: EditorChange) => void;
   uploadPastedImage?: (request: EditorImageUploadRequest) => Promise<EditorImageUploadResult>;
   onImagePasteStateChange?: (state: EditorImagePasteState) => void;

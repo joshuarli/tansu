@@ -6,17 +6,12 @@
     "playwrightVersion": "1.64.0",
     "install": [
       "chromium",
-      "firefox",
       "webkit"
     ],
     "browsers": {
       "chromium": {
         "version": "156.0.8078.4",
         "revision": "1248"
-      },
-      "firefox": {
-        "version": "157.0",
-        "revision": "1555"
       },
       "webkit": {
         "version": "27.2",

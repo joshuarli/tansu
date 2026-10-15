@@ -334,8 +334,8 @@ describe("view rendering", () => {
     const root = render(state, actions);
     const rows = [...root.querySelectorAll<HTMLButtonElement>(".quick-open-results .command-row")];
 
-    expect(rows.map((row) => row.dataset["noteId"])).toEqual(["reading", "gallery"]);
-    expect(rows[0]?.classList.contains("selected")).toBe(true);
+    expect(rows.map((row) => row.dataset["noteId"])).toStrictEqual(["reading", "gallery"]);
+    expect(rows[0]?.classList.contains("selected")).toBeTruthy();
     expect(rows[0]?.textContent).toContain("Pinned research notes.");
     expect(root.querySelector(".recent-notes-count")?.textContent).toBe("2 recent notes");
   });
@@ -374,7 +374,7 @@ describe("view rendering", () => {
     const snippet = root.querySelector(".search-snippet")!;
 
     expect(snippet.textContent).toBe("Search in Tansu should keep the surrounding text visible.\nA second Claude result makes the result list geometry stable.\nThis fixture covers source context.");
-    expect(snippet.querySelectorAll("mark").length).toBe(1);
+    expect(snippet.querySelectorAll("mark")).toHaveLength(1);
     expect(snippet.querySelector("mark")?.textContent).toBe("Claude");
   });
 
@@ -404,6 +404,7 @@ type ViewActionSpies = {
   recentPreview: ReturnType<typeof vi.fn<(noteId: string) => string | null>>;
   findMatches: ReturnType<typeof vi.fn<() => readonly { from: number; to: number }[]>>;
   outline: ReturnType<typeof vi.fn<() => Outline>>;
+  activeHeadingFrom: number | null;
 };
 
 function actionSpies(): ViewActionSpies {
@@ -414,6 +415,7 @@ function actionSpies(): ViewActionSpies {
     recentPreview: vi.fn<(noteId: string) => string | null>(() => null),
     findMatches: vi.fn<() => readonly { from: number; to: number }[]>(() => []),
     outline: vi.fn<() => Outline>(() => ({ headings: [], complete: true })),
+    activeHeadingFrom: null,
   };
 }
 

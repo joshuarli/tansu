@@ -404,7 +404,7 @@ describe("v2 desktop shell", () => {
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "p", ctrlKey: true, cancelable: true }));
     await until(() => client.quickOpen.mock.calls.length > 0);
 
-    expect(client.quickOpen.mock.calls.at(-1)?.[0].recentNoteIds).toEqual([second.noteId, first.noteId]);
+    expect(client.quickOpen.mock.calls.at(-1)?.[0].recentNoteIds).toStrictEqual([second.noteId, first.noteId]);
   });
 
   it("requeries stale search hits without applying their source range", async () => {

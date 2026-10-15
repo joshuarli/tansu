@@ -7,7 +7,7 @@ import { expect, afterEach, describe, test } from "vitest";
 import { createCodeMirrorEditor } from "../codemirror-adapter.ts";
 
 const benchDescribe = process.env["MD_WYSIWYG_BENCH"] === "1" ? describe : describe.skip;
-const FIXTURE_VAULT = resolve(import.meta.dirname, "../../../../tests/fixtures/test-vaults/vault-one");
+const FIXTURE_VAULT = resolve(import.meta.dirname, "../../../../tests/fixtures/demo-vault");
 const RESULTS_DIR = resolve(import.meta.dirname, "../../../../.work/tmp/bench-results");
 let disposeEditor: (() => void) | null = null;
 

@@ -44,7 +44,7 @@ is canceled. The CLI maps process termination signals into the same token.
 | Frontend state/API      | `web/ts/app.ts`, `web/ts/app/v2-api.ts`, `web/ts/state.ts`, `web/ts/app/workspace-store.ts` |
 | Frontend DOM/visuals    | `web/ts/view.ts`, `web/ts/dom.ts`, `web/static/app.css`   |
 | Editor engine           | `web/ts/editor/`                                          |
-| Dev/e2e fixture vaults  | `scripts/test-fixture.mjs`, `tests/fixtures/test-vaults/` |
+| Dev/e2e fixtures        | `scripts/dev-fixture.mjs`, `scripts/test-fixture.mjs`, `tests/fixtures/` |
 
 ## Writes and recovery
 

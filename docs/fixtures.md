@@ -1,7 +1,8 @@
 # Fixtures
 
-Dev and e2e tests use disk-backed vaults under
-`tests/fixtures/test-vaults/`. The generator is `scripts/test-fixture.mjs`.
+The dev app uses the single-note vault in `tests/fixtures/demo-vault/`.
+`scripts/dev-fixture.mjs` copies it to `.dev/vault` and writes isolated config
+and data under `.dev/`.
 
 ## Regenerate dev state
 
@@ -9,9 +10,12 @@ Dev and e2e tests use disk-backed vaults under
 make dev-config
 ```
 
-The generator writes `.dev/config/tansu/config.toml` and `.dev/data/`. The
-config points directly at the versioned fixture vaults. The app stores runtime
-state under `.dev/data`.
+The generator replaces `.dev/config`, `.dev/data`, and `.dev/vault`. The demo
+vault contains one note and its 17 WebP images. `make dev` opens that note in
+the app.
+
+Small synthetic e2e fixtures live under `tests/fixtures/test-vaults/`. Their
+generator is `scripts/test-fixture.mjs`.
 
 ## Create a fixture root
 

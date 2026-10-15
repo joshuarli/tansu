@@ -23,7 +23,7 @@ describe("HTML import", () => {
     input.dispatchEvent(new Event("cancel"));
 
     await expect(pending).resolves.toBeNull();
-    expect(removeListener.mock.calls.map(([type]) => type).sort()).toEqual(["cancel", "change"]);
+    expect(removeListener.mock.calls.map(([type]) => type).toSorted()).toStrictEqual(["cancel", "change"]);
   });
 
   it("creates unique markdown with imported metadata", async () => {

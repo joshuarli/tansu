@@ -52,29 +52,5 @@ must be one directory name. The auth directory is private to the server account.
 Serve, use the machine's HTTPS tailnet DNS name and set `rp_id` to that hostname
 or a parent domain allowed by WebAuthn.
 
-Create the first registration capability while the server is stopped:
-
-```sh
-tansu2 auth enroll
-```
-
-The command prints a single-use capability that expires after ten minutes. Use
-it to complete the first passkey registration. Later passkeys are added from a
-recently verified owner session.
-
-Back up and restore auth data with the server stopped:
-
-```sh
-tansu2 auth backup /path/to/auth-backup.db
-tansu2 auth restore /path/to/auth-backup.db
-```
-
-Backup refuses to replace an existing path and publishes a complete SQLite
-backup atomically. Restore validates the backup, preserves credentials, and
-clears sessions, enrollment capabilities, and pending ceremonies. These
-commands manage passkey state only; they do not back up vault notes or app
-history.
-
-When an older auth database is first opened after the token hash format
-upgrade, Tansu2 clears sessions, enrollment capabilities, and unfinished
-ceremonies. Registered passkeys remain available.
+For passkey enrollment, backup, restore, and remote access, see
+[Deployment](deployment.md).

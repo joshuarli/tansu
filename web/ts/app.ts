@@ -31,26 +31,11 @@ import {
 import { disposeAppView, renderApp, renderAuthGate, renderLoading, renderNoVaultConfigured, updateAppView, updateStatusBar, type ViewActions } from "./view.ts";
 import type { Settings, V2BootstrapResponse, V2MutationResponse, V2NoteDocument, V2NoteMeta, V2QuickOpenResponse, V2SearchHit, V2SearchOverlay, V2ServerEvent } from "./types.generated.ts";
 import type { DraftJournalRecord, WorkspaceState } from "./app/workspace-store.ts";
+import type { OutlineHeading } from "./editor/source-navigation.js";
 
 const SESSION_SAVE_DELAY_MS = 250;
 const EDITOR_CAPTURE_DELAY_MS = 150;
 const MIN_SEARCH_QUERY_CHARS = 3;
-
-function nativeParityImageMap(): ReadonlyMap<string, string> {
-  const encoded = document.documentElement.dataset["nativeParityImageMap"];
-  if (encoded === undefined) return new Map();
-  const value: unknown = JSON.parse(encoded);
-  if (value === null || Array.isArray(value) || typeof value !== "object") {
-    throw new TypeError("Native parity image map must be an object");
-  }
-  const entries = Object.entries(value);
-  if (entries.some(([name, url]) =>
-    !name.startsWith("images/") || typeof url !== "string" || !/^https?:\/\//.test(url)
-  )) {
-    throw new TypeError("Native parity image map contains an invalid entry");
-  }
-  return new Map(entries as [string, string][]);
-}
 
 function markdownPreview(source: string): string {
   const body = source.replace(/^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/, "");
@@ -70,7 +55,6 @@ function markdownPreview(source: string): string {
 export class TansuApp {
   private readonly state: State;
   private readonly workspaceId: WorkspaceId;
-  private readonly nativeParityImages = nativeParityImageMap();
   private readonly recentPreviews = new Map<string, string>();
   private identity: ServerIdentity | null = null;
   private journal: ReturnType<AppServices["workspace"]["createJournal"]> | null = null;
@@ -85,6 +69,7 @@ export class TansuApp {
     config: EditorConfig;
   } | null = null;
   private activeEditorKey: string | null = null;
+  private activeOutlineHeadingFrom: number | null = null;
   private attachedEditor: { tab: Tab; session: EditorSession } | null = null;
   private readonly editorMount = document.createElement("div");
   private readonly noteLoads = new Map<string, Promise<void>>();
@@ -509,6 +494,10 @@ export class TansuApp {
         }
       },
       onLinkOpen: (url) => window.open(url, "_blank", "noopener,noreferrer"),
+      onActiveHeadingChange: (heading) => {
+        if (generation !== this.bootGeneration || this.transitioningVault || !currentVault()) return;
+        this.updateActiveOutlineHeading(heading);
+      },
       uploadPastedImage: async ({ image, signal }) => {
         if (generation !== this.bootGeneration || this.transitioningVault || !currentVault()) {
           throw new DOMException("Image upload was canceled because the vault changed", "AbortError");
@@ -1911,7 +1900,7 @@ export class TansuApp {
 
   private resolveAssetUrl(name: string): string | null {
     const normalized = name.startsWith("/") ? name.slice(1) : name;
-    return this.assetScope.get(normalized) ?? this.nativeParityImages.get(normalized) ?? null;
+    return this.assetScope.get(normalized) ?? null;
   }
 
   private cancelAssetScope(): void {
@@ -1958,7 +1947,19 @@ export class TansuApp {
       recentPreview: (id) => this.recentPreviews.get(id) ?? null,
       findMatches: () => this.editor?.find(this.state.findQuery) ?? [],
       outline: () => this.editor?.outline() ?? { headings: [], complete: true },
+      activeHeadingFrom: this.activeOutlineHeadingFrom,
     };
+  }
+
+  private updateActiveOutlineHeading(heading: OutlineHeading | null): void {
+    this.activeOutlineHeadingFrom = heading?.from ?? null;
+    for (const row of this.root.querySelectorAll<HTMLButtonElement>(".outline-row")) {
+      if (row.dataset["headingFrom"] === String(this.activeOutlineHeadingFrom)) {
+        row.setAttribute("aria-current", "location");
+      } else {
+        row.removeAttribute("aria-current");
+      }
+    }
   }
 
   private notify(message: string): void {

@@ -96,6 +96,22 @@ describe("source-preserving Markdown operations", () => {
     }
   });
 
+  it("resolves standard Markdown vault images through the asset resolver", () => {
+    const imageUrl = "/api/v2/vaults/vault-1/assets?name=z-images%2Fphoto.webp";
+    const { container, dispose } = mounted("![photo](z-images/photo.webp)\n", {
+      extensions: [
+        createWikiImageExtension({
+          resolveUrl: (name) => name === "z-images/photo.webp" ? imageUrl : null,
+        }),
+      ],
+    });
+    try {
+      expect(container.querySelector(".cm-atomic-image img")?.getAttribute("src")).toBe(imageUrl);
+    } finally {
+      dispose();
+    }
+  });
+
   it("resizes one wiki image with one undoable source change", () => {
     const source = "before ![[photo]] after\n";
     const { container, editor, dispose } = mounted(source, {

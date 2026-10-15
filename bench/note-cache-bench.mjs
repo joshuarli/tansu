@@ -1,5 +1,5 @@
 import { execFileSync, spawn } from "node:child_process";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import net from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -12,7 +12,7 @@ import { stopProcessGroup } from "./process-group.mjs";
 
 const REPO_ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const RESULTS_DIR = join(REPO_ROOT, ".work", "tmp", "bench-results");
-const SEARCH_QUERY = "GlobalFoundries";
+const SEARCH_QUERY = "Claude";
 const args = parseArgs(process.argv.slice(2));
 const runs = Number(args.runs ?? 9);
 const delayMs = Number(args.delay ?? 200);
@@ -30,6 +30,8 @@ async function main() {
         encoding: "utf8",
       }),
     );
+    await rm(fixture.vaultOne, { recursive: true, force: true });
+    await cp(join(REPO_ROOT, "tests", "fixtures", "demo-vault"), fixture.vaultOne, { recursive: true });
     await requireTargetNote(fixture.vaultOne);
     const port = await freePort();
     const baseUrl = `http://127.0.0.1:${port}`;

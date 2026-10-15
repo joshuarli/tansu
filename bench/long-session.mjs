@@ -144,9 +144,9 @@ async function main() {
     const searchFailed = page.waitForEvent("requestfailed", (request) =>
       new URL(request.url()).pathname.endsWith("/search")
     );
-    await openSearch(page, "GlobalFoundries");
+    await openSearch(page, "alpha");
     await searchFailed;
-    await page.locator(".search-panel input").fill("GlobalFoundries ");
+    await page.locator(".search-panel input").fill("alpha ");
     await page.waitForSelector(".search-result-row");
     await closeSearch(page);
     await closeActiveTab(page);
@@ -186,7 +186,7 @@ async function main() {
       await openNote(page, one);
       await closeActiveTab(page);
       await closeActiveTab(page);
-      await openSearch(page, "GlobalFoundries");
+    await openSearch(page, "alpha");
       await page.waitForSelector(".search-result-row");
       await closeSearch(page);
       if ((iteration + 1) % 5 === 0 && iteration + 1 < ITERATIONS) {

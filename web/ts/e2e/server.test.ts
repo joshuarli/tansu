@@ -8,7 +8,6 @@ import { join, resolve } from "node:path";
 
 import {
   chromium,
-  firefox,
   webkit,
   type Browser,
   type BrowserType,
@@ -139,14 +138,39 @@ describe("real server harness", () => {
     });
     await page.goto(baseUrl);
     await page.waitForSelector(".main");
+    await expect.poll(() => page.locator(".vault-label").isVisible()).toBe(true);
+    await expect.poll(() => page.locator(".note-row").first().isVisible()).toBe(true);
     await bootstrapRequest;
     expect(startupRequests[0]).toBe("GET /api/v2/bootstrap");
     expect(startupRequests.some((request) => request.includes(`/vaults/${vaultOneId}/events?after=`))).toBeTruthy();
     expect(
       startupRequests.filter((request) => request.startsWith(`GET /api/v2/vaults/${vaultOneId}/notes/`)).length,
     ).toBeLessThanOrEqual(3);
+    await page.locator('.note-row[title="one.md"]').click();
+    await expect.poll(() => page.locator("#editor-mount .cm-content").textContent()).not.toBe("");
     await openQuickNote(page, "visual");
     await page.waitForSelector('.cm-content img[data-image-name="z-images/sample.webp"]');
+    await page.waitForFunction(() => {
+      const image = document.querySelector<HTMLImageElement>("#editor-mount .cm-atomic-image img");
+      return image?.complete === true && image.naturalWidth > 0;
+    });
+    await page.close();
+  });
+
+  it("highlights the active outline heading as the reader scrolls", async () => {
+    const page = await newLoggedPage();
+    await page.goto(baseUrl);
+    await page.waitForSelector(".main");
+    await openQuickNote(page, "Visual Check");
+
+    const firstHeading = page.locator(".outline-row").filter({ hasText: "Visual Check" });
+    const secondHeading = page.locator(".outline-row").filter({ hasText: "Second Section" });
+    await expect.poll(() => firstHeading.getAttribute("aria-current")).toBe("location");
+
+    await page.locator("#editor-mount .cm-scroller").evaluate((scroller) => {
+      scroller.scrollTop = scroller.scrollHeight;
+    });
+    await expect.poll(() => secondHeading.getAttribute("aria-current")).toBe("location");
     await page.close();
   });
 
@@ -167,9 +191,9 @@ describe("real server harness", () => {
     await page.waitForSelector(".command-panel", { state: "detached" });
     await openQuickNote(page, "One");
     await expect(page.locator(".workspace > .toolbar").count()).resolves.toBe(1);
-    expect(await page.locator(".workspace > .toolbar").isVisible()).toBe(false);
+    await expect(page.locator(".workspace > .toolbar").isVisible()).resolves.toBeFalsy();
     await expect(page.locator(".section-title", { hasText: "Notes" }).count()).resolves.toBe(0);
-    expect(await page.locator(".sidebar-controls").isVisible()).toBe(false);
+    await expect(page.locator(".sidebar-controls").isVisible()).resolves.toBeFalsy();
     await expect(
       page.evaluate(() => getComputedStyle(document.querySelector(".tabs")!).scrollbarWidth),
     ).resolves.toBe("none");
@@ -688,15 +712,15 @@ describe("real server harness", () => {
 });
 
 function browserTypeFromEnv(): BrowserType {
-  switch (process.env["TANSU2_E2E_BROWSER"]) {
-    case "firefox": {
-      return firefox;
+  switch (process.env["TANSU2_E2E_BROWSER"] ?? "chromium") {
+    case "chromium": {
+      return chromium;
     }
     case "webkit": {
       return webkit;
     }
     default: {
-      return chromium;
+      throw new Error(`Unsupported E2E browser: ${process.env["TANSU2_E2E_BROWSER"]}`);
     }
   }
 }
