@@ -58,6 +58,7 @@
 }
 
 .cm-editor:not([contenteditable="false"]) .tansu-wiki-image { touch-action: none; }
+.cm-editor:not([contenteditable="false"]) .tansu-resizable-image { touch-action: none; }
 
 .tansu-wiki-image img {
   display: block;
@@ -88,6 +89,15 @@
 
 .cm-editor[contenteditable="false"] .tansu-wiki-image-resize {
   display: none;
+}
+
+.cm-atomic-image {
+  position: relative;
+}
+
+.tansu-resizable-image:hover .tansu-wiki-image-resize,
+.tansu-resizable-image .tansu-wiki-image-resize:focus-visible {
+  opacity: 1;
 }
 
 .cm-editor.cm-focused .cm-selectionBackground,

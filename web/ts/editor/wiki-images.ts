@@ -17,6 +17,7 @@ type Resize = {
   from: number;
   to: number;
   source: string;
+  imageName: string;
   image: HTMLImageElement;
   mode: "drag" | "pinch" | "wheel" | "gesture";
   pointerId: number | null;
@@ -47,6 +48,7 @@ class WikiImagePreview extends WidgetType {
     wrapper.dataset["from"] = String(this.image.from);
     wrapper.dataset["to"] = String(this.image.to);
     wrapper.dataset["source"] = this.image.source;
+    wrapper.dataset["imageName"] = this.image.name;
     const image = document.createElement("img");
     image.alt = this.image.name;
     image.src = this.url;
@@ -149,7 +151,7 @@ export function wikiImages(options: { resolveUrl: (name: string) => string | nul
     private readonly onDown = (event: PointerEvent) => {
       const target = event.target;
       if (!(target instanceof Element) || this.view.state.facet(readOnlyFacet)) return;
-      const wrapper = target.closest<HTMLElement>(".tansu-wiki-image");
+      const wrapper = target.closest<HTMLElement>(".tansu-wiki-image, .tansu-resizable-image");
       if (wrapper === null) return;
       if (event.pointerType === "touch") {
         const pointerId = this.pointerId(event);
@@ -221,7 +223,7 @@ export function wikiImages(options: { resolveUrl: (name: string) => string | nul
       if (!event.ctrlKey || this.view.state.facet(readOnlyFacet)) return;
       const target = event.target;
       if (!(target instanceof Element)) return;
-      const wrapper = target.closest<HTMLElement>(".tansu-wiki-image");
+      const wrapper = target.closest<HTMLElement>(".tansu-wiki-image, .tansu-resizable-image");
       if (wrapper === null) return;
       event.preventDefault();
       event.stopPropagation();
@@ -244,7 +246,7 @@ export function wikiImages(options: { resolveUrl: (name: string) => string | nul
       if (this.view.state.facet(readOnlyFacet)) return;
       const target = event.target;
       if (!(target instanceof Element)) return;
-      const wrapper = target.closest<HTMLElement>(".tansu-wiki-image");
+      const wrapper = target.closest<HTMLElement>(".tansu-wiki-image, .tansu-resizable-image");
       if (wrapper === null) return;
       event.preventDefault();
       event.stopPropagation();
@@ -307,19 +309,20 @@ export function wikiImages(options: { resolveUrl: (name: string) => string | nul
 
     private startResize(wrapper: HTMLElement, mode: Resize["mode"], pointerId: number | null): Resize | null {
       const image = wrapper.querySelector<HTMLImageElement>("img");
-      const from = Number(wrapper.dataset["from"]);
-      const to = Number(wrapper.dataset["to"]);
       const source = wrapper.dataset["source"];
-      if (!image || !Number.isInteger(from) || !Number.isInteger(to) || source === undefined ||
-        this.view.state.doc.sliceString(from, to) !== source) return null;
+      const imageName = wrapper.dataset["imageName"];
+      if (!image || source === undefined || imageName === undefined || imageName === "" ||
+        imageName.includes("|") || imageName.includes("]") || /[\r\n]/.test(imageName)) return null;
+      const range = this.sourceRange(wrapper, source);
+      if (range === null) return null;
       this.finishResize(false);
       const startWidth = Math.round(this.clampGestureWidth(
         image.getBoundingClientRect().width || image.width || 320,
       ));
       this.resize = {
-        from,
-        to,
+        ...range,
         source,
+        imageName,
         image,
         mode,
         pointerId,
@@ -356,12 +359,38 @@ export function wikiImages(options: { resolveUrl: (name: string) => string | nul
       if (!commit || width === resize.startWidth || this.view.state.facet(readOnlyFacet)) return;
       const current = this.view.state.doc.sliceString(resize.from, resize.to);
       if (current !== resize.source) return;
-      const match = current.match(/^!\[\[([^\]|]+?)(?:\|\d+)?\]\]$/);
-      if (match === null) return;
       this.view.dispatch({
-        changes: { from: resize.from, to: resize.to, insert: `![[${match[1]!.trim()}|${width}]]` },
+        changes: { from: resize.from, to: resize.to, insert: `![[${resize.imageName}|${width}]]` },
         annotations: Transaction.userEvent.of("input.image-resize"),
       });
+    }
+
+    private sourceRange(wrapper: HTMLElement, source: string): { from: number; to: number } | null {
+      const doc = this.view.state.doc;
+      const from = Number(wrapper.dataset["from"]);
+      const to = Number(wrapper.dataset["to"]);
+      if (Number.isInteger(from) && Number.isInteger(to) && doc.sliceString(from, to) === source) {
+        return { from, to };
+      }
+
+      const position = this.view.posAtDOM(wrapper);
+      const anchors = (wrapper.classList.contains("tansu-resizable-image") ? [position - 1] : [position, position - 1])
+        .filter((anchor) => anchor >= 0 && anchor <= doc.length);
+      const lines = new Set(anchors.map((anchor) => doc.lineAt(anchor).number));
+      const candidates: { from: number; to: number }[] = [];
+      for (const number of lines) {
+        const line = doc.line(number);
+        let index = line.text.indexOf(source);
+        while (index !== -1) {
+          candidates.push({ from: line.from + index, to: line.from + index + source.length });
+          index = line.text.indexOf(source, index + 1);
+        }
+      }
+      if (candidates.length === 0) return null;
+      candidates.sort((left, right) =>
+        Math.abs(left.from - position) - Math.abs(right.from - position)
+      );
+      return candidates[0]!;
     }
 
     private clampGestureWidth(width: number): number {

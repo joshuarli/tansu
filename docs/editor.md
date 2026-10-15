@@ -62,13 +62,14 @@ targets remain unresolved.
 Renaming a note changes its path and keeps its `noteId`. Tansu2 does not rewrite
 Markdown links that mention the old path.
 
-Wiki images use `![[name]]` or `![[name|320]]`. Standard Markdown images with
-vault asset paths use the same configured URL resolver. HTTP and HTTPS image
-URLs remain remote. Resize a wiki image with its drag handle or a pinch gesture.
+Wiki images use `![[name]]` or `![[name|320]]`; this is the only width syntax.
+Vault images written as standard Markdown can be resized with the same handle
+or pinch gesture. Resizing one rewrites its source to wiki-image syntax.
+HTTP and HTTPS image URLs remain remote and cannot be resized.
 The editor previews the width without changing Markdown during the gesture.
-Release writes one undoable `|width` source edit. Cancellation leaves Markdown
-unchanged. Widths stay between 48 and 2,400 pixels or the editor content width,
-whichever is smaller.
+Release writes one undoable source edit in the canonical wiki-image form.
+Cancellation leaves Markdown unchanged. Widths stay between 48 and 2,400 pixels
+or the editor content width, whichever is smaller.
 
 The editor shares the shell's system font and color tokens. Wide Markdown tables
 keep each cell on one line and scroll horizontally inside the editor.

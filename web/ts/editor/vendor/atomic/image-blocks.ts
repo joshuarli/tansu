@@ -49,17 +49,25 @@ import { treeGrowthEffect, treeProgressPlugin } from './tree-progress';
 const dimensionCache = new Map<string, { w: number; h: number }>();
 
 class ImageWidget extends WidgetType {
-  constructor(readonly src: string, readonly alt: string) {
+  constructor(
+    readonly src: string,
+    readonly alt: string,
+    readonly source: string,
+    readonly from: number,
+    readonly to: number,
+    readonly imageName: string | null,
+  ) {
     super();
   }
 
   override eq(other: ImageWidget): boolean {
-    return other.src === this.src && other.alt === this.alt;
+    return other.src === this.src && other.alt === this.alt && other.source === this.source &&
+      other.imageName === this.imageName;
   }
 
   override toDOM(view: EditorView): HTMLElement {
     const wrap = document.createElement('div');
-    wrap.className = 'cm-atomic-image';
+    wrap.className = this.imageName === null ? 'cm-atomic-image' : 'cm-atomic-image tansu-resizable-image';
     const img = document.createElement('img');
     img.src = this.src;
     img.alt = this.alt;
@@ -86,6 +94,18 @@ class ImageWidget extends WidgetType {
       });
     }
     wrap.appendChild(img);
+    if (this.imageName !== null) {
+      wrap.dataset['from'] = String(this.from);
+      wrap.dataset['to'] = String(this.to);
+      wrap.dataset['source'] = this.source;
+      wrap.dataset['imageName'] = this.imageName;
+      const resize = document.createElement('button');
+      resize.type = 'button';
+      resize.className = 'tansu-wiki-image-resize';
+      resize.setAttribute('aria-label', `Resize ${this.imageName}`);
+      resize.textContent = '↘';
+      wrap.appendChild(resize);
+    }
 
     // Clicking the image should land the caret on the source line
     // (where the `![alt](url)` markdown lives) so the reveal happens
@@ -95,6 +115,7 @@ class ImageWidget extends WidgetType {
     // the widget's doc position via posAtDOM, step back into the
     // preceding line (the source), and dispatch an explicit selection.
     const onPointer = (event: MouseEvent) => {
+      if (event.target instanceof Element && event.target.closest('.tansu-wiki-image-resize') !== null) return;
       event.preventDefault();
       event.stopPropagation();
       const pos = view.posAtDOM(wrap);
@@ -157,11 +178,18 @@ function buildImageBlocks(
       if (!src) return;
       const resolvedSrc = resolveImageUrl(src);
       if (resolvedSrc === null) return;
+      let imageName: string | null = null;
+      try {
+        new URL(src);
+      } catch {
+        if (!src.startsWith('/') && !src.includes('|') && !src.includes(']') &&
+          !/[\r\n]/.test(src) && resolvedSrc !== src) imageName = src;
+      }
 
       const line = state.doc.lineAt(node.from);
       ranges.push(
         Decoration.widget({
-          widget: new ImageWidget(resolvedSrc, alt),
+          widget: new ImageWidget(resolvedSrc, alt, raw, node.from, node.to, imageName),
           block: true,
           // side: 1 places the block widget after the line's content,
           // so the image appears below its source line.
