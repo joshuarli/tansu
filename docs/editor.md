@@ -97,9 +97,10 @@ When `uploadPastedImage` is configured, image paste keeps WebP clipboard bytes
 as-is and converts other clipboard files to WebP. It passes the blob, note ID,
 source revision, selection, and an abort signal to the upload callback. The
 callback returns the server's `z-images/`
-asset name and wiki-image Markdown. The adapter displays a temporary image
-preview while the upload runs. It inserts the returned Markdown only into the
-captured session and selection while the source revision is still current.
+asset name and wiki-image Markdown. The adapter displays a local image preview
+immediately in live and source mode, before conversion or upload begins. It
+inserts the returned Markdown only into the captured session and selection
+while the source revision is still current.
 An intervening edit, clean reload, or read-only change aborts the request and
 reports it as stale. The state callback reports uploading, inserted, stale,
 and failed states. Its preview object URL is revoked on every terminal state
