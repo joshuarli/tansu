@@ -101,7 +101,7 @@ describe("v2 desktop shell", () => {
 
   it("deduplicates a render-triggered V2 note load", async () => {
     const note = noteMeta("note-1", "one.md", "One");
-    const client = configureVault([note]);
+    const client = configureVault([note, noteMeta("note-2", "two.md", "Two")]);
     const load = deferred<V2NoteDocument>();
     client.openNote.mockReturnValue(load.promise);
     const { app, root } = mountApp();
@@ -117,7 +117,7 @@ describe("v2 desktop shell", () => {
 
   it("loads a note reopened while its previous tab load is pending", async () => {
     const note = noteMeta("note-1", "one.md", "One");
-    const client = configureVault([note]);
+    const client = configureVault([note, noteMeta("note-2", "two.md", "Two")]);
     const load = deferred<V2NoteDocument>();
     client.openNote.mockReturnValue(load.promise);
     const { app, root } = mountApp();
@@ -437,7 +437,7 @@ describe("v2 desktop shell", () => {
 
   it("opens a note from a recent row using valid cache before the network response", async () => {
     const note = noteMeta("note-1", "one.md", "One");
-    const client = configureVault([note]);
+    const client = configureVault([note, noteMeta("note-2", "two.md", "Two")]);
     const load = deferred<V2NoteDocument>();
     client.openNote.mockReturnValue(load.promise);
     memory.cached.set(note.noteId, { sourceHash: note.sourceHash, content: "# Cached recent\n" });
@@ -452,7 +452,7 @@ describe("v2 desktop shell", () => {
 
   it("keeps the loading state on a cache miss until the note opens", async () => {
     const note = noteMeta("note-1", "one.md", "One");
-    const client = configureVault([note]);
+    const client = configureVault([note, noteMeta("note-2", "two.md", "Two")]);
     const load = deferred<V2NoteDocument>();
     client.openNote.mockReturnValue(load.promise);
     const { app, root } = mountApp();
@@ -515,7 +515,7 @@ describe("v2 desktop shell", () => {
 
   it("reopens a closed tab from cache before its network response", async () => {
     const note = noteMeta("note-1", "one.md", "One");
-    const client = configureVault([note], legacySession([], null, [
+    const client = configureVault([note, noteMeta("note-2", "two.md", "Two")], legacySession([], null, [
       { noteId: note.noteId, title: note.title, path: note.path, cursorOffset: 3, sourceMode: true },
     ]));
     const load = deferred<V2NoteDocument>();
@@ -611,6 +611,7 @@ describe("v2 desktop shell", () => {
     const client = configureVault([first, second]);
     const { app, root } = mountApp();
     await app.boot();
+    await openSearch(root);
 
     client.eventHandlers?.onEvent({
       eventVersion: 1,
@@ -891,7 +892,7 @@ describe("v2 desktop shell", () => {
     await app.boot();
     memory.cached.delete(note.noteId);
     editorMock.instances[0]!.simulateEdit("# Saved\n");
-    root.querySelector<HTMLButtonElement>('[title="Save"]')?.click();
+    await runCommand(root, "save");
     await until(() => memory.cached.get(note.noteId)?.content === "# Saved\n");
     const request = client.saveNote.mock.calls[0]![1];
     expect(memory.cached.get(note.noteId)).toStrictEqual({ sourceHash: request.sourceHash, content: "# Saved\n" });
@@ -997,7 +998,7 @@ describe("v2 desktop shell", () => {
   it("shows recent notes first and searches from the first character", async () => {
     const source = "# Cached\n";
     const note = { ...noteMeta("note-1", "folder/one.md", "One"), sourceHash: await canonicalSourceHash(source) };
-    const client = configureVault([note]);
+    const client = configureVault([note, noteMeta("note-2", "two.md", "Two")]);
     const load = deferred<V2NoteDocument>();
     client.openNote.mockReturnValue(load.promise);
     client.search.mockResolvedValue(searchResponse([{ ...searchHit(note), sourceRange: { startUtf16: 2, endUtf16: 8 } }]));
@@ -1279,7 +1280,7 @@ describe("v2 desktop shell", () => {
     const { app, root } = mountApp();
     await app.boot();
     editorMock.instances[0]!.simulateEdit("# Draft\n");
-    root.querySelector<HTMLButtonElement>('[title="Save"]')?.click();
+    await runCommand(root, "save");
     await until(() => root.textContent?.includes("Save conflict") === true);
     root.querySelector<HTMLButtonElement>('[title="View conflict draft"]')?.click();
     await flushAsync();
@@ -1315,7 +1316,7 @@ describe("v2 desktop shell", () => {
     root.querySelector<HTMLButtonElement>(".settings-panel .primary-button")?.click();
     await flushAsync();
     expect(client.saveSettings.mock.calls[1]?.[0].settings).toMatchObject({ autosaveDelayMs: 150, undoStackMax: 20, imageWebpQuality: 1 });
-    root.querySelector<HTMLButtonElement>('[title="Add tag"]')?.click();
+    (editorMock.instances[0]!.config["noteTags"] as EditorConfig["noteTags"])?.onAddTag();
     const input = root.querySelector<HTMLInputElement>(".note-dialog-panel input")!;
     input.value = "beta";
     input.dispatchEvent(new Event("input", { bubbles: true }));
@@ -1339,7 +1340,7 @@ describe("v2 desktop shell", () => {
     expect(client.openNote).toHaveBeenCalledWith(closed.noteId);
   });
 
-  it("imports HTML through a V2 local draft and preserves source mode and formatting commands", async () => {
+  it("imports HTML through a V2 local draft and preserves source mode", async () => {
     const note = noteMeta("note-1", "one.md", "One");
     const imported = noteMeta("imported", "imported.md", "Imported");
     const client = configureVault([note]);
@@ -1356,14 +1357,8 @@ describe("v2 desktop shell", () => {
     expect(client.createNote.mock.calls[0]?.[0]).toMatchObject({ path: "imported.md", content: "# Imported\n" });
     await until(() => root.querySelector<HTMLButtonElement>('.tab.active')?.title === "Imported");
     const editor = editorMock.instances[0]!;
-    root.querySelector<HTMLButtonElement>('[title="Source"]')?.click();
+    await runCommand(root, "source");
     expect(editor.setMode).toHaveBeenCalledWith("source");
-    for (const title of ["Bold", "Italic", "Highlight", "Strikethrough", "Heading", "Undo", "Redo"]) {
-      root.querySelector<HTMLButtonElement>(`[title="${title}"]`)?.click();
-    }
-    expect(editor.formatSelection).toHaveBeenCalled();
-    expect(editor.undo).toHaveBeenCalled();
-    expect(editor.redo).toHaveBeenCalled();
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "n", metaKey: true, altKey: true }));
     await until(() => root.querySelector(".note-dialog-panel") !== null);
   });
@@ -1484,7 +1479,7 @@ describe("v2 desktop shell", () => {
     const { app, root } = mountApp();
     await app.boot();
     editorMock.instances[0]!.simulateEdit("# Changed\n");
-    root.querySelector<HTMLButtonElement>('[title="Save"]')?.click();
+    await runCommand(root, "save");
     await until(() => root.textContent?.includes("Save failed") === true);
     root.querySelector<HTMLButtonElement>(".tab.active")?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }));
     root.querySelector<HTMLButtonElement>('[title="Delete note"]')?.click();
@@ -1509,9 +1504,10 @@ describe("v2 desktop shell", () => {
     document.body.append(root);
     const app = new TansuApp(root, services);
     apps.push(app);
+    app.bindGlobalEvents();
     await app.boot();
     editorMock.instances[0]!.simulateEdit("# Changed\n");
-    root.querySelector<HTMLButtonElement>('[title="Save"]')?.click();
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "s", metaKey: true, cancelable: true }));
     await until(() => root.textContent?.includes("Save failed") === true);
 
     const disposing = app.dispose();
@@ -1921,7 +1917,7 @@ async function flushEditorCapture(): Promise<void> {
 }
 async function until(predicate: () => boolean): Promise<void> { for (let index = 0; index < 80; index += 1) { if (predicate()) return; await flushAsync(); } throw new Error(`Expected asynchronous work did not finish: ${document.body.textContent}`); }
 async function openSearch(root: HTMLElement): Promise<void> {
-  window.dispatchEvent(new KeyboardEvent("keydown", { key: "/", cancelable: true }));
+  window.dispatchEvent(new KeyboardEvent("keydown", { key: "/", ctrlKey: true, cancelable: true }));
   await until(() => root.querySelector(".search-panel") !== null);
 }
 async function openRecentNote(root: HTMLElement, title?: string): Promise<void> {

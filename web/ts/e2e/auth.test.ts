@@ -239,7 +239,9 @@ describe("authenticated Chromium server", () => {
       await page.keyboard.press(`${process.platform === "darwin" ? "Meta" : "Control"}+k`);
       await page.locator(".command-input").fill("Settings");
       await page.locator(".command-row", { hasText: "Settings" }).evaluate((row) => (row as HTMLElement).click());
+      const logoutAfterEnrollment = page.waitForResponse((response) => response.url().endsWith("/api/v2/auth/logout"));
       await page.getByTitle("Lock this session").click();
+      expect((await logoutAfterEnrollment).status()).toBe(200);
       await page.waitForSelector(".auth-gate");
       await expect(page.evaluate(() => (
         window as unknown as { __h2EventClosed: Promise<boolean> }
@@ -289,7 +291,9 @@ describe("authenticated Chromium server", () => {
       await page.keyboard.press(`${process.platform === "darwin" ? "Meta" : "Control"}+k`);
       await page.locator(".command-input").fill("Settings");
       await page.locator(".command-row", { hasText: "Settings" }).evaluate((row) => (row as HTMLElement).click());
+      const logoutAfterLogin = page.waitForResponse((response) => response.url().endsWith("/api/v2/auth/logout"));
       await page.getByTitle("Lock this session").click();
+      expect((await logoutAfterLogin).status()).toBe(200);
       await page.waitForSelector(".auth-gate");
       expect((await browserContext.cookies(origin)).some((cookie) => cookie.name === "__Host-tansu_session"))
         .toBeFalsy();

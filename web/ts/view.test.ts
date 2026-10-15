@@ -71,7 +71,6 @@ describe("view rendering", () => {
       .dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 3, clientY: 4 }));
     root.querySelector<HTMLButtonElement>('[title="View conflict draft"]')!.click();
     root.querySelector<HTMLButtonElement>('[title="Restore conflict draft"]')!.click();
-    root.querySelector<HTMLButtonElement>('[title="Read"]')!.click();
     root.querySelector<HTMLButtonElement>('[title="Unpin note"]')!.click();
     root.querySelector<HTMLButtonElement>('[title="Rename note"]')!.click();
     root.querySelector<HTMLButtonElement>('[title="Delete note"]')!.click();
@@ -85,11 +84,10 @@ describe("view rendering", () => {
     expectDispatched(actions, { type: "note.pin", noteId: toNoteId("n1") });
     expectDispatched(actions, { type: "note.rename", noteId: toNoteId("n1") });
     expectDispatched(actions, { type: "note.delete", noteId: toNoteId("n1") });
-    expectDispatched(actions, { type: "reading.toggle" });
     expect(root.textContent).toContain("Save conflict");
     expect(root.querySelector(".sidebar")).toBeNull();
     expect(root.querySelector(".toolbar")).toBeNull();
-    expect(root.querySelector(".document-title")?.textContent).toBe("One");
+    expect(root.querySelector<HTMLButtonElement>(".tab.active")?.title).toBe("One");
   });
 
   it("opens a custom animated vault menu", () => {
@@ -158,15 +156,18 @@ describe("view rendering", () => {
     state.tabs = [tab];
     state.activeTab = tabIdentity(tab);
     state.readingMode = true;
+    state.commandOpen = true;
+    state.commandFilter = "reading";
     const actions = actionSpies();
+    actions.commandItems.mockReturnValue([{ id: "reading", label: "Reading mode" }]);
     const root = render(state, actions);
 
     expect(root.querySelector(".main")?.className).toContain("reading-mode");
-    expect(root.querySelector(".topbar")).toBeNull();
+    expect(root.querySelector(".topbar")).not.toBeNull();
     expect(root.querySelector(".toolbar")).toBeNull();
     expect(root.querySelector(".editor-meta")).toBeNull();
-    root.querySelector<HTMLButtonElement>('[title="Read"]')!.click();
-    expectDispatched(actions, { type: "reading.toggle" });
+    root.querySelector<HTMLButtonElement>('[data-command-id="reading"]')!.click();
+    expectDispatched(actions, { type: "command.run", id: "reading" });
   });
 
   it("shows tab close hint and captures x before editor key handlers", () => {
@@ -286,7 +287,7 @@ describe("view rendering", () => {
     const state = baseState();
     state.notes.set("n1", note("n1", "one.md", "One"));
     state.searchOpen = true;
-    state.searchOverlayQuery = "";
+    state.searchOverlayQuery = "no matching note";
     state.noteDialog = { kind: "delete", noteId: toNoteId("n1") };
     let actions = actionSpies();
     let root = render(state, actions);
@@ -350,7 +351,7 @@ describe("view rendering", () => {
 
     const root = render(baseState(), actions);
 
-    expect(root.querySelector(".outline-list")?.textContent).toBe("No headings");
+    expect(root.querySelector(".note-outline")).toBeNull();
     expect(actions.outline).not.toHaveBeenCalled();
   });
 });

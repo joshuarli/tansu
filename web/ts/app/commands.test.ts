@@ -11,7 +11,7 @@ describe("native command palette definitions", () => {
     expect(items.map(({ id, label, shortcut }) => [id, label, shortcut])).toStrictEqual([
       ["create", "New Note", "⌃N"],
       ["save", "Save Note", "⌘S"],
-      ["search", "Search Vault", "⌃G"],
+      ["search", "Search Notes", "/"],
       ["find", "Find in Note", "⌃F"],
       ["rename", "Rename Current Note", "⌃L"],
       ["close", "Close Current Tab", "⌃X"],

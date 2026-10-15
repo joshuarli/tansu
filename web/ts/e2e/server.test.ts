@@ -152,7 +152,7 @@ describe("real server harness", () => {
     await page.goto(baseUrl);
     await page.waitForSelector(".main");
     await expect.poll(() => page.locator(".vault-label").isVisible()).toBe(true);
-    await page.keyboard.press("/");
+    await page.keyboard.press("Control+/");
     await expect.poll(() => page.locator(".recent-search-result").first().isVisible()).toBe(true);
     await bootstrapRequest;
     expect(startupRequests[0]).toBe("GET /api/v2/bootstrap");
@@ -163,7 +163,7 @@ describe("real server harness", () => {
     await page.locator('.recent-search-result[title="one.md"]').click();
     await expect.poll(() => page.locator("#editor-mount .cm-content").textContent()).not.toBe("");
     await openSearchNote(page, "visual");
-    await page.waitForSelector('.cm-content img[data-image-name="z-images/sample.webp"]');
+    await page.waitForSelector('.cm-content .cm-atomic-image[data-image-name="z-images/sample.webp"] img');
     await page.waitForFunction(() => {
       const image = document.querySelector<HTMLImageElement>("#editor-mount .cm-atomic-image img");
       return image?.complete === true && image.naturalWidth > 0;
@@ -354,7 +354,7 @@ describe("real server harness", () => {
     await openSearchNote(page, "One");
     await expect(page.locator(".workspace > .toolbar").count()).resolves.toBe(0);
     await expect(page.locator(".selection-toolbar").count()).resolves.toBe(1);
-    await expect(page.locator(".selection-toolbar").isVisible()).resolves.toBeFalsy();
+    await expect(page.locator(".selection-toolbar").isVisible()).resolves.toBeTruthy();
     await expect(page.locator(".section-title", { hasText: "Notes" }).count()).resolves.toBe(0);
     await expect(page.locator(".sidebar").count()).resolves.toBe(0);
     await expect(
