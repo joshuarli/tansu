@@ -106,7 +106,7 @@ describe("v2 desktop shell", () => {
     client.openNote.mockReturnValue(load.promise);
     const { app, root } = mountApp();
     await app.boot();
-    root.querySelector<HTMLButtonElement>(".note-row")?.click();
+    await openRecentNote(root);
     await flushAsync();
     expect(client.openNote).toHaveBeenCalledTimes(1);
     expect(client.openNote).toHaveBeenCalledWith(note.noteId);
@@ -123,11 +123,11 @@ describe("v2 desktop shell", () => {
     const { app, root } = mountApp();
     await app.boot();
 
-    root.querySelector<HTMLButtonElement>(".note-row")?.click();
+    await openRecentNote(root);
     await flushAsync();
     root.querySelector<HTMLButtonElement>(".tab-close")?.click();
     await flushAsync();
-    root.querySelector<HTMLButtonElement>(".note-row")?.click();
+    await openRecentNote(root);
     await flushAsync();
 
     expect(client.openNote).toHaveBeenCalledTimes(2);
@@ -195,7 +195,7 @@ describe("v2 desktop shell", () => {
 
     await app.boot();
 
-    expect(root.querySelector(".sidebar")).not.toBeNull();
+    expect(root.querySelector(".main")).not.toBeNull();
     expect(root.textContent).toContain("No vault is configured");
     expect(client.connectEvents).toHaveBeenCalledTimes(2);
   });
@@ -225,7 +225,8 @@ describe("v2 desktop shell", () => {
     const { app, root } = mountApp();
     app.bindGlobalEvents();
     await app.boot();
-    const row = root.querySelector<HTMLElement>(".note-row");
+    await openSearch(root);
+    const row = root.querySelector<HTMLElement>(".recent-search-result");
     if (row === null) throw new Error("Expected a note row");
 
     row.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 20, clientY: 20 }));
@@ -248,7 +249,7 @@ describe("v2 desktop shell", () => {
     await app.boot();
     expect(root.querySelector(".auth-gate")?.textContent).toContain("Unlock your notes");
     root.querySelector<HTMLButtonElement>('[title="Sign in with passkey"]')?.click();
-    await until(() => root.querySelector(".sidebar") !== null);
+    await until(() => root.querySelector(".main") !== null);
 
     expect(login).toHaveBeenCalledTimes(1);
     expect(root.querySelector(".auth-gate")).toBeNull();
@@ -267,7 +268,7 @@ describe("v2 desktop shell", () => {
     capability.value = "first-use-capability";
     capability.dispatchEvent(new Event("input", { bubbles: true }));
     root.querySelector<HTMLButtonElement>('[title="Register first passkey"]')?.click();
-    await until(() => root.querySelector(".sidebar") !== null);
+    await until(() => root.querySelector(".main") !== null);
 
     expect(enroll).toHaveBeenCalledWith("first-use-capability");
   });
@@ -394,9 +395,9 @@ describe("v2 desktop shell", () => {
     app.bindGlobalEvents();
     await app.boot();
 
-    root.querySelector<HTMLButtonElement>('.note-row[title="one.md"]')?.click();
+    await openRecentNote(root, "One");
     await until(() => editorMock.instances[0]?.getSnapshot()?.source === "# One\n");
-    root.querySelector<HTMLButtonElement>('.note-row[title="two.md"]')?.click();
+    await openRecentNote(root, "Two");
     await until(() => editorMock.instances[0]?.getSnapshot()?.source === "# Two\n");
     root.querySelector<HTMLButtonElement>('.tab[title="One"]')?.click();
     await until(() => root.querySelector('.tab.active[title="One"]') !== null &&
@@ -417,7 +418,7 @@ describe("v2 desktop shell", () => {
     client.openNote.mockResolvedValue(documentFor(noteMeta(note.noteId, note.path, note.title, [], 2, HASH_B), "# New\n"));
     const { app, root } = mountApp();
     await app.boot();
-    root.querySelector<HTMLButtonElement>('[title="Search notes"]')?.click();
+    await openSearch(root);
     const input = root.querySelector<HTMLInputElement>(".search-panel input")!;
     input.value = "one";
     input.dispatchEvent(new Event("input", { bubbles: true }));
@@ -487,7 +488,7 @@ describe("v2 desktop shell", () => {
     memory.cached.set(note.noteId, { sourceHash: note.sourceHash, content: "# Cached recent\n" });
     const { app, root } = mountApp();
     await app.boot();
-    root.querySelector<HTMLButtonElement>(".note-row")?.click();
+    await openRecentNote(root);
     await until(() => editorMock.instances[0]?.getSnapshot()?.source === "# Cached recent\n");
     expect(client.openNote).toHaveBeenCalledWith(note.noteId);
     load.resolve(documentFor(note, "# Cached recent\n"));
@@ -501,7 +502,7 @@ describe("v2 desktop shell", () => {
     client.openNote.mockReturnValue(load.promise);
     const { app, root } = mountApp();
     await app.boot();
-    root.querySelector<HTMLButtonElement>(".note-row")?.click();
+    await openRecentNote(root);
     await flushAsync();
     expect(editorMock.instances).toHaveLength(0);
     expect(root.textContent).toContain("Loading");
@@ -586,9 +587,10 @@ describe("v2 desktop shell", () => {
     document.body.append(root);
     const app = new TansuApp(root, services);
     apps.push(app);
+    app.bindGlobalEvents();
     await app.boot();
     readCache.mockClear();
-    root.querySelector<HTMLButtonElement>(".note-row")?.click();
+    await openRecentNote(root);
     await flushAsync();
     expect(readCache).not.toHaveBeenCalled();
     expect(client.openNote).toHaveBeenCalledTimes(1);
@@ -768,7 +770,7 @@ describe("v2 desktop shell", () => {
     title.dispatchEvent(new Event("input", { bubbles: true }));
     root.querySelector<HTMLButtonElement>(".note-dialog-panel .primary-button")?.click();
     await flushAsync();
-    root.querySelector<HTMLButtonElement>('[title="Search notes"]')?.click();
+    await openSearch(root);
 
     expect([...root.children]).toStrictEqual(regions);
     expect(root.querySelector("#editor-mount")).toBe(editorMount);
@@ -1002,10 +1004,10 @@ describe("v2 desktop shell", () => {
     client.openNote.mockResolvedValue(documentFor(note, "# One\n"));
     const { app, root } = mountApp();
     await app.boot();
-    root.querySelector<HTMLButtonElement>(".note-row")?.click();
+    await openRecentNote(root);
     await flushAsync();
     editorMock.instances[0]!.simulateEdit("# Edited\n");
-    root.querySelector<HTMLButtonElement>('[title="Search notes"]')?.click();
+    await openSearch(root);
     const search = root.querySelector<HTMLInputElement>(".command-input")!;
     search.value = "alpha";
     search.dispatchEvent(new Event("input", { bubbles: true }));
@@ -1021,31 +1023,23 @@ describe("v2 desktop shell", () => {
     expect(root.textContent).not.toContain("one.md");
   });
 
-  it("shows skipped draft coverage in sidebar and overlay search results", async () => {
+  it("shows skipped draft coverage in note search", async () => {
     const client = configureVault([]);
     const partialCoverage = { status: "partial" as const, skippedNoteCount: 2 };
-    client.search
-      .mockResolvedValueOnce(searchResponse([], partialCoverage))
-      .mockResolvedValueOnce(searchResponse([], partialCoverage));
+    client.search.mockResolvedValueOnce(searchResponse([], partialCoverage));
     const { app, root } = mountApp();
     await app.boot();
 
-    const sidebarSearch = root.querySelector<HTMLInputElement>(".search-input")!;
-    sidebarSearch.value = "alpha";
-    sidebarSearch.dispatchEvent(new Event("input", { bubbles: true }));
-    await flushAsync();
-    expect(root.querySelector(".search-results")?.textContent).toContain("Draft search skipped 2 drafts");
-
-    root.querySelector<HTMLButtonElement>('[title="Search notes"]')?.click();
+    await openSearch(root);
     const overlaySearch = root.querySelector<HTMLInputElement>(".search-panel input")!;
-    overlaySearch.value = "beta";
+    overlaySearch.value = "alpha";
     overlaySearch.dispatchEvent(new Event("input", { bubbles: true }));
     await flushAsync();
 
     expect(root.querySelector(".search-panel")?.textContent).toContain("Draft search skipped 2 drafts");
   });
 
-  it("uses note identity for cached search hits and waits for three characters", async () => {
+  it("shows recent notes first and searches from the first character", async () => {
     const source = "# Cached\n";
     const note = { ...noteMeta("note-1", "folder/one.md", "One"), sourceHash: await canonicalSourceHash(source) };
     const client = configureVault([note]);
@@ -1055,19 +1049,10 @@ describe("v2 desktop shell", () => {
     memory.cached.set(note.noteId, { sourceHash: note.sourceHash, content: source });
     const { app, root } = mountApp();
     await app.boot();
-    const sidebar = root.querySelector<HTMLInputElement>(".search-input")!;
-    sidebar.value = "on";
-    sidebar.dispatchEvent(new Event("input", { bubbles: true }));
-    await flushAsync();
-    expect(client.search).not.toHaveBeenCalled();
-    sidebar.value = "one";
-    sidebar.dispatchEvent(new Event("input", { bubbles: true }));
-    await flushAsync();
-    expect(client.search).toHaveBeenCalledTimes(1);
-    root.querySelector<HTMLButtonElement>('[title="Search notes"]')?.click();
-    const overlay = root.querySelector<HTMLInputElement>(".command-input")!;
-    expect(overlay.value).toBe("");
-    overlay.value = "on";
+    await openSearch(root);
+    expect(root.querySelector(".recent-search-result .search-result-title")?.textContent).toBe("One");
+    const overlay = root.querySelector<HTMLInputElement>(".search-panel .command-input")!;
+    overlay.value = "o";
     overlay.dispatchEvent(new Event("input", { bubbles: true }));
     await flushAsync();
     expect(client.search).toHaveBeenCalledTimes(1);
@@ -1090,12 +1075,12 @@ describe("v2 desktop shell", () => {
     client.deleteNote.mockResolvedValue({ mutationId: "delete", outcome: { state: "accepted", result: null } });
     const { app, root } = mountApp();
     await app.boot();
-    root.querySelector<HTMLButtonElement>(".note-row")?.click();
+    await openRecentNote(root);
     await flushAsync();
     root.querySelector<HTMLButtonElement>(".tab.active")?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }));
     root.querySelector<HTMLButtonElement>('[title="Pin note"]')?.click();
     await flushAsync();
-    expect(root.querySelector(".sidebar")?.textContent).toContain("One");
+    expect(root.querySelector(".tab.active")?.textContent).toContain("One");
     root.querySelector<HTMLButtonElement>(".tab.active")?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }));
     root.querySelector<HTMLButtonElement>('[title="Rename note"]')?.click();
     const title = root.querySelector<HTMLInputElement>(".note-dialog-panel input")!;
@@ -1935,6 +1920,7 @@ function mountApp(services: AppServices = createServices()): { app: TansuApp; ro
   const root = document.createElement("div");
   document.body.append(root);
   const app = new TansuApp(root, services);
+  app.bindGlobalEvents();
   apps.push(app);
   return { app, root };
 }
@@ -1959,8 +1945,22 @@ async function flushEditorCapture(): Promise<void> {
   await flushAsync();
 }
 async function until(predicate: () => boolean): Promise<void> { for (let index = 0; index < 80; index += 1) { if (predicate()) return; await flushAsync(); } throw new Error(`Expected asynchronous work did not finish: ${document.body.textContent}`); }
+async function openSearch(root: HTMLElement): Promise<void> {
+  window.dispatchEvent(new KeyboardEvent("keydown", { key: "/", cancelable: true }));
+  await until(() => root.querySelector(".search-panel") !== null);
+}
+async function openRecentNote(root: HTMLElement, title?: string): Promise<void> {
+  await openSearch(root);
+  const row = [...root.querySelectorAll<HTMLButtonElement>(".recent-search-result")].find((candidate) =>
+    title === undefined || candidate.querySelector(".search-result-title")?.textContent === title
+  );
+  if (row === undefined) throw new Error(`Recent note was not rendered: ${title ?? "first note"}`);
+  row.click();
+  await flushAsync();
+}
 async function runCommand(root: HTMLElement, query: string): Promise<void> {
-  root.querySelector<HTMLButtonElement>('[title="Commands"]')?.click();
+  window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true, cancelable: true }));
+  await until(() => root.querySelector(".command-panel") !== null);
   const input = root.querySelector<HTMLInputElement>(".command-input");
   if (input === null) throw new Error("Command palette did not open");
   input.value = query;

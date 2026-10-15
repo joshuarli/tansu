@@ -42,7 +42,7 @@ describe("view rendering", () => {
     expect(renderStatusBar(state).textContent).toContain("Saving");
   });
 
-  it("wires sidebar, tabs, toolbar, tags, and context menu actions", () => {
+  it("wires floating navigation, tabs, toolbar, tags, and context menu actions", () => {
     const state = baseState();
     const active = tabFromDocument({
       meta: note("n1", "one.md", "One", ["alpha"]),
@@ -53,17 +53,16 @@ describe("view rendering", () => {
     active.conflict = true;
     state.tabs = [active, other];
     state.activeTab = tabIdentity(active);
+    state.notes.set(active.noteId, active.doc!.meta);
     state.pinned.add("n1");
     state.contextMenu = { noteId: toNoteId("n1"), x: 12, y: 24 };
+    state.searchOpen = true;
     const actions = actionSpies();
     const root = render(state, actions);
 
     root.querySelector<HTMLSelectElement>(".vault-select")!.value = "vault-1";
     root.querySelector<HTMLSelectElement>(".vault-select")!.dispatchEvent(new Event("change"));
-    root.querySelector<HTMLInputElement>(".search-input")!.value = "alpha";
-    root.querySelector<HTMLInputElement>(".search-input")!.dispatchEvent(new Event("input"));
-    root.querySelector<HTMLButtonElement>('[title="Search notes"]')!.click();
-    root.querySelector<HTMLButtonElement>('[title="Commands"]')!.click();
+    root.querySelector<HTMLButtonElement>(".recent-search-result")!.click();
     root.querySelector<HTMLButtonElement>('[title="New note"]')!.click();
     root.querySelectorAll<HTMLButtonElement>(".tab-close")[1]!.click();
     root.querySelector<HTMLButtonElement>('[title="Two"]')!.click();
@@ -93,8 +92,7 @@ describe("view rendering", () => {
     root.querySelector<HTMLButtonElement>('[title="Delete note"]')!.click();
 
     expectDispatched(actions, { type: "vault.switch", vaultId: VAULT_ID });
-    expectDispatched(actions, { type: "search.input", query: "alpha" });
-    expectDispatched(actions, { type: "search.open" });
+    expectDispatched(actions, { type: "search.recentOpen", noteId: toNoteId("n1") });
     expectDispatched(actions, { type: "command.run", id: "create" });
     expectDispatched(actions, { type: "tab.close", tab: tabIdentity(other) });
     expectDispatched(actions, { type: "tab.activate", tab: tabIdentity(other) });
@@ -106,6 +104,8 @@ describe("view rendering", () => {
     expectDispatched(actions, { type: "reading.toggle" });
     expectDispatched(actions, { type: "editor.toolbar", command: "bold" });
     expect(root.textContent).toContain("Save conflict");
+    expect(root.querySelector(".sidebar")).toBeNull();
+    expect(root.querySelector(".document-title")?.textContent).toBe("One");
   });
 
   it("opens a custom animated vault menu", () => {

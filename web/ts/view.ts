@@ -26,13 +26,11 @@ export type ViewActions = {
 };
 
 export function renderApp(state: State, actions: ViewActions): HTMLElement[] {
-  const sidebar = renderSidebar(state, actions);
   const main = renderMain(state, actions);
   const overlays = renderOverlays(state, actions);
-  sidebar.dataset["viewRegion"] = "sidebar";
   main.dataset["viewRegion"] = "main";
   overlays.dataset["viewRegion"] = "overlays";
-  return [sidebar, main, overlays];
+  return [main, overlays];
 }
 
 export function renderLoading(): HTMLElement {
@@ -210,12 +208,7 @@ export function updateStatusBar(status: HTMLElement, state: State): void {
   reconcileNode(status, renderStatusBar(state));
 }
 
-function renderSidebar(state: State, actions: ViewActions): HTMLElement {
-  const sidebar = el(
-    "aside",
-    ["sidebar", state.readingMode ? "reading-sidebar" : "", state.sidebarCollapsed ? "sidebar-collapsed" : ""]
-      .filter(Boolean).join(" "),
-  );
+function renderVaultPicker(state: State, actions: ViewActions): HTMLElement {
   const vaultSelect = document.createElement("select");
   vaultSelect.className = "vault-select";
   vaultSelect.dataset["key"] = "vault-select";
@@ -233,7 +226,7 @@ function renderSidebar(state: State, actions: ViewActions): HTMLElement {
     actions.dispatch({ type: "vault.switch", vaultId: vaultId(vaultSelect.value) });
   });
   const vaultOptions = el("div", "vault-options");
-  const vaultControl = el("div", "vault-control", vaultLabel, vaultSelect, vaultOptions);
+  const vaultControl = el("div", "vault-control floating-vault-control", vaultLabel, vaultSelect, vaultOptions);
   for (const vault of vaults) {
     if (vault.vaultId === state.vault) {
       continue;
@@ -257,58 +250,14 @@ function renderSidebar(state: State, actions: ViewActions): HTMLElement {
   vaultControl.style.setProperty("--vault-option-count", String(vaultOptions.childElementCount));
   vaultControl.setAttribute("aria-expanded", "false");
   vaultControl.addEventListener("click", () => toggleVaultOptions(vaultControl));
+  return vaultControl;
+}
 
-  const search = document.createElement("input");
-  search.className = "search-input";
-  search.dataset["key"] = "sidebar-search";
-  search.type = "search";
-  search.placeholder = "Search";
-  search.value = state.searchQuery;
-  search.addEventListener("input", () => {
-    actions.dispatch({ type: "search.input", query: search.value });
-  });
-
-  const searchButton = button(
-    "⌕",
-    "Search notes",
-    () => actions.dispatch({ type: "search.open" }),
-    "icon-button",
-  );
-  const create = button(
-    "+",
-    "New note",
-    () => actions.dispatch({ type: "command.run", id: "create" }),
-    "icon-button",
-  );
-  const read = toolButton(state.readingMode ? "eyeOff" : "eye", "Read", () =>
-    actions.dispatch({ type: "reading.toggle" }),
-  );
-  const palette = button(
-    "⌘",
-    "Commands",
-    () => actions.dispatch({ type: "command.open" }),
-    "icon-button",
-  );
-  const collapse = button(
-    state.sidebarCollapsed ? "›" : "‹",
-    state.sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar",
-    () => actions.dispatch({ type: "sidebar.toggle" }),
-    "icon-button sidebar-collapse",
-  );
-  const controls = el("div", "sidebar-controls", searchButton, create, read, palette, collapse);
-
-  sidebar.append(vaultControl, controls, search);
-  if (state.searchQuery.trim() !== "") {
-    const results = el("div", "note-list search-results");
-    for (const hit of state.searchHits ?? []) results.append(searchHitRow(hit, actions));
-    if (state.searchHits !== null && state.searchHits.length === 0) results.append(span("No matches", "empty-outline"));
-    const coverage = draftCoverageMessage(state.searchCoverage);
-    if (coverage !== null) results.append(coverage);
-    sidebar.append(section("Search", results));
-  }
-  const outline = state.outlineCollapsed || activeTab(state) === undefined
-    ? { headings: [], complete: true }
-    : actions.outline();
+function renderNoteOutline(state: State, actions: ViewActions): HTMLElement | null {
+  const active = activeTab(state);
+  if (active === undefined || loadedDraft(active) === null) return null;
+  const outline = actions.outline();
+  if (outline.headings.length === 0) return null;
   const outlineList = el("div", "outline-list");
   for (const heading of outline.headings) {
     const item = button(
@@ -322,19 +271,7 @@ function renderSidebar(state: State, actions: ViewActions): HTMLElement {
     if (heading.from === actions.activeHeadingFrom) item.setAttribute("aria-current", "location");
     outlineList.append(item);
   }
-  if (outline.headings.length === 0) outlineList.append(span("No headings", "empty-outline"));
-  const outlineHeading = button(
-    state.outlineCollapsed ? "Outline ›" : "Outline ‹",
-    state.outlineCollapsed ? "Expand outline" : "Collapse outline",
-    () => actions.dispatch({ type: "outline.toggle" }),
-    "outline-toggle",
-  );
-  const outlineSection = el("section", "sidebar-section outline-section", outlineHeading);
-  if (!state.outlineCollapsed) outlineSection.append(outlineList);
-  sidebar.append(outlineSection);
-  sidebar.append(section("Pinned", noteList(state, [...state.pinned], actions)));
-  sidebar.append(section("Recent", noteList(state, recentNoteIds(state), actions)));
-  return sidebar;
+  return el("aside", "note-outline", el("h2", "note-outline-title", "On this note"), outlineList);
 }
 
 const vaultOptionClosers = new WeakMap<HTMLElement, () => void>();
@@ -426,12 +363,19 @@ function renderMain(state: State, actions: ViewActions): HTMLElement {
     tabEl.append(...tabContent);
     tabs.append(tabEl);
   }
-  const topbar = el("div", "topbar", tabs);
+  const create = button(
+    "+",
+    "New note",
+    () => actions.dispatch({ type: "command.run", id: "create" }),
+    "icon-button new-note",
+  );
+  const topbar = el("div", "topbar", el("div", "tab-strip", tabs, create));
   const findBar = state.findOpen ? renderFindBar(state, actions) : null;
   const workspace = el("section", "workspace");
   if (active === undefined) {
-    workspace.append(emptyState(actions), renderEditorMount(true));
+    workspace.append(emptyState(), renderEditorMount(true));
   } else if (loadedDraft(active) === null) {
+    workspace.append(renderDocumentTitle(active));
     const unavailable = active.kind === "saved" && active.session?.state.status === "unavailable"
       ? active.session.state
       : null;
@@ -466,12 +410,12 @@ function renderMain(state: State, actions: ViewActions): HTMLElement {
     workspace.append(renderEditorMount(true));
   } else {
     if (!reading) {
-      workspace.append(editorToolbar(actions));
+      workspace.append(editorToolbar(state, actions));
     }
     const meta = el(
       "div",
       reading ? "editor-meta reader-meta" : "editor-meta",
-      el("div", "meta-spacer"),
+      renderDocumentTitle(active),
       renderTagRow(active, actions, reading),
     );
     workspace.append(meta, renderEditorMount(false));
@@ -536,10 +480,19 @@ function renderMain(state: State, actions: ViewActions): HTMLElement {
       );
     }
   }
-  if (!reading) main.append(topbar);
+  main.append(topbar);
   main.append(workspace, renderStatusBar(state));
+  main.append(renderVaultPicker(state, actions));
+  const outline = renderNoteOutline(state, actions);
+  if (outline !== null) main.append(outline);
   if (findBar !== null) main.append(findBar);
   return main;
+}
+
+function renderDocumentTitle(tab: Tab): HTMLElement {
+  const title = el("h1", "document-title", tab.title);
+  title.dataset["key"] = `document-title:${tab.key}`;
+  return title;
 }
 
 function renderFindBar(state: State, actions: ViewActions): HTMLElement {
@@ -571,30 +524,50 @@ function renderEditorMount(hidden: boolean): HTMLElement {
   return mount;
 }
 
-function editorToolbar(actions: ViewActions): HTMLElement {
-  return el(
+function editorToolbar(state: State, actions: ViewActions): HTMLElement {
+  const more = document.createElement("details");
+  more.className = "toolbar-more";
+  const moreToggle = el("summary", "tool-button toolbar-more-toggle", "···");
+  moreToggle.setAttribute("aria-label", "More formatting actions");
+  moreToggle.title = "More formatting actions";
+  const moreMenu = el("div", "toolbar-more-menu");
+  const extraCommands = [
+    ["strikethrough", "Strikethrough", "strikethrough"],
+    ["highlight", "Highlight", "highlight"],
+    ["undo", "Undo", "undo"],
+    ["redo", "Redo", "redo"],
+    ["code", "Source", "source"],
+    ["save", "Save", "save"],
+  ] as const;
+  for (const [icon, title, command] of extraCommands) {
+    const item = toolButton(icon, title, () => {
+      more.open = false;
+      actions.dispatch({ type: "editor.toolbar", command });
+    });
+    item.classList.add("toolbar-more-item");
+    moreMenu.append(item);
+  }
+  more.append(moreToggle, moreMenu);
+  const active = activeTab(state);
+  const saveStatus = active === undefined
+    ? ""
+    : active.saving
+    ? "Saving"
+    : tabIsDirty(active)
+    ? "Unsaved"
+    : "Saved";
+  const toolbar = el(
     "div",
     "toolbar",
     toolButton("bold", "Bold", () => actions.dispatch({ type: "editor.toolbar", command: "bold" })),
-    toolButton("italic", "Italic", () =>
-      actions.dispatch({ type: "editor.toolbar", command: "italic" }),
-    ),
-    toolButton("strikethrough", "Strikethrough", () =>
-      actions.dispatch({ type: "editor.toolbar", command: "strikethrough" }),
-    ),
-    toolButton("highlight", "Highlight", () =>
-      actions.dispatch({ type: "editor.toolbar", command: "highlight" }),
-    ),
-    toolButton("heading", "Heading", () =>
-      actions.dispatch({ type: "editor.toolbar", command: "heading" }),
-    ),
-    toolButton("undo", "Undo", () => actions.dispatch({ type: "editor.toolbar", command: "undo" })),
-    toolButton("redo", "Redo", () => actions.dispatch({ type: "editor.toolbar", command: "redo" })),
-    toolButton("code", "Source", () =>
-      actions.dispatch({ type: "editor.toolbar", command: "source" }),
-    ),
-    toolButton("save", "Save", () => actions.dispatch({ type: "editor.toolbar", command: "save" })),
+    toolButton("italic", "Italic", () => actions.dispatch({ type: "editor.toolbar", command: "italic" })),
+    toolButton("heading", "Heading", () => actions.dispatch({ type: "editor.toolbar", command: "heading" })),
+    more,
+    span(saveStatus, "toolbar-save-status"),
   );
+  toolbar.setAttribute("role", "toolbar");
+  toolbar.setAttribute("aria-label", "Editor formatting");
+  return toolbar;
 }
 
 function activeDraftStorageFailed(tab: Tab): boolean {
@@ -645,15 +618,18 @@ function renderOverlays(state: State, actions: ViewActions): HTMLElement {
     input.addEventListener("input", () => {
       actions.dispatch({ type: "search.overlayInput", query: input.value });
     });
-    const list = el("div", "command-list");
+    const list = el("div", "command-list search-result-list");
     input.addEventListener("keydown", (event) => {
       if (event.key === "Enter") actions.dispatch({ type: "search.overlaySubmit" });
     });
-    if (state.searchOverlayQuery.trim() !== "") {
+    const query = state.searchOverlayQuery.trim();
+    let recentHeader: HTMLElement | null = null;
+    if (query !== "") {
       const hits = state.searchOverlayHits ?? [];
       for (const hit of hits) {
         list.append(searchHitRow(hit, actions));
       }
+      if (state.searchOverlayHits === null) list.append(span("Searching…", "search-status"));
       if (state.searchOverlayHits !== null && hits.length === 0) {
         list.append(el(
           "div",
@@ -664,13 +640,55 @@ function renderOverlays(state: State, actions: ViewActions): HTMLElement {
       }
       const coverage = draftCoverageMessage(state.searchOverlayCoverage);
       if (coverage !== null) list.append(coverage);
-    } else if (state.searchHistory.length > 0) {
-      list.append(el("div", "search-history-heading", "Recent searches"));
-      for (const query of state.searchHistory) {
-        list.append(button(query, `Search for ${query}`, () => actions.dispatch({ type: "search.historySelect", query }), "search-history-row"));
+    } else {
+      const recentNotes = recentNoteIds(state).flatMap((noteId) => {
+        const note = state.notes.get(noteId);
+        return note === undefined ? [] : [note];
+      });
+      recentHeader = el(
+        "header",
+        "recent-notes-header",
+        el("h2", "", "Recent notes"),
+        span(`${recentNotes.length} recent notes`, "recent-notes-count"),
+      );
+      for (const [index, note] of recentNotes.entries()) {
+        const row = button(
+          "",
+          note.path,
+          () => actions.dispatch({ type: "search.recentOpen", noteId: toNoteId(note.noteId) }),
+          "command-row search-result-row recent-search-result",
+        );
+        row.dataset["key"] = `search-recent:${note.noteId}`;
+        row.dataset["noteId"] = note.noteId;
+        if (index === 0) row.classList.add("selected");
+        row.addEventListener("contextmenu", (event) => {
+          event.preventDefault();
+          actions.dispatch({
+            type: "context.open",
+            noteId: toNoteId(note.noteId),
+            x: event.clientX,
+            y: event.clientY,
+          });
+        });
+        row.append(span(note.title, "search-result-title"));
+        row.append(span(actions.recentPreview(note.noteId) ?? note.path, "recent-note-detail"));
+        list.append(row);
+      }
+      if (recentNotes.length === 0) list.append(span("No notes in this vault yet.", "search-status"));
+      if (state.searchHistory.length > 0) {
+        list.append(el("div", "search-history-heading", "Recent searches"));
+        for (const query of state.searchHistory) {
+          list.append(button(query, `Search for ${query}`, () => actions.dispatch({ type: "search.historySelect", query }), "search-history-row"));
+        }
       }
     }
-    host.append(backdrop(actions), el("div", "command-panel search-panel", el("div", "search-field", span("", "search-icon"), input), list));
+    host.append(backdrop(actions), el(
+      "div",
+      "command-panel search-panel",
+      ...(recentHeader === null ? [] : [recentHeader]),
+      el("div", "search-field", span("", "search-icon"), input),
+      list,
+    ));
     queueMicrotask(() => input.focus());
   }
   if (state.quickOpen) {
@@ -1038,7 +1056,7 @@ function searchHitRow(hit: V2SearchHit, actions: ViewActions): HTMLElement {
     "",
     hit.path,
     () => actions.dispatch({ type: "search.hitOpen", hit }),
-    "note-row command-row search-result-row",
+    "command-row search-result-row",
   );
   row.dataset["key"] = `search:${identity.kind}:${identity.noteId}`;
   row.append(span(hit.title, "search-result-title"), span(hit.path, "search-result-path"));
@@ -1197,18 +1215,8 @@ function diffPreview(current: string, revision: string): string {
   return out.join("\n");
 }
 
-function emptyState(actions: ViewActions): HTMLElement {
-  return el(
-    "div",
-    "empty-state",
-    el("div", "empty-title", "No note selected"),
-    button(
-      "New note",
-      "New note",
-      () => actions.dispatch({ type: "command.run", id: "create" }),
-      "primary-button",
-    ),
-  );
+function emptyState(): HTMLElement {
+  return el("div", "empty-state", el("div", "empty-title", "No note selected"));
 }
 
 function renderTagRow(tab: Tab, actions: ViewActions, readonly = false): HTMLElement {
@@ -1248,48 +1256,9 @@ function renderTagRow(tab: Tab, actions: ViewActions, readonly = false): HTMLEle
   return row;
 }
 
-function noteList(state: State, ids: string[], actions: ViewActions): HTMLElement {
-  const list = el("div", "note-list");
-  const seen = new Set<string>();
-  for (const noteId of ids) {
-    if (seen.has(noteId)) {
-      continue;
-    }
-    seen.add(noteId);
-    const note = state.notes.get(noteId);
-    if (note === undefined) {
-      continue;
-    }
-    const row = button(
-      note.title,
-      note.path,
-      () => actions.dispatch({ type: "note.open", noteId: toNoteId(note.noteId) }),
-      state.activeTab?.kind === "saved" && state.activeTab.noteId === note.noteId
-        ? "note-row active"
-        : "note-row",
-    );
-    row.dataset["key"] = `note:${note.noteId}`;
-    row.addEventListener("contextmenu", (event) => {
-      event.preventDefault();
-      actions.dispatch({
-        type: "context.open",
-        noteId: toNoteId(note.noteId),
-        x: event.clientX,
-        y: event.clientY,
-      });
-    });
-    list.append(row);
-  }
-  return list;
-}
-
 function recentNoteIds(state: State): string[] {
   const ids = new Set(state.recent);
   return [...state.recent, ...[...state.notes.keys()].filter((noteId) => !ids.has(noteId))];
-}
-
-function section(title: string, body: HTMLElement): HTMLElement {
-  return el("section", "sidebar-section", el("h2", "section-title", title), body);
 }
 
 function closeButton(tab: TabIdentity, actions: ViewActions, beforeClose?: () => void): HTMLElement {

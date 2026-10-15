@@ -139,14 +139,15 @@ describe("real server harness", () => {
     await page.goto(baseUrl);
     await page.waitForSelector(".main");
     await expect.poll(() => page.locator(".vault-label").isVisible()).toBe(true);
-    await expect.poll(() => page.locator(".note-row").first().isVisible()).toBe(true);
+    await page.keyboard.press("/");
+    await expect.poll(() => page.locator(".recent-search-result").first().isVisible()).toBe(true);
     await bootstrapRequest;
     expect(startupRequests[0]).toBe("GET /api/v2/bootstrap");
     expect(startupRequests.some((request) => request.includes(`/vaults/${vaultOneId}/events?after=`))).toBeTruthy();
     expect(
       startupRequests.filter((request) => request.startsWith(`GET /api/v2/vaults/${vaultOneId}/notes/`)).length,
     ).toBeLessThanOrEqual(3);
-    await page.locator('.note-row[title="one.md"]').click();
+    await page.locator('.recent-search-result[title="one.md"]').click();
     await expect.poll(() => page.locator("#editor-mount .cm-content").textContent()).not.toBe("");
     await openQuickNote(page, "visual");
     await page.waitForSelector('.cm-content img[data-image-name="z-images/sample.webp"]');
@@ -193,7 +194,7 @@ describe("real server harness", () => {
     await expect(page.locator(".workspace > .toolbar").count()).resolves.toBe(1);
     await expect(page.locator(".workspace > .toolbar").isVisible()).resolves.toBeFalsy();
     await expect(page.locator(".section-title", { hasText: "Notes" }).count()).resolves.toBe(0);
-    await expect(page.locator(".sidebar-controls").isVisible()).resolves.toBeFalsy();
+    await expect(page.locator(".sidebar").count()).resolves.toBe(0);
     await expect(
       page.evaluate(() => getComputedStyle(document.querySelector(".tabs")!).scrollbarWidth),
     ).resolves.toBe("none");

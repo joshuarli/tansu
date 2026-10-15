@@ -47,12 +47,12 @@ type SettingsFormValue = {
 
 export type ViewEvent =
   | { type: "vault.switch"; vaultId: VaultId }
-  | { type: "search.input"; query: string }
   | { type: "search.open" }
   | { type: "search.overlayInput"; query: string }
   | { type: "search.overlaySubmit" }
   | { type: "search.historySelect"; query: string }
   | { type: "search.hitOpen"; hit: V2SearchHit }
+  | { type: "search.recentOpen"; noteId: NoteId }
   | { type: "quickOpen.open" }
   | { type: "quickOpen.input"; query: string }
   | { type: "quickOpen.hitOpen"; hit: V2QuickOpenResponse["hits"][number] }
@@ -62,8 +62,6 @@ export type ViewEvent =
   | { type: "find.close" }
   | { type: "find.select"; match: FindMatch }
   | { type: "outline.select"; heading: OutlineHeading }
-  | { type: "sidebar.toggle" }
-  | { type: "outline.toggle" }
   | { type: "auth.login" }
   | { type: "auth.enroll" }
   | { type: "auth.logout" }

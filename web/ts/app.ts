@@ -35,7 +35,7 @@ import type { OutlineHeading } from "./editor/source-navigation.js";
 
 const SESSION_SAVE_DELAY_MS = 250;
 const EDITOR_CAPTURE_DELAY_MS = 150;
-const MIN_SEARCH_QUERY_CHARS = 3;
+const MIN_SEARCH_QUERY_CHARS = 1;
 
 function markdownPreview(source: string): string {
   const body = source.replace(/^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/, "");
@@ -50,6 +50,11 @@ function markdownPreview(source: string): string {
     .replace(/[*_~`]/g, "")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function isTextEntryTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  return target.isContentEditable || target.closest("input, textarea, select, [contenteditable='true']") !== null;
 }
 
 export class TansuApp {
@@ -84,7 +89,6 @@ export class TansuApp {
   private workspaceTimer: number | undefined;
   private noticeTimer: number | undefined;
   private disposeTask: Promise<void> | null = null;
-  private searchRequestSeq = 0;
   private searchOverlayRequestSeq = 0;
   private quickOpenRequestSeq = 0;
   private bootGeneration = 0;
@@ -113,7 +117,6 @@ export class TansuApp {
     const generation = ++this.bootGeneration;
     this.transitioningVault = true;
     this.state.imageUploads.clear();
-    this.searchRequestSeq += 1;
     this.searchOverlayRequestSeq += 1;
     this.quickOpenRequestSeq += 1;
     this.eventSubscription?.close();
@@ -298,6 +301,10 @@ export class TansuApp {
       } else if (modifier && event.altKey && !event.shiftKey && key === "n") {
         event.preventDefault();
         this.runAsync(this.commandCreate(), "Create failed");
+      } else if (event.key === "/" && !modifier && !event.altKey && !event.shiftKey &&
+        !isTextEntryTarget(event.target)) {
+        event.preventDefault();
+        this.dispatch({ type: "search.open" });
       } else if (event.key === "Escape" && this.hasOverlay()) {
         event.preventDefault();
         this.runAsync(this.closeOverlays(), "Local recovery storage failed");
@@ -437,7 +444,6 @@ export class TansuApp {
   private render(): void {
     if (this.disposed) return;
     this.captureActiveEditor();
-    this.root.dataset["sidebarCollapsed"] = String(this.state.sidebarCollapsed);
     const view = this.state.authRequired
       ? [renderAuthGate(this.state, this.viewActions())]
       : this.noVaultConfigured ? [renderNoVaultConfigured()]
@@ -1000,25 +1006,6 @@ export class TansuApp {
     }, SESSION_SAVE_DELAY_MS);
   }
 
-  private async updateSearch(): Promise<void> {
-    const request = ++this.searchRequestSeq;
-    const query = this.state.searchQuery.trim();
-    const client = this.vaultClient;
-    const serverIdentity = this.identity;
-    if (query.length < MIN_SEARCH_QUERY_CHARS || client === null || serverIdentity === null) {
-      this.state.searchHits = null;
-      this.state.searchCoverage = null;
-      this.render();
-      return;
-    }
-    const response = await client.search({ query, mode: "default", limit: 50, overlays: this.searchOverlays() });
-    if (request !== this.searchRequestSeq || this.state.searchQuery.trim() !== query ||
-      !this.isCurrentVault(serverIdentity, client)) return;
-    this.state.searchHits = response.hits;
-    this.state.searchCoverage = response.overlayCoverage;
-    this.render();
-  }
-
   private async updateSearchOverlay(): Promise<void> {
     const request = ++this.searchOverlayRequestSeq;
     const query = this.state.searchOverlayQuery.trim();
@@ -1030,6 +1017,9 @@ export class TansuApp {
       this.render();
       return;
     }
+    this.state.searchOverlayHits = null;
+    this.state.searchOverlayCoverage = null;
+    this.render();
     const response = await client.search({ query, mode: "default", limit: 50, overlays: this.searchOverlays() });
     if (request !== this.searchOverlayRequestSeq || this.state.searchOverlayQuery.trim() !== query ||
       !this.isCurrentVault(serverIdentity, client)) return;
@@ -1060,6 +1050,15 @@ export class TansuApp {
     this.render();
   }
 
+  private async openRecentNote(noteId: ReturnType<typeof toNoteId>): Promise<void> {
+    await this.openNote(noteId);
+    this.state.searchOpen = false;
+    this.state.quickOpen = false;
+    this.overlayReturn = null;
+    this.editor?.focus();
+    this.render();
+  }
+
   private async openQuickOpenHit(hit: V2QuickOpenResponse["hits"][number]): Promise<void> {
     const client = this.vaultClient;
     const serverIdentity = this.identity;
@@ -1079,13 +1078,14 @@ export class TansuApp {
       return;
     }
     this.state.quickOpen = false;
+    this.state.searchOpen = false;
     this.overlayReturn = null;
     this.editor?.focus();
     this.render();
   }
 
   private refreshSearchResults(): Promise<void> {
-    return this.state.searchOpen ? this.updateSearchOverlay() : this.updateSearch();
+    return this.state.searchOpen ? this.updateSearchOverlay() : Promise.resolve();
   }
 
   private async openSearchHit(hit: V2SearchHit): Promise<void> {
@@ -1497,11 +1497,6 @@ export class TansuApp {
         this.runAsync(this.boot(event.vaultId), "Load failed", false);
         return;
       }
-      case "search.input": {
-        this.state.searchQuery = event.query;
-        this.runAsync(this.updateSearch(), "Search failed");
-        return;
-      }
       case "search.open": {
         this.captureOverlayReturn();
         this.clearFindHighlights();
@@ -1510,6 +1505,8 @@ export class TansuApp {
         this.state.findOpen = false;
         this.state.commandOpen = false;
         this.state.searchOverlayQuery = "";
+        this.state.searchOverlayHits = null;
+        this.state.searchOverlayCoverage = null;
         this.render();
         return;
       }
@@ -1534,6 +1531,10 @@ export class TansuApp {
       }
       case "search.hitOpen": {
         this.runAsync(this.openSearchHit(event.hit), "Search result could not be opened");
+        return;
+      }
+      case "search.recentOpen": {
+        this.runAsync(this.openRecentNote(event.noteId), "Open failed");
         return;
       }
       case "quickOpen.open": {
@@ -1606,16 +1607,6 @@ export class TansuApp {
       }
       case "outline.select": {
         this.editor?.revealSelection({ anchor: event.heading.from, head: event.heading.from });
-        return;
-      }
-      case "sidebar.toggle": {
-        this.state.sidebarCollapsed = !this.state.sidebarCollapsed;
-        this.render();
-        return;
-      }
-      case "outline.toggle": {
-        this.state.outlineCollapsed = !this.state.outlineCollapsed;
-        this.render();
         return;
       }
       case "auth.capability": {

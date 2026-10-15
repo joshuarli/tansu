@@ -91,9 +91,6 @@ export type State = {
   tabs: Tab[];
   closedTabs: WorkspaceTab[];
   activeTab: TabIdentity | null;
-  searchQuery: string;
-  searchHits: V2SearchHit[] | null;
-  searchCoverage: V2OverlayCoverage | null;
   searchOpen: boolean;
   quickOpen: boolean;
   quickOpenQuery: string;
@@ -113,8 +110,6 @@ export type State = {
   conflictDraft: V2ConflictDraftDocument | null;
   settingsOpen: boolean;
   storagePersisted: boolean | null;
-  sidebarCollapsed: boolean;
-  outlineCollapsed: boolean;
   noteDialog: NoteDialog | null;
   contextMenu: ContextMenuState | null;
   notice: string | null;
@@ -138,9 +133,6 @@ export function createState(vault: VaultId): State {
     tabs: [],
     closedTabs: [],
     activeTab: null,
-    searchQuery: "",
-    searchHits: null,
-    searchCoverage: null,
     searchOpen: false,
     quickOpen: false,
     quickOpenQuery: "",
@@ -160,8 +152,6 @@ export function createState(vault: VaultId): State {
     conflictDraft: null,
     settingsOpen: false,
     storagePersisted: null,
-    sidebarCollapsed: false,
-    outlineCollapsed: false,
     noteDialog: null,
     contextMenu: null,
     notice: null,
