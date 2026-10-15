@@ -1,7 +1,7 @@
 # Tansu2 TODO
 
 Prefix: TNS
-Next: 36
+Next: 37
 
 ### TNS-024 · P1 · Serialize vault mutations across server processes
 
@@ -91,15 +91,6 @@ Next: 36
 - **Problem:** The release workflow builds and uploads archives without running the existing packaged-binary smoke check. A binary can compile and still fail its packaged runtime checks after the release is published.
 - **Recommendation:** Run the narrow package smoke check on release artifacts before uploading them.
 - **Fix with:** none
-- **Effort:** S
-
-### TNS-035 · P3 · Keep e2e fixture state under repository scratch
-
-- **Area:** Tests
-- **Where:** `web/ts/e2e/server.test.ts:64`, `web/ts/e2e/server.test.ts:93-96`
-- **Problem:** The real-server suite creates its copied fixture under the operating-system temp directory and stops the server without removing the fixture. This leaves scratch state outside the repository’s `.work/` convention and accumulates fixture directories across runs.
-- **Recommendation:** Create the fixture under `.work/tmp` and remove it after stopping the server.
-- **Fix with:** renovate-tests
 - **Effort:** S
 
 ### TNS-036 · P3 · Give SQLite build inputs one owner

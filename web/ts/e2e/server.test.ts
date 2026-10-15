@@ -1,9 +1,8 @@
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { once } from "node:events";
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import net from "node:net";
-import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 import {
@@ -21,6 +20,7 @@ let browser: Browser | undefined;
 let baseUrl = "";
 let vaultOnePath = "";
 let fixture: TestFixture | undefined;
+let fixtureRoot: string | undefined;
 let serverPort = 0;
 let serverInstanceId = "";
 let vaultOneId = "";
@@ -61,7 +61,10 @@ type LogEvent = {
 
 describe("real server harness", () => {
   beforeAll(async () => {
-    const root = await mkdtemp(join(tmpdir(), "tansu2-e2e-"));
+    const scratchRoot = join(process.cwd(), ".work", "tmp");
+    await mkdir(scratchRoot, { recursive: true });
+    const root = await mkdtemp(join(scratchRoot, "tansu2-e2e-"));
+    fixtureRoot = root;
     fixture = JSON.parse(
       execFileSync(process.execPath, ["scripts/test-fixture.mjs", root, "--copy-vaults"], {
         cwd: process.cwd(),
@@ -91,8 +94,17 @@ describe("real server harness", () => {
   });
 
   afterAll(async () => {
-    await browser?.close();
-    await stopFixtureServer();
+    try {
+      await browser?.close();
+    } finally {
+      try {
+        await stopFixtureServer();
+      } finally {
+        if (fixtureRoot !== undefined) {
+          await rm(fixtureRoot, { recursive: true, force: true });
+        }
+      }
+    }
   });
 
   it("starts with two seeded vaults and loads the static app", async () => {
