@@ -210,6 +210,14 @@ export class TansuApp {
       )
       ? identityOfWorkspaceIdentity(imported.activeTab)
       : this.state.tabs[0] === undefined ? null : tabIdentity(this.state.tabs[0]);
+    if (this.state.activeTab === null && this.state.notes.size === 1) {
+      const onlyNote = this.state.notes.values().next().value;
+      if (onlyNote !== undefined) {
+        const tab = tabFromMeta(onlyNote);
+        this.state.tabs.push(tab);
+        this.state.activeTab = tabIdentity(tab);
+      }
+    }
     this.transitioningVault = false;
     this.scheduleWorkspaceSave();
     this.connectEvents(generation);
