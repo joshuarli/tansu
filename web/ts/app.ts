@@ -330,6 +330,10 @@ export class TansuApp {
         }
         current = current.parentElement;
       }
+      if (this.root.querySelector(".overlay-backdrop") !== null) {
+        event.preventDefault();
+        return;
+      }
       if (this.editor?.scrollByWheel(event)) event.preventDefault();
     };
     window.addEventListener("beforeunload", onBeforeUnload);
@@ -1987,13 +1991,16 @@ export class TansuApp {
 
   private updateActiveOutlineHeading(heading: OutlineHeading | null): void {
     this.activeOutlineHeadingFrom = heading?.from ?? null;
+    let activeRow: HTMLButtonElement | null = null;
     for (const row of this.root.querySelectorAll<HTMLButtonElement>(".outline-row")) {
       if (row.dataset["headingFrom"] === String(this.activeOutlineHeadingFrom)) {
         row.setAttribute("aria-current", "location");
+        activeRow = row;
       } else {
         row.removeAttribute("aria-current");
       }
     }
+    activeRow?.scrollIntoView({ block: "nearest" });
   }
 
   private notify(message: string): void {
