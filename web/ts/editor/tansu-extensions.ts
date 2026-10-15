@@ -12,6 +12,12 @@ export type EditorConfig = {
   mode?: "live" | "source";
   className?: string;
   noteTitle?: string;
+  noteTags?: {
+    tags: readonly string[];
+    status: "editable" | "read-only" | "locked";
+    onAddTag: () => void;
+    onRemoveTag: (tag: string) => void;
+  };
   currentNotePath?: () => string;
   wikiNotes?: () => readonly WikiNote[];
   onWikiNoteOpen?: (noteId: string) => void;

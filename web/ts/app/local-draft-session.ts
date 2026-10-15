@@ -8,6 +8,7 @@ export type LocalDraftSessionState = {
   workspaceId: string;
   localDraftId: LocalDraftId;
   localRevision: number;
+  updatedAtMs: number;
   mutationId: string;
   source: string;
   titleDraft: string;
@@ -43,6 +44,7 @@ export class LocalDraftSession {
       workspaceId,
       localDraftId,
       localRevision: 0,
+      updatedAtMs: Date.now(),
       mutationId,
       source: "",
       titleDraft: "",
@@ -77,6 +79,7 @@ export class LocalDraftSession {
     this.set({
       ...this.current,
       localRevision: record.localRevision,
+      updatedAtMs: record.checkpointedAtMs,
       mutationId: record.mutationId,
       source: record.source,
       titleDraft: record.titleDraft,
@@ -141,6 +144,7 @@ export class LocalDraftSession {
       ...this.current,
       ...fields,
       localRevision,
+      updatedAtMs: Date.now(),
       mutationId: this.services.createMutationId(),
     });
   }

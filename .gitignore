@@ -2,6 +2,7 @@ target
 node_modules
 web/static/app.js
 web/static/app.js.map
+web/dist/
 bindings
 .env
 coverage/

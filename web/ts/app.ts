@@ -9,7 +9,7 @@ import { logClientEvent } from "./dev-log.ts";
 import { V2ApiError } from "./app/v2-api.ts";
 import type { EditorHandle, EditorSession } from "./editor/codemirror-adapter.ts";
 import { createCalloutExtension, createWikiImageExtension, type EditorConfig } from "./editor/tansu-extensions.ts";
-import { normalizeTag } from "./markdown-tags.ts";
+import { frontmatterSupportsTags, normalizeTag } from "./markdown-tags.ts";
 import { canonicalSourceHash } from "./save-delta.ts";
 import {
   activeTab,
@@ -72,6 +72,12 @@ export class TansuApp {
   private activeOutlineHeadingFrom: number | null = null;
   private attachedEditor: { tab: Tab; session: EditorSession } | null = null;
   private readonly editorMount = document.createElement("div");
+  private readonly addEditorTag = (): void => this.dispatch({ type: "note.addTag" });
+  private readonly removeEditorTag = (tag: string): void => {
+    const tab = activeTab(this.state);
+    if (tab?.kind !== "saved" || tab.doc === null) return;
+    this.dispatch({ type: "tags.update", tags: tab.doc.meta.tags.filter((item) => item !== tag) });
+  };
   private readonly noteLoads = new Map<string, Promise<void>>();
   private readonly autoSaveTimers = new Map<string, number>();
   private editorCaptureTimer: number | undefined;
@@ -479,15 +485,16 @@ export class TansuApp {
     const client = this.vaultClient;
     const cached = this.cachedEditorConfig;
     const sameVault = cached !== null && cached.generation === generation && cached.identity === serverIdentity && cached.client === client;
+    const noteTags = this.editorNoteTags();
     if (sameVault && cached !== null && cached.assetScopeRevision === this.assetScopeRevision) {
-      return { ...cached.config, noteTitle: activeTab(this.state)?.title ?? "" };
+      return this.editorConfigForActiveNote(cached.config);
     }
     const extensions = [
       createWikiImageExtension({ resolveUrl: (name) => this.resolveAssetUrl(name) }),
       createCalloutExtension(),
     ];
     if (sameVault && cached !== null) {
-      const config = { ...cached.config, extensions, noteTitle: activeTab(this.state)?.title ?? "" };
+      const config = this.editorConfigForActiveNote({ ...cached.config, extensions });
       this.cachedEditorConfig = { generation, identity: serverIdentity, client, assetScopeRevision: this.assetScopeRevision, config };
       return config;
     }
@@ -495,6 +502,7 @@ export class TansuApp {
     const config: EditorConfig = {
       extensions,
       noteTitle: activeTab(this.state)?.title ?? "",
+      ...(noteTags === undefined ? {} : { noteTags }),
       currentNotePath: () => activeTab(this.state)?.path ?? "",
       wikiNotes: () => [...this.state.notes.values()].map((note) => ({ noteId: note.noteId, title: note.title, path: note.path })),
       onWikiNoteOpen: (id) => {
@@ -558,6 +566,33 @@ export class TansuApp {
     };
     this.cachedEditorConfig = { generation, identity: serverIdentity, client, assetScopeRevision: this.assetScopeRevision, config };
     return config;
+  }
+
+  private editorConfigForActiveNote(config: EditorConfig): EditorConfig {
+    const { noteTags: _cachedNoteTags, ...baseConfig } = config;
+    const noteTags = this.editorNoteTags();
+    return {
+      ...baseConfig,
+      noteTitle: activeTab(this.state)?.title ?? "",
+      ...(noteTags === undefined ? {} : { noteTags }),
+    };
+  }
+
+  private editorNoteTags(): NonNullable<EditorConfig["noteTags"]> | undefined {
+    const tab = activeTab(this.state);
+    if (tab?.kind !== "saved" || tab.doc === null) return undefined;
+    const content = tab.draft ?? tab.doc.content;
+    const status = !frontmatterSupportsTags(content)
+      ? "locked"
+      : this.state.readingMode || this.transitioningVault
+      ? "read-only"
+      : "editable";
+    return {
+      tags: tab.doc.meta.tags,
+      status,
+      onAddTag: this.addEditorTag,
+      onRemoveTag: this.removeEditorTag,
+    };
   }
 
   private attachActiveEditor(): void {

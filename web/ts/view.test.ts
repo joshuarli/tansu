@@ -69,8 +69,6 @@ describe("view rendering", () => {
     root
       .querySelector<HTMLButtonElement>('[title="One"]')!
       .dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 3, clientY: 4 }));
-    root.querySelector<HTMLButtonElement>('[title="Remove alpha"]')!.click();
-    root.querySelector<HTMLButtonElement>('[title="Add tag"]')!.click();
     root.querySelector<HTMLButtonElement>('[title="View conflict draft"]')!.click();
     root.querySelector<HTMLButtonElement>('[title="Restore conflict draft"]')!.click();
     root.querySelector<HTMLButtonElement>('[title="Read"]')!.click();
@@ -84,7 +82,6 @@ describe("view rendering", () => {
     expectDispatched(actions, { type: "tab.close", tab: tabIdentity(other) });
     expectDispatched(actions, { type: "tab.activate", tab: tabIdentity(other) });
     expectDispatched(actions, { type: "context.open", noteId: toNoteId("n1"), x: 3, y: 4 });
-    expectDispatched(actions, { type: "tags.update", tags: [] });
     expectDispatched(actions, { type: "note.pin", noteId: toNoteId("n1") });
     expectDispatched(actions, { type: "note.rename", noteId: toNoteId("n1") });
     expectDispatched(actions, { type: "note.delete", noteId: toNoteId("n1") });
@@ -167,8 +164,7 @@ describe("view rendering", () => {
     expect(root.querySelector(".main")?.className).toContain("reading-mode");
     expect(root.querySelector(".topbar")).toBeNull();
     expect(root.querySelector(".toolbar")).toBeNull();
-    expect(root.querySelector(".editor-meta")).not.toBeNull();
-    expect(root.querySelector(".tag-row")).not.toBeNull();
+    expect(root.querySelector(".editor-meta")).toBeNull();
     root.querySelector<HTMLButtonElement>('[title="Read"]')!.click();
     expectDispatched(actions, { type: "reading.toggle" });
   });

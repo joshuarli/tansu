@@ -6,7 +6,7 @@ DEPLOY_HOST ?= ubuntu@oracle
 
 dev:
 	deno task build:dev
-	$(MAKE) types dev-config
+	$(MAKE) types-generated dev-config
 	TANSU2_LOGS=pretty XDG_CONFIG_HOME="$(DEV_CONFIG_HOME)" XDG_DATA_HOME="$(DEV_DATA_HOME)" cargo run --bin $(NAME) -- --port 3000
 
 dev-config:
@@ -50,10 +50,15 @@ audit:
 ci: lint coverage test-e2e-chromium test-e2e-webkit audit
 
 types:
+	deno task build
 	cargo run --quiet --bin gen-api-types
 
 types-check:
+	deno task build
 	cargo run --quiet --bin gen-api-types -- --check
+
+types-generated:
+	cargo run --quiet --bin gen-api-types
 
 ts: types
 	deno task build:dev
@@ -113,4 +118,4 @@ bench-long-session:
 	mkdir -p "$(CURDIR)/.work/tmp"
 	TMPDIR="$(CURDIR)/.work/tmp" node bench/long-session.mjs
 
-.PHONY: audit bench bench-full bench-long-session build-linux-musl-aarch64 build-linux-musl-both build-linux-musl-docker build-linux-musl-x86_64 ci coverage coverage-html coverage-rs deploy dev dev-config check lint test-package types types-check ts test test-e2e-chromium test-e2e-webkit test-rs
+.PHONY: audit bench bench-full bench-long-session build-linux-musl-aarch64 build-linux-musl-both build-linux-musl-docker build-linux-musl-x86_64 ci coverage coverage-html coverage-rs deploy dev dev-config check lint test-package types types-check types-generated ts test test-e2e-chromium test-e2e-webkit test-rs

@@ -57,6 +57,8 @@
   vertical-align: middle;
 }
 
+.cm-editor:not([contenteditable="false"]) .tansu-wiki-image { touch-action: none; }
+
 .tansu-wiki-image img {
   display: block;
   height: auto;

@@ -12,6 +12,6 @@
     "playwright:install": "node scripts/install-playwright-browsers.mjs",
     "coverage": "node_modules/.bin/vitest run --coverage",
     "coverage:html": "node_modules/.bin/vitest run --coverage --coverage.reporter=html",
-    "check": "deno task lint && deno task typecheck && deno task test && cargo check -q"
+    "check": "deno task build && deno task lint && deno task typecheck && deno task test && cargo check -q"
   }
 }

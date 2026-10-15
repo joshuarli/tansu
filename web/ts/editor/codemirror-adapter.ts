@@ -56,26 +56,75 @@ import {
 
 const transactionOrigin = Annotation.define<EditorOrigin>();
 
-class NoteTitleWidget extends WidgetType {
-  constructor(readonly title: string) {
+type NoteTags = NonNullable<EditorConfig["noteTags"]>;
+
+function sameNoteTags(left: NoteTags | undefined, right: NoteTags | undefined): boolean {
+  if (left === right) return true;
+  if (left === undefined || right === undefined || left.status !== right.status ||
+    left.onAddTag !== right.onAddTag || left.onRemoveTag !== right.onRemoveTag || left.tags.length !== right.tags.length) {
+    return false;
+  }
+  return left.tags.every((tag, index) => tag === right.tags[index]);
+}
+
+class NoteHeaderWidget extends WidgetType {
+  constructor(readonly title: string, readonly tags: NoteTags | undefined) {
     super();
   }
 
   override eq(other: WidgetType): boolean {
-    return other instanceof NoteTitleWidget && this.title === other.title;
+    return other instanceof NoteHeaderWidget && this.title === other.title && sameNoteTags(this.tags, other.tags);
   }
 
   override toDOM(): HTMLElement {
+    const header = document.createElement("div");
+    header.className = "note-header";
+    header.contentEditable = "false";
     const title = document.createElement("h1");
     title.className = "document-title";
-    title.contentEditable = "false";
     title.textContent = this.title;
-    return title;
+    header.append(title);
+    if (this.tags !== undefined) header.append(renderNoteTags(this.tags));
+    return header;
   }
 
   override ignoreEvent(): boolean {
     return true;
   }
+}
+
+function renderNoteTags(tags: NoteTags): HTMLElement {
+  const row = document.createElement("div");
+  row.className = "tag-row";
+  for (const tag of tags.tags) {
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "tag";
+    remove.disabled = tags.status !== "editable";
+    remove.title = `Remove ${tag}`;
+    remove.setAttribute("aria-label", `Remove ${tag}`);
+    remove.textContent = `#${tag} x`;
+    remove.addEventListener("click", () => tags.onRemoveTag(tag));
+    row.append(remove);
+  }
+  if (tags.status !== "read-only") {
+    const add = document.createElement("button");
+    add.type = "button";
+    add.className = "tag tag-add";
+    add.disabled = tags.status === "locked";
+    add.title = "Add tag";
+    add.setAttribute("aria-label", "Add tag");
+    add.textContent = "+ tag";
+    add.addEventListener("click", tags.onAddTag);
+    row.append(add);
+  }
+  if (tags.status === "locked") {
+    const locked = document.createElement("span");
+    locked.className = "tag-disabled";
+    locked.textContent = "Tags locked";
+    row.append(locked);
+  }
+  return row;
 }
 
 function frontmatterDecorations(state: EditorState): DecorationSet {
@@ -284,9 +333,9 @@ function sessionData(session: EditorSession, owner: symbol): SessionData {
 
 function editorExtensions(config: EditorConfig, live: boolean): Extension[] {
   const extensions: Extension[] = [];
-  if (config.noteTitle !== undefined && config.noteTitle !== "") {
+  if ((config.noteTitle !== undefined && config.noteTitle !== "") || config.noteTags !== undefined) {
     const decoration = Decoration.widget({
-      widget: new NoteTitleWidget(config.noteTitle),
+      widget: new NoteHeaderWidget(config.noteTitle ?? "", config.noteTags),
       side: -1,
       block: true,
     }).range(0);
@@ -1128,6 +1177,7 @@ export function createCodeMirrorEditor(container: HTMLElement, initialConfig: Ed
       if (session !== null && data.readOnly) abortInvalidImagePastes(session);
       const modeChanged = data.mode !== previousMode;
       const editorExtensionsChanged = modeChanged || previous.noteTitle !== config.noteTitle ||
+        !sameNoteTags(previous.noteTags, config.noteTags) ||
         (data.mode === "live" && !sameEditorExtensionInputs(previous, config));
       const readOnlyChanged = data.readOnly !== previousReadOnly;
       const keymapChanged = previous.onSave !== config.onSave || previous.onFindRequested !== config.onFindRequested;

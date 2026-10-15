@@ -1,6 +1,5 @@
 import type { CommandItem, ViewEvent } from "./app/events.ts";
 import { button, el, span } from "./dom.ts";
-import { frontmatterSupportsTags } from "./markdown-tags.ts";
 import {
   activeTab,
   loadedDraft,
@@ -273,7 +272,9 @@ function renderNoteOutline(state: State, actions: ViewActions): HTMLElement | nu
     if (heading.from === actions.activeHeadingFrom) item.setAttribute("aria-current", "location");
     outlineList.append(item);
   }
-  return el("aside", "note-outline", el("h2", "note-outline-title", "On this note"), outlineList);
+  const aside = el("aside", "note-outline", outlineList);
+  aside.setAttribute("aria-label", "Note outline");
+  return aside;
 }
 
 const vaultOptionClosers = new WeakMap<HTMLElement, () => void>();
@@ -411,12 +412,7 @@ function renderMain(state: State, actions: ViewActions): HTMLElement {
     }
     workspace.append(renderEditorMount(true));
   } else {
-    const meta = el(
-      "div",
-      reading ? "editor-meta reader-meta" : "editor-meta",
-      renderTagRow(active, actions, reading),
-    );
-    workspace.append(meta, renderEditorMount(false));
+    workspace.append(renderEditorMount(false));
     if (active.conflict) {
       const banner = el(
         "div",
@@ -482,7 +478,10 @@ function renderMain(state: State, actions: ViewActions): HTMLElement {
   main.append(workspace, renderStatusBar(state));
   main.append(renderVaultPicker(state, actions));
   const outline = renderNoteOutline(state, actions);
-  if (outline !== null) main.append(outline);
+  if (outline !== null) {
+    main.classList.add("has-note-outline");
+    main.append(outline);
+  }
   if (findBar !== null) main.append(findBar);
   return main;
 }
@@ -582,18 +581,10 @@ function renderOverlays(state: State, actions: ViewActions): HTMLElement {
       const note = state.notes.get(noteId);
       return note === undefined ? [] : [note];
     });
-    const recentHeader = el(
-      "header",
-      "recent-notes-header",
-      el("h2", "", "Recent notes"),
-      span(`${recentNotes.length} recent notes`, "recent-notes-count"),
-    );
-    recentHeader.dataset["key"] = "search-recent-header";
-    recentHeader.hidden = query !== "";
     if (query !== "") {
       const hits = state.searchOverlayHits ?? [];
       for (const hit of hits) {
-        list.append(searchHitRow(hit, actions));
+        list.append(searchHitRow(hit, actions, state));
       }
       if (state.searchOverlayHits === null) list.append(span("Searching…", "search-status"));
       if (state.searchOverlayHits !== null && hits.length === 0) {
@@ -626,7 +617,7 @@ function renderOverlays(state: State, actions: ViewActions): HTMLElement {
             y: event.clientY,
           });
         });
-        row.append(span(note.title, "search-result-title"));
+        row.append(searchResultHeading(note.title, note.updatedAtMs));
         row.append(span(actions.recentPreview(note.noteId) ?? note.path, "recent-note-detail"));
         list.append(row);
       }
@@ -643,7 +634,6 @@ function renderOverlays(state: State, actions: ViewActions): HTMLElement {
     const panel = el(
       "div",
       "command-panel search-panel",
-      recentHeader,
       searchField,
       list,
     );
@@ -1026,8 +1016,9 @@ function renderContextMenu(state: State, actions: ViewActions): HTMLElement {
   return menu;
 }
 
-function searchHitRow(hit: V2SearchHit, actions: ViewActions): HTMLElement {
+function searchHitRow(hit: V2SearchHit, actions: ViewActions, state: State): HTMLElement {
   const identity = hit.identity;
+  const updatedAtMs = searchHitUpdatedAtMs(identity, state);
   if (identity.kind === "newLocalDraft") {
     const row = button(
       "",
@@ -1036,7 +1027,7 @@ function searchHitRow(hit: V2SearchHit, actions: ViewActions): HTMLElement {
       "command-row search-result-row local-search-result",
     );
     row.dataset["key"] = `local-draft:${identity.localId}`;
-    row.append(span(hit.title), renderSnippet(hit));
+    row.append(searchResultHeading(hit.title, updatedAtMs), renderSnippet(hit));
     return row;
   }
   const row = button(
@@ -1046,9 +1037,53 @@ function searchHitRow(hit: V2SearchHit, actions: ViewActions): HTMLElement {
     "command-row search-result-row",
   );
   row.dataset["key"] = `search:${identity.kind}:${identity.noteId}`;
-  row.append(span(hit.title, "search-result-title"), span(hit.path, "search-result-path"));
+  row.append(searchResultHeading(hit.title, updatedAtMs), span(hit.path, "search-result-path"));
   row.append(renderScore(hit), renderSnippet(hit));
   return row;
+}
+
+function searchHitUpdatedAtMs(identity: V2SearchHit["identity"], state: State): number {
+  if (identity.kind === "newLocalDraft") {
+    const tab = state.tabs.find((candidate) =>
+      candidate.kind === "local-draft" && candidate.localDraftId === identity.localId
+    );
+    return tab?.kind === "local-draft" ? tab.session?.state.updatedAtMs ?? Date.now() : Date.now();
+  }
+  const tab = state.tabs.find((candidate) => candidate.kind === "saved" && candidate.noteId === identity.noteId);
+  return state.notes.get(identity.noteId)?.updatedAtMs ?? tab?.doc?.meta.updatedAtMs ?? Date.now();
+}
+
+function searchResultHeading(title: string, updatedAtMs: number): HTMLElement {
+  return el("div", "search-result-heading", span(title, "search-result-title"), renderNoteAge(updatedAtMs));
+}
+
+function renderNoteAge(updatedAtMs: number): HTMLElement {
+  const elapsed = Math.max(1000, Date.now() - updatedAtMs);
+  const units = [
+    { label: "y", name: "year", milliseconds: 365 * 24 * 60 * 60 * 1000 },
+    { label: "mo", name: "month", milliseconds: 30 * 24 * 60 * 60 * 1000 },
+    { label: "w", name: "week", milliseconds: 7 * 24 * 60 * 60 * 1000 },
+    { label: "d", name: "day", milliseconds: 24 * 60 * 60 * 1000 },
+    { label: "h", name: "hour", milliseconds: 60 * 60 * 1000 },
+    { label: "m", name: "minute", milliseconds: 60 * 1000 },
+    { label: "s", name: "second", milliseconds: 1000 },
+  ];
+  let unitIndex = units.findIndex((unit) => elapsed >= unit.milliseconds);
+  if (unitIndex === -1) unitIndex = units.length - 1;
+  let unit = units[unitIndex]!;
+  let amount = Math.max(1, Math.round(elapsed / unit.milliseconds));
+  while (unitIndex > 0) {
+    const nextUnit = units[unitIndex - 1]!;
+    if (amount < Math.round(nextUnit.milliseconds / unit.milliseconds)) break;
+    unit = nextUnit;
+    unitIndex -= 1;
+    amount = Math.max(1, Math.round(elapsed / unit.milliseconds));
+  }
+  const age = el("time", `note-age note-age-${unit.label}`, `${amount}${unit.label}`);
+  const date = new Date(updatedAtMs);
+  if (!Number.isNaN(date.valueOf())) age.dateTime = date.toISOString();
+  age.setAttribute("aria-label", `${amount} ${unit.name}${amount === 1 ? "" : "s"} ago`);
+  return age;
 }
 
 function draftCoverageMessage(coverage: V2OverlayCoverage | null): HTMLElement | null {
@@ -1206,43 +1241,6 @@ function diffPreview(current: string, revision: string): string {
 
 function emptyState(): HTMLElement {
   return el("div", "empty-state", el("div", "empty-title", "No note selected"));
-}
-
-function renderTagRow(tab: Tab, actions: ViewActions, readonly = false): HTMLElement {
-  const row = el("div", "tag-row");
-  if (tab.kind !== "saved" || tab.doc === null) {
-    return row;
-  }
-  const supported = frontmatterSupportsTags(tab.draft ?? tab.doc.content);
-  for (const tag of tab.doc.meta.tags) {
-    const tagButton = button(
-      `#${tag} x`,
-      `Remove ${tag}`,
-      () => {
-        actions.dispatch({
-          type: "tags.update",
-          tags: tab.doc?.meta.tags.filter((item) => item !== tag) ?? [],
-        });
-      },
-      "tag",
-    );
-    tagButton.disabled = readonly || !supported;
-    row.append(tagButton);
-  }
-  const add = button(
-    "+ tag",
-    "Add tag",
-    () => actions.dispatch({ type: "note.addTag" }),
-    "tag tag-add",
-  );
-  add.disabled = readonly || !supported;
-  if (!readonly) {
-    row.append(add);
-  }
-  if (!supported) {
-    row.append(span("Tags locked", "tag-disabled"));
-  }
-  return row;
 }
 
 function recentNoteIds(state: State): string[] {

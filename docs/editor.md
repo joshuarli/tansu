@@ -27,6 +27,10 @@ session. A clean reload replaces its `EditorState` and clears its undo history.
 Source mode reconfigures the same document through a CodeMirror compartment. It
 does not create a textarea or serialize the editor DOM.
 
+The note title and tag controls render inside the scrolling editor header, in
+that order before Markdown content. The tag row follows the active note and
+keeps its read-only and frontmatter-lock states.
+
 ## Read-only sessions
 
 Read-only sessions use both `EditorState.readOnly` and a transaction filter.
@@ -60,9 +64,11 @@ Markdown links that mention the old path.
 
 Wiki images use `![[name]]` or `![[name|320]]`. Standard Markdown images with
 vault asset paths use the same configured URL resolver. HTTP and HTTPS image
-URLs remain remote. Dragging a wiki-image resize handle replaces only that
-image construct in one undoable transaction. Widths stay between 48 and 2,400
-pixels.
+URLs remain remote. Resize a wiki image with its drag handle or a pinch gesture.
+The editor previews the width without changing Markdown during the gesture.
+Release writes one undoable `|width` source edit. Cancellation leaves Markdown
+unchanged. Widths stay between 48 and 2,400 pixels or the editor content width,
+whichever is smaller.
 
 The editor shares the shell's system font and color tokens. Wide Markdown tables
 keep each cell on one line and scroll horizontally inside the editor.
