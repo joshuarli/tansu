@@ -2,6 +2,7 @@ NAME := tansu2
 DEV_DIR := $(CURDIR)/.dev
 DEV_CONFIG_HOME := $(DEV_DIR)/config
 DEV_DATA_HOME := $(DEV_DIR)/data
+DEPLOY_HOST ?= ubuntu@oracle
 
 dev:
 	deno task build:dev
@@ -87,6 +88,9 @@ build-linux-musl-both:
 	$(MAKE) build-linux-musl-x86_64
 	$(MAKE) build-linux-musl-aarch64
 
+deploy:
+	DEPLOY_HOST="$(DEPLOY_HOST)" TMPDIR="$(CURDIR)/.work/tmp" deploy/deploy-oracle.sh
+
 test-package:
 	mkdir -p "$(CURDIR)/.work/tmp"
 	TMPDIR="$(CURDIR)/.work/tmp" deno task build
@@ -109,4 +113,4 @@ bench-long-session:
 	mkdir -p "$(CURDIR)/.work/tmp"
 	TMPDIR="$(CURDIR)/.work/tmp" node bench/long-session.mjs
 
-.PHONY: audit bench bench-full bench-long-session build-linux-musl-aarch64 build-linux-musl-both build-linux-musl-docker build-linux-musl-x86_64 ci coverage coverage-html coverage-rs coverage-ts dev dev-config check lint test-package types types-check ts test test-e2e-chromium test-e2e-webkit test-rs
+.PHONY: audit bench bench-full bench-long-session build-linux-musl-aarch64 build-linux-musl-both build-linux-musl-docker build-linux-musl-x86_64 ci coverage coverage-html coverage-rs deploy dev dev-config check lint test-package types types-check ts test test-e2e-chromium test-e2e-webkit test-rs

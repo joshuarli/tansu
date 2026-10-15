@@ -37,6 +37,31 @@ access to your tailnet and its access controls. Do not run `tailscale funnel`;
 Funnel exposes the service to the public internet. Tailscale identity headers
 do not replace Tansu2 passkey authentication.
 
+## Deploy to Oracle
+
+Run `make deploy` from the repository root. The command builds a static Linux
+binary for Oracle's architecture, installs it as a systemd service, and keeps
+the config, vault, and app data under `/var/lib/tansu2/`.
+
+Tailscale Serve exposes the app to your tailnet over HTTPS. The URL
+`http://oracle:3000` redirects to `https://oracle.<tailnet>.ts.net`, where the
+server uses authenticated mode. The HTTP endpoint only redirects. Tailscale
+HTTPS must be enabled for your tailnet. See the
+[Tailscale Serve documentation](https://tailscale.com/docs/reference/tailscale-cli/serve).
+
+The first deployment creates an empty `Personal` vault. Enroll the first
+passkey before editing notes. Stop the service, issue a one-time capability,
+then start the service again:
+
+```sh
+ssh ubuntu@oracle 'sudo systemctl stop tansu2'
+ssh ubuntu@oracle 'sudo -u tansu2 env HOME=/var/lib/tansu2 XDG_CONFIG_HOME=/var/lib/tansu2/config XDG_DATA_HOME=/var/lib/tansu2/data /opt/tansu2/tansu2 auth enroll'
+ssh ubuntu@oracle 'sudo systemctl start tansu2'
+```
+
+Enter the printed capability at the authenticated HTTPS URL and complete
+passkey registration. The capability expires after ten minutes.
+
 ## Enroll and recover passkeys
 
 Stop the server before running local auth commands. The exclusive auth-state
