@@ -93,15 +93,6 @@ Next: 36
 - **Fix with:** none
 - **Effort:** S
 
-### TNS-034 · P3 · Bound recent note preview memory
-
-- **Area:** Performance
-- **Where:** `web/ts/app.ts:58`, `web/ts/app.ts:1876-1890`
-- **Problem:** Every opened note adds a preview to `recentPreviews`, but the recent-note list is capped at 50 and does not evict old preview entries. A long session that opens many notes retains all their preview strings until the vault changes.
-- **Recommendation:** Evict previews when notes leave the recent-note set.
-- **Fix with:** make-it-fast
-- **Effort:** S
-
 ### TNS-035 · P3 · Keep e2e fixture state under repository scratch
 
 - **Area:** Tests

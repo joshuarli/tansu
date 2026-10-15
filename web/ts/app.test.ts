@@ -1021,6 +1021,24 @@ describe("v2 desktop shell", () => {
     load.resolve(documentFor(note, source));
   });
 
+  it("evicts previews when notes leave the recent-note set", async () => {
+    const notes = Array.from({ length: 51 }, (_, index) => {
+      const number = String(index + 1).padStart(2, "0");
+      return noteMeta(`note-${number}`, `${number}.md`, `Note ${number}`);
+    });
+    configureVault(notes);
+    const { app } = mountApp();
+    await app.boot();
+
+    const openNote = (app as unknown as { openNote: (id: string) => Promise<void> }).openNote.bind(app);
+    for (const note of notes) await openNote(note.noteId);
+
+    const previews = (app as unknown as { recentPreviews: Map<string, string> }).recentPreviews;
+    expect(previews.size).toBe(50);
+    expect(previews.has(notes[0]!.noteId)).toBeFalsy();
+    expect(previews.has(notes[50]!.noteId)).toBeTruthy();
+  });
+
   it("renames and pins locally, then deletes with a V2 precondition", async () => {
     const note = noteMeta("note-1", "one.md", "One");
     const renamed = noteMeta(note.noteId, "renamed.md", "Renamed", [], 2, HASH_B);

@@ -422,9 +422,12 @@ export class TansuApp {
         if (tab !== undefined) await this.reconcileTab(tab);
       }
     } else if (event.update.kind === "noteDeleted") {
-      this.state.notes.delete(event.update.noteId);
-      await this.services.workspace.deleteCachedNoteBodies({ ...this.identity!, noteId: noteId(event.update.noteId) });
-      await this.closeTab({ kind: "saved", noteId: toNoteId(event.update.noteId) }, false);
+      const deletedNoteId = event.update.noteId;
+      this.state.notes.delete(deletedNoteId);
+      this.state.recent = this.state.recent.filter((item) => item !== deletedNoteId);
+      this.evictNonRecentPreviews();
+      await this.services.workspace.deleteCachedNoteBodies({ ...this.identity!, noteId: noteId(deletedNoteId) });
+      await this.closeTab({ kind: "saved", noteId: toNoteId(deletedNoteId) }, false);
     } else if (event.update.kind === "searchChanged" && this.state.boot !== null) {
       this.state.boot.searchStatus = { dirty: event.update.dirty, degraded: event.update.degraded };
     }
@@ -1341,6 +1344,7 @@ export class TansuApp {
     this.state.notes.delete(id);
     this.state.pinned.delete(id);
     this.state.recent = this.state.recent.filter((item) => item !== id);
+    this.evictNonRecentPreviews();
     this.state.noteDialog = null;
     this.render();
     await this.services.workspace.deleteCachedNoteBodies({ ...this.identity!, noteId: id });
@@ -1878,7 +1882,10 @@ export class TansuApp {
     const client = this.vaultClient;
     if (serverIdentity === null || client === null) return;
     const identity: DocumentIdentity = { ...serverIdentity, noteId: noteId(document.meta.noteId) };
-    this.recentPreviews.set(document.meta.noteId, markdownPreview(document.content));
+    if (this.state.recent.includes(document.meta.noteId)) {
+      this.recentPreviews.set(document.meta.noteId, markdownPreview(document.content));
+    }
+    this.evictNonRecentPreviews();
     const write = this.services.workspace.cacheNoteBody(identity, document).catch((error) => {
       if (this.isCurrentVault(serverIdentity, client)) this.notifyStorageFailure(error);
     });
@@ -1888,7 +1895,19 @@ export class TansuApp {
   private touchRecent(id: string): void {
     if (!this.state.notes.has(id)) return;
     this.state.recent = [id, ...this.state.recent.filter((item) => item !== id)].slice(0, 50);
+    const document = tabById(this.state, id)?.doc;
+    if (document !== null && document !== undefined) {
+      this.recentPreviews.set(id, markdownPreview(document.content));
+    }
+    this.evictNonRecentPreviews();
     this.scheduleWorkspaceSave();
+  }
+
+  private evictNonRecentPreviews(): void {
+    const recent = new Set(this.state.recent);
+    for (const id of this.recentPreviews.keys()) {
+      if (!recent.has(id)) this.recentPreviews.delete(id);
+    }
   }
 
   private filteredCommands() {
