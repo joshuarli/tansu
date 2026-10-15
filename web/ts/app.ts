@@ -317,13 +317,30 @@ export class TansuApp {
         this.render();
       }
     };
+    const onWheel = (event: WheelEvent) => {
+      if (event.defaultPrevented || event.ctrlKey || event.deltaY === 0) return;
+      const target = event.target;
+      if (!(target instanceof Node) || this.editorMount.contains(target)) return;
+      let current = target instanceof Element ? target : target.parentElement;
+      while (current !== null && current !== this.root) {
+        if (current instanceof HTMLElement && ["auto", "scroll"].includes(getComputedStyle(current).overflowY)) {
+          const maxScrollTop = current.scrollHeight - current.clientHeight;
+          const canScroll = event.deltaY < 0 ? current.scrollTop > 0 : current.scrollTop < maxScrollTop;
+          if (maxScrollTop > 0 && canScroll) return;
+        }
+        current = current.parentElement;
+      }
+      if (this.editor?.scrollByWheel(event)) event.preventDefault();
+    };
     window.addEventListener("beforeunload", onBeforeUnload);
     window.addEventListener("keydown", onKeyDown);
     window.addEventListener("click", onClick);
+    this.root.addEventListener("wheel", onWheel, { passive: false });
     this.globalEventCleanups.push(
       () => window.removeEventListener("beforeunload", onBeforeUnload),
       () => window.removeEventListener("keydown", onKeyDown),
       () => window.removeEventListener("click", onClick),
+      () => this.root.removeEventListener("wheel", onWheel),
     );
   }
 
@@ -1636,7 +1653,7 @@ export class TansuApp {
         return;
       }
       case "outline.select": {
-        this.editor?.revealSelection({ anchor: event.heading.from, head: event.heading.from });
+        this.editor?.revealOutlineHeading(event.heading);
         return;
       }
       case "auth.capability": {

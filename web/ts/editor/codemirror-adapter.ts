@@ -209,6 +209,8 @@ export type EditorHandle = {
   setMode(mode: EditorMode): void;
   updateConfiguration(partial: Partial<EditorConfig>): void;
   revealSelection(selection: EditorSelectionSnapshot): boolean;
+  revealOutlineHeading(heading: OutlineHeading): boolean;
+  scrollByWheel(delta: Pick<WheelEvent, "deltaY" | "deltaMode">): boolean;
   find(query: string): readonly FindMatch[];
   setFindHighlights(highlights: { matches: readonly FindMatch[]; selected: FindMatch | null }): void;
   revealFindMatch(match: FindMatch): boolean;
@@ -841,7 +843,7 @@ export function createCodeMirrorEditor(container: HTMLElement, initialConfig: Ed
       if (atBottom) {
         active = headings[headings.length - 1] ?? null;
       } else {
-        const threshold = scroller.scrollTop + Math.min(96, Math.max(24, scroller.clientHeight * 0.18));
+        const threshold = scroller.scrollTop + activeHeadingOffset(scroller);
         for (const heading of headings) {
           if (view.lineBlockAt(heading.from).top > threshold) break;
           active = heading;
@@ -853,6 +855,10 @@ export function createCodeMirrorEditor(container: HTMLElement, initialConfig: Ed
     if (activeHeadingFrom === from) return;
     activeHeadingFrom = from;
     config.onActiveHeadingChange?.(active);
+  }
+
+  function activeHeadingOffset(scroller: HTMLElement): number {
+    return Math.min(96, Math.max(24, scroller.clientHeight * 0.18));
   }
 
   function scheduleActiveHeadingSync(): void {
@@ -1204,6 +1210,37 @@ export function createCodeMirrorEditor(container: HTMLElement, initialConfig: Ed
         scrollIntoView: true,
       });
       return true;
+    },
+
+    revealOutlineHeading(heading) {
+      const data = ensureActive();
+      if (
+        data === null ||
+        !Number.isInteger(heading.from) ||
+        heading.from < 0 ||
+        heading.from > data.state.doc.length
+      ) return false;
+      view.dispatch({
+        selection: EditorSelection.single(heading.from),
+        effects: EditorView.scrollIntoView(heading.from, {
+          y: "start",
+          yMargin: activeHeadingOffset(view.scrollDOM) + 1,
+        }),
+      });
+      return true;
+    },
+
+    scrollByWheel({ deltaY, deltaMode }) {
+      if (ensureActive() === null || !Number.isFinite(deltaY) || deltaY === 0) return false;
+      const scroller = view.scrollDOM;
+      const pixels = deltaMode === WheelEvent.DOM_DELTA_LINE
+        ? deltaY * view.defaultLineHeight
+        : deltaMode === WheelEvent.DOM_DELTA_PAGE
+        ? deltaY * scroller.clientHeight
+        : deltaY;
+      const previous = scroller.scrollTop;
+      scroller.scrollTop += pixels;
+      return scroller.scrollTop !== previous;
     },
 
     find(query) {

@@ -1894,6 +1894,8 @@ function createFakeEditor(initialConfig?: EditorConfig): FakeEditor {
     setMode: vi.fn((mode: "live" | "source") => { if (active !== null) snapshots.set(active, { ...snapshots.get(active)!, mode }); }),
     updateConfiguration: vi.fn((partial: Partial<EditorConfig>) => { config = { ...config, ...partial }; }),
     revealSelection: vi.fn((selection: EditorSnapshot["selection"]) => { if (active !== null) snapshots.set(active, { ...snapshots.get(active)!, selection }); return true; }),
+    revealOutlineHeading: vi.fn(() => true),
+    scrollByWheel: vi.fn(() => false),
     find: vi.fn(() => []),
     setFindHighlights: vi.fn(),
     revealFindMatch: vi.fn(() => true),
