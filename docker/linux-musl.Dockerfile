@@ -1,10 +1,6 @@
 FROM alpine:edge AS build
 
 ARG TARGET=x86_64-unknown-linux-musl
-ARG SQLITE_VERSION=3.54.0
-ARG SQLITE_AUTOCONF=3540000
-ARG SQLITE_RELEASE_YEAR=2026
-ARG SQLITE_SHA3_256=f5e3e724e9c9b3b5d512c76b02082091a59eeea9becd169a9fbf4d376403acce
 ARG CARGO_PROFILE=release
 
 RUN apk add --no-cache \
@@ -45,12 +41,7 @@ COPY scripts ./scripts
 COPY web/dist ./web/dist
 
 RUN rustup target add "${TARGET}"
-RUN CC=/usr/local/bin/tansu-clang \
-  SQLITE_VERSION="${SQLITE_VERSION}" \
-  SQLITE_AUTOCONF="${SQLITE_AUTOCONF}" \
-  SQLITE_RELEASE_YEAR="${SQLITE_RELEASE_YEAR}" \
-  SQLITE_SHA3_256="${SQLITE_SHA3_256}" \
-  scripts/build-sqlite-static.sh /opt/tansu-sqlite
+RUN CC=/usr/local/bin/tansu-clang scripts/build-sqlite-static.sh /opt/tansu-sqlite
 RUN if [ "${CARGO_PROFILE}" = "release" ]; then \
     cargo build --locked --release --target "${TARGET}" --bin tansu2; \
   else \

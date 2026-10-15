@@ -93,11 +93,3 @@ Next: 37
 - **Fix with:** none
 - **Effort:** S
 
-### TNS-036 · P3 · Give SQLite build inputs one owner
-
-- **Area:** Build
-- **Where:** `docker/linux-musl.Dockerfile:4-7`, `scripts/build-sqlite-static.sh:6-9`
-- **Problem:** The SQLite version, autoconf value, release year, and SHA3 digest are duplicated between the Docker build and helper script. Updating one copy can make the Linux build fail or fetch an unexpected archive.
-- **Recommendation:** Keep these values in one authoritative declaration and derive both build paths from it.
-- **Fix with:** single-source-of-truth
-- **Effort:** S
