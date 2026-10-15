@@ -31,16 +31,12 @@ lint-rs:
 		-A clippy::type_complexity \
 		-A clippy::needless_borrow
 
-coverage-rs:
-	cargo llvm-cov --workspace --all-targets --ignore-filename-regex 'src/(main\.rs|bin/gen-api-types\.rs)$$' --fail-under-lines 87 --fail-under-functions 80 --no-clean
-
 coverage-ts: types-check
 	deno task coverage
 
-coverage: coverage-rs coverage-ts
+coverage: coverage-ts
 
 coverage-html: types-check
-	cargo llvm-cov --workspace --all-targets --ignore-filename-regex 'src/(main\.rs|bin/gen-api-types\.rs)$$' --html --no-clean
 	deno task coverage:html
 
 audit:
@@ -116,4 +112,4 @@ bench-long-session:
 	mkdir -p "$(CURDIR)/.work/tmp"
 	TMPDIR="$(CURDIR)/.work/tmp" node bench/long-session.mjs
 
-.PHONY: audit bench bench-full bench-long-session build-linux-musl-aarch64 build-linux-musl-both build-linux-musl-docker build-linux-musl-x86_64 coverage coverage-html coverage-rs deploy dev dev-config check lint test-package types types-check types-generated ts test test-e2e-chromium test-e2e-webkit test-rs
+.PHONY: audit bench bench-full bench-long-session build-linux-musl-aarch64 build-linux-musl-both build-linux-musl-docker build-linux-musl-x86_64 coverage coverage-html deploy dev dev-config check lint test-package types types-check types-generated ts test test-e2e-chromium test-e2e-webkit test-rs

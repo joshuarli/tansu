@@ -1,7 +1,7 @@
 # Tansu2 TODO
 
 Prefix: TNS
-Next: 38
+Next: 44
 
 ### TNS-024 · P1 · Serialize vault mutations across server processes
 
@@ -12,11 +12,20 @@ Next: 38
 - **Fix with:** durable-state
 - **Effort:** M
 
+### TNS-038 · P1 · Keep auth database validation available in release builds
+
+- **Area:** Data
+- **Where:** `scripts/build-sqlite-static.sh:89`, `src/auth.rs:857-865`
+- **Problem:** The release SQLite build defines `SQLITE_OMIT_INTEGRITY_CHECK`, which also removes `PRAGMA quick_check`. Auth backup and restore call `verify_database`, which expects that pragma to return a row. Against the release SQLite build, those operations fail even for a valid database.
+- **Recommendation:** Keep the pragma enabled or validate the database using an operation supported by the release build, then cover backup and restore against that build.
+- **Fix with:** error-model
+- **Effort:** S
+
 ### TNS-025 · P2 · Reject malformed persisted catalog values
 
 - **Area:** Data
 - **Where:** `src/catalog.rs:1025`, `src/catalog.rs:1082`, `src/catalog.rs:1144`, `src/catalog.rs:1212`
-- **Problem:** Invalid session JSON becomes an empty session, invalid tag JSON becomes empty tags, and invalid sync versions become zero. The app silently discards persisted state or resets a sync version instead of surfacing catalog corruption.
+- **Problem:** Invalid session JSON becomes an empty session, invalid tag JSON becomes empty tags, invalid sync versions become zero, and malformed persisted booleans become false. The app silently discards persisted state or resets values instead of surfacing catalog corruption.
 - **Recommendation:** Return a corruption error for malformed persisted JSON and sync versions.
 - **Fix with:** durable-state
 - **Effort:** S
@@ -89,16 +98,52 @@ Next: 38
 - **Area:** Build
 - **Where:** `.github/workflows/build-server.yml:54-63`, `.github/workflows/build-server.yml:136-155`, `Makefile:97-101`
 - **Problem:** The release workflow builds and uploads archives without running the existing packaged-binary smoke check. A binary can compile and still fail its packaged runtime checks after the release is published.
-- **Recommendation:** Run the narrow package smoke check on release artifacts before uploading them.
+- **Recommendation:** Run the narrow package smoke check on release artifacts before uploading them, including auth backup and restore with the release SQLite build.
 - **Fix with:** none
 - **Effort:** S
 
-### TNS-037 · P2 · Use the search shortcut in the real-server e2e
+### TNS-039 · P2 · Version immutable WebP encoder asset URLs
 
-- **Area:** Tests
-- **Where:** `web/ts/e2e/server.test.ts:155-156`, `web/ts/app.ts:300`
-- **Problem:** The real-server startup test presses `/` and waits for search results, while the app opens search only for Ctrl+/. The filtered Chromium test fails on this mismatch on both the current tree and the TNS-035 base, so the e2e suite cannot pass this case.
-- **Recommendation:** Press `Control+/` or use a shared helper that matches the app shortcut.
-- **Fix with:** renovate-tests
+- **Area:** Build
+- **Where:** `scripts/build-web.mjs:44-49`, `scripts/build-web.mjs:76-81`, `src/http.rs:1447-1455`
+- **Problem:** WebP encoder JS and WASM files use stable URLs but are marked immutable, so the server may let browsers cache old encoder bytes for a year after those files change.
+- **Recommendation:** Add content fingerprints to encoder asset URLs or serve those stable URLs with revalidation headers.
+- **Fix with:** single-source-of-truth
+- **Effort:** S
+
+### TNS-040 · P2 · Guard benchmark runs against host load
+
+- **Area:** Performance
+- **Where:** `Makefile:103-117`, `docs/performance.md:15-17`
+- **Problem:** The documented benchmark targets collect and record timing results without checking host readiness before and after measurement. Results can be recorded while unrelated load distorts them.
+- **Recommendation:** Gate benchmark runs with `perf-gate-ready` before and after measurement, and discard results when either check reports host load.
+- **Fix with:** benchmark-checklist
+- **Effort:** S
+
+### TNS-041 · P2 · Bound filesystem watcher trigger backlog
+
+- **Area:** Concurrency
+- **Where:** `src/vault.rs:832-842`
+- **Problem:** Filesystem notifications are sent into an unbounded channel while the watcher worker may be busy reconciling. A burst of events during a slow reconciliation can accumulate without limit even though each notification only requests another full reconciliation.
+- **Recommendation:** Use a bounded coalescing trigger and a nonblocking full-queue policy so pending notifications cannot grow with the event burst.
+- **Fix with:** lifecycle-concurrency
+- **Effort:** S
+
+### TNS-042 · P2 · Validate settings at the backend boundary
+
+- **Area:** Data
+- **Where:** `src/vault.rs:1012-1041`, `src/vault.rs:2717-2723`, `src/api_types.rs:102-114`
+- **Problem:** V2 and Rust callers can persist settings outside the ranges enforced by the browser form. Extreme autosave delays, undo depths, image qualities, or non-finite search weights can then reach application consumers and persist across restarts.
+- **Recommendation:** Define valid settings once and reject invalid values before persisting them, while keeping the existing serialized representation.
+- **Fix with:** make-invalid-states-unrepresentable
+- **Effort:** S
+
+### TNS-043 · P2 · Use the platform current-directory value for relative roots
+
+- **Area:** Portability
+- **Where:** `src/paths.rs:266-270`, `src/paths.rs:396-400`, `src/paths.rs:488-493`
+- **Problem:** Unix path operations pass `-100` as the `openat` directory descriptor for root paths. That is Linux's `AT_FDCWD`; Darwin uses `-2`. Absolute roots work because `openat` ignores the descriptor for absolute paths, but direct path API calls or `VaultRuntime::open` with a relative root fail on macOS.
+- **Recommendation:** Use the platform's `AT_FDCWD` value through a platform abstraction and cover relative-root operations on each supported Unix target.
+- **Fix with:** os-boundaries
 - **Effort:** S
 

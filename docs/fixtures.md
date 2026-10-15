@@ -11,7 +11,7 @@ make dev-config
 ```
 
 The generator replaces `.dev/config`, `.dev/data`, and `.dev/vault`. The demo
-vault contains one note and its 17 WebP images. `make dev` opens that note in
+vault contains one note and its 11 WebP images. `make dev` opens that note in
 the app.
 
 Small synthetic e2e fixtures live under `tests/fixtures/test-vaults/`. Their

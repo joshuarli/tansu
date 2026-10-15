@@ -30,10 +30,11 @@ visible files or add hidden IDs.
 
 On first startup, Tansu2 assigns a stable ID to each canonical vault root and
 copies any prior app state into the new ID-based directory when needed. It also
-copies legacy `.tansu/` state when that directory has a `vault.db` and no app
-catalog exists. These copies do not remove the old state. Keep your backup until
-you confirm the notes, history, and settings are present. This does not import
-revision or settings formats from other note applications.
+copies legacy `.tansu/` state when that directory has a `vault.db` and the
+destination state directory is absent or empty. These copies do not remove the
+old state. Keep your backup until you confirm the notes, history, and settings
+are present. This does not import revision or settings formats from other note
+applications.
 
 ## Run the state migration
 
