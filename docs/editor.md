@@ -46,6 +46,9 @@ control. Find highlights remain separate from the document selection and do not
 change source or undo history.
 Blank lines between Markdown paragraphs carry native paragraph spacing in the
 rendered editor without changing source text.
+The adapter shows a floating formatting toolbar centered above the selection
+head. It hides the toolbar when the selection collapses or the session is
+read-only.
 Enable wiki links with `createWikiLinkExtension()`. Wiki links resolve against
 the configured active-vault notes. A leading `/`
 selects a vault-root path. `./` and `../` paths resolve from the current note's

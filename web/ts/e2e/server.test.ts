@@ -191,8 +191,9 @@ describe("real server harness", () => {
     await page.keyboard.press("Escape");
     await page.waitForSelector(".command-panel", { state: "detached" });
     await openQuickNote(page, "One");
-    await expect(page.locator(".workspace > .toolbar").count()).resolves.toBe(1);
-    await expect(page.locator(".workspace > .toolbar").isVisible()).resolves.toBeFalsy();
+    await expect(page.locator(".workspace > .toolbar").count()).resolves.toBe(0);
+    await expect(page.locator(".selection-toolbar").count()).resolves.toBe(1);
+    await expect(page.locator(".selection-toolbar").isVisible()).resolves.toBeFalsy();
     await expect(page.locator(".section-title", { hasText: "Notes" }).count()).resolves.toBe(0);
     await expect(page.locator(".sidebar").count()).resolves.toBe(0);
     await expect(

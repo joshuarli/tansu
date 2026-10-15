@@ -27,17 +27,6 @@ export type CommandItem = {
   shortcut?: string;
 };
 
-export type EditorToolbarCommand =
-  | "bold"
-  | "italic"
-  | "highlight"
-  | "strikethrough"
-  | "heading"
-  | "undo"
-  | "redo"
-  | "source"
-  | "save";
-
 type SettingsFormValue = {
   excludedFoldersText: string;
   autosaveDelayMs: number;
@@ -87,7 +76,6 @@ export type ViewEvent =
   | { type: "note.addTag" }
   | { type: "tags.update"; tags: string[] }
   | { type: "reading.toggle" }
-  | { type: "editor.toolbar"; command: EditorToolbarCommand }
   | { type: "revisions.open" }
   | { type: "revisions.select"; eventId: RevisionEventId }
   | { type: "revisions.restore" }

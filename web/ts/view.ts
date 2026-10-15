@@ -131,6 +131,8 @@ function reconcileNode(current: Node, next: Node): Node {
   }
   if (!(current instanceof HTMLElement) || !(next instanceof HTMLElement)) return next;
   if (current.id === "editor-mount") return current;
+  const preserveInputValue = current instanceof HTMLInputElement &&
+    current.dataset["preserveValue"] !== undefined && current.value !== current.defaultValue;
   const obsoleteAttributes: string[] = [];
   for (const attribute of current.attributes) {
     if (!next.hasAttribute(attribute.name)) obsoleteAttributes.push(attribute.name);
@@ -142,7 +144,7 @@ function reconcileNode(current: Node, next: Node): Node {
     }
   }
   if (current instanceof HTMLInputElement && next instanceof HTMLInputElement) {
-    if (current.value !== next.value) current.value = next.value;
+    if (!preserveInputValue && current.value !== next.value) current.value = next.value;
     current.checked = next.checked;
     current.disabled = next.disabled;
   } else if (current instanceof HTMLSelectElement && next instanceof HTMLSelectElement) {
@@ -409,13 +411,9 @@ function renderMain(state: State, actions: ViewActions): HTMLElement {
     }
     workspace.append(renderEditorMount(true));
   } else {
-    if (!reading) {
-      workspace.append(editorToolbar(state, actions));
-    }
     const meta = el(
       "div",
       reading ? "editor-meta reader-meta" : "editor-meta",
-      renderDocumentTitle(active),
       renderTagRow(active, actions, reading),
     );
     workspace.append(meta, renderEditorMount(false));
@@ -524,52 +522,6 @@ function renderEditorMount(hidden: boolean): HTMLElement {
   return mount;
 }
 
-function editorToolbar(state: State, actions: ViewActions): HTMLElement {
-  const more = document.createElement("details");
-  more.className = "toolbar-more";
-  const moreToggle = el("summary", "tool-button toolbar-more-toggle", "···");
-  moreToggle.setAttribute("aria-label", "More formatting actions");
-  moreToggle.title = "More formatting actions";
-  const moreMenu = el("div", "toolbar-more-menu");
-  const extraCommands = [
-    ["strikethrough", "Strikethrough", "strikethrough"],
-    ["highlight", "Highlight", "highlight"],
-    ["undo", "Undo", "undo"],
-    ["redo", "Redo", "redo"],
-    ["code", "Source", "source"],
-    ["save", "Save", "save"],
-  ] as const;
-  for (const [icon, title, command] of extraCommands) {
-    const item = toolButton(icon, title, () => {
-      more.open = false;
-      actions.dispatch({ type: "editor.toolbar", command });
-    });
-    item.classList.add("toolbar-more-item");
-    moreMenu.append(item);
-  }
-  more.append(moreToggle, moreMenu);
-  const active = activeTab(state);
-  const saveStatus = active === undefined
-    ? ""
-    : active.saving
-    ? "Saving"
-    : tabIsDirty(active)
-    ? "Unsaved"
-    : "Saved";
-  const toolbar = el(
-    "div",
-    "toolbar",
-    toolButton("bold", "Bold", () => actions.dispatch({ type: "editor.toolbar", command: "bold" })),
-    toolButton("italic", "Italic", () => actions.dispatch({ type: "editor.toolbar", command: "italic" })),
-    toolButton("heading", "Heading", () => actions.dispatch({ type: "editor.toolbar", command: "heading" })),
-    more,
-    span(saveStatus, "toolbar-save-status"),
-  );
-  toolbar.setAttribute("role", "toolbar");
-  toolbar.setAttribute("aria-label", "Editor formatting");
-  return toolbar;
-}
-
 function activeDraftStorageFailed(tab: Tab): boolean {
   if (tab.session === null) return false;
   return tab.kind === "local-draft"
@@ -606,8 +558,10 @@ function renderOverlays(state: State, actions: ViewActions): HTMLElement {
     const searchIcon = el("span", "command-search-icon");
     searchIcon.setAttribute("aria-hidden", "true");
     const field = el("div", "command-field", searchIcon, input);
-    host.append(backdrop(actions), el("div", "command-panel command-palette-panel", field, list));
-    queueMicrotask(() => input.focus());
+    const panel = el("div", "command-panel command-palette-panel", field, list);
+    panel.dataset["key"] = "modal:command";
+    host.append(backdrop(actions), panel);
+    focusOnOpen(input);
   }
   if (state.searchOpen) {
     const input = document.createElement("input");
@@ -619,11 +573,23 @@ function renderOverlays(state: State, actions: ViewActions): HTMLElement {
       actions.dispatch({ type: "search.overlayInput", query: input.value });
     });
     const list = el("div", "command-list search-result-list");
+    list.dataset["key"] = "search-results";
     input.addEventListener("keydown", (event) => {
       if (event.key === "Enter") actions.dispatch({ type: "search.overlaySubmit" });
     });
     const query = state.searchOverlayQuery.trim();
-    let recentHeader: HTMLElement | null = null;
+    const recentNotes = recentNoteIds(state).flatMap((noteId) => {
+      const note = state.notes.get(noteId);
+      return note === undefined ? [] : [note];
+    });
+    const recentHeader = el(
+      "header",
+      "recent-notes-header",
+      el("h2", "", "Recent notes"),
+      span(`${recentNotes.length} recent notes`, "recent-notes-count"),
+    );
+    recentHeader.dataset["key"] = "search-recent-header";
+    recentHeader.hidden = query !== "";
     if (query !== "") {
       const hits = state.searchOverlayHits ?? [];
       for (const hit of hits) {
@@ -641,16 +607,6 @@ function renderOverlays(state: State, actions: ViewActions): HTMLElement {
       const coverage = draftCoverageMessage(state.searchOverlayCoverage);
       if (coverage !== null) list.append(coverage);
     } else {
-      const recentNotes = recentNoteIds(state).flatMap((noteId) => {
-        const note = state.notes.get(noteId);
-        return note === undefined ? [] : [note];
-      });
-      recentHeader = el(
-        "header",
-        "recent-notes-header",
-        el("h2", "", "Recent notes"),
-        span(`${recentNotes.length} recent notes`, "recent-notes-count"),
-      );
       for (const [index, note] of recentNotes.entries()) {
         const row = button(
           "",
@@ -682,14 +638,18 @@ function renderOverlays(state: State, actions: ViewActions): HTMLElement {
         }
       }
     }
-    host.append(backdrop(actions), el(
+    const searchField = el("div", "search-field", span("", "search-icon"), input);
+    searchField.dataset["key"] = "search-field";
+    const panel = el(
       "div",
       "command-panel search-panel",
-      ...(recentHeader === null ? [] : [recentHeader]),
-      el("div", "search-field", span("", "search-icon"), input),
+      recentHeader,
+      searchField,
       list,
-    ));
-    queueMicrotask(() => input.focus());
+    );
+    panel.dataset["key"] = "modal:search";
+    host.append(backdrop(actions), panel);
+    focusOnOpen(input);
   }
   if (state.quickOpen) {
     const input = document.createElement("input");
@@ -715,14 +675,16 @@ function renderOverlays(state: State, actions: ViewActions): HTMLElement {
     const quickOpenIcon = el("span", "quick-open-search-icon");
     quickOpenIcon.setAttribute("aria-hidden", "true");
     const quickOpenField = el("div", "quick-open-field", quickOpenIcon, input);
-    host.append(backdrop(actions), el(
+    const panel = el(
       "div",
       "command-panel quick-open-panel",
       el("header", "recent-notes-header", el("h2", "", "Recent notes"), span(`${count} recent notes`, "recent-notes-count")),
       quickOpenField,
       list,
-    ));
-    queueMicrotask(() => input.focus());
+    );
+    panel.dataset["key"] = "modal:quick-open";
+    host.append(backdrop(actions), panel);
+    focusOnOpen(input);
   }
   if (state.revisionsOpen) {
     host.append(backdrop(actions), renderRevisionsPanel(state, actions));
@@ -757,8 +719,17 @@ function renderOverlays(state: State, actions: ViewActions): HTMLElement {
 
 function backdrop(actions: ViewActions): HTMLElement {
   const element = el("div", "overlay-backdrop");
+  element.dataset["key"] = "overlay-backdrop";
   element.addEventListener("click", () => actions.dispatch({ type: "overlay.close" }));
   return element;
+}
+
+function focusOnOpen(input: HTMLInputElement, select = false): void {
+  queueMicrotask(() => {
+    if (!input.isConnected || document.activeElement === input) return;
+    input.focus();
+    if (select) input.select();
+  });
 }
 
 function renderRevisionsPanel(state: State, actions: ViewActions): HTMLElement {
@@ -792,7 +763,7 @@ function renderRevisionsPanel(state: State, actions: ViewActions): HTMLElement {
     revisionDocument === null
       ? el("div", "empty-panel", "Select a revision")
       : el("pre", "diff-preview", diffPreview(current, revisionDocument.content));
-  return el(
+  const panel = el(
     "div",
     "modal-panel revisions-panel",
     el(
@@ -813,11 +784,13 @@ function renderRevisionsPanel(state: State, actions: ViewActions): HTMLElement {
       ),
     ),
   );
+  panel.dataset["key"] = "modal:revisions";
+  return panel;
 }
 
 function renderConflictPanel(state: State, actions: ViewActions): HTMLElement {
   const draft = state.conflictDraft;
-  return el(
+  const panel = el(
     "div",
     "modal-panel revisions-panel",
     el(
@@ -838,6 +811,8 @@ function renderConflictPanel(state: State, actions: ViewActions): HTMLElement {
       ),
     ),
   );
+  panel.dataset["key"] = "modal:conflict";
+  return panel;
 }
 
 function renderSettingsPanel(state: State, actions: ViewActions): HTMLElement {
@@ -853,7 +828,10 @@ function renderSettingsPanel(state: State, actions: ViewActions): HTMLElement {
     "1",
     "0.05",
   );
-  return el(
+  for (const field of [excluded, autosave, undo, quality]) {
+    field.dataset["preserveValue"] = "";
+  }
+  const panel = el(
     "div",
     "modal-panel settings-panel",
     el(
@@ -901,6 +879,8 @@ function renderSettingsPanel(state: State, actions: ViewActions): HTMLElement {
       ),
     ),
   );
+  panel.dataset["key"] = "modal:settings";
+  return panel;
 }
 
 function numericValue(inputEl: HTMLInputElement): number {
@@ -923,6 +903,7 @@ function renderNoteDialog(state: State, actions: ViewActions): HTMLElement {
     dialog !== null && dialog.kind !== "delete"
       ? input(title, dialog.kind === "tag" ? dialog.value : dialog.title)
       : null;
+  if (inputEl !== null) inputEl.dataset["key"] = `note-dialog-input:${dialog?.kind ?? "delete"}`;
   const localDraft = dialog?.kind === "create"
     ? state.tabs.find((tab) => tab.kind === "local-draft" && tab.localDraftId === dialog.localDraftId)
     : undefined;
@@ -938,6 +919,14 @@ function renderNoteDialog(state: State, actions: ViewActions): HTMLElement {
       ...(isRename ? [] : [button("×", "Close", () => actions.dispatch({ type: "overlay.close" }), "tab-close")]),
     ),
   );
+  const dialogKey = dialog === null
+    ? "delete"
+    : dialog.kind === "rename" || dialog.kind === "delete"
+    ? `${dialog.kind}:${dialog.noteId}`
+    : dialog.kind === "create"
+    ? `create:${dialog.localDraftId}`
+    : "tag";
+  panel.dataset["key"] = `modal:note:${dialogKey}`;
   if (isDelete) {
     const note = state.notes.get(dialog.noteId);
     panel.append(
@@ -990,16 +979,14 @@ function renderNoteDialog(state: State, actions: ViewActions): HTMLElement {
       event.preventDefault();
       actions.dispatch({ type: "dialog.submit", value: inputEl.value });
     });
-    queueMicrotask(() => {
-      inputEl.focus();
-      if (isRename) inputEl.select();
-    });
+    focusOnOpen(inputEl, isRename);
   }
   return panel;
 }
 
 function renderContextMenu(state: State, actions: ViewActions): HTMLElement {
   const menu = el("div", "context-menu");
+  menu.dataset["key"] = "context-menu";
   const context = state.contextMenu;
   if (context === null) {
     return menu;
@@ -1191,8 +1178,10 @@ function input(
 ): HTMLInputElement {
   const element = document.createElement("input");
   element.className = "settings-input";
+  element.dataset["key"] = `field:${title}`;
   element.title = title;
   element.type = type;
+  element.defaultValue = value;
   element.value = value;
   if (min !== undefined) element.min = min;
   if (max !== undefined) element.max = max;
@@ -1326,114 +1315,4 @@ function bindTabCloseHint(
   tabEl.addEventListener("mousemove", positionHint);
   tabEl.addEventListener("mouseleave", hideCloseHint);
   return hideCloseHint;
-}
-
-type ToolIcon =
-  | "bold"
-  | "italic"
-  | "strikethrough"
-  | "highlight"
-  | "heading"
-  | "undo"
-  | "redo"
-  | "code"
-  | "save"
-  | "eye"
-  | "eyeOff";
-
-function toolButton(iconName: ToolIcon, title: string, onClick: (event: MouseEvent) => void) {
-  const element = button("", title, onClick, "tool-button");
-  element.ariaLabel = title;
-  element.append(toolIcon(iconName));
-  return element;
-}
-
-function toolIcon(iconName: ToolIcon): SVGSVGElement {
-  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-  svg.setAttribute("viewBox", "0 0 24 24");
-  svg.setAttribute("aria-hidden", "true");
-  for (const child of iconPaths(iconName)) {
-    svg.append(child);
-  }
-  return svg;
-}
-
-function iconPaths(iconName: ToolIcon): SVGElement[] {
-  switch (iconName) {
-    case "bold": {
-      return [iconPath("M8 5h5a3 3 0 0 1 0 6H8zM8 11h6a4 4 0 0 1 0 8H8zM8 5v14")];
-    }
-    case "italic": {
-      return [iconPath("M10 5h7M7 19h7M14 5l-4 14")];
-    }
-    case "strikethrough": {
-      return [
-        iconPath("M7 7.5A4 4 0 0 1 11 5h5M8 17a5 5 0 0 0 4 2h1.5a3.5 3.5 0 0 0 0-7H6M5 12h14"),
-      ];
-    }
-    case "highlight": {
-      return [
-        iconShape("path", {
-          d: "M7 18.5h4.5L20 10l-2.8-2.8-11.7 9.3z",
-          fill: "#ffe16a",
-          stroke: "none",
-        }),
-        iconPath("M14 4l6 6-8.5 8.5H7.5l-2-2z", "#d88b18"),
-        iconPath("M5 20h11", "#d88b18"),
-      ];
-    }
-    case "heading": {
-      return [iconPath("M6 5v14M18 5v14M6 12h12M14 19h7")];
-    }
-    case "undo": {
-      return [iconPath("M9 7l-5 5 5 5M4 12h10a5 5 0 1 1-3.5 8.5")];
-    }
-    case "redo": {
-      return [iconPath("M15 7l5 5-5 5M20 12H10a5 5 0 1 0 3.5 8.5")];
-    }
-    case "code": {
-      return [iconPath("M9 7l-5 5 5 5M15 7l5 5-5 5")];
-    }
-    case "save": {
-      return [
-        iconShape("rect", { x: "9", y: "15", width: "6", height: "5", fill: "#dfe7f2" }),
-        iconPath("M5 4h12l2 2v14H5zM8 4v6h8V4M8 20v-6h8v6"),
-      ];
-    }
-    case "eye": {
-      return [
-        iconPath("M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6z"),
-        iconPath("M12 9.5a2.5 2.5 0 1 1 0 5 2.5 2.5 0 0 1 0-5z"),
-      ];
-    }
-    case "eyeOff": {
-      return [
-        iconPath("M3 3l18 18"),
-        iconPath("M10.7 5.2A10.7 10.7 0 0 1 12 5c6 0 9.5 7 9.5 7a17.8 17.8 0 0 1-3.2 4.1"),
-        iconPath("M6.5 6.9A17.6 17.6 0 0 0 2.5 12s3.5 7 9.5 7c1.7 0 3.2-.4 4.5-1"),
-      ];
-    }
-  }
-}
-
-function iconPath(d: string, stroke = "currentColor"): SVGPathElement {
-  return iconShape("path", {
-    d,
-    fill: "none",
-    stroke,
-    "stroke-width": "1.8",
-    "stroke-linecap": "round",
-    "stroke-linejoin": "round",
-  }) as SVGPathElement;
-}
-
-function iconShape<K extends keyof SVGElementTagNameMap>(
-  tag: K,
-  attributes: Record<string, string>,
-): SVGElementTagNameMap[K] {
-  const element = document.createElementNS("http://www.w3.org/2000/svg", tag);
-  for (const [key, value] of Object.entries(attributes)) {
-    element.setAttribute(key, value);
-  }
-  return element;
 }

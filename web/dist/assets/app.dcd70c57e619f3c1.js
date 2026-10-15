@@ -32998,6 +32998,50 @@ function toggleHeading(md, selStart, level) {
 
 // web/ts/editor/codemirror-adapter.ts
 var transactionOrigin = Annotation.define();
+var NoteTitleWidget = class _NoteTitleWidget extends WidgetType {
+  constructor(title) {
+    super();
+    this.title = title;
+  }
+  title;
+  eq(other) {
+    return other instanceof _NoteTitleWidget && this.title === other.title;
+  }
+  toDOM() {
+    const title = document.createElement("h1");
+    title.className = "document-title";
+    title.contentEditable = "false";
+    title.textContent = this.title;
+    return title;
+  }
+  ignoreEvent() {
+    return true;
+  }
+};
+function frontmatterDecorations(state) {
+  const firstLine = state.doc.line(1);
+  if (firstLine.text !== "---" && firstLine.text !== "\uFEFF---") return Decoration.none;
+  let closingLine = 0;
+  for (let number2 = 2; number2 <= state.doc.lines; number2++) {
+    if (state.doc.line(number2).text === "---") {
+      closingLine = number2;
+      break;
+    }
+  }
+  if (closingLine === 0) return Decoration.none;
+  const decorations2 = [];
+  for (let number2 = 1; number2 <= closingLine; number2++) {
+    decorations2.push(Decoration.line({ class: "cm-frontmatter-line" }).range(state.doc.line(number2).from));
+  }
+  return Decoration.set(decorations2, true);
+}
+var frontmatterAppearance = StateField.define({
+  create: frontmatterDecorations,
+  update(decorations2, transaction) {
+    return transaction.docChanged ? frontmatterDecorations(transaction.state) : decorations2;
+  },
+  provide: (field2) => EditorView.decorations.from(field2)
+});
 var setFindHighlightsEffect = StateEffect.define();
 var findHighlightField = StateField.define({
   create: () => ({ matches: [], selected: null, decorations: Decoration.none }),
@@ -33059,6 +33103,20 @@ function sessionData(session, owner) {
 }
 function editorExtensions(config2, live) {
   const extensions = [];
+  if (config2.noteTitle !== void 0 && config2.noteTitle !== "") {
+    const decoration = Decoration.widget({
+      widget: new NoteTitleWidget(config2.noteTitle),
+      side: -1,
+      block: true
+    }).range(0);
+    extensions.push(StateField.define({
+      create: () => Decoration.set([decoration]),
+      update(decorations2, transaction) {
+        return transaction.docChanged ? decorations2.map(transaction.changes) : decorations2;
+      },
+      provide: (field2) => EditorView.decorations.from(field2)
+    }));
+  }
   if (!live) return extensions;
   const configured = config2.extensions ?? [];
   const imageExtensions = configured.filter(
@@ -33159,6 +33217,7 @@ function createState2(source, mode, readOnly2, config2, modeCompartment, readOnl
     extensions: [
       history(),
       findHighlightField,
+      frontmatterAppearance,
       markdown({ base: markdownLanguage, codeLanguages: [], extensions: [highlightMarkdown] }),
       atomicEditorTheme,
       atomicMarkdownSyntax,
@@ -33391,7 +33450,10 @@ function createCodeMirrorEditor(container, initialConfig = {}) {
       console.error(error);
     });
   }
+  let scheduleSelectionToolbarSync = () => {
+  };
   const updateListener2 = EditorView.updateListener.of((update) => {
+    scheduleSelectionToolbarSync();
     if (activeSession === null) return;
     const data2 = sessionData(activeSession, owner);
     data2.state = update.state;
@@ -33484,6 +33546,7 @@ function createCodeMirrorEditor(container, initialConfig = {}) {
   if (config2.className) view.dom.classList.add(config2.className);
   let activeHeadingFrom;
   let activeHeadingFrame = null;
+  let selectionToolbarFrame = null;
   function syncActiveHeading() {
     const headings = activeSession === null ? [] : outlineFromSyntaxTree(view.state).headings;
     const scroller = view.scrollDOM;
@@ -33565,6 +33628,81 @@ function createCodeMirrorEditor(container, initialConfig = {}) {
       annotations: [transactionOrigin.of("userEdit"), Transaction.userEvent.of("input.format")]
     });
   }
+  function formatSelection(command2) {
+    const data2 = ensureActive();
+    if (data2 === null) return;
+    const operation = command2 === "bold" ? toggleBold : command2 === "italic" ? toggleItalic : command2 === "highlight" ? toggleHighlight : command2 === "strikethrough" ? toggleStrikethrough : (source, start) => toggleHeading(source, start, 1);
+    sourceChange(data2, operation);
+  }
+  const selectionToolbar = document.createElement("div");
+  selectionToolbar.className = "selection-toolbar";
+  selectionToolbar.setAttribute("role", "toolbar");
+  selectionToolbar.setAttribute("aria-label", "Text formatting");
+  const formatButtons = [
+    ["B", "Bold", "bold"],
+    ["I", "Italic", "italic"],
+    ["H", "Heading", "heading"],
+    ["S\u0336", "Strikethrough", "strikethrough"],
+    ["\u25B0", "Highlight", "highlight"]
+  ];
+  for (const [label, title, command2] of formatButtons) {
+    const button2 = document.createElement("button");
+    button2.type = "button";
+    button2.className = `selection-toolbar-button selection-toolbar-${command2}`;
+    button2.textContent = label;
+    button2.title = title;
+    button2.setAttribute("aria-label", title);
+    button2.addEventListener("pointerdown", (event) => event.preventDefault());
+    button2.addEventListener("click", (event) => {
+      event.preventDefault();
+      formatSelection(command2);
+    });
+    selectionToolbar.append(button2);
+  }
+  view.dom.append(selectionToolbar);
+  let selectionPointerDown = false;
+  function syncSelectionToolbar() {
+    const selection2 = view.state.selection.main;
+    if (activeSession === null || sessionData(activeSession, owner).readOnly || selection2.empty || selectionPointerDown || !view.hasFocus && !selectionToolbar.contains(document.activeElement)) {
+      selectionToolbar.classList.remove("is-visible");
+      return;
+    }
+    const cursor = view.coordsAtPos(selection2.head);
+    if (cursor === null) {
+      selectionToolbar.classList.remove("is-visible");
+      return;
+    }
+    selectionToolbar.classList.add("is-visible");
+    const { width, height } = selectionToolbar.getBoundingClientRect();
+    const center = cursor.left + (cursor.right - cursor.left) / 2;
+    const left = Math.max(width / 2 + 8, Math.min(window.innerWidth - width / 2 - 8, center));
+    selectionToolbar.style.left = `${left}px`;
+    selectionToolbar.style.top = `${Math.max(8, cursor.top - height - 8)}px`;
+  }
+  function scheduleToolbarSync() {
+    if (selectionToolbarFrame !== null) return;
+    selectionToolbarFrame = requestAnimationFrame(() => {
+      selectionToolbarFrame = null;
+      syncSelectionToolbar();
+    });
+  }
+  function onEditorPointerDown(event) {
+    if (event.target instanceof Node && selectionToolbar.contains(event.target)) return;
+    selectionPointerDown = true;
+    selectionToolbar.classList.remove("is-visible");
+  }
+  function onPointerUp() {
+    if (!selectionPointerDown) return;
+    selectionPointerDown = false;
+    scheduleToolbarSync();
+  }
+  scheduleSelectionToolbarSync = scheduleToolbarSync;
+  view.dom.addEventListener("pointerdown", onEditorPointerDown);
+  window.addEventListener("pointerup", onPointerUp);
+  window.addEventListener("resize", scheduleToolbarSync, { passive: true });
+  window.addEventListener("scroll", scheduleToolbarSync, { passive: true });
+  view.scrollDOM.addEventListener("scroll", scheduleToolbarSync, { passive: true });
+  scheduleToolbarSync();
   return {
     createSession(noteId2, source, options = {}) {
       if (disposed) throw new TypeError("Editor has been disposed");
@@ -33607,6 +33745,7 @@ function createCodeMirrorEditor(container, initialConfig = {}) {
       view.scrollDOM.scrollTop = data2.scroll.top;
       view.scrollDOM.scrollLeft = data2.scroll.left;
       scheduleActiveHeadingSync();
+      scheduleToolbarSync();
     },
     detachSession() {
       if (disposed) throw new TypeError("Editor has been disposed");
@@ -33615,6 +33754,7 @@ function createCodeMirrorEditor(container, initialConfig = {}) {
       activeSession = null;
       view.setState(initialState);
       scheduleActiveHeadingSync();
+      scheduleToolbarSync();
       return detached;
     },
     dispose() {
@@ -33627,6 +33767,13 @@ function createCodeMirrorEditor(container, initialConfig = {}) {
         markImagePasteFinished(paste);
       }
       if (activeHeadingFrame !== null) cancelAnimationFrame(activeHeadingFrame);
+      if (selectionToolbarFrame !== null) cancelAnimationFrame(selectionToolbarFrame);
+      view.dom.removeEventListener("pointerdown", onEditorPointerDown);
+      window.removeEventListener("pointerup", onPointerUp);
+      window.removeEventListener("resize", scheduleToolbarSync);
+      window.removeEventListener("scroll", scheduleToolbarSync);
+      view.scrollDOM.removeEventListener("scroll", scheduleToolbarSync);
+      selectionToolbar.remove();
       view.destroy();
     },
     focus() {
@@ -33706,7 +33853,7 @@ function createCodeMirrorEditor(container, initialConfig = {}) {
       if (Object.hasOwn(partial, "mode")) data2.mode = partial.mode ?? data2.mode;
       if (session !== null && data2.readOnly) abortInvalidImagePastes(session);
       const modeChanged = data2.mode !== previousMode;
-      const editorExtensionsChanged = modeChanged || data2.mode === "live" && !sameEditorExtensionInputs(previous, config2);
+      const editorExtensionsChanged = modeChanged || previous.noteTitle !== config2.noteTitle || data2.mode === "live" && !sameEditorExtensionInputs(previous, config2);
       const readOnlyChanged = data2.readOnly !== previousReadOnly;
       const keymapChanged = previous.onSave !== config2.onSave || previous.onFindRequested !== config2.onFindRequested;
       reconfigure(data2, "modeChange", {
@@ -33747,12 +33894,7 @@ function createCodeMirrorEditor(container, initialConfig = {}) {
       const data2 = ensureActive();
       return data2 === null ? { headings: [], complete: true } : outlineFromSyntaxTree(data2.state);
     },
-    formatSelection(command2) {
-      const data2 = ensureActive();
-      if (data2 === null) return;
-      const operation = command2 === "bold" ? toggleBold : command2 === "italic" ? toggleItalic : command2 === "highlight" ? toggleHighlight : command2 === "strikethrough" ? toggleStrikethrough : (source, start) => toggleHeading(source, start, 1);
-      sourceChange(data2, operation);
-    },
+    formatSelection,
     updateTags(tags3) {
       const data2 = ensureActive();
       if (data2 === null || data2.readOnly) return false;
@@ -35407,6 +35549,7 @@ function reconcileNode(current, next) {
   }
   if (!(current instanceof HTMLElement) || !(next instanceof HTMLElement)) return next;
   if (current.id === "editor-mount") return current;
+  const preserveInputValue = current instanceof HTMLInputElement && current.dataset["preserveValue"] !== void 0 && current.value !== current.defaultValue;
   const obsoleteAttributes = [];
   for (const attribute of current.attributes) {
     if (!next.hasAttribute(attribute.name)) obsoleteAttributes.push(attribute.name);
@@ -35418,7 +35561,7 @@ function reconcileNode(current, next) {
     }
   }
   if (current instanceof HTMLInputElement && next instanceof HTMLInputElement) {
-    if (current.value !== next.value) current.value = next.value;
+    if (!preserveInputValue && current.value !== next.value) current.value = next.value;
     current.checked = next.checked;
     current.disabled = next.disabled;
   } else if (current instanceof HTMLSelectElement && next instanceof HTMLSelectElement) {
@@ -35654,13 +35797,9 @@ function renderMain(state, actions) {
     }
     workspace.append(renderEditorMount(true));
   } else {
-    if (!reading) {
-      workspace.append(editorToolbar(state, actions));
-    }
     const meta2 = el(
       "div",
       reading ? "editor-meta reader-meta" : "editor-meta",
-      renderDocumentTitle(active),
       renderTagRow(active, actions, reading)
     );
     workspace.append(meta2, renderEditorMount(false));
@@ -35763,45 +35902,6 @@ function renderEditorMount(hidden) {
   if (hidden) mount.setAttribute("aria-hidden", "true");
   return mount;
 }
-function editorToolbar(state, actions) {
-  const more = document.createElement("details");
-  more.className = "toolbar-more";
-  const moreToggle = el("summary", "tool-button toolbar-more-toggle", "\xB7\xB7\xB7");
-  moreToggle.setAttribute("aria-label", "More formatting actions");
-  moreToggle.title = "More formatting actions";
-  const moreMenu = el("div", "toolbar-more-menu");
-  const extraCommands = [
-    ["strikethrough", "Strikethrough", "strikethrough"],
-    ["highlight", "Highlight", "highlight"],
-    ["undo", "Undo", "undo"],
-    ["redo", "Redo", "redo"],
-    ["code", "Source", "source"],
-    ["save", "Save", "save"]
-  ];
-  for (const [icon, title, command2] of extraCommands) {
-    const item = toolButton(icon, title, () => {
-      more.open = false;
-      actions.dispatch({ type: "editor.toolbar", command: command2 });
-    });
-    item.classList.add("toolbar-more-item");
-    moreMenu.append(item);
-  }
-  more.append(moreToggle, moreMenu);
-  const active = activeTab(state);
-  const saveStatus = active === void 0 ? "" : active.saving ? "Saving" : tabIsDirty(active) ? "Unsaved" : "Saved";
-  const toolbar = el(
-    "div",
-    "toolbar",
-    toolButton("bold", "Bold", () => actions.dispatch({ type: "editor.toolbar", command: "bold" })),
-    toolButton("italic", "Italic", () => actions.dispatch({ type: "editor.toolbar", command: "italic" })),
-    toolButton("heading", "Heading", () => actions.dispatch({ type: "editor.toolbar", command: "heading" })),
-    more,
-    span(saveStatus, "toolbar-save-status")
-  );
-  toolbar.setAttribute("role", "toolbar");
-  toolbar.setAttribute("aria-label", "Editor formatting");
-  return toolbar;
-}
 function activeDraftStorageFailed(tab) {
   if (tab.session === null) return false;
   return tab.kind === "local-draft" ? tab.session.state.storage === "failed" : tab.session.state.storage.kind === "failed";
@@ -35835,8 +35935,10 @@ function renderOverlays(state, actions) {
     const searchIcon = el("span", "command-search-icon");
     searchIcon.setAttribute("aria-hidden", "true");
     const field2 = el("div", "command-field", searchIcon, input2);
-    host.append(backdrop(actions), el("div", "command-panel command-palette-panel", field2, list2));
-    queueMicrotask(() => input2.focus());
+    const panel = el("div", "command-panel command-palette-panel", field2, list2);
+    panel.dataset["key"] = "modal:command";
+    host.append(backdrop(actions), panel);
+    focusOnOpen(input2);
   }
   if (state.searchOpen) {
     const input2 = document.createElement("input");
@@ -35848,11 +35950,23 @@ function renderOverlays(state, actions) {
       actions.dispatch({ type: "search.overlayInput", query: input2.value });
     });
     const list2 = el("div", "command-list search-result-list");
+    list2.dataset["key"] = "search-results";
     input2.addEventListener("keydown", (event) => {
       if (event.key === "Enter") actions.dispatch({ type: "search.overlaySubmit" });
     });
     const query = state.searchOverlayQuery.trim();
-    let recentHeader = null;
+    const recentNotes = recentNoteIds(state).flatMap((noteId2) => {
+      const note = state.notes.get(noteId2);
+      return note === void 0 ? [] : [note];
+    });
+    const recentHeader = el(
+      "header",
+      "recent-notes-header",
+      el("h2", "", "Recent notes"),
+      span(`${recentNotes.length} recent notes`, "recent-notes-count")
+    );
+    recentHeader.dataset["key"] = "search-recent-header";
+    recentHeader.hidden = query !== "";
     if (query !== "") {
       const hits = state.searchOverlayHits ?? [];
       for (const hit of hits) {
@@ -35870,16 +35984,6 @@ function renderOverlays(state, actions) {
       const coverage = draftCoverageMessage(state.searchOverlayCoverage);
       if (coverage !== null) list2.append(coverage);
     } else {
-      const recentNotes = recentNoteIds(state).flatMap((noteId2) => {
-        const note = state.notes.get(noteId2);
-        return note === void 0 ? [] : [note];
-      });
-      recentHeader = el(
-        "header",
-        "recent-notes-header",
-        el("h2", "", "Recent notes"),
-        span(`${recentNotes.length} recent notes`, "recent-notes-count")
-      );
       for (const [index, note] of recentNotes.entries()) {
         const row = button(
           "",
@@ -35911,14 +36015,18 @@ function renderOverlays(state, actions) {
         }
       }
     }
-    host.append(backdrop(actions), el(
+    const searchField = el("div", "search-field", span("", "search-icon"), input2);
+    searchField.dataset["key"] = "search-field";
+    const panel = el(
       "div",
       "command-panel search-panel",
-      ...recentHeader === null ? [] : [recentHeader],
-      el("div", "search-field", span("", "search-icon"), input2),
+      recentHeader,
+      searchField,
       list2
-    ));
-    queueMicrotask(() => input2.focus());
+    );
+    panel.dataset["key"] = "modal:search";
+    host.append(backdrop(actions), panel);
+    focusOnOpen(input2);
   }
   if (state.quickOpen) {
     const input2 = document.createElement("input");
@@ -35941,14 +36049,16 @@ function renderOverlays(state, actions) {
     const quickOpenIcon = el("span", "quick-open-search-icon");
     quickOpenIcon.setAttribute("aria-hidden", "true");
     const quickOpenField = el("div", "quick-open-field", quickOpenIcon, input2);
-    host.append(backdrop(actions), el(
+    const panel = el(
       "div",
       "command-panel quick-open-panel",
       el("header", "recent-notes-header", el("h2", "", "Recent notes"), span(`${count2} recent notes`, "recent-notes-count")),
       quickOpenField,
       list2
-    ));
-    queueMicrotask(() => input2.focus());
+    );
+    panel.dataset["key"] = "modal:quick-open";
+    host.append(backdrop(actions), panel);
+    focusOnOpen(input2);
   }
   if (state.revisionsOpen) {
     host.append(backdrop(actions), renderRevisionsPanel(state, actions));
@@ -35982,8 +36092,16 @@ function renderOverlays(state, actions) {
 }
 function backdrop(actions) {
   const element = el("div", "overlay-backdrop");
+  element.dataset["key"] = "overlay-backdrop";
   element.addEventListener("click", () => actions.dispatch({ type: "overlay.close" }));
   return element;
+}
+function focusOnOpen(input2, select = false) {
+  queueMicrotask(() => {
+    if (!input2.isConnected || document.activeElement === input2) return;
+    input2.focus();
+    if (select) input2.select();
+  });
 }
 function renderRevisionsPanel(state, actions) {
   const active = activeTab(state);
@@ -36005,7 +36123,7 @@ function renderRevisionsPanel(state, actions) {
   }
   const current = active === void 0 ? "" : loadedDraft(active) ?? "";
   const preview = revisionDocument === null ? el("div", "empty-panel", "Select a revision") : el("pre", "diff-preview", diffPreview(current, revisionDocument.content));
-  return el(
+  const panel = el(
     "div",
     "modal-panel revisions-panel",
     el(
@@ -36026,10 +36144,12 @@ function renderRevisionsPanel(state, actions) {
       )
     )
   );
+  panel.dataset["key"] = "modal:revisions";
+  return panel;
 }
 function renderConflictPanel(state, actions) {
   const draft = state.conflictDraft;
-  return el(
+  const panel = el(
     "div",
     "modal-panel revisions-panel",
     el(
@@ -36050,6 +36170,8 @@ function renderConflictPanel(state, actions) {
       )
     )
   );
+  panel.dataset["key"] = "modal:conflict";
+  return panel;
 }
 function renderSettingsPanel(state, actions) {
   const settings = state.boot.settings;
@@ -36064,7 +36186,10 @@ function renderSettingsPanel(state, actions) {
     "1",
     "0.05"
   );
-  return el(
+  for (const field2 of [excluded, autosave, undo2, quality]) {
+    field2.dataset["preserveValue"] = "";
+  }
+  const panel = el(
     "div",
     "modal-panel settings-panel",
     el(
@@ -36110,6 +36235,8 @@ function renderSettingsPanel(state, actions) {
       )
     )
   );
+  panel.dataset["key"] = "modal:settings";
+  return panel;
 }
 function numericValue(inputEl) {
   return inputEl.value.trim() === "" ? Number.NaN : Number(inputEl.value);
@@ -36120,6 +36247,7 @@ function renderNoteDialog(state, actions) {
   const isRename = dialog?.kind === "rename";
   const title = dialog?.kind === "create" ? "New Note" : isRename ? "Rename note" : dialog?.kind === "tag" ? "Add Tag" : "Delete Note";
   const inputEl = dialog !== null && dialog.kind !== "delete" ? input(title, dialog.kind === "tag" ? dialog.value : dialog.title) : null;
+  if (inputEl !== null) inputEl.dataset["key"] = `note-dialog-input:${dialog?.kind ?? "delete"}`;
   const localDraft = dialog?.kind === "create" ? state.tabs.find((tab) => tab.kind === "local-draft" && tab.localDraftId === dialog.localDraftId) : void 0;
   const promotionPending = localDraft?.kind === "local-draft" && localDraft.session?.state.promotionPending === true;
   if (inputEl !== null && promotionPending) inputEl.disabled = true;
@@ -36133,6 +36261,8 @@ function renderNoteDialog(state, actions) {
       ...isRename ? [] : [button("\xD7", "Close", () => actions.dispatch({ type: "overlay.close" }), "tab-close")]
     )
   );
+  const dialogKey = dialog === null ? "delete" : dialog.kind === "rename" || dialog.kind === "delete" ? `${dialog.kind}:${dialog.noteId}` : dialog.kind === "create" ? `create:${dialog.localDraftId}` : "tag";
+  panel.dataset["key"] = `modal:note:${dialogKey}`;
   if (isDelete) {
     const note = state.notes.get(dialog.noteId);
     panel.append(
@@ -36185,15 +36315,13 @@ function renderNoteDialog(state, actions) {
       event.preventDefault();
       actions.dispatch({ type: "dialog.submit", value: inputEl.value });
     });
-    queueMicrotask(() => {
-      inputEl.focus();
-      if (isRename) inputEl.select();
-    });
+    focusOnOpen(inputEl, isRename);
   }
   return panel;
 }
 function renderContextMenu(state, actions) {
   const menu = el("div", "context-menu");
+  menu.dataset["key"] = "context-menu";
   const context = state.contextMenu;
   if (context === null) {
     return menu;
@@ -36351,8 +36479,10 @@ function normalizeSnippet(source, ranges, start, end) {
 function input(title, value, type = "text", min, max, step) {
   const element = document.createElement("input");
   element.className = "settings-input";
+  element.dataset["key"] = `field:${title}`;
   element.title = title;
   element.type = type;
+  element.defaultValue = value;
   element.value = value;
   if (min !== void 0) element.min = min;
   if (max !== void 0) element.max = max;
@@ -36470,95 +36600,6 @@ function bindTabCloseHint(tabEl, closeHint, tab, actions) {
   tabEl.addEventListener("mouseleave", hideCloseHint);
   return hideCloseHint;
 }
-function toolButton(iconName, title, onClick) {
-  const element = button("", title, onClick, "tool-button");
-  element.ariaLabel = title;
-  element.append(toolIcon(iconName));
-  return element;
-}
-function toolIcon(iconName) {
-  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-  svg.setAttribute("viewBox", "0 0 24 24");
-  svg.setAttribute("aria-hidden", "true");
-  for (const child of iconPaths(iconName)) {
-    svg.append(child);
-  }
-  return svg;
-}
-function iconPaths(iconName) {
-  switch (iconName) {
-    case "bold": {
-      return [iconPath("M8 5h5a3 3 0 0 1 0 6H8zM8 11h6a4 4 0 0 1 0 8H8zM8 5v14")];
-    }
-    case "italic": {
-      return [iconPath("M10 5h7M7 19h7M14 5l-4 14")];
-    }
-    case "strikethrough": {
-      return [
-        iconPath("M7 7.5A4 4 0 0 1 11 5h5M8 17a5 5 0 0 0 4 2h1.5a3.5 3.5 0 0 0 0-7H6M5 12h14")
-      ];
-    }
-    case "highlight": {
-      return [
-        iconShape("path", {
-          d: "M7 18.5h4.5L20 10l-2.8-2.8-11.7 9.3z",
-          fill: "#ffe16a",
-          stroke: "none"
-        }),
-        iconPath("M14 4l6 6-8.5 8.5H7.5l-2-2z", "#d88b18"),
-        iconPath("M5 20h11", "#d88b18")
-      ];
-    }
-    case "heading": {
-      return [iconPath("M6 5v14M18 5v14M6 12h12M14 19h7")];
-    }
-    case "undo": {
-      return [iconPath("M9 7l-5 5 5 5M4 12h10a5 5 0 1 1-3.5 8.5")];
-    }
-    case "redo": {
-      return [iconPath("M15 7l5 5-5 5M20 12H10a5 5 0 1 0 3.5 8.5")];
-    }
-    case "code": {
-      return [iconPath("M9 7l-5 5 5 5M15 7l5 5-5 5")];
-    }
-    case "save": {
-      return [
-        iconShape("rect", { x: "9", y: "15", width: "6", height: "5", fill: "#dfe7f2" }),
-        iconPath("M5 4h12l2 2v14H5zM8 4v6h8V4M8 20v-6h8v6")
-      ];
-    }
-    case "eye": {
-      return [
-        iconPath("M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6z"),
-        iconPath("M12 9.5a2.5 2.5 0 1 1 0 5 2.5 2.5 0 0 1 0-5z")
-      ];
-    }
-    case "eyeOff": {
-      return [
-        iconPath("M3 3l18 18"),
-        iconPath("M10.7 5.2A10.7 10.7 0 0 1 12 5c6 0 9.5 7 9.5 7a17.8 17.8 0 0 1-3.2 4.1"),
-        iconPath("M6.5 6.9A17.6 17.6 0 0 0 2.5 12s3.5 7 9.5 7c1.7 0 3.2-.4 4.5-1")
-      ];
-    }
-  }
-}
-function iconPath(d, stroke = "currentColor") {
-  return iconShape("path", {
-    d,
-    fill: "none",
-    stroke,
-    "stroke-width": "1.8",
-    "stroke-linecap": "round",
-    "stroke-linejoin": "round"
-  });
-}
-function iconShape(tag, attributes) {
-  const element = document.createElementNS("http://www.w3.org/2000/svg", tag);
-  for (const [key, value] of Object.entries(attributes)) {
-    element.setAttribute(key, value);
-  }
-  return element;
-}
 
 // web/ts/app.ts
 var SESSION_SAVE_DELAY_MS = 250;
@@ -36572,10 +36613,6 @@ function markdownPreview(source) {
     return value !== "" && !/^(?:#{1,6}\s|```|~~~|>|[-*+]\s|\d+[.)]\s|\|)/m.test(value);
   });
   return (paragraph ?? "").replace(/\r?\n/g, " ").replace(/\[([^\]]+)\]\([^)]*\)/g, "$1").replace(/[*_~`]/g, "").replace(/\s+/g, " ").trim();
-}
-function isTextEntryTarget(target) {
-  if (!(target instanceof HTMLElement)) return false;
-  return target.isContentEditable || target.closest("input, textarea, select, [contenteditable='true']") !== null;
 }
 var TansuApp = class {
   constructor(root2, services = defaultServices) {
@@ -36798,9 +36835,9 @@ var TansuApp = class {
       } else if (modifier && event.altKey && !event.shiftKey && key === "n") {
         event.preventDefault();
         this.runAsync(this.commandCreate(), "Create failed");
-      } else if (event.key === "/" && !modifier && !event.altKey && !event.shiftKey && !isTextEntryTarget(event.target)) {
+      } else if (event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey && event.key === "/") {
         event.preventDefault();
-        this.dispatch({ type: "search.open" });
+        if (!this.state.searchOpen) this.dispatch({ type: "search.open" });
       } else if (event.key === "Escape" && this.hasOverlay()) {
         event.preventDefault();
         this.runAsync(this.closeOverlays(), "Local recovery storage failed");
@@ -36968,20 +37005,21 @@ var TansuApp = class {
     const cached = this.cachedEditorConfig;
     const sameVault = cached !== null && cached.generation === generation && cached.identity === serverIdentity && cached.client === client;
     if (sameVault && cached !== null && cached.assetScopeRevision === this.assetScopeRevision) {
-      return cached.config;
+      return { ...cached.config, noteTitle: activeTab(this.state)?.title ?? "" };
     }
     const extensions = [
       createWikiImageExtension({ resolveUrl: (name2) => this.resolveAssetUrl(name2) }),
       createCalloutExtension()
     ];
     if (sameVault && cached !== null) {
-      const config3 = { ...cached.config, extensions };
+      const config3 = { ...cached.config, extensions, noteTitle: activeTab(this.state)?.title ?? "" };
       this.cachedEditorConfig = { generation, identity: serverIdentity, client, assetScopeRevision: this.assetScopeRevision, config: config3 };
       return config3;
     }
     const currentVault = () => serverIdentity !== null && client !== null && this.isCurrentVault(serverIdentity, client);
     const config2 = {
       extensions,
+      noteTitle: activeTab(this.state)?.title ?? "",
       currentNotePath: () => activeTab(this.state)?.path ?? "",
       wikiNotes: () => [...this.state.notes.values()].map((note) => ({ noteId: note.noteId, title: note.title, path: note.path })),
       onWikiNoteOpen: (id2) => {
@@ -38125,10 +38163,6 @@ var TansuApp = class {
         this.render();
         return;
       }
-      case "editor.toolbar": {
-        this.dispatchEditorToolbar(event.command);
-        return;
-      }
       case "revisions.open": {
         this.runAsync(this.commandRevisions(), "Revisions failed");
         return;
@@ -38243,13 +38277,6 @@ var TansuApp = class {
     this.state.tabs.push(tab);
     if (tab.kind === "saved") this.touchRecent(tab.noteId);
     this.runAsync(this.activateTab(tabIdentity(tab)), "Open failed");
-  }
-  dispatchEditorToolbar(command2) {
-    if (command2 === "source") this.toggleSourceMode();
-    else if (command2 === "save") this.runAsync(this.manualSave(), "Save failed");
-    else if (command2 === "undo") this.editor?.undo();
-    else if (command2 === "redo") this.editor?.redo();
-    else this.editor?.formatSelection(command2);
   }
   toggleSourceMode() {
     const tab = activeTab(this.state);

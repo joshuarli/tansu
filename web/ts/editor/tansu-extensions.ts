@@ -11,6 +11,7 @@ export type EditorConfig = {
   readOnly?: boolean;
   mode?: "live" | "source";
   className?: string;
+  noteTitle?: string;
   currentNotePath?: () => string;
   wikiNotes?: () => readonly WikiNote[];
   onWikiNoteOpen?: (noteId: string) => void;

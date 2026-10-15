@@ -42,7 +42,7 @@ describe("view rendering", () => {
     expect(renderStatusBar(state).textContent).toContain("Saving");
   });
 
-  it("wires floating navigation, tabs, toolbar, tags, and context menu actions", () => {
+  it("wires floating navigation, tabs, tags, and context menu actions", () => {
     const state = baseState();
     const active = tabFromDocument({
       meta: note("n1", "one.md", "One", ["alpha"]),
@@ -74,19 +74,6 @@ describe("view rendering", () => {
     root.querySelector<HTMLButtonElement>('[title="View conflict draft"]')!.click();
     root.querySelector<HTMLButtonElement>('[title="Restore conflict draft"]')!.click();
     root.querySelector<HTMLButtonElement>('[title="Read"]')!.click();
-    for (const title of [
-      "Bold",
-      "Italic",
-      "Strikethrough",
-      "Highlight",
-      "Heading",
-      "Undo",
-      "Redo",
-      "Source",
-      "Save",
-    ]) {
-      root.querySelector<HTMLButtonElement>(`[title="${title}"]`)!.click();
-    }
     root.querySelector<HTMLButtonElement>('[title="Unpin note"]')!.click();
     root.querySelector<HTMLButtonElement>('[title="Rename note"]')!.click();
     root.querySelector<HTMLButtonElement>('[title="Delete note"]')!.click();
@@ -102,9 +89,9 @@ describe("view rendering", () => {
     expectDispatched(actions, { type: "note.rename", noteId: toNoteId("n1") });
     expectDispatched(actions, { type: "note.delete", noteId: toNoteId("n1") });
     expectDispatched(actions, { type: "reading.toggle" });
-    expectDispatched(actions, { type: "editor.toolbar", command: "bold" });
     expect(root.textContent).toContain("Save conflict");
     expect(root.querySelector(".sidebar")).toBeNull();
+    expect(root.querySelector(".toolbar")).toBeNull();
     expect(root.querySelector(".document-title")?.textContent).toBe("One");
   });
 

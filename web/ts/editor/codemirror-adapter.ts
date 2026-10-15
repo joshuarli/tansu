@@ -19,6 +19,7 @@ import {
   highlightActiveLine,
   keymap,
   rectangularSelection,
+  WidgetType,
 } from "@codemirror/view";
 import { atomicEditorTheme, atomicMarkdownSyntax } from "./vendor/atomic/atomic-theme.js";
 import { autoCloseCodeFence, extendEmphasisPair, startAsteriskList } from "./vendor/atomic/edit-helpers.js";
@@ -54,6 +55,56 @@ import {
 } from "./format-ops.js";
 
 const transactionOrigin = Annotation.define<EditorOrigin>();
+
+class NoteTitleWidget extends WidgetType {
+  constructor(readonly title: string) {
+    super();
+  }
+
+  override eq(other: WidgetType): boolean {
+    return other instanceof NoteTitleWidget && this.title === other.title;
+  }
+
+  override toDOM(): HTMLElement {
+    const title = document.createElement("h1");
+    title.className = "document-title";
+    title.contentEditable = "false";
+    title.textContent = this.title;
+    return title;
+  }
+
+  override ignoreEvent(): boolean {
+    return true;
+  }
+}
+
+function frontmatterDecorations(state: EditorState): DecorationSet {
+  const firstLine = state.doc.line(1);
+  if (firstLine.text !== "---" && firstLine.text !== "\uFEFF---") return Decoration.none;
+
+  let closingLine = 0;
+  for (let number = 2; number <= state.doc.lines; number++) {
+    if (state.doc.line(number).text === "---") {
+      closingLine = number;
+      break;
+    }
+  }
+  if (closingLine === 0) return Decoration.none;
+
+  const decorations = [];
+  for (let number = 1; number <= closingLine; number++) {
+    decorations.push(Decoration.line({ class: "cm-frontmatter-line" }).range(state.doc.line(number).from));
+  }
+  return Decoration.set(decorations, true);
+}
+
+const frontmatterAppearance = StateField.define<DecorationSet>({
+  create: frontmatterDecorations,
+  update(decorations, transaction) {
+    return transaction.docChanged ? frontmatterDecorations(transaction.state) : decorations;
+  },
+  provide: (field) => EditorView.decorations.from(field),
+});
 
 type EditorOrigin = "load" | "modeChange" | "externalReload" | "userEdit";
 export type EditorMode = "live" | "source";
@@ -233,6 +284,20 @@ function sessionData(session: EditorSession, owner: symbol): SessionData {
 
 function editorExtensions(config: EditorConfig, live: boolean): Extension[] {
   const extensions: Extension[] = [];
+  if (config.noteTitle !== undefined && config.noteTitle !== "") {
+    const decoration = Decoration.widget({
+      widget: new NoteTitleWidget(config.noteTitle),
+      side: -1,
+      block: true,
+    }).range(0);
+    extensions.push(StateField.define<DecorationSet>({
+      create: () => Decoration.set([decoration]),
+      update(decorations, transaction) {
+        return transaction.docChanged ? decorations.map(transaction.changes) : decorations;
+      },
+      provide: (field) => EditorView.decorations.from(field),
+    }));
+  }
   if (!live) return extensions;
 
   const configured = config.extensions ?? [];
@@ -353,6 +418,7 @@ function createState(
     extensions: [
       history(),
       findHighlightField,
+      frontmatterAppearance,
       markdown({ base: markdownLanguage, codeLanguages: [], extensions: [highlightMarkdown] }),
       atomicEditorTheme,
       atomicMarkdownSyntax,
@@ -615,7 +681,9 @@ export function createCodeMirrorEditor(container: HTMLElement, initialConfig: Ed
     });
   }
 
+  let scheduleSelectionToolbarSync = (): void => {};
   const updateListener = EditorView.updateListener.of((update) => {
+    scheduleSelectionToolbarSync();
     if (activeSession === null) return;
     const data = sessionData(activeSession, owner);
     data.state = update.state;
@@ -713,6 +781,7 @@ export function createCodeMirrorEditor(container: HTMLElement, initialConfig: Ed
   if (config.className) view.dom.classList.add(config.className);
   let activeHeadingFrom: number | null | undefined;
   let activeHeadingFrame: number | null = null;
+  let selectionToolbarFrame: number | null = null;
 
   function syncActiveHeading(): void {
     const headings = activeSession === null ? [] : outlineFromSyntaxTree(view.state).headings;
@@ -807,6 +876,98 @@ export function createCodeMirrorEditor(container: HTMLElement, initialConfig: Ed
     });
   }
 
+  function formatSelection(command: FormatCommand): void {
+    const data = ensureActive();
+    if (data === null) return;
+    const operation = command === "bold"
+      ? toggleBold
+      : command === "italic"
+      ? toggleItalic
+      : command === "highlight"
+      ? toggleHighlight
+      : command === "strikethrough"
+      ? toggleStrikethrough
+      : (source: string, start: number) => toggleHeading(source, start, 1);
+    sourceChange(data, operation);
+  }
+
+  const selectionToolbar = document.createElement("div");
+  selectionToolbar.className = "selection-toolbar";
+  selectionToolbar.setAttribute("role", "toolbar");
+  selectionToolbar.setAttribute("aria-label", "Text formatting");
+  const formatButtons = [
+    ["B", "Bold", "bold"],
+    ["I", "Italic", "italic"],
+    ["H", "Heading", "heading"],
+    ["S̶", "Strikethrough", "strikethrough"],
+    ["▰", "Highlight", "highlight"],
+  ] as const;
+  for (const [label, title, command] of formatButtons) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `selection-toolbar-button selection-toolbar-${command}`;
+    button.textContent = label;
+    button.title = title;
+    button.setAttribute("aria-label", title);
+    button.addEventListener("pointerdown", (event) => event.preventDefault());
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      formatSelection(command);
+    });
+    selectionToolbar.append(button);
+  }
+  view.dom.append(selectionToolbar);
+
+  let selectionPointerDown = false;
+
+  function syncSelectionToolbar(): void {
+    const selection = view.state.selection.main;
+    if (activeSession === null || sessionData(activeSession, owner).readOnly || selection.empty ||
+      selectionPointerDown || (!view.hasFocus && !selectionToolbar.contains(document.activeElement))) {
+      selectionToolbar.classList.remove("is-visible");
+      return;
+    }
+    const cursor = view.coordsAtPos(selection.head);
+    if (cursor === null) {
+      selectionToolbar.classList.remove("is-visible");
+      return;
+    }
+    selectionToolbar.classList.add("is-visible");
+    const { width, height } = selectionToolbar.getBoundingClientRect();
+    const center = cursor.left + (cursor.right - cursor.left) / 2;
+    const left = Math.max(width / 2 + 8, Math.min(window.innerWidth - width / 2 - 8, center));
+    selectionToolbar.style.left = `${left}px`;
+    selectionToolbar.style.top = `${Math.max(8, cursor.top - height - 8)}px`;
+  }
+
+  function scheduleToolbarSync(): void {
+    if (selectionToolbarFrame !== null) return;
+    selectionToolbarFrame = requestAnimationFrame(() => {
+      selectionToolbarFrame = null;
+      syncSelectionToolbar();
+    });
+  }
+
+  function onEditorPointerDown(event: PointerEvent): void {
+    if (event.target instanceof Node && selectionToolbar.contains(event.target)) return;
+    selectionPointerDown = true;
+    selectionToolbar.classList.remove("is-visible");
+  }
+
+  function onPointerUp(): void {
+    if (!selectionPointerDown) return;
+    selectionPointerDown = false;
+    scheduleToolbarSync();
+  }
+
+  scheduleSelectionToolbarSync = scheduleToolbarSync;
+  view.dom.addEventListener("pointerdown", onEditorPointerDown);
+  window.addEventListener("pointerup", onPointerUp);
+  window.addEventListener("resize", scheduleToolbarSync, { passive: true });
+  window.addEventListener("scroll", scheduleToolbarSync, { passive: true });
+  view.scrollDOM.addEventListener("scroll", scheduleToolbarSync, { passive: true });
+  scheduleToolbarSync();
+
   return {
     createSession(noteId, source, options = {}) {
       if (disposed) throw new TypeError("Editor has been disposed");
@@ -850,6 +1011,7 @@ export function createCodeMirrorEditor(container: HTMLElement, initialConfig: Ed
       view.scrollDOM.scrollTop = data.scroll.top;
       view.scrollDOM.scrollLeft = data.scroll.left;
       scheduleActiveHeadingSync();
+      scheduleToolbarSync();
     },
 
     detachSession() {
@@ -859,6 +1021,7 @@ export function createCodeMirrorEditor(container: HTMLElement, initialConfig: Ed
       activeSession = null;
       view.setState(initialState);
       scheduleActiveHeadingSync();
+      scheduleToolbarSync();
       return detached;
     },
 
@@ -872,6 +1035,13 @@ export function createCodeMirrorEditor(container: HTMLElement, initialConfig: Ed
         markImagePasteFinished(paste);
       }
       if (activeHeadingFrame !== null) cancelAnimationFrame(activeHeadingFrame);
+      if (selectionToolbarFrame !== null) cancelAnimationFrame(selectionToolbarFrame);
+      view.dom.removeEventListener("pointerdown", onEditorPointerDown);
+      window.removeEventListener("pointerup", onPointerUp);
+      window.removeEventListener("resize", scheduleToolbarSync);
+      window.removeEventListener("scroll", scheduleToolbarSync);
+      view.scrollDOM.removeEventListener("scroll", scheduleToolbarSync);
+      selectionToolbar.remove();
       view.destroy();
     },
 
@@ -957,7 +1127,8 @@ export function createCodeMirrorEditor(container: HTMLElement, initialConfig: Ed
       if (Object.hasOwn(partial, "mode")) data.mode = partial.mode ?? data.mode;
       if (session !== null && data.readOnly) abortInvalidImagePastes(session);
       const modeChanged = data.mode !== previousMode;
-      const editorExtensionsChanged = modeChanged || (data.mode === "live" && !sameEditorExtensionInputs(previous, config));
+      const editorExtensionsChanged = modeChanged || previous.noteTitle !== config.noteTitle ||
+        (data.mode === "live" && !sameEditorExtensionInputs(previous, config));
       const readOnlyChanged = data.readOnly !== previousReadOnly;
       const keymapChanged = previous.onSave !== config.onSave || previous.onFindRequested !== config.onFindRequested;
       reconfigure(data, "modeChange", {
@@ -1011,20 +1182,7 @@ export function createCodeMirrorEditor(container: HTMLElement, initialConfig: Ed
       return data === null ? { headings: [], complete: true } : outlineFromSyntaxTree(data.state);
     },
 
-    formatSelection(command) {
-      const data = ensureActive();
-      if (data === null) return;
-      const operation = command === "bold"
-        ? toggleBold
-        : command === "italic"
-        ? toggleItalic
-        : command === "highlight"
-        ? toggleHighlight
-        : command === "strikethrough"
-        ? toggleStrikethrough
-        : (source: string, start: number) => toggleHeading(source, start, 1);
-      sourceChange(data, operation);
-    },
+    formatSelection,
 
     updateTags(tags) {
       const data = ensureActive();

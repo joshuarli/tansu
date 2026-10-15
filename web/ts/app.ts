@@ -1,5 +1,5 @@
 import { commandItems } from "./app/commands.ts";
-import type { CommandId, EditorToolbarCommand, ViewEvent } from "./app/events.ts";
+import type { CommandId, ViewEvent } from "./app/events.ts";
 import { DocumentSession, defaultDocumentSessionServices, type DocumentSessionState } from "./app/document-session.ts";
 import { LocalDraftSession } from "./app/local-draft-session.ts";
 import { defaultServices, type AppServices } from "./app/services.ts";
@@ -50,11 +50,6 @@ function markdownPreview(source: string): string {
     .replace(/[*_~`]/g, "")
     .replace(/\s+/g, " ")
     .trim();
-}
-
-function isTextEntryTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) return false;
-  return target.isContentEditable || target.closest("input, textarea, select, [contenteditable='true']") !== null;
 }
 
 export class TansuApp {
@@ -301,10 +296,9 @@ export class TansuApp {
       } else if (modifier && event.altKey && !event.shiftKey && key === "n") {
         event.preventDefault();
         this.runAsync(this.commandCreate(), "Create failed");
-      } else if (event.key === "/" && !modifier && !event.altKey && !event.shiftKey &&
-        !isTextEntryTarget(event.target)) {
+      } else if (event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey && event.key === "/") {
         event.preventDefault();
-        this.dispatch({ type: "search.open" });
+        if (!this.state.searchOpen) this.dispatch({ type: "search.open" });
       } else if (event.key === "Escape" && this.hasOverlay()) {
         event.preventDefault();
         this.runAsync(this.closeOverlays(), "Local recovery storage failed");
@@ -486,20 +480,21 @@ export class TansuApp {
     const cached = this.cachedEditorConfig;
     const sameVault = cached !== null && cached.generation === generation && cached.identity === serverIdentity && cached.client === client;
     if (sameVault && cached !== null && cached.assetScopeRevision === this.assetScopeRevision) {
-      return cached.config;
+      return { ...cached.config, noteTitle: activeTab(this.state)?.title ?? "" };
     }
     const extensions = [
       createWikiImageExtension({ resolveUrl: (name) => this.resolveAssetUrl(name) }),
       createCalloutExtension(),
     ];
     if (sameVault && cached !== null) {
-      const config = { ...cached.config, extensions };
+      const config = { ...cached.config, extensions, noteTitle: activeTab(this.state)?.title ?? "" };
       this.cachedEditorConfig = { generation, identity: serverIdentity, client, assetScopeRevision: this.assetScopeRevision, config };
       return config;
     }
     const currentVault = () => serverIdentity !== null && client !== null && this.isCurrentVault(serverIdentity, client);
     const config: EditorConfig = {
       extensions,
+      noteTitle: activeTab(this.state)?.title ?? "",
       currentNotePath: () => activeTab(this.state)?.path ?? "",
       wikiNotes: () => [...this.state.notes.values()].map((note) => ({ noteId: note.noteId, title: note.title, path: note.path })),
       onWikiNoteOpen: (id) => {
@@ -1732,10 +1727,6 @@ export class TansuApp {
         this.render();
         return;
       }
-      case "editor.toolbar": {
-        this.dispatchEditorToolbar(event.command);
-        return;
-      }
       case "revisions.open": {
         this.runAsync(this.commandRevisions(), "Revisions failed");
         return;
@@ -1852,14 +1843,6 @@ export class TansuApp {
     this.state.tabs.push(tab);
     if (tab.kind === "saved") this.touchRecent(tab.noteId);
     this.runAsync(this.activateTab(tabIdentity(tab)), "Open failed");
-  }
-
-  private dispatchEditorToolbar(command: EditorToolbarCommand): void {
-    if (command === "source") this.toggleSourceMode();
-    else if (command === "save") this.runAsync(this.manualSave(), "Save failed");
-    else if (command === "undo") this.editor?.undo();
-    else if (command === "redo") this.editor?.redo();
-    else this.editor?.formatSelection(command);
   }
 
   private toggleSourceMode(): void {
