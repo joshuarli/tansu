@@ -36,9 +36,42 @@ const SESSION_SAVE_DELAY_MS = 250;
 const EDITOR_CAPTURE_DELAY_MS = 150;
 const MIN_SEARCH_QUERY_CHARS = 3;
 
+function nativeParityImageMap(): ReadonlyMap<string, string> {
+  const encoded = document.documentElement.dataset["nativeParityImageMap"];
+  if (encoded === undefined) return new Map();
+  const value: unknown = JSON.parse(encoded);
+  if (value === null || Array.isArray(value) || typeof value !== "object") {
+    throw new TypeError("Native parity image map must be an object");
+  }
+  const entries = Object.entries(value);
+  if (entries.some(([name, url]) =>
+    !name.startsWith("images/") || typeof url !== "string" || !/^https?:\/\//.test(url)
+  )) {
+    throw new TypeError("Native parity image map contains an invalid entry");
+  }
+  return new Map(entries as [string, string][]);
+}
+
+function markdownPreview(source: string): string {
+  const body = source.replace(/^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/, "");
+  const paragraphs = body.split(/\r?\n(?:[ \t]*\r?\n)+/);
+  const paragraph = paragraphs.find((candidate) => {
+    const value = candidate.trim();
+    return value !== "" && !/^(?:#{1,6}\s|```|~~~|>|[-*+]\s|\d+[.)]\s|\|)/m.test(value);
+  });
+  return (paragraph ?? "")
+    .replace(/\r?\n/g, " ")
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+    .replace(/[*_~`]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 export class TansuApp {
   private readonly state: State;
   private readonly workspaceId: WorkspaceId;
+  private readonly nativeParityImages = nativeParityImageMap();
+  private readonly recentPreviews = new Map<string, string>();
   private identity: ServerIdentity | null = null;
   private journal: ReturnType<AppServices["workspace"]["createJournal"]> | null = null;
   private detachVisibilityFlush: (() => void) | null = null;
@@ -174,6 +207,7 @@ export class TansuApp {
     for (const timer of this.autoSaveTimers.values()) window.clearTimeout(timer);
     this.autoSaveTimers.clear();
     this.noteLoads.clear();
+    this.recentPreviews.clear();
     this.state.vault = nextIdentity.vaultId;
     this.state.serverInstanceId = global.serverInstanceId;
     this.identity = nextIdentity;
@@ -183,6 +217,7 @@ export class TansuApp {
     this.state.notes = new Map(vaultBootstrap.notes.map((meta) => [meta.noteId, meta]));
     this.state.pinned = new Set(imported.pinnedNoteIds.filter((id) => this.state.notes.has(id)));
     this.state.recent = imported.recentNoteIds.filter((id) => this.state.notes.has(id));
+    this.state.searchHistory = imported.searchHistory.slice(0, 100);
     this.state.tabs = imported.tabs.map(tabFromWorkspace);
     this.state.closedTabs = imported.closedTabs;
     this.state.activeTab = imported.activeTab !== null && this.state.tabs.some((tab) =>
@@ -785,7 +820,6 @@ export class TansuApp {
     this.captureActiveEditor();
     if (outgoingTab?.kind === "saved" && tabIsDirty(outgoingTab)) this.scheduleAutoSave(outgoingTab);
     this.state.activeTab = identity;
-    if (identity.kind === "saved") this.touchRecent(identity.noteId);
     this.cancelAssetScope();
     this.render();
     const tab = activeTab(this.state);
@@ -794,12 +828,16 @@ export class TansuApp {
 
   private async openNote(id: ReturnType<typeof toNoteId>): Promise<void> {
     let tab = tabById(this.state, id);
+    const wasNew = tab === undefined;
     const meta = this.state.notes.get(id);
     if (tab === undefined && meta !== undefined) {
       tab = tabFromMeta(meta);
       this.state.tabs.push(tab);
     }
-    if (tab !== undefined) await this.activateTab({ kind: "saved", noteId: tab.noteId });
+    if (tab !== undefined) {
+      await this.activateTab({ kind: "saved", noteId: tab.noteId });
+      if (wasNew) this.touchRecent(tab.noteId);
+    }
   }
 
   private async retryNote(id: ReturnType<typeof toNoteId>): Promise<void> {
@@ -933,7 +971,7 @@ export class TansuApp {
       closedTabs: this.state.closedTabs,
       pinnedNoteIds: [...this.state.pinned],
       recentNoteIds: this.state.recent,
-      searchHistory: [],
+      searchHistory: this.state.searchHistory,
       legacySessionImported: true,
       savedAtMs: Date.now(),
     };
@@ -1469,6 +1507,7 @@ export class TansuApp {
       }
       case "search.open": {
         this.captureOverlayReturn();
+        this.clearFindHighlights();
         this.state.searchOpen = true;
         this.state.quickOpen = false;
         this.state.findOpen = false;
@@ -1482,12 +1521,27 @@ export class TansuApp {
         this.runAsync(this.updateSearchOverlay(), "Search failed");
         return;
       }
+      case "search.overlaySubmit": {
+        const query = this.state.searchOverlayQuery.trim();
+        if (query.length < MIN_SEARCH_QUERY_CHARS) return;
+        this.state.searchHistory = [query, ...this.state.searchHistory.filter((item) => item !== query)].slice(0, 100);
+        this.scheduleWorkspaceSave();
+        this.render();
+        return;
+      }
+      case "search.historySelect": {
+        this.state.searchOverlayQuery = event.query;
+        this.runAsync(this.updateSearchOverlay(), "Search failed");
+        this.render();
+        return;
+      }
       case "search.hitOpen": {
         this.runAsync(this.openSearchHit(event.hit), "Search result could not be opened");
         return;
       }
       case "quickOpen.open": {
         this.captureOverlayReturn();
+        this.clearFindHighlights();
         this.state.quickOpen = true;
         this.state.searchOpen = false;
         this.state.findOpen = false;
@@ -1510,23 +1564,47 @@ export class TansuApp {
       case "find.open": {
         this.captureOverlayReturn();
         this.state.findOpen = true;
+        this.state.findIndex = 0;
         this.state.searchOpen = false;
         this.state.quickOpen = false;
         this.state.commandOpen = false;
+        this.setFindHighlights(this.editor?.find(this.state.findQuery) ?? [], 0);
         this.render();
         return;
       }
       case "find.input": {
         this.state.findQuery = event.query;
+        this.state.findIndex = 0;
+        const matches = this.editor?.find(event.query) ?? [];
+        const match = matches[0];
+        this.setFindHighlights(matches, 0);
+        if (match !== undefined) this.editor?.revealFindMatch(match);
         this.render();
         return;
       }
-      case "find.select": {
-        this.editor?.revealFindMatch(event.match);
-        this.state.findOpen = false;
-        this.overlayReturn = null;
+      case "find.move": {
+        const matches = this.editor?.find(this.state.findQuery) ?? [];
+        if (matches.length === 0) return;
+        this.state.findIndex = (this.state.findIndex + event.direction + matches.length) % matches.length;
+        const match = matches[this.state.findIndex]!;
+        this.setFindHighlights(matches, this.state.findIndex);
+        this.editor?.revealFindMatch(match);
         this.render();
-        this.editor?.focus();
+        return;
+      }
+      case "find.close": {
+        this.state.findOpen = false;
+        this.clearFindHighlights();
+        this.render();
+        this.restoreOverlayReturn();
+        return;
+      }
+      case "find.select": {
+        const matches = this.editor?.find(this.state.findQuery) ?? [];
+        this.state.findIndex = matches.findIndex((match) => match.from === event.match.from && match.to === event.match.to);
+        this.setFindHighlights(matches, this.state.findIndex);
+        this.editor?.revealFindMatch(event.match);
+        this.render();
         return;
       }
       case "outline.select": {
@@ -1565,6 +1643,7 @@ export class TansuApp {
       }
       case "command.open": {
         this.captureOverlayReturn();
+        this.clearFindHighlights();
         this.state.commandOpen = true;
         this.state.searchOpen = false;
         this.state.quickOpen = false;
@@ -1726,6 +1805,11 @@ export class TansuApp {
         if (tab?.kind === "saved") this.runAsync(this.renameDialog(tab.noteId), "Rename failed");
         break;
       }
+      case "close": {
+        const tab = activeTab(this.state);
+        if (tab !== undefined) this.runAsync(this.closeTab(tabIdentity(tab)), "Close failed");
+        break;
+      }
       case "delete": {
         const tab = activeTab(this.state);
         if (tab?.kind === "saved") this.dispatch({ type: "note.delete", noteId: tab.noteId });
@@ -1778,6 +1862,7 @@ export class TansuApp {
     if (closed === undefined) return;
     const tab = tabFromWorkspace(closed);
     this.state.tabs.push(tab);
+    if (tab.kind === "saved") this.touchRecent(tab.noteId);
     this.runAsync(this.activateTab(tabIdentity(tab)), "Open failed");
   }
 
@@ -1826,7 +1911,7 @@ export class TansuApp {
 
   private resolveAssetUrl(name: string): string | null {
     const normalized = name.startsWith("/") ? name.slice(1) : name;
-    return this.assetScope.get(normalized) ?? null;
+    return this.assetScope.get(normalized) ?? this.nativeParityImages.get(normalized) ?? null;
   }
 
   private cancelAssetScope(): void {
@@ -1849,6 +1934,7 @@ export class TansuApp {
     const client = this.vaultClient;
     if (serverIdentity === null || client === null) return;
     const identity: DocumentIdentity = { ...serverIdentity, noteId: noteId(document.meta.noteId) };
+    this.recentPreviews.set(document.meta.noteId, markdownPreview(document.content));
     const write = this.services.workspace.cacheNoteBody(identity, document).catch((error) => {
       if (this.isCurrentVault(serverIdentity, client)) this.notifyStorageFailure(error);
     });
@@ -1869,6 +1955,7 @@ export class TansuApp {
     return {
       dispatch: (event) => this.dispatch(event),
       commandItems: () => this.filteredCommands(),
+      recentPreview: (id) => this.recentPreviews.get(id) ?? null,
       findMatches: () => this.editor?.find(this.state.findQuery) ?? [],
       outline: () => this.editor?.outline() ?? { headings: [], complete: true },
     };
@@ -1953,6 +2040,7 @@ export class TansuApp {
   private async closeOverlays(): Promise<void> {
     const dialog = this.state.noteDialog;
     if (dialog?.kind === "rename") tabById(this.state, dialog.noteId)?.session?.editTitle(null);
+    this.clearFindHighlights();
     this.state.commandOpen = false;
     this.state.searchOpen = false;
     this.state.quickOpen = false;
@@ -1982,6 +2070,15 @@ export class TansuApp {
       editorFocused: element !== null && this.editorMount.contains(element),
       selection: snapshot?.selection ?? tab?.selection ?? null,
     };
+  }
+
+  private setFindHighlights(matches: ReturnType<EditorHandle["find"]>, selectedIndex: number): void {
+    const selected = matches[selectedIndex] ?? null;
+    this.editor?.setFindHighlights({ matches, selected });
+  }
+
+  private clearFindHighlights(): void {
+    this.editor?.setFindHighlights({ matches: [], selected: null });
   }
 
   private restoreOverlayReturn(): void {

@@ -27,10 +27,20 @@ if (!javascript) {
   throw new Error("esbuild did not emit app.js");
 }
 
-const stylesheet = await readFile("web/static/app.css");
+const stylesheetResult = await esbuild.build({
+  entryPoints: ["web/static/app.css"],
+  bundle: true,
+  outfile: "app.css",
+  minify: mode === "production",
+  write: false,
+});
+const stylesheet = stylesheetResult.outputFiles.find((file) => file.path.endsWith(".css"));
+if (!stylesheet) {
+  throw new Error("esbuild did not emit app.css");
+}
 const fingerprint = (content) => createHash("sha256").update(content).digest("hex").slice(0, 16);
 const javascriptName = `app.${fingerprint(javascript.contents)}.js`;
-const stylesheetName = `app.${fingerprint(stylesheet)}.css`;
+const stylesheetName = `app.${fingerprint(stylesheet.contents)}.css`;
 const shell = await readFile("web/index.html", "utf8");
 const rewrittenShell = shell
   .replace('href="/static/app.css"', `href="/assets/${stylesheetName}"`)
@@ -44,7 +54,7 @@ await rm(dist, { recursive: true, force: true });
 await mkdir(resolve(dist, "assets"), { recursive: true });
 await writeFile(resolve(dist, "index.html"), rewrittenShell);
 await writeFile(resolve(dist, "assets", javascriptName), javascript.contents);
-await writeFile(resolve(dist, "assets", stylesheetName), stylesheet);
+await writeFile(resolve(dist, "assets", stylesheetName), stylesheet.contents);
 
 const manifest = {
   files: [

@@ -62,6 +62,25 @@ describe("CodeMirror editor sessions", () => {
     expect(editor.getSnapshot()).toBeNull();
   });
 
+  it("keeps find highlights separate from the editor selection", () => {
+    const source = "# Heading\nworkspace in prose\nworkspace below";
+    const { container, editor, view } = mountEditor(source);
+    const originalSelection = view.state.selection.main;
+    const firstMatch = source.indexOf("workspace");
+    const lastMatch = source.lastIndexOf("workspace");
+    const matches = [
+      { from: firstMatch, to: firstMatch + 9 },
+      { from: lastMatch, to: lastMatch + 9 },
+    ];
+
+    editor.setFindHighlights({ matches, selected: matches[0]! });
+
+    expect(view.state.selection.main).toBe(originalSelection);
+    expect(container.querySelectorAll(".cm-atomic-find-match")).toHaveLength(2);
+    expect(container.querySelectorAll(".cm-atomic-find-match-active")).toHaveLength(1);
+    expect(editor.getSnapshot()?.source).toBe(source);
+  });
+
   it("keeps independent history when sessions attach to one view", () => {
     const { container, editor, session: first, view } = mountEditor("A", {}, "first");
     view.dispatch({ changes: { from: 1, insert: "1" }, annotations: Transaction.userEvent.of("input.type") });
@@ -164,6 +183,7 @@ describe("CodeMirror editor sessions", () => {
     const { container, view } = mountEditor(source);
     const headingLine = container.querySelector(".cm-line.cm-atomic-h1");
     expect(headingLine).not.toBeNull();
+    expect(container.querySelectorAll(".cm-line.cm-atomic-paragraph-gap")).toHaveLength(1);
     expect(container.querySelectorAll(".cm-atomic-strong")).toHaveLength(1);
 
     view.dispatch({
@@ -173,6 +193,7 @@ describe("CodeMirror editor sessions", () => {
     });
 
     expect(container.querySelector(".cm-line.cm-atomic-h1")).toBe(headingLine);
+    expect(container.querySelectorAll(".cm-line.cm-atomic-paragraph-gap")).toHaveLength(1);
     expect(container.querySelectorAll(".cm-atomic-strong")).toHaveLength(1);
     expect(view.state.doc.toString()).toBe("# Heading\n\nplwordain text\n\n**bold**");
 

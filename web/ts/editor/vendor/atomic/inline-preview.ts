@@ -60,6 +60,7 @@ function defaultOnLinkClick(url: string): void {
 const FREEZE_TAIL_MS = 100;
 const PLAIN_PARAGRAPH_TEXT = /^[\p{L}\p{N}\p{M} ]*$/u;
 const PLAIN_TEXT_EDIT = /^[\p{L}\p{N}\p{M} ]+$/u;
+const focusedViews = new WeakSet<EditorView>();
 
 type PlainParagraphCache = {
   doc: Text;
@@ -213,7 +214,6 @@ const LINE_CLASS_BY_BLOCK: Record<string, string> = {
 };
 
 const HIDEABLE_SYNTAX = new Set([
-  'HeaderMark',
   'EmphasisMark',
   'CodeMark',
   'CodeInfo',
@@ -384,18 +384,23 @@ function sameListItem(a: SyntaxNode | null, b: SyntaxNode): boolean {
   return a?.name === 'ListItem' && a.from === b.from && a.to === b.to;
 }
 
+function hasAncestor(node: SyntaxNode | null, name: string): boolean {
+  for (let current = node; current; current = current.parent) {
+    if (current.name === name) return true;
+  }
+  return false;
+}
+
 function buildInlineDecorations(view: EditorView): DecorationSet {
   const { state } = view;
   const { doc } = state;
   const ranges: Range<Decoration>[] = [];
 
-  // In read-only mode no line is ever "active" — the whole doc stays
-  // rendered (no reveal). We skip the selection walk entirely rather
-  // than relying on `hasFocus` staying false, so a programmatic
-  // `.focus()` can't accidentally reveal source under reading mode.
   const readOnly = state.facet(readOnlyFacet);
+  if (view.hasFocus) focusedViews.add(view);
+  const selectionIsActive = !readOnly && (view.hasFocus || focusedViews.has(view));
   const activeLines = new Set<number>();
-  if (view.hasFocus && !readOnly) {
+  if (selectionIsActive) {
     for (const r of state.selection.ranges) {
       const firstLine = doc.lineAt(r.from).number;
       const lastLine = doc.lineAt(r.to).number;
@@ -430,6 +435,18 @@ function buildInlineDecorations(view: EditorView): DecorationSet {
   // its cost scales with document size.)
   tree.iterate({
     enter: (node) => {
+      if (node.name === 'HeaderMark' && node.from < node.to) {
+        const lineNumber = doc.lineAt(node.from).number;
+        if (!readOnly && activeLines.has(lineNumber)) {
+          ranges.push(
+            Decoration.mark({ class: 'cm-atomic-heading-mark' }).range(node.from, node.to),
+          );
+        } else {
+          let hideTo = node.to;
+          while (hideTo < doc.length && doc.sliceString(hideTo, hideTo + 1) === ' ') hideTo++;
+          pushReplace(ranges, doc, node.from, hideTo);
+        }
+      }
       if (node.name === 'FencedCode') {
         const firstLine = doc.lineAt(node.from).number;
         const lastLine = doc.lineAt(node.to).number;
@@ -444,7 +461,7 @@ function buildInlineDecorations(view: EditorView): DecorationSet {
           for (let n = firstLine; n <= lastLine; n++) activeLines.add(n);
         }
       }
-      if (node.name === 'Link' && view.hasFocus) {
+      if (node.name === 'Link' && selectionIsActive) {
         for (const range of state.selection.ranges) {
           // Inclusive overlap: cursor sitting exactly on either
           // boundary counts as inside, matching the UX where the
@@ -722,6 +739,18 @@ function buildInlineDecorations(view: EditorView): DecorationSet {
     },
   });
 
+  for (let number = 2; number < doc.lines; number++) {
+    const line = doc.line(number);
+    if (line.length !== 0) continue;
+    const previous = tree.resolveInner(doc.line(number - 1).from, 1);
+    const next = tree.resolveInner(doc.line(number + 1).from, 1);
+    if (hasAncestor(previous, 'Paragraph') && hasAncestor(next, 'Paragraph')) {
+      ranges.push(
+        Decoration.line({ class: 'cm-atomic-paragraph-gap' }).range(line.from),
+      );
+    }
+  }
+
   // Supplemental inline marks for the line containing the cursor.
   // CommonMark's flanking rules say that `**foo **` is not emphasis
   // because the closing `**` is preceded by whitespace — lezer
@@ -733,7 +762,7 @@ function buildInlineDecorations(view: EditorView): DecorationSet {
   // emitting the mark ourselves regardless of flanking. Once the
   // cursor leaves, lezer's opinion wins and the visual reverts to
   // what will actually persist when the line is serialized.
-  if (view.hasFocus) {
+  if (selectionIsActive) {
     const head = state.selection.main.head;
     const line = doc.lineAt(head);
     if (activeLines.has(line.number)) {
@@ -872,9 +901,19 @@ const inlinePreviewPlugin = ViewPlugin.fromClass(
   class {
     decorations: DecorationSet;
     _plainParagraph: PlainParagraphCache | null = null;
+    private readonly view: EditorView;
+    private readonly onFocus: () => void;
 
     constructor(view: EditorView) {
+      this.view = view;
+      this.onFocus = () => focusedViews.add(view);
+      view.dom.addEventListener('focusin', this.onFocus);
+      if (view.hasFocus) focusedViews.add(view);
       this.decorations = buildInlineDecorations(view);
+    }
+
+    destroy() {
+      this.view.dom.removeEventListener('focusin', this.onFocus);
     }
 
     update(update: ViewUpdate) {

@@ -145,12 +145,12 @@ describe("real server harness", () => {
     expect(
       startupRequests.filter((request) => request.startsWith(`GET /api/v2/vaults/${vaultOneId}/notes/`)).length,
     ).toBeLessThanOrEqual(3);
-    await page.locator('.note-row[title="visual.md"]').click();
+    await openQuickNote(page, "visual");
     await page.waitForSelector('.cm-content img[data-image-name="z-images/sample.webp"]');
     await page.close();
   });
 
-  it("locks in modal, search, toolbar, and note management UX", async () => {
+  it("locks in command, search, and note management UX", async () => {
     const page = await newLoggedPage();
     page.on("dialog", (dialog) => {
       throw new Error(`unexpected native dialog: ${dialog.type()} ${dialog.message()}`);
@@ -165,27 +165,21 @@ describe("real server harness", () => {
     await page.waitForSelector(".command-panel .command-input");
     await page.keyboard.press("Escape");
     await page.waitForSelector(".command-panel", { state: "detached" });
-    await page.locator('.note-row[title="one.md"]').first().click();
-    await page.waitForSelector(".workspace > .toolbar");
+    await openQuickNote(page, "One");
     await expect(page.locator(".workspace > .toolbar").count()).resolves.toBe(1);
+    expect(await page.locator(".workspace > .toolbar").isVisible()).toBe(false);
     await expect(page.locator(".section-title", { hasText: "Notes" }).count()).resolves.toBe(0);
-    await expect(page.locator('.toolbar [title="Source"] svg').count()).resolves.toBe(1);
-    await expect(page.locator('.toolbar [title="Save"] svg').count()).resolves.toBe(1);
-    await expect(page.locator('.toolbar [title="Highlight"] svg').count()).resolves.toBe(1);
-    await expect(page.locator('.toolbar [title="Strikethrough"] svg').count()).resolves.toBe(1);
-    await expect(
-      page.locator('.toolbar [title="Highlight"] svg [fill="#ffe16a"]').count(),
-    ).resolves.toBe(1);
+    expect(await page.locator(".sidebar-controls").isVisible()).toBe(false);
     await expect(
       page.evaluate(() => getComputedStyle(document.querySelector(".tabs")!).scrollbarWidth),
     ).resolves.toBe("none");
 
-    await page.locator('.sidebar-controls [title="New note"]').click();
+    await runPaletteCommand(page, "create");
     await page.waitForSelector(".note-dialog-panel");
     await page.locator(".overlay-backdrop").click({ position: { x: 4, y: 4 } });
     await page.waitForSelector(".note-dialog-panel", { state: "detached" });
 
-    await page.locator('.sidebar-controls [title="New note"]').click();
+    await runPaletteCommand(page, "create");
     await page.locator(".note-dialog-panel input").fill("Meeting Notes");
     await page.locator(".note-dialog-panel .primary-button").click();
     await page.waitForFunction(() =>
@@ -201,12 +195,7 @@ describe("real server harness", () => {
 
     await page.locator(".context-menu", { hasText: "Pin" }).getByText("Pin").click();
     await page.waitForSelector(".context-menu", { state: "detached" });
-    await page.waitForFunction(
-      () =>
-        [...document.querySelectorAll(".sidebar-section")]
-          .find((section) => section.textContent?.includes("Pinned"))
-          ?.textContent?.includes("meeting-notes") === true,
-    );
+    await expect.poll(() => page.locator(".tab.active .tab-pinned").count()).toBe(1);
 
     await page.locator(".tab.active").click({ button: "right" });
     await page.locator(".context-menu", { hasText: "Rename" }).getByText("Rename").click();
@@ -238,18 +227,17 @@ describe("real server harness", () => {
     await page.waitForSelector(".main");
     const searchBefore = await openSeededDocument("search.md");
 
-    await page.locator('.note-row[title="one.md"]').first().click();
+    await openQuickNote(page, "One");
     await page.waitForFunction(() =>
       document.querySelector(".cm-content")?.textContent?.includes("alpha") === true,
     );
     await page.locator(".cm-content").fill("# One\n\nalpha edited in One\n");
 
-    await page.locator('.note-row[title="search.md"]').first().click();
+    await openQuickNote(page, "Search Fixture");
     await page.waitForFunction(() =>
       document.querySelector(".cm-content")?.textContent?.includes("Search Fixture") === true,
     );
-    await page.locator('.toolbar [title="Save"]').click();
-    await page.waitForTimeout(500);
+    await page.keyboard.press(`${shortcutModifier()}+s`);
 
     const searchAfter = await openSeededDocument("search.md");
     expect(searchAfter.content).toBe(searchBefore.content);
@@ -468,7 +456,7 @@ describe("real server harness", () => {
     expect(asset.ok).toBeTruthy();
     await expect(asset.arrayBuffer()).resolves.toHaveProperty("byteLength", 3);
     await expect.poll(() => page.locator(".cm-content").textContent()).toContain("old");
-    await page.locator('.toolbar [title="Source"]').click();
+    await runPaletteCommand(page, "source");
     await page.keyboard.press("Control+End");
     const pastedUpload = page.waitForResponse((response) =>
       new URL(response.url()).pathname.endsWith("/images") && response.status() === 201
@@ -491,7 +479,7 @@ describe("real server harness", () => {
     await expect.poll(() => page.locator(".cm-content").textContent(), { timeout: 3_000 })
       .toContain(pasted.name);
     await expect.poll(() => page.locator(".tab.active").textContent()).toContain("•");
-    await page.locator('.toolbar [title="Save"]').click();
+    await page.keyboard.press(`${shortcutModifier()}+s`);
     await pastedSave;
     await expect.poll(() => page.locator(".statusbar").textContent()).toContain("Saved");
     await page.close();
@@ -571,7 +559,7 @@ describe("real server harness", () => {
     await uiSave;
     await expectSavedContent("cross-engine-lifecycle.md", edited);
 
-    await page.locator('.sidebar-controls [title="Search notes"]').click();
+    await page.keyboard.press(`${shortcutModifier()}+Shift+f`);
     await page.locator(".search-panel input").fill("searchable lifecycle");
     await page.waitForSelector(".search-snippet mark");
     await expect
@@ -884,7 +872,7 @@ async function loadNoteByPath(vaultId: string, path: string): Promise<TestNoteDo
 }
 
 async function createCodeMirrorNote(page: Page, title: string): Promise<void> {
-  await page.locator('.sidebar-controls [title="New note"]').click();
+  await runPaletteCommand(page, "create");
   await page.locator(".note-dialog-panel input").fill(title);
   await page.locator(".note-dialog-panel .primary-button").click();
   await page.waitForFunction(
@@ -893,6 +881,25 @@ async function createCodeMirrorNote(page: Page, title: string): Promise<void> {
   );
   await expect.poll(() => page.locator("#editor-mount .cm-editor .cm-content").isVisible())
     .toBe(true);
+}
+
+async function runPaletteCommand(page: Page, commandID: string): Promise<void> {
+  await page.waitForSelector(".main");
+  await page.keyboard.press(`${shortcutModifier()}+k`);
+  const input = page.locator(".command-panel .command-input");
+  await input.waitFor({ state: "visible" });
+  await input.fill(commandID);
+  await page.locator(`.command-panel .command-row[data-command-id="${commandID}"]`).click();
+}
+
+async function openQuickNote(page: Page, query: string): Promise<void> {
+  await page.keyboard.press(`${shortcutModifier()}+p`);
+  const panel = page.locator(".quick-open-panel");
+  await panel.waitFor({ state: "visible" });
+  await panel.locator(".command-input").fill(query);
+  await panel.locator(".quick-open-results .command-row").first().click();
+  await panel.waitFor({ state: "detached" });
+  await expect.poll(() => page.locator("#editor-mount .cm-content").textContent()).not.toBe("");
 }
 
 async function expectSavedContent(path: string, content: string): Promise<void> {

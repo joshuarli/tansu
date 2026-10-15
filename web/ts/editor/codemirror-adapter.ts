@@ -6,12 +6,15 @@ import {
   Compartment,
   EditorSelection,
   EditorState,
-  type StateEffect,
+  StateEffect,
+  StateField,
   Transaction,
   type Extension,
 } from "@codemirror/state";
 import {
   drawSelection,
+  Decoration,
+  type DecorationSet,
   EditorView,
   highlightActiveLine,
   keymap,
@@ -107,6 +110,7 @@ export type EditorHandle = {
   updateConfiguration(partial: Partial<EditorConfig>): void;
   revealSelection(selection: EditorSelectionSnapshot): boolean;
   find(query: string): readonly FindMatch[];
+  setFindHighlights(highlights: { matches: readonly FindMatch[]; selected: FindMatch | null }): void;
   revealFindMatch(match: FindMatch): boolean;
   outline(): Outline;
   formatSelection(command: FormatCommand): void;
@@ -126,6 +130,64 @@ type SessionData = {
   sourceCacheRevision: number;
   scroll: EditorScrollSnapshot;
 };
+
+type FindHighlightState = {
+  matches: readonly FindMatch[];
+  selected: FindMatch | null;
+  decorations: DecorationSet;
+};
+
+const setFindHighlightsEffect = StateEffect.define<{
+  matches: readonly FindMatch[];
+  selected: FindMatch | null;
+}>();
+
+const findHighlightField = StateField.define<FindHighlightState>({
+  create: () => ({ matches: [], selected: null, decorations: Decoration.none }),
+  update(value, transaction) {
+    let matches = value.matches;
+    let selected = value.selected;
+    let decorations = value.decorations;
+    if (transaction.docChanged) {
+      matches = matches
+        .map((match) => ({
+          from: transaction.changes.mapPos(match.from, 1),
+          to: transaction.changes.mapPos(match.to, -1),
+        }))
+        .filter((match) => match.from < match.to);
+      selected = selected === null
+        ? null
+        : {
+          from: transaction.changes.mapPos(selected.from, 1),
+          to: transaction.changes.mapPos(selected.to, -1),
+        };
+      if (selected !== null && selected.from >= selected.to) selected = null;
+      decorations = decorations.map(transaction.changes);
+    }
+    for (const effect of transaction.effects) {
+      if (!effect.is(setFindHighlightsEffect)) continue;
+      matches = effect.value.matches;
+      selected = effect.value.selected;
+      decorations = findMatchDecorations(matches, selected);
+    }
+    if (matches === value.matches && selected === value.selected && decorations === value.decorations) return value;
+    return { matches, selected, decorations };
+  },
+  provide: (field) => EditorView.decorations.from(field, (value) => value.decorations),
+});
+
+function findMatchDecorations(matches: readonly FindMatch[], selected: FindMatch | null): DecorationSet {
+  return Decoration.set(
+    matches.map((match) =>
+      Decoration.mark({
+        class: selected !== null && match.from === selected.from && match.to === selected.to
+          ? "cm-atomic-find-match cm-atomic-find-match-active"
+          : "cm-atomic-find-match",
+      }).range(match.from, match.to)
+    ),
+    true,
+  );
+}
 
 type PendingImagePaste = {
   uploadId: number;
@@ -275,6 +337,7 @@ function createState(
     doc: source,
     extensions: [
       history(),
+      findHighlightField,
       markdown({ base: markdownLanguage, codeLanguages: [], extensions: [highlightMarkdown] }),
       atomicEditorTheme,
       atomicMarkdownSyntax,
@@ -872,12 +935,18 @@ export function createCodeMirrorEditor(container: HTMLElement, initialConfig: Ed
       return data === null ? [] : findLiteral(currentSource(data), query);
     },
 
+    setFindHighlights(highlights) {
+      if (ensureActive() === null) return;
+      view.dispatch({
+        effects: setFindHighlightsEffect.of(highlights),
+      });
+    },
+
     revealFindMatch(match) {
       const data = ensureActive();
       if (data === null || match.from < 0 || match.to > data.state.doc.length || match.from > match.to) return false;
       view.dispatch({
-        selection: EditorSelection.single(match.from, match.to),
-        scrollIntoView: true,
+        effects: EditorView.scrollIntoView(match.from, { y: "nearest" }),
       });
       return true;
     },

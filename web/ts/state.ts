@@ -87,6 +87,7 @@ export type State = {
   notes: Map<string, V2NoteMeta>;
   pinned: Set<string>;
   recent: string[];
+  searchHistory: string[];
   tabs: Tab[];
   closedTabs: WorkspaceTab[];
   activeTab: TabIdentity | null;
@@ -99,6 +100,7 @@ export type State = {
   quickOpenHits: V2QuickOpenResponse["hits"] | null;
   findOpen: boolean;
   findQuery: string;
+  findIndex: number;
   searchOverlayQuery: string;
   searchOverlayHits: V2SearchHit[] | null;
   searchOverlayCoverage: V2OverlayCoverage | null;
@@ -132,6 +134,7 @@ export function createState(vault: VaultId): State {
     notes: new Map(),
     pinned: new Set(),
     recent: [],
+    searchHistory: [],
     tabs: [],
     closedTabs: [],
     activeTab: null,
@@ -144,6 +147,7 @@ export function createState(vault: VaultId): State {
     quickOpenHits: null,
     findOpen: false,
     findQuery: "",
+    findIndex: 0,
     searchOverlayQuery: "",
     searchOverlayHits: null,
     searchOverlayCoverage: null,

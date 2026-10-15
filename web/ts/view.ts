@@ -19,6 +19,7 @@ import type { FindMatch, Outline } from "./editor/source-navigation.js";
 export type ViewActions = {
   dispatch: (event: ViewEvent) => void;
   commandItems: () => CommandItem[];
+  recentPreview: (noteId: string) => string | null;
   findMatches: () => readonly FindMatch[];
   outline: () => Outline;
 };
@@ -378,7 +379,12 @@ function closeVaultOptions(vaultControl: HTMLElement): void {
 function renderMain(state: State, actions: ViewActions): HTMLElement {
   const active = activeTab(state);
   const reading = state.readingMode;
-  const main = el("main", reading ? "main reading-mode" : "main");
+  const main = el(
+    "main",
+    ["main", reading ? "reading-mode" : "", state.findOpen ? "find-open" : ""]
+      .filter(Boolean)
+      .join(" "),
+  );
   const tabs = el("div", "tabs");
   for (const tab of state.tabs) {
     const identity = tabIdentity(tab);
@@ -404,18 +410,21 @@ function renderMain(state: State, actions: ViewActions): HTMLElement {
     const closeHint = span("x to close", "tab-close-tooltip");
     closeHint.setAttribute("aria-hidden", "true");
     const hideCloseHint = bindTabCloseHint(tabEl, closeHint, identity, actions);
-    tabEl.append(
-      span(tab.title),
-      span(tab.kind === "saved" && state.pinned.has(tab.noteId) ? "◆" : "", "tab-pinned"),
-      span(tabIsDirty(tab) ? "•" : ""),
-      tab.saving ? span("Saving", "tab-saving") : span(""),
-      tab.conflict ? span("!", "tab-conflict") : span(""),
-      closeButton(identity, actions, hideCloseHint),
-      closeHint,
-    );
+    const tabLabel = span("", "tab-label");
+    const isPinned = tab.kind === "saved" && state.pinned.has(tab.noteId);
+    if (isPinned) tabLabel.classList.add("pinned-tab-label");
+    tabLabel.append(document.createTextNode(tab.title));
+    const tabContent = [tabLabel];
+    if (isPinned) tabContent.push(span("📌", "tab-pinned"));
+    if (tabIsDirty(tab)) tabContent.push(span("•"));
+    if (tab.saving) tabContent.push(span("Saving", "tab-saving"));
+    if (tab.conflict) tabContent.push(span("!", "tab-conflict"));
+    tabContent.push(closeButton(identity, actions, hideCloseHint), closeHint);
+    tabEl.append(...tabContent);
     tabs.append(tabEl);
   }
   const topbar = el("div", "topbar", tabs);
+  const findBar = state.findOpen ? renderFindBar(state, actions) : null;
   const workspace = el("section", "workspace");
   if (active === undefined) {
     workspace.append(emptyState(actions), renderEditorMount(true));
@@ -526,7 +535,28 @@ function renderMain(state: State, actions: ViewActions): HTMLElement {
   }
   if (!reading) main.append(topbar);
   main.append(workspace, renderStatusBar(state));
+  if (findBar !== null) main.append(findBar);
   return main;
+}
+
+function renderFindBar(state: State, actions: ViewActions): HTMLElement {
+  const input = document.createElement("input");
+  input.className = "find-input";
+  input.dataset["key"] = "current-note-find";
+  input.value = state.findQuery;
+  input.placeholder = "Find";
+  input.setAttribute("aria-label", "Find in current note");
+  input.addEventListener("input", () => actions.dispatch({ type: "find.input", query: input.value }));
+  const matches = actions.findMatches();
+  const count = state.findQuery === "" ? "" : matches.length === 0 ? "No matches" : `${state.findIndex + 1} of ${matches.length}`;
+  const previous = button("‹", "Previous match", () => actions.dispatch({ type: "find.move", direction: -1 }), "find-control find-previous");
+  const next = button("›", "Next match", () => actions.dispatch({ type: "find.move", direction: 1 }), "find-control find-next");
+  previous.disabled = matches.length === 0;
+  next.disabled = matches.length === 0;
+  const close = button("×", "Close find", () => actions.dispatch({ type: "find.close" }), "find-control find-close");
+  const bar = el("div", "find-bar", span("⌕", "find-icon"), input, span(count, "find-count"), previous, next, close);
+  queueMicrotask(() => input.focus());
+  return bar;
 }
 
 function renderEditorMount(hidden: boolean): HTMLElement {
@@ -578,22 +608,29 @@ function renderOverlays(state: State, actions: ViewActions): HTMLElement {
     input.className = "command-input";
     input.dataset["key"] = "command-filter";
     input.value = state.commandFilter;
-    input.placeholder = "Command";
+    input.placeholder = "Type a command";
     input.addEventListener("input", () => {
       actions.dispatch({ type: "command.filter", query: input.value });
     });
     const list = el("div", "command-list");
-    for (const command of actions.commandItems()) {
-      list.append(
-        button(
-          command.label,
-          command.label,
-          () => actions.dispatch({ type: "command.run", id: command.id }),
-          "command-row",
-        ),
+    for (const [index, command] of actions.commandItems().entries()) {
+      const row = button(
+        "",
+        command.label,
+        () => actions.dispatch({ type: "command.run", id: command.id }),
+        "command-row palette-command-row",
       );
+      row.dataset["commandId"] = command.id;
+      row.setAttribute("aria-label", command.label);
+      if (index === 0 && state.commandFilter === "") row.classList.add("selected");
+      row.append(span(command.label, "palette-command-label"));
+      if (command.shortcut !== undefined) row.append(span(command.shortcut, "palette-command-shortcut"));
+      list.append(row);
     }
-    host.append(backdrop(actions), el("div", "command-panel", input, list));
+    const searchIcon = el("span", "command-search-icon");
+    searchIcon.setAttribute("aria-hidden", "true");
+    const field = el("div", "command-field", searchIcon, input);
+    host.append(backdrop(actions), el("div", "command-panel command-palette-panel", field, list));
     queueMicrotask(() => input.focus());
   }
   if (state.searchOpen) {
@@ -606,14 +643,31 @@ function renderOverlays(state: State, actions: ViewActions): HTMLElement {
       actions.dispatch({ type: "search.overlayInput", query: input.value });
     });
     const list = el("div", "command-list");
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") actions.dispatch({ type: "search.overlaySubmit" });
+    });
     if (state.searchOverlayQuery.trim() !== "") {
-      for (const hit of state.searchOverlayHits ?? []) {
+      const hits = state.searchOverlayHits ?? [];
+      for (const hit of hits) {
         list.append(searchHitRow(hit, actions));
+      }
+      if (state.searchOverlayHits !== null && hits.length === 0) {
+        list.append(el(
+          "div",
+          "empty-panel search-empty",
+          el("strong", "search-empty-heading", `No results for “${state.searchOverlayQuery.trim()}”`),
+          el("span", "search-empty-message", "Try a different word or phrase."),
+        ));
       }
       const coverage = draftCoverageMessage(state.searchOverlayCoverage);
       if (coverage !== null) list.append(coverage);
+    } else if (state.searchHistory.length > 0) {
+      list.append(el("div", "search-history-heading", "Recent searches"));
+      for (const query of state.searchHistory) {
+        list.append(button(query, `Search for ${query}`, () => actions.dispatch({ type: "search.historySelect", query }), "search-history-row"));
+      }
     }
-    host.append(backdrop(actions), el("div", "command-panel search-panel", input, list));
+    host.append(backdrop(actions), el("div", "command-panel search-panel", el("div", "search-field", span("", "search-icon"), input), list));
     queueMicrotask(() => input.focus());
   }
   if (state.quickOpen) {
@@ -621,51 +675,32 @@ function renderOverlays(state: State, actions: ViewActions): HTMLElement {
     input.className = "command-input";
     input.dataset["key"] = "quick-open-input";
     input.value = state.quickOpenQuery;
-    input.placeholder = "Open note by title or path";
+    input.placeholder = "Filter recent notes";
     input.addEventListener("input", () => actions.dispatch({ type: "quickOpen.input", query: input.value }));
+    const hits = state.quickOpenHits ?? [];
+    const orderedHits = state.quickOpenQuery.trim() === ""
+      ? [...hits].sort((left, right) => {
+        const leftIndex = state.recent.indexOf(left.noteId);
+        const rightIndex = state.recent.indexOf(right.noteId);
+        return (leftIndex === -1 ? Number.MAX_SAFE_INTEGER : leftIndex) -
+          (rightIndex === -1 ? Number.MAX_SAFE_INTEGER : rightIndex);
+      })
+      : hits;
     const list = el("div", "command-list quick-open-results");
-    for (const hit of state.quickOpenHits ?? []) list.append(quickOpenHitRow(hit, actions));
-    host.append(backdrop(actions), el("div", "command-panel quick-open-panel", input, list));
-    queueMicrotask(() => input.focus());
-  }
-  if (state.findOpen) {
-    const input = document.createElement("input");
-    input.className = "command-input";
-    input.dataset["key"] = "current-note-find";
-    input.value = state.findQuery;
-    input.placeholder = "Find in this note";
-    input.addEventListener("input", () => actions.dispatch({ type: "find.input", query: input.value }));
-    const list = el("div", "command-list find-results");
-    const active = activeTab(state);
-    const source = active === undefined ? "" : loadedDraft(active) ?? "";
-    const matches = actions.findMatches().slice(0, 100);
-    const lineStarts = [0];
-    for (let offset = 0; matches.length > 0 && offset < source.length; offset++) {
-      if (source.charCodeAt(offset) === 10) lineStarts.push(offset + 1);
+    for (const [index, hit] of orderedHits.entries()) {
+      list.append(quickOpenHitRow(hit, actions, state.quickOpenQuery, index === 0));
     }
-    for (const match of matches) {
-      let low = 0;
-      let high = lineStarts.length;
-      while (low < high) {
-        const middle = (low + high) >>> 1;
-        if (lineStarts[middle]! <= match.from) low = middle + 1;
-        else high = middle;
-      }
-      const lineIndex = low - 1;
-      const line = lineIndex + 1;
-      const lineStart = lineStarts[lineIndex]!;
-      const nextLineStart = lineStarts[lineIndex + 1];
-      const lineEnd = nextLineStart === undefined ? source.length : nextLineStart - 1;
-      const text = source.slice(lineStart, lineEnd).trim();
-      list.append(button(
-        `Line ${line}: ${text}`,
-        `Reveal match on line ${line}`,
-        () => actions.dispatch({ type: "find.select", match }),
-        "command-row",
-      ));
-    }
-    if (state.findQuery !== "" && list.childElementCount === 0) list.append(el("div", "empty-panel", "No matches"));
-    host.append(backdrop(actions), el("div", "command-panel find-panel", input, list));
+    const count = hits.length;
+    const quickOpenIcon = el("span", "quick-open-search-icon");
+    quickOpenIcon.setAttribute("aria-hidden", "true");
+    const quickOpenField = el("div", "quick-open-field", quickOpenIcon, input);
+    host.append(backdrop(actions), el(
+      "div",
+      "command-panel quick-open-panel",
+      el("header", "recent-notes-header", el("h2", "", "Recent notes"), span(`${count} recent notes`, "recent-notes-count")),
+      quickOpenField,
+      list,
+    ));
     queueMicrotask(() => input.focus());
   }
   if (state.revisionsOpen) {
@@ -854,11 +889,12 @@ function numericValue(inputEl: HTMLInputElement): number {
 function renderNoteDialog(state: State, actions: ViewActions): HTMLElement {
   const dialog = state.noteDialog;
   const isDelete = dialog?.kind === "delete";
+  const isRename = dialog?.kind === "rename";
   const title =
     dialog?.kind === "create"
       ? "New Note"
-      : dialog?.kind === "rename"
-        ? "Rename Note"
+      : isRename
+        ? "Rename note"
         : dialog?.kind === "tag"
           ? "Add Tag"
           : "Delete Note";
@@ -873,12 +909,12 @@ function renderNoteDialog(state: State, actions: ViewActions): HTMLElement {
   if (inputEl !== null && promotionPending) inputEl.disabled = true;
   const panel = el(
     "form",
-    "modal-panel note-dialog-panel",
+    `modal-panel note-dialog-panel${isRename ? " is-rename" : ""}`,
     el(
       "div",
       "modal-header",
       span(title),
-      button("×", "Close", () => actions.dispatch({ type: "overlay.close" }), "tab-close"),
+      ...(isRename ? [] : [button("×", "Close", () => actions.dispatch({ type: "overlay.close" }), "tab-close")]),
     ),
   );
   if (isDelete) {
@@ -903,6 +939,13 @@ function renderNoteDialog(state: State, actions: ViewActions): HTMLElement {
       ),
     );
   } else if (inputEl !== null) {
+    const label = el("label", `field-label${isRename ? " rename-field-label" : ""}`, span(dialog?.kind === "tag" ? "Tag" : "Title"));
+    if (isRename) {
+      inputEl.id = "rename-note-title";
+      label.htmlFor = inputEl.id;
+    } else {
+      label.append(inputEl);
+    }
     inputEl.addEventListener("input", () => {
       actions.dispatch({ type: "dialog.input", value: inputEl.value });
     });
@@ -910,24 +953,26 @@ function renderNoteDialog(state: State, actions: ViewActions): HTMLElement {
       "Cancel",
       "Cancel",
       () => actions.dispatch({ type: "overlay.close" }),
-      "text-button",
+      isRename ? "rename-cancel-button" : "text-button",
     );
     cancel.disabled = promotionPending;
     const submit = button(
       dialog?.kind === "create" ? (promotionPending ? "Retry create" : "Create") : dialog?.kind === "rename" ? "Rename" : "Add",
       title,
       () => actions.dispatch({ type: "dialog.submit", value: inputEl.value }),
-      "primary-button",
+      isRename ? "primary-button rename-submit-button" : "primary-button",
     );
-    panel.append(
-      el("label", "field-label", span(dialog?.kind === "tag" ? "Tag" : "Title"), inputEl),
-      el("div", "modal-actions", cancel, submit),
-    );
+    panel.append(label);
+    if (isRename) panel.append(inputEl);
+    panel.append(el("div", `modal-actions${isRename ? " rename-actions" : ""}`, cancel, submit));
     panel.addEventListener("submit", (event) => {
       event.preventDefault();
       actions.dispatch({ type: "dialog.submit", value: inputEl.value });
     });
-    queueMicrotask(() => inputEl.focus());
+    queueMicrotask(() => {
+      inputEl.focus();
+      if (isRename) inputEl.select();
+    });
   }
   return panel;
 }
@@ -1007,15 +1052,22 @@ function draftCoverageMessage(coverage: V2OverlayCoverage | null): HTMLElement |
 function quickOpenHitRow(
   hit: V2QuickOpenResponse["hits"][number],
   actions: ViewActions,
+  query: string,
+  selected: boolean,
 ): HTMLElement {
   const row = button(
     "",
-    hit.path,
+    hit.title,
     () => actions.dispatch({ type: "quickOpen.hitOpen", hit }),
     "command-row search-result-row",
   );
   row.dataset["key"] = `quick-open:${hit.noteId}`;
-  row.append(span(hit.title, "search-result-title"), span(hit.path, "search-result-path"));
+  row.dataset["noteId"] = hit.noteId;
+  if (selected) row.classList.add("selected");
+  row.append(span(hit.title, "recent-note-title"));
+  const preview = query.trim() === "" ? actions.recentPreview(hit.noteId) : null;
+  const detail = preview === null || preview === "" ? hit.path : preview;
+  if (detail !== null && detail !== "") row.append(span(detail, "recent-note-detail"));
   return row;
 }
 
@@ -1025,17 +1077,87 @@ function renderScore(hit: V2SearchHit): HTMLElement {
 
 function renderSnippet(hit: V2SearchHit): HTMLElement {
   const element = el("span", "search-snippet");
+  const { text, ranges } = searchSnippetContext(hit);
   let offset = 0;
-  for (const range of hit.excerptRanges) {
-    if (range.startUtf16 < offset || range.endUtf16 > hit.excerpt.length) {
+  for (const range of ranges) {
+    if (range.startUtf16 < offset || range.endUtf16 > text.length) {
       continue;
     }
-    element.append(document.createTextNode(hit.excerpt.slice(offset, range.startUtf16)));
-    element.append(el("mark", "", hit.excerpt.slice(range.startUtf16, range.endUtf16)));
+    element.append(document.createTextNode(text.slice(offset, range.startUtf16)));
+    element.append(el("mark", "", text.slice(range.startUtf16, range.endUtf16)));
     offset = range.endUtf16;
   }
-  element.append(document.createTextNode(hit.excerpt.slice(offset)));
+  element.append(document.createTextNode(text.slice(offset)));
   return element;
+}
+
+function searchSnippetContext(hit: V2SearchHit): {
+  text: string;
+  ranges: V2SearchHit["excerptRanges"];
+} {
+  const source = hit.excerpt;
+  const firstLineBreak = /\r?\n/.exec(source);
+  let start = 0;
+  if (firstLineBreak !== null) {
+    const headingEnd = firstLineBreak.index;
+    const heading = source.slice(0, headingEnd).replace(/^…/, "").trim().replace(/^#{1,6}\s+/, "");
+    if (heading === hit.title) {
+      start = headingEnd + firstLineBreak[0].length;
+      while (source[start] === "\n" || source[start] === "\r") start += 1;
+    }
+  }
+
+  const firstMatch = hit.excerptRanges.find((range) => range.startUtf16 >= start);
+  if (firstMatch !== undefined) {
+    const paragraphSeparators = [...source.slice(start, firstMatch.startUtf16).matchAll(/\r?\n[ \t]*\r?\n/g)];
+    const lastSeparator = paragraphSeparators.at(-1);
+    if (lastSeparator !== undefined) {
+      start += lastSeparator.index + lastSeparator[0].length;
+    }
+    const afterMatch = source.slice(firstMatch.endUtf16);
+    const separator = /\r?\n[ \t]*\r?\n/.exec(afterMatch);
+    if (separator !== null) {
+      const end = firstMatch.endUtf16 + separator.index;
+      return normalizeSnippet(source, hit.excerptRanges, start, end);
+    }
+  }
+  return normalizeSnippet(source, hit.excerptRanges, start, source.length);
+}
+
+function normalizeSnippet(
+  source: string,
+  ranges: V2SearchHit["excerptRanges"],
+  start: number,
+  end: number,
+): {
+  text: string;
+  ranges: V2SearchHit["excerptRanges"];
+} {
+  const original = source.slice(start, end);
+  const offsets = new Array<number>(original.length + 1);
+  let text = "";
+  let index = 0;
+  while (index < original.length) {
+    if (original[index] === "\n" || original[index] === "\r") {
+      const lineBreakStart = index;
+      while (original[index] === "\n" || original[index] === "\r") index += 1;
+      if (text.length > 0 && !text.endsWith("\n")) text += "\n";
+      for (let offset = lineBreakStart; offset <= index; offset += 1) offsets[offset] = text.length;
+    } else {
+      offsets[index] = text.length;
+      text += original[index];
+      index += 1;
+      offsets[index] = text.length;
+    }
+  }
+  offsets[original.length] = text.length;
+  const normalizedRanges = ranges
+    .filter((range) => range.startUtf16 >= start && range.endUtf16 <= end)
+    .map((range) => ({
+      startUtf16: offsets[range.startUtf16 - start] ?? 0,
+      endUtf16: offsets[range.endUtf16 - start] ?? text.length,
+    }));
+  return { text, ranges: normalizedRanges };
 }
 
 function input(

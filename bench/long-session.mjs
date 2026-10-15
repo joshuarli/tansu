@@ -126,11 +126,16 @@ async function main() {
 
     await page.goto(baseUrl);
     await page.waitForSelector(".main");
+    await page.waitForFunction((path) =>
+      [...document.querySelectorAll(".note-row")].some((row) => row.getAttribute("title") === path), one.path);
     await openNote(page, one);
     const noteOpenFailed = page.waitForEvent("requestfailed", (request) =>
       request.url().includes(`/notes/${encodeURIComponent(search.noteId)}`)
     );
-    await noteRow(page, search).click();
+    await noteRow(page, search).evaluate((element) => {
+      if (!(element instanceof HTMLButtonElement)) throw new Error("The long-session note row is missing");
+      element.click();
+    });
     await noteOpenFailed;
     await closeActiveTab(page);
     await openNote(page, search);
@@ -153,12 +158,27 @@ async function main() {
 
     for (let iteration = 0; iteration < ITERATIONS; iteration += 1) {
       await openNote(page, one);
+      await toggleSourceMode(page);
       const beforeEdit = await page.locator(".cm-content").textContent();
       await page.locator(".cm-content").click();
       await page.keyboard.press(endOfDocumentShortcut());
       await page.keyboard.insertText(` soak-${iteration}`);
       await page.keyboard.press(`${shortcutModifier()}+z`);
-      await page.waitForFunction((source) => document.querySelector(".cm-content")?.textContent === source, beforeEdit);
+      try {
+        await page.waitForFunction((source) => document.querySelector(".cm-content")?.textContent === source, beforeEdit);
+      } catch (error) {
+        const afterUndo = await page.locator(".cm-content").textContent() ?? "";
+        let difference = 0;
+        while (difference < beforeEdit.length && difference < afterUndo.length && beforeEdit[difference] === afterUndo[difference]) {
+          difference += 1;
+        }
+        throw new Error(`Undo did not restore the editor at ${difference}: ${JSON.stringify({
+          before: beforeEdit.slice(Math.max(0, difference - 24), difference + 48),
+          after: afterUndo.slice(Math.max(0, difference - 24), difference + 48),
+          beforeLength: beforeEdit.length,
+          afterLength: afterUndo.length,
+        })}`, { cause: error });
+      }
       await openNote(page, visual);
       const image = page.locator('.cm-content img[data-image-name="z-images/sample.webp"]');
       await image.waitFor({ state: "attached" });
@@ -275,11 +295,30 @@ function summarizeSampledAllocations(profile) {
 }
 
 async function openNote(page, note) {
-  await noteRow(page, note).click();
-  await page.waitForFunction(({ title, marker }) =>
-    document.querySelector(".tab.active")?.getAttribute("title") === title &&
-    document.querySelector(".cm-content")?.textContent?.includes(marker) === true,
-  { title: note.title, marker: note.title });
+  const tabTitle = noteTabTitle(note);
+  const existingTab = page.locator(`.tab[title="${cssEscape(tabTitle)}"]`);
+  if (await existingTab.count() > 0) {
+    await existingTab.click();
+  } else {
+    await noteRow(page, note).evaluate((element) => {
+      if (!(element instanceof HTMLButtonElement)) throw new Error("The long-session note row is missing");
+      element.click();
+    });
+  }
+  await page.waitForFunction((marker) => document.querySelector(".cm-content")?.textContent?.includes(marker) === true, note.title);
+}
+
+function noteTabTitle(note) {
+  return note.path.replace(/\.md$/i, "").split("/").at(-1) ?? note.title;
+}
+
+async function toggleSourceMode(page) {
+  await page.keyboard.press("Control+k");
+  const panel = page.locator(".command-panel");
+  await panel.waitFor({ state: "visible" });
+  await panel.locator(".command-input").fill("source");
+  await panel.locator('.command-row[data-command-id="source"]').click();
+  await panel.waitFor({ state: "detached" });
 }
 
 function noteRow(page, note) {
@@ -296,7 +335,7 @@ async function closeActiveTab(page) {
 
 async function openSearch(page, query) {
   if (await page.locator(".search-panel").count() === 0) {
-    await page.locator('.sidebar-controls [title="Search notes"]').click();
+    await page.keyboard.press("Control+Shift+f");
   }
   await page.locator(".search-panel input").fill(query);
 }

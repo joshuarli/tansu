@@ -11,6 +11,7 @@ export type CommandId =
   | "rename"
   | "delete"
   | "pin"
+  | "close"
   | "reopen"
   | "reading"
   | "search"
@@ -23,6 +24,7 @@ export type CommandId =
 export type CommandItem = {
   id: CommandId;
   label: string;
+  shortcut?: string;
 };
 
 export type EditorToolbarCommand =
@@ -48,12 +50,16 @@ export type ViewEvent =
   | { type: "search.input"; query: string }
   | { type: "search.open" }
   | { type: "search.overlayInput"; query: string }
+  | { type: "search.overlaySubmit" }
+  | { type: "search.historySelect"; query: string }
   | { type: "search.hitOpen"; hit: V2SearchHit }
   | { type: "quickOpen.open" }
   | { type: "quickOpen.input"; query: string }
   | { type: "quickOpen.hitOpen"; hit: V2QuickOpenResponse["hits"][number] }
   | { type: "find.open" }
   | { type: "find.input"; query: string }
+  | { type: "find.move"; direction: -1 | 1 }
+  | { type: "find.close" }
   | { type: "find.select"; match: FindMatch }
   | { type: "outline.select"; heading: OutlineHeading }
   | { type: "sidebar.toggle" }

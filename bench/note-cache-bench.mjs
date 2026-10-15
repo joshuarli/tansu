@@ -59,8 +59,8 @@ async function main() {
         runs,
         syntheticDelayMs: delayMs,
         target: target.path,
-        actual: await runSuite(browser, baseUrl, serverIdentity, target.noteId, 0),
-        delayed: await runSuite(browser, baseUrl, serverIdentity, target.noteId, delayMs),
+        actual: await runSuite(browser, baseUrl, serverIdentity, target, 0),
+        delayed: await runSuite(browser, baseUrl, serverIdentity, target, delayMs),
       };
       const output = join(RESULTS_DIR, `note-cache-${Date.now()}.json`);
       await writeFile(output, `${JSON.stringify(results, null, 2)}\n`, "utf8");
@@ -74,7 +74,7 @@ async function main() {
   }
 }
 
-async function runSuite(browser, baseUrl, serverIdentity, noteId, noteDelayMs) {
+async function runSuite(browser, baseUrl, serverIdentity, target, noteDelayMs) {
   const metrics = {
     missOpen: [],
     cachedRecentOpen: [],
@@ -83,19 +83,19 @@ async function runSuite(browser, baseUrl, serverIdentity, noteId, noteDelayMs) {
     restoredActive: [],
   };
   for (let i = 0; i < runs; i += 1) {
-    metrics.missOpen.push(await measureMissOpen(browser, baseUrl, serverIdentity, noteId, noteDelayMs));
-    metrics.cachedRecentOpen.push(await measureCachedRecent(browser, baseUrl, serverIdentity, noteId, noteDelayMs));
-    metrics.cachedSearchOpen.push(await measureCachedSearch(browser, baseUrl, serverIdentity, noteId, noteDelayMs));
-    metrics.cachedClosedReopen.push(await measureClosedReopen(browser, baseUrl, serverIdentity, noteId, noteDelayMs));
-    metrics.restoredActive.push(await measureRestoredActive(browser, baseUrl, serverIdentity, noteId, noteDelayMs));
+    metrics.missOpen.push(await measureMissOpen(browser, baseUrl, serverIdentity, target, noteDelayMs));
+    metrics.cachedRecentOpen.push(await measureCachedRecent(browser, baseUrl, serverIdentity, target, noteDelayMs));
+    metrics.cachedSearchOpen.push(await measureCachedSearch(browser, baseUrl, serverIdentity, target, noteDelayMs));
+    metrics.cachedClosedReopen.push(await measureClosedReopen(browser, baseUrl, serverIdentity, target, noteDelayMs));
+    metrics.restoredActive.push(await measureRestoredActive(browser, baseUrl, serverIdentity, target, noteDelayMs));
   }
   return Object.fromEntries(
     Object.entries(metrics).map(([key, values]) => [key, summarize(values)]),
   );
 }
 
-async function measureMissOpen(browser, baseUrl, serverIdentity, noteId, noteDelayMs) {
-  const { context, page } = await newMeasuredPage(browser, serverIdentity, noteId, noteDelayMs);
+async function measureMissOpen(browser, baseUrl, serverIdentity, target, noteDelayMs) {
+  const { context, page } = await newMeasuredPage(browser, serverIdentity, target.noteId, noteDelayMs);
   try {
     await page.goto(baseUrl);
     await page.waitForSelector(".main");
@@ -105,10 +105,10 @@ async function measureMissOpen(browser, baseUrl, serverIdentity, noteId, noteDel
   }
 }
 
-async function measureCachedRecent(browser, baseUrl, serverIdentity, noteId, noteDelayMs) {
-  const { context, page } = await newMeasuredPage(browser, serverIdentity, noteId, noteDelayMs);
+async function measureCachedRecent(browser, baseUrl, serverIdentity, target, noteDelayMs) {
+  const { context, page } = await newMeasuredPage(browser, serverIdentity, target.noteId, noteDelayMs);
   try {
-    await prewarmTarget(page, baseUrl);
+    await prewarmTarget(page, baseUrl, target.title);
     await closeActiveTab(page);
     return await measureEditorAfterAction(page, "note-row", targetNotePath);
   } finally {
@@ -116,12 +116,12 @@ async function measureCachedRecent(browser, baseUrl, serverIdentity, noteId, not
   }
 }
 
-async function measureCachedSearch(browser, baseUrl, serverIdentity, noteId, noteDelayMs) {
-  const { context, page } = await newMeasuredPage(browser, serverIdentity, noteId, noteDelayMs);
+async function measureCachedSearch(browser, baseUrl, serverIdentity, target, noteDelayMs) {
+  const { context, page } = await newMeasuredPage(browser, serverIdentity, target.noteId, noteDelayMs);
   try {
-    await prewarmTarget(page, baseUrl);
+    await prewarmTarget(page, baseUrl, target.title);
     await closeActiveTab(page);
-    await page.locator('.sidebar-controls [title="Search notes"]').click();
+    await page.keyboard.press("Control+Shift+f");
     await page.locator(".search-panel input").fill(SEARCH_QUERY);
     await page.waitForSelector(".search-result-row");
     return await measureEditorAfterAction(page, "search-result", targetNotePath);
@@ -130,12 +130,12 @@ async function measureCachedSearch(browser, baseUrl, serverIdentity, noteId, not
   }
 }
 
-async function measureClosedReopen(browser, baseUrl, serverIdentity, noteId, noteDelayMs) {
-  const { context, page } = await newMeasuredPage(browser, serverIdentity, noteId, noteDelayMs);
+async function measureClosedReopen(browser, baseUrl, serverIdentity, target, noteDelayMs) {
+  const { context, page } = await newMeasuredPage(browser, serverIdentity, target.noteId, noteDelayMs);
   try {
-    await prewarmTarget(page, baseUrl);
+    await prewarmTarget(page, baseUrl, target.title);
     await closeActiveTab(page);
-    await page.locator('.sidebar-controls [title="Commands"]').click();
+    await page.keyboard.press("Control+k");
     await page.locator(".command-input").fill("reopen");
     return await measureEditorAfterAction(page, "command-row");
   } finally {
@@ -143,10 +143,10 @@ async function measureClosedReopen(browser, baseUrl, serverIdentity, noteId, not
   }
 }
 
-async function measureRestoredActive(browser, baseUrl, serverIdentity, noteId, noteDelayMs) {
-  const { context, page } = await newMeasuredPage(browser, serverIdentity, noteId, noteDelayMs);
+async function measureRestoredActive(browser, baseUrl, serverIdentity, target, noteDelayMs) {
+  const { context, page } = await newMeasuredPage(browser, serverIdentity, target.noteId, noteDelayMs);
   try {
-    await prewarmTarget(page, baseUrl);
+    await prewarmTarget(page, baseUrl, target.title);
     await page.waitForTimeout(350);
     await page.reload();
     await page.waitForSelector(".cm-editor");
@@ -223,15 +223,21 @@ async function newMeasuredPage(browser, serverIdentity, noteId, noteDelayMs) {
   return { context, page };
 }
 
-async function prewarmTarget(page, baseUrl) {
+async function prewarmTarget(page, baseUrl, title) {
   await page.goto(baseUrl);
   await page.waitForSelector(".main");
-  await page
-    .locator(`.note-row[title="${cssEscape(targetNotePath)}"]`)
-    .first()
-    .click();
-  await page.waitForSelector(".cm-editor");
-  await page.waitForTimeout(50);
+  await page.keyboard.press("Control+p");
+  const panel = page.locator(".quick-open-panel");
+  await panel.waitFor({ state: "visible" });
+  await panel.locator(".command-input").fill(title);
+  const row = panel.locator(".quick-open-results .command-row").filter({ hasText: title }).first();
+  await row.waitFor({ state: "visible" });
+  await row.click();
+  await panel.waitFor({ state: "detached" });
+  await page.waitForFunction((expected) =>
+    document.querySelector(".tab.active")?.getAttribute("title") === expected &&
+    (document.querySelector(".cm-content")?.textContent?.trim().length ?? 0) > 0,
+  title);
 }
 
 async function closeActiveTab(page) {

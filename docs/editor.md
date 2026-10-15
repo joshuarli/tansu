@@ -41,6 +41,11 @@ The adapter keeps authored source while CodeMirror renders live decorations.
 Decorations cover the full document, including content outside the viewport.
 Word edits and caret moves in plain paragraphs map existing decorations; edits
 that can affect Markdown syntax rebuild them from the syntax tree.
+Syntax on the saved cursor line stays revealed when focus moves to a transient
+control. Find highlights remain separate from the document selection and do not
+change source or undo history.
+Blank lines between Markdown paragraphs carry native paragraph spacing in the
+rendered editor without changing source text.
 Enable wiki links with `createWikiLinkExtension()`. Wiki links resolve against
 the configured active-vault notes. A leading `/`
 selects a vault-root path. `./` and `../` paths resolve from the current note's

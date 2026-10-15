@@ -112,4 +112,18 @@ bench-long-session:
 	mkdir -p "$(CURDIR)/.work/tmp"
 	TMPDIR="$(CURDIR)/.work/tmp" node bench/long-session.mjs
 
-.PHONY: audit bench bench-full bench-long-session build-linux-musl-aarch64 build-linux-musl-both build-linux-musl-docker build-linux-musl-x86_64 ci coverage coverage-html coverage-rs coverage-ts dev dev-config check lint test-package types types-check ts test test-ts test-e2e test-rs
+visual-oracle-import:
+	TMPDIR="$(CURDIR)/.work/tmp" node scripts/import-native-visual-oracle.mjs
+
+visual-parity:
+	TMPDIR="$(CURDIR)/.work/tmp" node bench/native-parity.mjs
+
+visual-parity-report:
+	TANSU_VISUAL_PARITY_RUN_ID="$(RUN_ID)" TMPDIR="$(CURDIR)/.work/tmp" node bench/native-parity-report.mjs
+
+visual-parity-fault-check:
+	TMPDIR="$(CURDIR)/.work/tmp" node bench/native-parity-fault-check.mjs
+
+visual-parity-acceptance: visual-parity
+
+.PHONY: audit bench bench-full bench-long-session build-linux-musl-aarch64 build-linux-musl-both build-linux-musl-docker build-linux-musl-x86_64 ci coverage coverage-html coverage-rs coverage-ts dev dev-config check lint test-package types types-check ts test test-e2e test-rs visual-oracle-import visual-parity visual-parity-fault-check visual-parity-report visual-parity-acceptance

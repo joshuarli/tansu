@@ -119,7 +119,7 @@ async function runBrowserBenchmarks(browser, baseUrl, fixture, identity, first, 
     out.firstEditorInteractive = await measure(async () => {
       await page.goto(baseUrl);
       await page.waitForSelector(".main");
-      await page.locator(`.note-row[title="${cssEscape(first.path)}"]`).first().click();
+      await openNoteThroughQuickOpen(page, first.title);
       await page.waitForSelector(".cm-editor");
       activeNote = first;
     });
@@ -128,10 +128,7 @@ async function runBrowserBenchmarks(browser, baseUrl, fixture, identity, first, 
     });
     out.switchNote = await measure(async () => {
       const target = activeNote.noteId === first.noteId ? second : first;
-      await page
-        .locator(`.note-row[title="${cssEscape(target.path)}"]`)
-        .first()
-        .click();
+      await openNoteThroughQuickOpen(page, target.title);
       await page.locator(`.tab.active[title="${cssEscape(target.title)}"]`).waitFor();
       activeNote = target;
     });
@@ -139,7 +136,7 @@ async function runBrowserBenchmarks(browser, baseUrl, fixture, identity, first, 
       const document = await vaultJson(baseUrl, identity, `/notes/${encodeURIComponent(first.noteId)}`);
       await saveNote(baseUrl, identity, first.noteId, document.meta, `${document.content}\nbench ${randomUUID()}\n`);
     });
-    await page.locator('.sidebar-controls [title="Search notes"]').click();
+    await page.keyboard.press("Control+Shift+f");
     const searchInput = page.locator(".search-panel input");
     const searchTiming = await measureSearchPaint(page, searchInput, SEARCH_QUERY, SEARCH_RESULT_PATH);
     out.searchPainted = searchTiming.paintedMs;
@@ -233,7 +230,7 @@ async function runBrowserBenchmarks(browser, baseUrl, fixture, identity, first, 
     const largeNoteResponse = page.waitForResponse((response) =>
       response.request().method() === "GET" && new URL(response.url()).pathname === largeNoteUrl
     );
-    await page.locator(`.note-row[title="${cssEscape(largeNote.path)}"]`).first().click();
+    await openNoteThroughQuickOpen(page, largeNote.title);
     const loadedLargeNote = await largeNoteResponse.then((response) => response.json());
     if (Buffer.byteLength(loadedLargeNote.content) !== largeNote.bytes) {
       throw new Error("large benchmark note response has an unexpected size");
@@ -243,8 +240,8 @@ async function runBrowserBenchmarks(browser, baseUrl, fixture, identity, first, 
     if (!(await page.locator(".cm-editor .cm-content").textContent())?.includes(LARGE_NOTE_QUERY)) {
       throw new Error("large benchmark note content was not loaded in the editor");
     }
-    const findInput = page.locator('.find-panel input[placeholder="Find in this note"]');
-    const findRows = page.locator(".find-panel .command-row");
+    const findInput = page.locator('.main .find-bar input[data-key="current-note-find"]');
+    const findCount = page.locator(".main .find-bar .find-count");
     const findShortcut = process.platform === "darwin" ? "Meta+f" : "Control+f";
     out.largeNoteFindOpen = await measureUiTransition(
       page,
@@ -266,15 +263,11 @@ async function runBrowserBenchmarks(browser, baseUrl, fixture, identity, first, 
         await page.keyboard.press(findShortcut);
         await findInput.waitFor({ state: "visible" });
         await findInput.fill("");
-        if (await findRows.count() !== 0) throw new Error("Find results were not cleared before measurement");
+        await page.waitForFunction(() => document.querySelector(".main .find-count")?.textContent === "");
       },
       async () => {
         await findInput.fill(LARGE_NOTE_QUERY);
-        await findRows.nth(LARGE_NOTE_MATCHES - 1).waitFor({ state: "visible" });
-        const count = await findRows.count();
-        if (count !== LARGE_NOTE_MATCHES) {
-          throw new Error(`Find rendered ${count} rows; expected ${LARGE_NOTE_MATCHES}`);
-        }
+        await page.waitForFunction((expected) => document.querySelector(".main .find-count")?.textContent === `1 of ${expected}`, LARGE_NOTE_MATCHES);
       },
       async () => {
         await page.keyboard.press("Escape");
@@ -284,8 +277,10 @@ async function runBrowserBenchmarks(browser, baseUrl, fixture, identity, first, 
     const sidebar = page.locator('[data-view-region="sidebar"]');
     const sidebarToggle = page.locator(".sidebar-collapse");
     const activateSidebarToggle = async () => {
-      await sidebarToggle.focus();
-      await page.keyboard.press("Enter");
+      await sidebarToggle.evaluate((element) => {
+        if (!(element instanceof HTMLButtonElement)) throw new Error("The sidebar toggle is missing");
+        element.click();
+      });
     };
     out.largeNoteSidebarToggle = await measureUiTransition(
       page,
@@ -315,6 +310,17 @@ async function runBrowserBenchmarks(browser, baseUrl, fixture, identity, first, 
   } finally {
     await page.close();
   }
+}
+
+async function openNoteThroughQuickOpen(page, title) {
+  await page.keyboard.press("Control+p");
+  const panel = page.locator(".quick-open-panel");
+  await panel.waitFor({ state: "visible" });
+  await panel.locator(".command-input").fill(title);
+  const row = panel.locator(".quick-open-results .command-row").filter({ hasText: title }).first();
+  await row.waitFor({ state: "visible" });
+  await row.click();
+  await panel.waitFor({ state: "detached" });
 }
 
 async function measureUiTransition(page, setup, transition, cleanup) {

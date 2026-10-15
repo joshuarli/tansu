@@ -130,7 +130,7 @@ describe("view rendering", () => {
     expect(vaultControl.classList.contains("open")).toBeFalsy();
   });
 
-  it("renders outline and current-note find actions without replacing the editor region", () => {
+  it("renders outline and current-note find controls without replacing the editor region", () => {
     const state = baseState();
     const tab = tabFromDocument({ meta: note("n1", "one.md", "One"), content: "# One\nbody\n" });
     state.tabs = [tab];
@@ -146,11 +146,12 @@ describe("view rendering", () => {
     const root = render(state, actions);
 
     expect(root.querySelector(".outline-row")?.textContent).toBe("One");
-    expect(root.querySelector(".find-panel")?.textContent).toContain("Line 2: body");
+    expect(root.querySelector<HTMLInputElement>(".find-bar input")?.value).toBe("body");
+    expect(root.querySelector(".find-count")?.textContent).toBe("1 of 1");
     root.querySelector<HTMLButtonElement>(".outline-row")?.click();
-    root.querySelector<HTMLButtonElement>(".find-results .command-row")?.click();
+    root.querySelector<HTMLButtonElement>(".find-next")?.click();
     expectDispatched(actions, { type: "outline.select", heading: { level: 1, line: 1, text: "One", from: 0, to: 5 } });
-    expectDispatched(actions, { type: "find.select", match: { from: 6, to: 10 } });
+    expectDispatched(actions, { type: "find.move", direction: 1 });
     expect(root.querySelector("#editor-mount")).not.toBeNull();
   });
 
@@ -249,6 +250,7 @@ describe("view rendering", () => {
     state.searchOverlayQuery = "alpha";
     state.searchOverlayHits = [searchHit(noteData, "hit alpha", [{ startUtf16: 4, endUtf16: 9 }])];
     state.revisionsOpen = true;
+    state.revisionNoteId = toNoteId(noteData.noteId);
     state.revisionList = [revision];
     state.revisionDocument = { revision, content: "# Old\n" };
     state.settingsOpen = true;
@@ -318,6 +320,26 @@ describe("view rendering", () => {
     expectDispatched(actions, { type: "dialog.submit", value: "" });
   });
 
+  it("renders recent note excerpts in recency order with the first row selected", () => {
+    const state = baseState();
+    state.quickOpen = true;
+    state.quickOpenHits = [
+      { noteId: "gallery", sourceHash: "hash-gallery", title: "Gallery", path: "Gallery.md", score: 0 },
+      { noteId: "reading", sourceHash: "hash-reading", title: "Reading Queue", path: "Reading Queue.md", score: 0 },
+    ];
+    state.recent = ["reading", "gallery"];
+    const actions = actionSpies();
+    actions.recentPreview.mockImplementation((id) => id === "reading" ? "Pinned research notes." : "Gallery excerpt.");
+
+    const root = render(state, actions);
+    const rows = [...root.querySelectorAll<HTMLButtonElement>(".quick-open-results .command-row")];
+
+    expect(rows.map((row) => row.dataset["noteId"])).toEqual(["reading", "gallery"]);
+    expect(rows[0]?.classList.contains("selected")).toBe(true);
+    expect(rows[0]?.textContent).toContain("Pinned research notes.");
+    expect(root.querySelector(".recent-notes-count")?.textContent).toBe("2 recent notes");
+  });
+
   it("renders search excerpts as text and preserves highlighted ranges", () => {
     const state = baseState();
     state.searchOpen = true;
@@ -330,6 +352,30 @@ describe("view rendering", () => {
     expect(snippet.textContent).toBe('"quote" <tag>');
     expect(snippet.querySelector("mark")?.textContent).toBe("quote");
     expect(snippet.querySelector("tag")).toBeNull();
+  });
+
+  it("keeps search snippets within the matched paragraph and removes a repeated heading", () => {
+    const state = baseState();
+    state.searchOpen = true;
+    state.searchOverlayQuery = "Claude";
+    const excerpt = "# Claude Search Notes\n\nSearch in Tansu should keep the surrounding text visible.\nA second Claude result makes the result list geometry stable.\nThis fixture covers source context.\n\nAnother paragraph.";
+    const headingStart = excerpt.indexOf("Claude");
+    const bodyStart = excerpt.indexOf("Claude", headingStart + 1);
+    state.searchOverlayHits = [searchHit(
+      note("n1", "Claude Search Notes.md", "Claude Search Notes"),
+      excerpt,
+      [
+        { startUtf16: headingStart, endUtf16: headingStart + "Claude".length },
+        { startUtf16: bodyStart, endUtf16: bodyStart + "Claude".length },
+      ],
+    )];
+
+    const root = render(state);
+    const snippet = root.querySelector(".search-snippet")!;
+
+    expect(snippet.textContent).toBe("Search in Tansu should keep the surrounding text visible.\nA second Claude result makes the result list geometry stable.\nThis fixture covers source context.");
+    expect(snippet.querySelectorAll("mark").length).toBe(1);
+    expect(snippet.querySelector("mark")?.textContent).toBe("Claude");
   });
 
   it("does not show a detached note outline when no tab is active", () => {
@@ -355,6 +401,7 @@ function render(state: State, actions = actionSpies()): HTMLElement {
 type ViewActionSpies = {
   dispatch: ReturnType<typeof vi.fn<(event: ViewEvent) => void>>;
   commandItems: ReturnType<typeof vi.fn<() => CommandItem[]>>;
+  recentPreview: ReturnType<typeof vi.fn<(noteId: string) => string | null>>;
   findMatches: ReturnType<typeof vi.fn<() => readonly { from: number; to: number }[]>>;
   outline: ReturnType<typeof vi.fn<() => Outline>>;
 };
@@ -364,6 +411,7 @@ function actionSpies(): ViewActionSpies {
   return {
     dispatch: vi.fn<(event: ViewEvent) => void>(),
     commandItems: vi.fn<() => CommandItem[]>(() => commands),
+    recentPreview: vi.fn<(noteId: string) => string | null>(() => null),
     findMatches: vi.fn<() => readonly { from: number; to: number }[]>(() => []),
     outline: vi.fn<() => Outline>(() => ({ headings: [], complete: true })),
   };

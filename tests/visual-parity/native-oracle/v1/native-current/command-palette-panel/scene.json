@@ -1,0 +1,778 @@
+{
+  "actualSHA256" : "75ea539c99287bdf0e0d31e3dc6f7bc8d25bc5f52a9677893d5c6d8397260929",
+  "backingScale" : 2,
+  "captureType" : "panel-only",
+  "colors" : {
+    "controlBackground" : {
+      "alpha" : 1,
+      "blue" : 1,
+      "green" : 1,
+      "red" : 1
+    },
+    "secondaryLabel" : {
+      "alpha" : 0.4980392156862745,
+      "blue" : 0,
+      "green" : 0,
+      "red" : 0
+    },
+    "selectedTextBackground" : {
+      "alpha" : 1,
+      "blue" : 1,
+      "green" : 0.843137264251709,
+      "red" : 0.7019608020782471
+    },
+    "separator" : {
+      "alpha" : 0.09803921568627451,
+      "blue" : 0,
+      "green" : 0,
+      "red" : 0
+    },
+    "text" : {
+      "alpha" : 1,
+      "blue" : 0,
+      "green" : 0,
+      "red" : 0
+    },
+    "windowBackground" : {
+      "alpha" : 1,
+      "blue" : 1,
+      "green" : 1,
+      "red" : 1
+    }
+  },
+  "openNotes" : [
+    "Gallery.md"
+  ],
+  "oracleKind" : "native-current",
+  "pinnedNotes" : [
+
+  ],
+  "pixelHeight" : 768,
+  "pixelWidth" : 1040,
+  "pointHeight" : 384,
+  "pointWidth" : 520,
+  "repeatChangedPixelPercent" : 0,
+  "repeatSHA256" : "75ea539c99287bdf0e0d31e3dc6f7bc8d25bc5f52a9677893d5c6d8397260929",
+  "sceneID" : "command-palette-panel",
+  "selectedNotes" : [
+    "Gallery.md"
+  ],
+  "sourceFiles" : [
+    {
+      "relativePath" : "claude-code\/Claude Search Notes.md",
+      "role" : "search-companion",
+      "sha256" : "cdde95671f5d5299ebed64577cf34145b94076c017600f0005e9cef222e2a7ff"
+    },
+    {
+      "relativePath" : "claude-code\/claude code is the inflection point.md",
+      "role" : "image-heavy-note",
+      "sha256" : "8e877017df2eca7ecdfc2455f0acd1385497f56f0aca97a9dd7877a974ee693d"
+    },
+    {
+      "relativePath" : "claude-code\/images\/claude code is the inflection point 20260728135304.heic",
+      "role" : "native-attachment",
+      "sha256" : "859e02a70c22e61b0a76a5c5db45fddf9b74e51a179e410773768b5cd29a0b89"
+    },
+    {
+      "relativePath" : "claude-code\/images\/claude code is the inflection point 20260728135305.heic",
+      "role" : "native-attachment",
+      "sha256" : "d889baf66f768bb9d1b50af2d76a197aeccbf32f00cc1df1d90ca66752156c38"
+    },
+    {
+      "relativePath" : "claude-code\/images\/claude code is the inflection point 20260728135306.heic",
+      "role" : "native-attachment",
+      "sha256" : "2487fa24360ce1a6588cc00ebdc374c960750df11a53ba195912c062d9d1cd02"
+    },
+    {
+      "relativePath" : "claude-code\/images\/claude code is the inflection point 20260728135307.heic",
+      "role" : "native-attachment",
+      "sha256" : "ff1052eed26820046074f4947aad1c1b6e4cf870be1db499e8f6770adf6be72d"
+    },
+    {
+      "relativePath" : "claude-code\/images\/claude code is the inflection point 20260728135308.heic",
+      "role" : "native-attachment",
+      "sha256" : "f9fff843aed5397b30134bcaa9a74007dfdca7a4be6f2278f73de1b462bb2e89"
+    },
+    {
+      "relativePath" : "claude-code\/images\/claude code is the inflection point 20260728135309.heic",
+      "role" : "native-attachment",
+      "sha256" : "756caa48889881fcac8c4ff384e80d122f95727cebd814da5612141a10d6d15d"
+    },
+    {
+      "relativePath" : "claude-code\/images\/claude code is the inflection point 20260728135310.heic",
+      "role" : "native-attachment",
+      "sha256" : "800112ab223619fb5d8237721f6d13edfc04fea88c777534d764e7ca4292438a"
+    },
+    {
+      "relativePath" : "claude-code\/images\/claude code is the inflection point 20260728135311.heic",
+      "role" : "native-attachment",
+      "sha256" : "11ca768af3e771c14eedc191c9f6e7e7bcae103f069969f08c3ac4949786faf7"
+    },
+    {
+      "relativePath" : "claude-code\/images\/claude code is the inflection point 20260728135312.heic",
+      "role" : "native-attachment",
+      "sha256" : "4858b5f07bc1a4d7dac654f2a37ddcd90d11da5fb92db80be5a2f7fcaf547a7f"
+    },
+    {
+      "relativePath" : "claude-code\/images\/claude code is the inflection point 20260728135313.heic",
+      "role" : "native-attachment",
+      "sha256" : "7d4cc1d3ed8962c66ff041c474c5fac3603242f9d0b4e536f96b157de62418f1"
+    },
+    {
+      "relativePath" : "claude-code\/images\/claude code is the inflection point 20260728135314.heic",
+      "role" : "native-attachment",
+      "sha256" : "14c2d2495659632bb1090f72847f4db55df2e19f3d38522effd27827a618cd3a"
+    },
+    {
+      "relativePath" : "claude-code\/images\/claude code is the inflection point 20260728135315.heic",
+      "role" : "native-attachment",
+      "sha256" : "feb6af02a26b480bc82300aacf58fb37749e21c30204ebc71328d272d89d5133"
+    },
+    {
+      "relativePath" : "claude-code\/images\/claude code is the inflection point 20260728135316.heic",
+      "role" : "native-attachment",
+      "sha256" : "8b4e0433ca2ea8fb385b570c55ccd803e681ba2667f09bf7f86f68e42abeb98b"
+    },
+    {
+      "relativePath" : "claude-code\/images\/claude code is the inflection point 20260728135317.heic",
+      "role" : "native-attachment",
+      "sha256" : "75b8a779cdee3c46dd6f42d818bbb47338348b926a93ec035f0163c5816b143b"
+    },
+    {
+      "relativePath" : "claude-code\/images\/claude code is the inflection point 20260728135318.heic",
+      "role" : "native-attachment",
+      "sha256" : "81ed92218773200687998e069451c9758f45837c4faedd0a321f560f52091e7c"
+    },
+    {
+      "relativePath" : "claude-code\/images\/claude code is the inflection point 20260728135319.heic",
+      "role" : "native-attachment",
+      "sha256" : "9f12be7c61cd3c9fbae85c2f256ad0517bc889276e818aef45429eadf59dff28"
+    },
+    {
+      "relativePath" : "claude-code\/images\/claude code is the inflection point 20260728135320.heic",
+      "role" : "native-attachment",
+      "sha256" : "85d02b1bc99c35fb78b5061f2f81b095cce5845c42f53e2dbb0faa9e432cbe9a"
+    },
+    {
+      "relativePath" : "surface\/Gallery.md",
+      "role" : "surface-note",
+      "sha256" : "5d30d2c6fa899a6159e130aa535b952ae831552ac3a85bc41c6d7d77aa75dae3"
+    },
+    {
+      "relativePath" : "surface\/Project Atlas.md",
+      "role" : "surface-note",
+      "sha256" : "269fe581df71427b1d80bcfb43dadbb85ea6106263765edefbe55677d08b6f81"
+    },
+    {
+      "relativePath" : "surface\/Reading Queue.md",
+      "role" : "surface-note",
+      "sha256" : "6aaf4e99bc03a05753b301006995633632df5a3f58856b016dc30058d9e0d685"
+    },
+    {
+      "relativePath" : "surface\/Studio Dashboard.md",
+      "role" : "surface-note",
+      "sha256" : "695be3ac805ddd9ffaa869af597deedabe2d485ff31344f35938eeb407d1ca28"
+    }
+  ],
+  "textMetrics" : [
+    {
+      "className" : "NSTextView",
+      "fontName" : ".AppleSystemUIFont",
+      "fontSize" : 15,
+      "insetX" : 0,
+      "insetY" : 0,
+      "viewportHeight" : 32,
+      "viewportWidth" : 428
+    }
+  ],
+  "viewFrames" : [
+    {
+      "className" : "NativeVaultTransientSurface",
+      "height" : 384,
+      "width" : 520,
+      "x" : 0,
+      "y" : 0
+    },
+    {
+      "className" : "NSTextField",
+      "height" : 32,
+      "width" : 428,
+      "x" : 62,
+      "y" : 315
+    },
+    {
+      "className" : "NSTextFieldSimpleLabel",
+      "height" : 32,
+      "width" : 428,
+      "x" : 62,
+      "y" : 315
+    },
+    {
+      "className" : "_NSKeyboardFocusClipView",
+      "height" : 39,
+      "width" : 433,
+      "x" : 59,
+      "y" : 310.5
+    },
+    {
+      "className" : "NSTextView",
+      "height" : 32,
+      "width" : 428,
+      "x" : 62,
+      "y" : 315
+    },
+    {
+      "className" : "_NSTextSelectionView",
+      "height" : 32,
+      "width" : 428,
+      "x" : 62,
+      "y" : 315
+    },
+    {
+      "className" : "_NSTextRenderingSurfacesGroupView",
+      "height" : 32,
+      "width" : 428,
+      "x" : 62,
+      "y" : 315
+    },
+    {
+      "className" : "_NSTextContentView",
+      "height" : 32,
+      "width" : 428,
+      "x" : 62,
+      "y" : 315
+    },
+    {
+      "className" : "NSImageView",
+      "height" : 23.5,
+      "width" : 16.5,
+      "x" : 36,
+      "y" : 327.5
+    },
+    {
+      "className" : "_NSImageViewSimpleImageView",
+      "height" : 15.674999999999997,
+      "width" : 16.5,
+      "x" : 36,
+      "y" : 331.5
+    },
+    {
+      "className" : "NSView",
+      "height" : 0.5,
+      "width" : 456,
+      "x" : 32,
+      "y" : 312.5
+    },
+    {
+      "className" : "NSScrollView",
+      "height" : 280,
+      "width" : 464,
+      "x" : 28,
+      "y" : 26
+    },
+    {
+      "className" : "NSClipView",
+      "height" : 280,
+      "width" : 464,
+      "x" : 28,
+      "y" : 26
+    },
+    {
+      "className" : "NSTableView",
+      "height" : 560,
+      "width" : 464,
+      "x" : 28,
+      "y" : -254
+    },
+    {
+      "className" : "NSTableRowView",
+      "height" : 28,
+      "width" : 464,
+      "x" : 28,
+      "y" : 278
+    },
+    {
+      "className" : "NativeVaultPaletteActionCell",
+      "height" : 28,
+      "width" : 464,
+      "x" : 28,
+      "y" : 278
+    },
+    {
+      "className" : "NativeVaultRoundedBackgroundView",
+      "height" : 28,
+      "width" : 464,
+      "x" : 28,
+      "y" : 278
+    },
+    {
+      "className" : "NSTextField",
+      "height" : 20,
+      "width" : 66,
+      "x" : 38,
+      "y" : 278
+    },
+    {
+      "className" : "NSTextFieldSimpleLabel",
+      "height" : 20,
+      "width" : 66,
+      "x" : 38,
+      "y" : 278
+    },
+    {
+      "className" : "NSTextField",
+      "height" : 20,
+      "width" : 60,
+      "x" : 422,
+      "y" : 278
+    },
+    {
+      "className" : "NSTextFieldSimpleLabel",
+      "height" : 20,
+      "width" : 60,
+      "x" : 422,
+      "y" : 278
+    },
+    {
+      "className" : "NSTableRowView",
+      "height" : 28,
+      "width" : 464,
+      "x" : 28,
+      "y" : 250
+    },
+    {
+      "className" : "NativeVaultPaletteActionCell",
+      "height" : 28,
+      "width" : 464,
+      "x" : 28,
+      "y" : 250
+    },
+    {
+      "className" : "NativeVaultRoundedBackgroundView",
+      "height" : 28,
+      "width" : 464,
+      "x" : 28,
+      "y" : 250
+    },
+    {
+      "className" : "NSTextField",
+      "height" : 20,
+      "width" : 68,
+      "x" : 38,
+      "y" : 250
+    },
+    {
+      "className" : "NSTextFieldSimpleLabel",
+      "height" : 20,
+      "width" : 68,
+      "x" : 38,
+      "y" : 250
+    },
+    {
+      "className" : "NSTextField",
+      "height" : 20,
+      "width" : 60,
+      "x" : 422,
+      "y" : 250
+    },
+    {
+      "className" : "NSTextFieldSimpleLabel",
+      "height" : 20,
+      "width" : 60,
+      "x" : 422,
+      "y" : 250
+    },
+    {
+      "className" : "NSTableRowView",
+      "height" : 28,
+      "width" : 464,
+      "x" : 28,
+      "y" : 222
+    },
+    {
+      "className" : "NativeVaultPaletteActionCell",
+      "height" : 28,
+      "width" : 464,
+      "x" : 28,
+      "y" : 222
+    },
+    {
+      "className" : "NativeVaultRoundedBackgroundView",
+      "height" : 28,
+      "width" : 464,
+      "x" : 28,
+      "y" : 222
+    },
+    {
+      "className" : "NSTextField",
+      "height" : 20,
+      "width" : 83,
+      "x" : 38,
+      "y" : 222
+    },
+    {
+      "className" : "NSTextFieldSimpleLabel",
+      "height" : 20,
+      "width" : 83,
+      "x" : 38,
+      "y" : 222
+    },
+    {
+      "className" : "NSTextField",
+      "height" : 20,
+      "width" : 60,
+      "x" : 422,
+      "y" : 222
+    },
+    {
+      "className" : "NSTextFieldSimpleLabel",
+      "height" : 20,
+      "width" : 60,
+      "x" : 422,
+      "y" : 222
+    },
+    {
+      "className" : "NSTableRowView",
+      "height" : 28,
+      "width" : 464,
+      "x" : 28,
+      "y" : 194
+    },
+    {
+      "className" : "NativeVaultPaletteActionCell",
+      "height" : 28,
+      "width" : 464,
+      "x" : 28,
+      "y" : 194
+    },
+    {
+      "className" : "NativeVaultRoundedBackgroundView",
+      "height" : 28,
+      "width" : 464,
+      "x" : 28,
+      "y" : 194
+    },
+    {
+      "className" : "NSTextField",
+      "height" : 20,
+      "width" : 88.5,
+      "x" : 38,
+      "y" : 194
+    },
+    {
+      "className" : "NSTextFieldSimpleLabel",
+      "height" : 20,
+      "width" : 88.5,
+      "x" : 38,
+      "y" : 194
+    },
+    {
+      "className" : "NSTextField",
+      "height" : 20,
+      "width" : 60,
+      "x" : 422,
+      "y" : 194
+    },
+    {
+      "className" : "NSTextFieldSimpleLabel",
+      "height" : 20,
+      "width" : 60,
+      "x" : 422,
+      "y" : 194
+    },
+    {
+      "className" : "NSTableRowView",
+      "height" : 28,
+      "width" : 464,
+      "x" : 28,
+      "y" : 166
+    },
+    {
+      "className" : "NativeVaultPaletteActionCell",
+      "height" : 28,
+      "width" : 464,
+      "x" : 28,
+      "y" : 166
+    },
+    {
+      "className" : "NativeVaultRoundedBackgroundView",
+      "height" : 28,
+      "width" : 464,
+      "x" : 28,
+      "y" : 166
+    },
+    {
+      "className" : "NSTextField",
+      "height" : 20,
+      "width" : 79.5,
+      "x" : 38,
+      "y" : 166
+    },
+    {
+      "className" : "NSTextFieldSimpleLabel",
+      "height" : 20,
+      "width" : 79.5,
+      "x" : 38,
+      "y" : 166
+    },
+    {
+      "className" : "NSTextField",
+      "height" : 20,
+      "width" : 60,
+      "x" : 422,
+      "y" : 166
+    },
+    {
+      "className" : "NSTextFieldSimpleLabel",
+      "height" : 20,
+      "width" : 60,
+      "x" : 422,
+      "y" : 166
+    },
+    {
+      "className" : "NSTableRowView",
+      "height" : 28,
+      "width" : 464,
+      "x" : 28,
+      "y" : 138
+    },
+    {
+      "className" : "NativeVaultPaletteActionCell",
+      "height" : 28,
+      "width" : 464,
+      "x" : 28,
+      "y" : 138
+    },
+    {
+      "className" : "NativeVaultRoundedBackgroundView",
+      "height" : 28,
+      "width" : 464,
+      "x" : 28,
+      "y" : 138
+    },
+    {
+      "className" : "NSTextField",
+      "height" : 20,
+      "width" : 139.5,
+      "x" : 38,
+      "y" : 138
+    },
+    {
+      "className" : "NSTextFieldSimpleLabel",
+      "height" : 20,
+      "width" : 139.5,
+      "x" : 38,
+      "y" : 138
+    },
+    {
+      "className" : "NSTextField",
+      "height" : 20,
+      "width" : 60,
+      "x" : 422,
+      "y" : 138
+    },
+    {
+      "className" : "NSTextFieldSimpleLabel",
+      "height" : 20,
+      "width" : 60,
+      "x" : 422,
+      "y" : 138
+    },
+    {
+      "className" : "NSTableRowView",
+      "height" : 28,
+      "width" : 464,
+      "x" : 28,
+      "y" : 110
+    },
+    {
+      "className" : "NativeVaultPaletteActionCell",
+      "height" : 28,
+      "width" : 464,
+      "x" : 28,
+      "y" : 110
+    },
+    {
+      "className" : "NativeVaultRoundedBackgroundView",
+      "height" : 28,
+      "width" : 464,
+      "x" : 28,
+      "y" : 110
+    },
+    {
+      "className" : "NSTextField",
+      "height" : 20,
+      "width" : 117,
+      "x" : 38,
+      "y" : 110
+    },
+    {
+      "className" : "NSTextFieldSimpleLabel",
+      "height" : 20,
+      "width" : 117,
+      "x" : 38,
+      "y" : 110
+    },
+    {
+      "className" : "NSTextField",
+      "height" : 20,
+      "width" : 60,
+      "x" : 422,
+      "y" : 110
+    },
+    {
+      "className" : "NSTextFieldSimpleLabel",
+      "height" : 20,
+      "width" : 60,
+      "x" : 422,
+      "y" : 110
+    },
+    {
+      "className" : "NSTableRowView",
+      "height" : 28,
+      "width" : 464,
+      "x" : 28,
+      "y" : 82
+    },
+    {
+      "className" : "NativeVaultPaletteActionCell",
+      "height" : 28,
+      "width" : 464,
+      "x" : 28,
+      "y" : 82
+    },
+    {
+      "className" : "NativeVaultRoundedBackgroundView",
+      "height" : 28,
+      "width" : 464,
+      "x" : 28,
+      "y" : 82
+    },
+    {
+      "className" : "NSTextField",
+      "height" : 20,
+      "width" : 126.5,
+      "x" : 38,
+      "y" : 82
+    },
+    {
+      "className" : "NSTextFieldSimpleLabel",
+      "height" : 20,
+      "width" : 126.5,
+      "x" : 38,
+      "y" : 82
+    },
+    {
+      "className" : "NSTextField",
+      "height" : 20,
+      "width" : 60,
+      "x" : 422,
+      "y" : 82
+    },
+    {
+      "className" : "NSTextFieldSimpleLabel",
+      "height" : 20,
+      "width" : 60,
+      "x" : 422,
+      "y" : 82
+    },
+    {
+      "className" : "NSTableRowView",
+      "height" : 28,
+      "width" : 464,
+      "x" : 28,
+      "y" : 54
+    },
+    {
+      "className" : "NativeVaultPaletteActionCell",
+      "height" : 28,
+      "width" : 464,
+      "x" : 28,
+      "y" : 54
+    },
+    {
+      "className" : "NativeVaultRoundedBackgroundView",
+      "height" : 28,
+      "width" : 464,
+      "x" : 28,
+      "y" : 54
+    },
+    {
+      "className" : "NSTextField",
+      "height" : 20,
+      "width" : 101,
+      "x" : 38,
+      "y" : 54
+    },
+    {
+      "className" : "NSTextFieldSimpleLabel",
+      "height" : 20,
+      "width" : 101,
+      "x" : 38,
+      "y" : 54
+    },
+    {
+      "className" : "NSTextField",
+      "height" : 20,
+      "width" : 60,
+      "x" : 422,
+      "y" : 54
+    },
+    {
+      "className" : "NSTextFieldSimpleLabel",
+      "height" : 20,
+      "width" : 60,
+      "x" : 422,
+      "y" : 54
+    },
+    {
+      "className" : "NSTableRowView",
+      "height" : 28,
+      "width" : 464,
+      "x" : 28,
+      "y" : 26
+    },
+    {
+      "className" : "NativeVaultPaletteActionCell",
+      "height" : 28,
+      "width" : 464,
+      "x" : 28,
+      "y" : 26
+    },
+    {
+      "className" : "NativeVaultRoundedBackgroundView",
+      "height" : 28,
+      "width" : 464,
+      "x" : 28,
+      "y" : 26
+    },
+    {
+      "className" : "NSTextField",
+      "height" : 20,
+      "width" : 163,
+      "x" : 38,
+      "y" : 26
+    },
+    {
+      "className" : "NSTextFieldSimpleLabel",
+      "height" : 20,
+      "width" : 163,
+      "x" : 38,
+      "y" : 26
+    },
+    {
+      "className" : "NSTextField",
+      "height" : 20,
+      "width" : 60,
+      "x" : 422,
+      "y" : 26
+    },
+    {
+      "className" : "NSTextFieldSimpleLabel",
+      "height" : 20,
+      "width" : 60,
+      "x" : 422,
+      "y" : 26
+    }
+  ]
+}

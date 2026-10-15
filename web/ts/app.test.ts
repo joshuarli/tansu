@@ -337,7 +337,7 @@ describe("v2 desktop shell", () => {
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "f", ctrlKey: true, cancelable: true }));
     await flushAsync();
 
-    expect(root.querySelector(".find-panel")?.textContent).toContain("Line 1");
+    expect(root.querySelector(".find-bar")).not.toBeNull();
     expect(root.querySelector(".search-panel")).toBeNull();
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", cancelable: true }));
     await flushAsync();
@@ -347,8 +347,15 @@ describe("v2 desktop shell", () => {
     vi.mocked(editor.revealSelection).mockClear();
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "f", ctrlKey: true, cancelable: true }));
     await flushAsync();
-    root.querySelector<HTMLButtonElement>(".find-results .command-row")?.click();
+    const findInput = root.querySelector<HTMLInputElement>('[data-key="current-note-find"]')!;
+    findInput.value = "body";
+    findInput.dispatchEvent(new Event("input", { bubbles: true }));
+    root.querySelector<HTMLButtonElement>(".find-next")?.click();
     expect(editor.revealFindMatch).toHaveBeenCalledWith({ from: 2, to: 5 });
+    expect(editor.setFindHighlights).toHaveBeenCalledWith({
+      matches: [{ from: 2, to: 5 }],
+      selected: { from: 2, to: 5 },
+    });
     expect(editor.revealSelection).not.toHaveBeenCalled();
     expect(editor.focus).toHaveBeenCalled();
     expect(root.querySelector("#editor-mount")).toBe(editorMount);
@@ -373,6 +380,31 @@ describe("v2 desktop shell", () => {
     await until(() => editorMock.instances[0]?.getSnapshot()?.source === source);
     expect(root.querySelector(".quick-open-panel")).toBeNull();
     expect(editorMock.instances[0]?.focus).toHaveBeenCalled();
+  });
+
+  it("keeps existing tab selection from changing the recent-open order", async () => {
+    const first = noteMeta("note-1", "one.md", "One");
+    const second = noteMeta("note-2", "two.md", "Two");
+    const client = configureVault([first, second]);
+    client.openNote.mockImplementation(async (id) => {
+      const meta = id === first.noteId ? first : second;
+      return documentFor(meta, `# ${meta.title}\n`);
+    });
+    const { app, root } = mountApp();
+    app.bindGlobalEvents();
+    await app.boot();
+
+    root.querySelector<HTMLButtonElement>('.note-row[title="one.md"]')?.click();
+    await until(() => editorMock.instances[0]?.getSnapshot()?.source === "# One\n");
+    root.querySelector<HTMLButtonElement>('.note-row[title="two.md"]')?.click();
+    await until(() => editorMock.instances[0]?.getSnapshot()?.source === "# Two\n");
+    root.querySelector<HTMLButtonElement>('.tab[title="One"]')?.click();
+    await until(() => root.querySelector('.tab.active[title="One"]') !== null &&
+      editorMock.instances[0]?.getSnapshot()?.source === "# One\n");
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "p", ctrlKey: true, cancelable: true }));
+    await until(() => client.quickOpen.mock.calls.length > 0);
+
+    expect(client.quickOpen.mock.calls.at(-1)?.[0].recentNoteIds).toEqual([second.noteId, first.noteId]);
   });
 
   it("requeries stale search hits without applying their source range", async () => {
@@ -1878,6 +1910,7 @@ function createFakeEditor(initialConfig?: EditorConfig): FakeEditor {
     updateConfiguration: vi.fn((partial: Partial<EditorConfig>) => { config = { ...config, ...partial }; }),
     revealSelection: vi.fn((selection: EditorSnapshot["selection"]) => { if (active !== null) snapshots.set(active, { ...snapshots.get(active)!, selection }); return true; }),
     find: vi.fn(() => []),
+    setFindHighlights: vi.fn(),
     revealFindMatch: vi.fn(() => true),
     outline: vi.fn(() => ({ complete: true, headings: [] })),
     formatSelection: vi.fn(),

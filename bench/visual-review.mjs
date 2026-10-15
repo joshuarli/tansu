@@ -86,7 +86,7 @@ try {
       };
     });
     const reducedMotionSeconds = Number.parseFloat(metrics.reducedMotion);
-    if (metrics.document.width > metrics.viewport.width || metrics.editor.size !== "17px" || metrics.editor.lineHeight !== "27.2px" ||
+    if (metrics.document.width > metrics.viewport.width || metrics.editor.size !== "17px" || metrics.editor.lineHeight !== "25.5px" ||
       metrics.tabTitle.top < metrics.tabTitle.tabTop || metrics.tabTitle.bottom > metrics.tabTitle.tabBottom ||
       !Number.isFinite(reducedMotionSeconds) || !metrics.reducedMotion.endsWith("s") || reducedMotionSeconds > 0.00001) {
       throw new Error(`Visual layout metrics are outside the review target: ${JSON.stringify(metrics)}`);
@@ -112,37 +112,38 @@ try {
     });
     await captureOverlay(page, directory, "note-find", async () => {
       await page.keyboard.press("Control+f");
-      await page.locator(".find-panel").waitFor();
-      await page.locator(".find-panel .command-input").fill("paragraph");
-      await page.locator(".find-panel .command-row").first().waitFor();
+      await page.locator(".find-bar").waitFor();
+      await page.locator(".find-bar .find-input").fill("paragraph");
+      await page.waitForFunction(() => document.querySelector(".find-count")?.textContent?.includes("of"));
     });
     await captureOverlay(page, directory, "command-palette", async () => {
       await page.keyboard.press("Control+k");
       await page.locator(".command-panel").waitFor();
     });
     await captureOverlay(page, directory, "rename", async () => {
-      await openCommand(page, "Rename note");
+      await openCommand(page, "rename");
       await page.locator(".note-dialog-panel").waitFor();
     });
     await captureOverlay(page, directory, "revisions", async () => {
-      await openCommand(page, "Revisions");
+      await openCommand(page, "revisions");
       await page.locator(".revisions-panel").waitFor();
     });
     await captureOverlay(page, directory, "settings", async () => {
-      await openCommand(page, "Settings");
+      await openCommand(page, "settings");
       await page.locator(".settings-panel").waitFor();
     });
     await page.keyboard.press("Escape");
     await page.locator(".overlay-host .settings-panel").waitFor({ state: "detached" });
-    await page.locator('.note-row[title="visual-review.md"]').click({ button: "right" });
+    await page.locator(".tab.active").click({ button: "right" });
     await page.locator(".context-menu").waitFor();
     await capture(page, directory, "context-menu");
     await page.keyboard.press("Escape");
+    await closeAllTabs(page);
     await switchVault(page, "Empty");
-    await page.locator(".empty-state").waitFor();
+    await page.waitForFunction(() => document.querySelectorAll(".tabs .tab").length === 0);
     await capture(page, directory, "empty-vault");
     await switchVault(page, "One");
-    await page.locator('[title="New note"]').click();
+    await openCommand(page, "create");
     await page.locator(".note-dialog-panel").waitFor();
     await capture(page, directory, "unnamed-draft");
     await page.keyboard.press("Escape");
@@ -172,7 +173,7 @@ try {
 async function openVisualNote(page) {
   await page.goto(baseUrl);
   await page.locator(".main").waitFor();
-  await page.locator('.note-row[title="visual-review.md"]').click();
+  await openNoteByTitle(page, "Visual Review");
   await waitForEditor(page);
   try {
     await page.waitForFunction(() => {
@@ -204,13 +205,36 @@ async function waitForEditor(page, heading = "Visual Review") {
   await page.waitForFunction((expected) => document.querySelector("#editor-mount .cm-content")?.textContent?.includes(expected), heading);
 }
 
+async function openNoteByTitle(page, title) {
+  const existingTab = page.locator(`.tab[title="${title}"]`);
+  if (await existingTab.count() > 0) {
+    await existingTab.click();
+    return;
+  }
+  await page.keyboard.press("Control+p");
+  const panel = page.locator(".quick-open-panel");
+  await panel.waitFor({ state: "visible" });
+  await panel.locator(".command-input").fill(title);
+  const row = panel.locator(".command-row").filter({ hasText: title }).first();
+  await row.waitFor({ state: "visible" });
+  await row.click();
+  await panel.waitFor({ state: "detached" });
+}
+
+async function openNoteThroughSidebar(page, title) {
+  await page.locator(".sidebar .note-row").filter({ hasText: title }).evaluate((element) => {
+    if (!(element instanceof HTMLButtonElement)) throw new Error("The review note row is missing");
+    element.click();
+  });
+}
+
 async function captureContentVariants(page, directory) {
-  for (const [name, path, title] of [["long-text", "long-text.md", "Long Text"], ["image-heavy", "image-heavy.md", "Image Heavy"], ["wide-table", "wide-table.md", "Wide Table"], ["long-fence", "long-fence.md", "Long Fence"]]) {
-    await page.locator(`.note-row[title="${path}"]`).click();
+  for (const [name, title] of [["long-text", "Long Text"], ["image-heavy", "Image Heavy"], ["wide-table", "Wide Table"], ["long-fence", "Long Fence"]]) {
+    await openNoteByTitle(page, title);
     await waitForEditor(page, title);
     await page.locator(".workspace").evaluate((element) => element.scrollTo(0, 0));
     if (name === "wide-table") {
-      const overflow = await page.locator(".cm-content table").evaluate((table) => ({
+      const overflow = await page.locator(".cm-atomic-table").evaluate((table) => ({
         clientWidth: table.clientWidth,
         scrollWidth: table.scrollWidth,
         overflowX: getComputedStyle(table).overflowX,
@@ -219,13 +243,13 @@ async function captureContentVariants(page, directory) {
         throw new Error(`Wide table has no local horizontal scroll: ${JSON.stringify(overflow)}`);
       }
       await capture(page, directory, "wide-table-left");
-      await page.locator(".cm-content table").evaluate((table) => table.scrollTo(table.scrollWidth, 0));
+      await page.locator(".cm-atomic-table").evaluate((table) => table.scrollTo(table.scrollWidth, 0));
       await capture(page, directory, "wide-table-right");
       continue;
     }
     await capture(page, directory, name);
   }
-  await page.locator('.note-row[title="visual-review.md"]').click();
+  await openNoteByTitle(page, "Visual Review");
   await waitForEditor(page);
 }
 
@@ -236,24 +260,48 @@ async function captureOverlay(page, directory, name, open) {
   await open();
   await capture(page, directory, name);
   await page.keyboard.press("Escape");
-  await page.locator(".overlay-host").waitFor();
-  await page.locator(`.overlay-host .${name === "note-find" ? "find-panel" : name === "vault-search" ? "search-panel" : name === "quick-open" ? "quick-open-panel" : name === "command-palette" ? "command-panel" : name === "rename" ? "note-dialog-panel" : name === "revisions" ? "revisions-panel" : "settings-panel"}`).waitFor({ state: "detached" });
+  const surface = name === "note-find"
+    ? page.locator(".main .find-bar")
+    : page.locator(`.overlay-host .${name === "vault-search" ? "search-panel" : name === "quick-open" ? "quick-open-panel" : name === "command-palette" ? "command-panel" : name === "rename" ? "note-dialog-panel" : name === "revisions" ? "revisions-panel" : "settings-panel"}`);
+  await surface.waitFor({ state: "detached" });
   const mountedEditorRemained = await page.evaluate(() => window.__visualEditor === document.querySelector(".cm-editor"));
   if (!mountedEditorRemained) throw new Error(`${name} remounted the editor`);
 }
 
-async function openCommand(page, label) {
+async function openCommand(page, commandID) {
   await page.keyboard.press("Control+k");
-  await page.locator(".command-panel").waitFor();
-  await page.locator(".command-panel .command-row").filter({ hasText: label }).click();
+  const panel = page.locator(".command-panel");
+  await panel.waitFor();
+  await panel.locator(".command-input").fill(commandID);
+  await page.locator(`.command-panel .command-row[data-command-id="${commandID}"]`).click();
+}
+
+async function closeAllTabs(page) {
+  while (true) {
+    const currentCount = await page.locator(".tabs .tab").count();
+    if (currentCount === 0) return;
+    await openCommand(page, "close");
+    await page.waitForFunction((count) => document.querySelectorAll(".tabs .tab").length < count, currentCount);
+  }
 }
 
 async function switchVault(page, name) {
-  const control = page.locator(".vault-control");
-  await control.click();
-  await control.locator(".vault-option").filter({ hasText: name }).click();
+  const vaultID = await page.locator(".vault-select option").filter({ hasText: name }).getAttribute("value");
+  if (vaultID === null) throw new Error(`Missing vault option: ${name}`);
+  const response = page.waitForResponse((item) =>
+    item.url().includes(`/vaults/${vaultID}/bootstrap`) && item.request().method() === "GET"
+  );
+  await page.locator(".vault-select").evaluate((select, value) => {
+    if (!(select instanceof HTMLSelectElement)) throw new Error("Vault selector is missing");
+    select.value = value;
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+  }, vaultID);
+  await response;
   await page.waitForFunction((vaultName) => document.querySelector(".vault-label")?.textContent === vaultName, name);
-  await page.waitForTimeout(100);
+  await page.waitForFunction((vaultName) => {
+    const noteCount = document.querySelectorAll(".sidebar .note-row").length;
+    return vaultName === "Empty" ? noteCount === 0 : noteCount > 0;
+  }, name);
 }
 
 async function captureFailureState(browser, baseUrl, viewport, output, name, failure) {
@@ -279,7 +327,7 @@ async function captureFailureState(browser, baseUrl, viewport, output, name, fai
   });
   await page.goto(baseUrl);
   await page.locator(".main").waitFor();
-  await page.locator('.note-row[title="visual-review.md"]').click();
+  await openNoteThroughSidebar(page, "Visual Review");
   await page.locator(".unavailable-state").waitFor();
   const directory = join(output, viewport.label);
   await mkdir(directory, { recursive: true });
@@ -314,7 +362,7 @@ async function captureLoadingState(browser, baseUrl, viewport, output) {
   });
   await page.goto(baseUrl);
   await page.locator(".main").waitFor();
-  await page.locator('.note-row[title="visual-review.md"]').click();
+  await openNoteThroughSidebar(page, "Visual Review");
   await pending;
   await page.locator(".workspace .loading").waitFor();
   const directory = join(output, viewport.label);
@@ -373,7 +421,7 @@ async function captureSaveState(browser, baseUrl, viewport, output, kind) {
   }));
   await page.goto(baseUrl);
   await page.locator(".main").waitFor();
-  await page.locator('.note-row[title="visual-review.md"]').click();
+  await openNoteByTitle(page, "Visual Review");
   await waitForEditor(page);
   await page.locator(".cm-content").press("Control+End");
   await page.keyboard.insertText("\n\nVisual edit");
@@ -445,7 +493,7 @@ async function captureAuthLock(browser, baseUrl, viewport, output) {
     : route.continue());
   await page.goto(baseUrl);
   await page.locator(".main").waitFor();
-  await page.locator('.note-row[title="visual-review.md"]').click();
+  await openNoteThroughSidebar(page, "Visual Review");
   await page.locator(".auth-gate").waitFor();
   const directory = join(output, viewport.label);
   await mkdir(directory, { recursive: true });
@@ -458,7 +506,13 @@ async function capture(page, directory, name) {
 }
 
 function viewportMatrix() {
-  return [1024, 1280, 1440, 1920].flatMap((width) => [
+  const availableWidths = [1024, 1280, 1440, 1920];
+  const requestedWidths = process.env.TANSU_VISUAL_REVIEW_WIDTHS?.split(",").map(Number);
+  const widths = requestedWidths ?? availableWidths;
+  if (widths.length === 0 || widths.some((width) => !availableWidths.includes(width))) {
+    throw new Error(`Unsupported visual review widths: ${requestedWidths?.join(",") ?? ""}`);
+  }
+  return widths.flatMap((width) => [
     { label: `${width}`, width, height: 900, deviceScaleFactor: 1 },
     { label: `${width}-200pct`, width: width / 2, height: 450, deviceScaleFactor: 2 },
   ]);
