@@ -180,6 +180,109 @@ describe("real server harness", () => {
     await page.close();
   });
 
+  it("keeps modal and article rail geometry stable", async () => {
+    const page = await newLoggedPage();
+    await page.setViewportSize({ width: 1600, height: 1000 });
+    await page.goto(baseUrl);
+    await page.waitForSelector(".main");
+
+    await page.keyboard.press("Control+/");
+    const searchPanel = page.locator(".search-panel");
+    await searchPanel.waitFor({ state: "visible" });
+    const modalStyle = (panel: typeof searchPanel) =>
+      panel.evaluate((element) => {
+        const style = getComputedStyle(element);
+        return {
+          backdropFilter: style.backdropFilter,
+          backgroundColor: style.backgroundColor,
+          borderRadius: style.borderRadius,
+          boxShadow: style.boxShadow,
+          display: style.display,
+          flexDirection: style.flexDirection,
+          left: style.left,
+          maxHeight: style.maxHeight,
+          overflow: style.overflow,
+          padding: style.padding,
+          top: style.top,
+          transform: style.transform,
+          width: style.width,
+        };
+      });
+    const searchStyle = await modalStyle(searchPanel);
+    await page.keyboard.press("Escape");
+    await searchPanel.waitFor({ state: "detached" });
+
+    await runPaletteCommand(page, "create");
+    const createPanel = page.locator(".note-dialog-panel.is-create");
+    await createPanel.waitFor({ state: "visible" });
+    await expect(modalStyle(createPanel)).resolves.toStrictEqual(searchStyle);
+    await page.keyboard.press("Escape");
+    await createPanel.waitFor({ state: "detached" });
+
+    await createCodeMirrorNote(page, "Plain Article");
+    const plainSave = page.waitForResponse((response) =>
+      response.request().method() === "PUT" && response.status() === 200
+    );
+    await page.locator("#editor-mount .cm-content").fill("# Plain Article\n\nA body without a margin note.");
+    await page.keyboard.press(`${shortcutModifier()}+s`);
+    await plainSave;
+    const article = page.locator(".editor-mount .cm-content");
+    await expect.poll(() => article.isVisible()).toBe(true);
+    const articleWidthWithoutNotes = (await article.boundingBox())?.width;
+    if (articleWidthWithoutNotes === undefined) throw new Error("article body is not visible");
+
+    await createCodeMirrorNote(page, "Article with Margin Note");
+    const sidenoteSave = page.waitForResponse((response) =>
+      response.request().method() === "PUT" && response.status() === 200
+    );
+    await page.locator("#editor-mount .cm-content").fill(
+      "# Article with Margin Note\n\nA sentence with a margin note.[^margin]\n\n[^margin]: A note kept in the right margin.",
+    );
+    await page.keyboard.press(`${shortcutModifier()}+s`);
+    await sidenoteSave;
+    const marginNote = page.locator(".tansu-sidenote-card");
+    await expect.poll(() => marginNote.isVisible()).toBe(true);
+    const containingEditorClass = await marginNote.evaluate((note) => note.closest(".cm-editor")?.className);
+    expect(containingEditorClass).toContain("tansu-has-sidenotes");
+    const railGeometry = await page.evaluate(() => {
+      const outline = document.querySelector<HTMLElement>(".note-outline");
+      const workspace = document.querySelector<HTMLElement>(".workspace");
+      const articleBody = document.querySelector<HTMLElement>(".editor-mount .cm-content");
+      const sidenote = document.querySelector<HTMLElement>(".tansu-sidenote-card");
+      if (outline === null || workspace === null || articleBody === null || sidenote === null) return null;
+      const outlineBox = outline.getBoundingClientRect();
+      const workspaceBox = workspace.getBoundingClientRect();
+      const articleBox = articleBody.getBoundingClientRect();
+      const sidenoteBox = sidenote.getBoundingClientRect();
+      return {
+        articleRight: articleBox.right,
+        articleWidth: articleBox.width,
+        outlineRight: outlineBox.right,
+        outlineTransform: getComputedStyle(outline).transform,
+        sidenoteLeft: sidenoteBox.left,
+        sidenotePosition: getComputedStyle(sidenote).position,
+        sidenoteRight: sidenoteBox.right,
+        workspaceLeft: workspaceBox.left,
+        workspaceRight: workspaceBox.right,
+        workspaceTransform: getComputedStyle(workspace).transform,
+      };
+    });
+    expect(railGeometry).not.toBeNull();
+    if (railGeometry === null) throw new Error("article rails are not visible");
+    expect(railGeometry.outlineTransform).toBe("matrix(1, 0, 0, 1, -100, 0)");
+    expect(railGeometry.workspaceTransform).toBe("matrix(1, 0, 0, 1, -50, 50)");
+    expect(railGeometry.outlineRight).toBeLessThan(railGeometry.workspaceLeft);
+    expect(railGeometry.sidenotePosition).toBe("absolute");
+    expect(railGeometry.sidenoteLeft).toBeGreaterThan(railGeometry.articleRight);
+    expect(railGeometry.articleWidth).toBe(articleWidthWithoutNotes);
+    expect(railGeometry.sidenoteRight).toBeLessThan(railGeometry.workspaceRight);
+
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await expect.poll(() => marginNote.evaluate((element) => getComputedStyle(element).position))
+      .toBe("static");
+    await page.close();
+  });
+
   it("folds frontmatter until revealed and places clicks on the selected line", async () => {
     const page = await newLoggedPage();
     await page.goto(baseUrl);
@@ -538,26 +641,59 @@ describe("real server harness", () => {
     const pastedNoteSave = page.waitForResponse((response) =>
       response.request().method() === "PUT" && response.status() === 200
     );
-    await page.locator(".cm-content").evaluate(async (content) => {
-      const canvas = document.createElement("canvas");
-      canvas.width = 1;
-      canvas.height = 1;
-      const context = canvas.getContext("2d");
-      if (context === null) throw new Error("2D canvas is unavailable");
-      context.fillRect(0, 0, 1, 1);
-      const blob = await new Promise<Blob>((resolveBlob, rejectBlob) => {
-        canvas.toBlob((result) => result === null ? rejectBlob(new Error("Could not create PNG fixture")) : resolveBlob(result));
-      });
-      const clipboard = new DataTransfer();
-      clipboard.items.add(new File([blob], "pasted.png", { type: "image/png" }));
-      const paste = new Event("paste", {
-        bubbles: true,
-        cancelable: true,
-      });
-      Object.defineProperty(paste, "clipboardData", { value: clipboard });
-      content.dispatchEvent(paste);
+    let releasePastedImageUpload!: () => void;
+    const pastedImageUploadGate = new Promise<void>((resolve) => {
+      releasePastedImageUpload = resolve;
     });
-    await expect.poll(() => page.locator(".tansu-pasted-image-preview img").count()).toBe(1);
+    let markPastedImageUploadStarted!: () => void;
+    const pastedImageUploadStarted = new Promise<void>((resolve) => {
+      markPastedImageUploadStarted = resolve;
+    });
+    const pastedImageUploadPath = `**/api/v2/vaults/${encodeURIComponent(vaultOneId)}/images`;
+    await page.route(pastedImageUploadPath, async (route) => {
+      markPastedImageUploadStarted();
+      await pastedImageUploadGate;
+      await route.continue();
+    });
+    try {
+      await page.locator(".cm-content").evaluate(async (content) => {
+        const canvas = document.createElement("canvas");
+        canvas.width = 1;
+        canvas.height = 1;
+        const context = canvas.getContext("2d");
+        if (context === null) throw new Error("2D canvas is unavailable");
+        context.fillRect(0, 0, 1, 1);
+        const blob = await new Promise<Blob>((resolveBlob, rejectBlob) => {
+          canvas.toBlob((result) => result === null ? rejectBlob(new Error("Could not create PNG fixture")) : resolveBlob(result));
+        });
+        const clipboard = new DataTransfer();
+        clipboard.items.add(new File([blob], "pasted.png", { type: "image/png" }));
+        const paste = new Event("paste", {
+          bubbles: true,
+          cancelable: true,
+        });
+        Object.defineProperty(paste, "clipboardData", { value: clipboard });
+        content.dispatchEvent(paste);
+      });
+      const pastedPreview = page.locator(".tansu-pasted-image-preview img");
+      await expect(pastedPreview.count()).resolves.toBe(1);
+      await expect(pastedPreview.getAttribute("src")).resolves.toMatch(/^blob:/u);
+      await pastedImageUploadStarted;
+      await expect.poll(async () => {
+        if (await pastedPreview.count() !== 1) return false;
+        return pastedPreview.evaluate((image) => {
+          const style = getComputedStyle(image);
+          const bounds = image.getBoundingClientRect();
+          return style.visibility === "visible" && style.display !== "none" && bounds.width > 0 && bounds.height > 0;
+        });
+      }).toBe(true);
+      await expect.poll(() => pastedPreview.evaluate((image) => (image as HTMLImageElement).naturalWidth)).toBe(1);
+      const pastedPreviewBox = await pastedPreview.boundingBox();
+      expect(pastedPreviewBox?.width).toBeGreaterThan(0);
+      expect(pastedPreviewBox?.height).toBeGreaterThan(0);
+    } finally {
+      releasePastedImageUpload();
+    }
     await expect.poll(() => page.locator(".tansu-pasted-image-preview").count()).toBe(0);
     await expect.poll(() => pastedUploadResponse !== undefined).toBe(true);
     await pastedNoteSave;

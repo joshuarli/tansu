@@ -182,6 +182,31 @@ describe("CodeMirror image paste uploads", () => {
     expect(revokeUrl).toHaveBeenCalledWith("blob:image-preview");
   });
 
+  it("shows a preview while a source mode image upload is pending", async () => {
+    installImageApis();
+    const requestSeen = deferred<EditorImageUploadRequest>();
+    const response = deferred<EditorImageUploadResult>();
+    const finished = deferred<EditorImagePasteState>();
+    const { view } = mountEditor("text", {
+      mode: "source",
+      uploadPastedImage(request) {
+        requestSeen.resolve(request);
+        return response.promise;
+      },
+      onImagePasteStateChange(state) {
+        terminalState(finished, state);
+      },
+    });
+
+    pasteImage(view);
+    expect(view.dom.querySelector<HTMLImageElement>(".tansu-pasted-image-preview img")?.src)
+      .toBe("blob:image-preview");
+    await requestSeen.promise;
+    response.resolve({ name: "z-images/photo.webp", markdown: "![[z-images/photo.webp]]" });
+    await expect(finished.promise).resolves.toMatchObject({ status: "inserted" });
+    expect(view.dom.querySelector(".tansu-pasted-image-preview")).toBeNull();
+  });
+
   it("uploads existing WebP bytes without re-encoding them", async () => {
     const { bitmapClose, encode } = installImageApis();
     const requestSeen = deferred<EditorImageUploadRequest>();

@@ -451,7 +451,6 @@ function editorExtensions(config: EditorConfig, live: boolean, onFrontmatterTogg
   extensions.push(
     inlinePreview(config.onLinkOpen ? { onLinkClick: config.onLinkOpen } : {}),
     imageBlocks((source) => resolveMarkdownImageUrl(source, resolveVaultAsset)),
-    pendingImagePreviews,
     tables(config.onLinkOpen ? { onLinkClick: config.onLinkOpen } : {}),
     calloutDecoration({ icons: callout.icons }),
     tufteNotes(),
@@ -533,6 +532,7 @@ function createState(
       codeFolding({ placeholderText: "" }),
       EditorView.atomicRanges.of((view) => foldedRanges(view.state)),
       findHighlightField,
+      pendingImagePreviews,
       frontmatterAppearance,
       markdown({ base: markdownLanguage, codeLanguages: [], extensions: [highlightMarkdown] }),
       atomicEditorTheme,

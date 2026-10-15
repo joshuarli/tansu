@@ -1,6 +1,6 @@
 import { ensureSyntaxTree, syntaxTree } from "@codemirror/language";
 import type { EditorState, Extension, Range } from "@codemirror/state";
-import { Decoration, ViewPlugin, WidgetType, type DecorationSet, type EditorView, type ViewUpdate } from "@codemirror/view";
+import { Decoration, EditorView, ViewPlugin, WidgetType, type DecorationSet, type ViewUpdate } from "@codemirror/view";
 
 type NoteDefinition = {
   label: string;
@@ -183,8 +183,9 @@ function superscript(value: number): string {
 }
 
 export function tufteNotes(): Extension {
-  return ViewPlugin.fromClass(class {
+  const plugin = ViewPlugin.fromClass(class {
     decorations: DecorationSet;
+    hasNotes = false;
 
     constructor(private readonly view: EditorView) {
       this.decorations = Decoration.none;
@@ -195,16 +196,18 @@ export function tufteNotes(): Extension {
       if (update.docChanged || update.selectionSet || update.viewportChanged) this.refresh();
     }
 
-    destroy(): void {
-      this.view.dom.classList.remove("tansu-has-sidenotes");
-    }
-
     private refresh(): void {
       const layout = buildSidenoteLayout(this.view.state);
       this.decorations = layout.decorations;
-      this.view.dom.classList.toggle("tansu-has-sidenotes", layout.hasNotes);
+      this.hasNotes = layout.hasNotes;
     }
   }, {
     decorations: (plugin) => plugin.decorations,
   });
+  return [
+    plugin,
+    EditorView.editorAttributes.of((view) => view.plugin(plugin)?.hasNotes
+      ? { class: "tansu-has-sidenotes" }
+      : null),
+  ];
 }
