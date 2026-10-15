@@ -44,10 +44,11 @@ async function main() {
     const largeNote = await createLargeNote(fixture.vaultOne);
     const port = await freePort();
     const baseUrl = `http://127.0.0.1:${port}`;
+    execFileSync("cargo", ["build", "--quiet", "--bin", "tansu2"], { cwd: REPO_ROOT, stdio: "inherit" });
     const serverStart = performance.now();
     server = spawn(
-      "cargo",
-      ["run", "--quiet", "--bin", "tansu2", "--", "--port", String(port)],
+      join(REPO_ROOT, "target", "debug", "tansu2"),
+      ["--port", String(port)],
       {
         cwd: REPO_ROOT,
         env: { ...process.env, XDG_CONFIG_HOME: fixture.configHome, XDG_DATA_HOME: fixture.dataHome },
@@ -274,38 +275,6 @@ async function runBrowserBenchmarks(browser, baseUrl, fixture, identity, first, 
         await findInput.waitFor({ state: "detached" });
       },
     );
-    const sidebar = page.locator('[data-view-region="sidebar"]');
-    const sidebarToggle = page.locator(".sidebar-collapse");
-    const activateSidebarToggle = async () => {
-      await sidebarToggle.evaluate((element) => {
-        if (!(element instanceof HTMLButtonElement)) throw new Error("The sidebar toggle is missing");
-        element.click();
-      });
-    };
-    out.largeNoteSidebarToggle = await measureUiTransition(
-      page,
-      async () => {
-        if (await sidebar.evaluate((element) => element.classList.contains("sidebar-collapsed"))) {
-          await activateSidebarToggle();
-        }
-        await sidebar.waitFor({ state: "visible" });
-      },
-      async () => {
-        await activateSidebarToggle();
-        await page.waitForFunction(() =>
-          document.querySelector('[data-view-region="sidebar"]')?.classList.contains("sidebar-collapsed") === true
-        );
-        if (!await page.locator(`.tab.active[title="${cssEscape(largeNote.title)}"]`).isVisible()) {
-          throw new Error("large benchmark note was not open during sidebar toggle");
-        }
-      },
-      async () => {
-        await activateSidebarToggle();
-        await page.waitForFunction(() =>
-          document.querySelector('[data-view-region="sidebar"]')?.classList.contains("sidebar-collapsed") === false
-        );
-      },
-    );
     return out;
   } finally {
     await page.close();
@@ -363,7 +332,7 @@ async function measureSearchPaint(page, input, query, expectedPath) {
   });
   const measureOne = async () => {
     await input.fill("");
-    await page.locator(".search-panel .search-result-row").first().waitFor({ state: "detached" });
+    await page.locator(".search-panel .search-result-row:not(.recent-search-result)").first().waitFor({ state: "detached" });
     await page.evaluate(() => {
       performance.clearResourceTimings();
       performance.clearMarks("tansu:search:start");
@@ -372,7 +341,7 @@ async function measureSearchPaint(page, input, query, expectedPath) {
       globalThis.__tansuSearchResultInsertedAt = null;
       globalThis.__tansuSearchMutationObserver?.disconnect();
       globalThis.__tansuSearchMutationObserver = new MutationObserver(() => {
-        if (document.querySelector(".search-panel .search-result-row") !== null) {
+        if (document.querySelector(".search-panel .search-result-row:not(.recent-search-result)") !== null) {
           globalThis.__tansuSearchResultInsertedAt ??= performance.now();
         }
       });
@@ -383,7 +352,7 @@ async function measureSearchPaint(page, input, query, expectedPath) {
     });
     await input.fill(query);
     return await page.evaluate(async (expectedPath) => {
-      const expectedResult = () => [...document.querySelectorAll(".search-panel .search-result-row")]
+      const expectedResult = () => [...document.querySelectorAll(".search-panel .search-result-row:not(.recent-search-result)")]
         .find((row) => row.textContent?.includes(expectedPath) && row.getClientRects().length > 0);
       if (expectedResult() === undefined) {
         await new Promise((resolve) => {

@@ -39,3 +39,9 @@ The 2026-10-14 long-session run used Chromium 156.0.8078.4 and 20 rounds. Heap
 after forced GC grew by 2,668,000 bytes and tapered over the final five
 checkpoints. No leak root was established, and the cause of the growth remains
 unresolved.
+
+The 2026-10-15 long-session run used 100 rounds. Heap after forced GC grew from
+5.74 MB to 8.35 MB: 1.9 MB over the first 20 rounds, then about 9 KB per round
+falling to about 4 KB per round. DOM element count held at 48 and live editor
+views at 1. Server RSS grew about 17 KB per round, consistent with accepted
+saves accumulating history. The growth is sublinear and no leak root was found.

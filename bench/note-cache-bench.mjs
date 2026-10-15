@@ -101,7 +101,8 @@ async function measureMissOpen(browser, baseUrl, serverIdentity, target, noteDel
   try {
     await page.goto(baseUrl);
     await page.waitForSelector(".main");
-    return await measureEditorAfterAction(page, "note-row", targetNotePath);
+    await prepareQuickOpen(page, target.title);
+    return await measureEditorAfterAction(page, "quick-open-row", target.title);
   } finally {
     await context.close();
   }
@@ -112,7 +113,8 @@ async function measureCachedRecent(browser, baseUrl, serverIdentity, target, not
   try {
     await prewarmTarget(page, baseUrl, target.title);
     await closeActiveTab(page);
-    return await measureEditorAfterAction(page, "note-row", targetNotePath);
+    await prepareQuickOpen(page, target.title);
+    return await measureEditorAfterAction(page, "quick-open-row", target.title);
   } finally {
     await context.close();
   }
@@ -125,7 +127,7 @@ async function measureCachedSearch(browser, baseUrl, serverIdentity, target, not
     await closeActiveTab(page);
     await page.keyboard.press("Control+Shift+f");
     await page.locator(".search-panel input").fill(SEARCH_QUERY);
-    await page.waitForSelector(".search-result-row");
+    await page.waitForSelector(".search-result-row:not(.recent-search-result)");
     return await measureEditorAfterAction(page, "search-result", targetNotePath);
   } finally {
     await context.close();
@@ -161,18 +163,25 @@ async function measureRestoredActive(browser, baseUrl, serverIdentity, target, n
   }
 }
 
+async function prepareQuickOpen(page, title) {
+  await page.keyboard.press("Control+p");
+  await page.locator(".quick-open-panel .command-input").fill(title);
+  await page.locator(".quick-open-results .command-row").filter({ hasText: title }).first().waitFor({ state: "visible" });
+}
+
 async function measureEditorAfterAction(page, action, actionArg = null) {
   return await page.evaluate(
     async ({ action, actionArg }) => {
       performance.clearMarks();
       const start = performance.now();
       const editorReady = waitForEditor();
-      if (action === "note-row") {
-        [...document.querySelectorAll(".note-row")]
-          .find((row) => row.getAttribute("title") === actionArg)
-          ?.click();
+      if (action === "quick-open-row") {
+        const row = [...document.querySelectorAll(".quick-open-results .command-row")]
+          .find((candidate) => candidate.textContent?.includes(actionArg));
+        if (row === undefined) throw new Error("quick open row is missing during cache benchmark");
+        row.click();
       } else if (action === "search-result") {
-        [...document.querySelectorAll(".search-result-row")]
+        [...document.querySelectorAll(".search-result-row:not(.recent-search-result)")]
           .find((row) => row.textContent?.includes(actionArg))
           ?.click();
       } else if (action === "command-row") {

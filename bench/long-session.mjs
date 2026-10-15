@@ -126,18 +126,14 @@ async function main() {
 
     await page.goto(baseUrl);
     await page.waitForSelector(".main");
-    await page.waitForFunction((path) =>
-      [...document.querySelectorAll(".note-row")].some((row) => row.getAttribute("title") === path), one.path);
     await openNote(page, one);
     const noteOpenFailed = page.waitForEvent("requestfailed", (request) =>
       request.url().includes(`/notes/${encodeURIComponent(search.noteId)}`)
     );
-    await noteRow(page, search).evaluate((element) => {
-      if (!(element instanceof HTMLButtonElement)) throw new Error("The long-session note row is missing");
-      element.click();
-    });
+    await clickQuickOpenRow(page, search, true);
     await noteOpenFailed;
-    await closeActiveTab(page);
+    await page.keyboard.press("Escape");
+    await page.locator(".quick-open-panel").waitFor({ state: "detached" });
     await openNote(page, search);
     await closeActiveTab(page);
 
@@ -147,7 +143,7 @@ async function main() {
     await openSearch(page, "alpha");
     await searchFailed;
     await page.locator(".search-panel input").fill("alpha ");
-    await page.waitForSelector(".search-result-row");
+    await page.waitForSelector(".search-result-row:not(.recent-search-result)");
     await closeSearch(page);
     await closeActiveTab(page);
 
@@ -158,6 +154,7 @@ async function main() {
 
     for (let iteration = 0; iteration < ITERATIONS; iteration += 1) {
       await openNote(page, one);
+      await page.waitForFunction(() => document.querySelector(".cm-content")?.textContent?.includes("alpha") === true);
       await toggleSourceMode(page);
       const beforeEdit = await page.locator(".cm-content").textContent();
       await page.locator(".cm-content").click();
@@ -179,6 +176,7 @@ async function main() {
           afterLength: afterUndo.length,
         })}`, { cause: error });
       }
+      await page.waitForFunction(() => !document.querySelector(".tab.active")?.textContent?.includes("•"));
       await openNote(page, visual);
       const image = page.locator('.cm-content img[data-image-name="z-images/sample.webp"]');
       await image.waitFor({ state: "attached" });
@@ -187,7 +185,7 @@ async function main() {
       await closeActiveTab(page);
       await closeActiveTab(page);
     await openSearch(page, "alpha");
-      await page.waitForSelector(".search-result-row");
+      await page.waitForSelector(".search-result-row:not(.recent-search-result)");
       await closeSearch(page);
       if ((iteration + 1) % 5 === 0 && iteration + 1 < ITERATIONS) {
         await waitForIdle(lastRequestAt, pendingRequests);
@@ -296,16 +294,13 @@ function summarizeSampledAllocations(profile) {
 
 async function openNote(page, note) {
   const tabTitle = noteTabTitle(note);
-  const existingTab = page.locator(`.tab[title="${cssEscape(tabTitle)}"]`);
+  const existingTab = page.locator(".tab").filter({ hasText: tabTitle });
   if (await existingTab.count() > 0) {
     await existingTab.click();
   } else {
-    await noteRow(page, note).evaluate((element) => {
-      if (!(element instanceof HTMLButtonElement)) throw new Error("The long-session note row is missing");
-      element.click();
-    });
+    await clickQuickOpenRow(page, note);
   }
-  await page.waitForFunction((marker) => document.querySelector(".cm-content")?.textContent?.includes(marker) === true, note.title);
+  await page.waitForFunction((marker) => document.querySelector(".cm-content")?.textContent?.toLowerCase().includes(marker) === true, note.title.toLowerCase());
 }
 
 function noteTabTitle(note) {
@@ -313,7 +308,7 @@ function noteTabTitle(note) {
 }
 
 async function toggleSourceMode(page) {
-  await page.keyboard.press("Control+k");
+  await page.keyboard.press(`${shortcutModifier()}+k`);
   const panel = page.locator(".command-panel");
   await panel.waitFor({ state: "visible" });
   await panel.locator(".command-input").fill("source");
@@ -321,8 +316,12 @@ async function toggleSourceMode(page) {
   await panel.waitFor({ state: "detached" });
 }
 
-function noteRow(page, note) {
-  return page.locator(`.note-row[title="${cssEscape(note.path)}"]`).first();
+async function clickQuickOpenRow(page, note, expectFailure = false) {
+  await page.keyboard.press("Control+p");
+  const panel = page.locator(".quick-open-panel");
+  await panel.locator(".command-input").fill(note.title);
+  await panel.locator(".quick-open-results .command-row").filter({ hasText: note.title }).first().click();
+  if (!expectFailure) await panel.waitFor({ state: "detached" });
 }
 
 async function closeActiveTab(page) {
