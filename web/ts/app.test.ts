@@ -363,51 +363,6 @@ describe("v2 desktop shell", () => {
     expect(editorMock.instances).toHaveLength(1);
   });
 
-  it("keeps Mod+P quick-open separate from vault search and validates source identity", async () => {
-    const source = "# One\n";
-    const note = { ...noteMeta("note-1", "one.md", "One"), sourceHash: await canonicalSourceHash(source) };
-    const client = configureVault([note]);
-    client.openNote.mockResolvedValue(documentFor(note, source));
-    client.quickOpen.mockResolvedValue({ hits: [{ noteId: note.noteId, sourceHash: note.sourceHash, title: note.title, path: note.path, score: 1 }] });
-    const { app, root } = mountApp();
-    app.bindGlobalEvents();
-    await app.boot();
-    window.dispatchEvent(new KeyboardEvent("keydown", { key: "p", ctrlKey: true, cancelable: true }));
-    await until(() => root.querySelector(".quick-open-panel") !== null);
-
-    expect(root.querySelector(".search-panel")).toBeNull();
-    expect(client.quickOpen).toHaveBeenCalledWith({ query: "", pinnedNoteIds: [], recentNoteIds: [], limit: 50 });
-    root.querySelector<HTMLButtonElement>(".quick-open-results button")?.click();
-    await until(() => editorMock.instances[0]?.getSnapshot()?.source === source);
-    expect(root.querySelector(".quick-open-panel")).toBeNull();
-    expect(editorMock.instances[0]?.focus).toHaveBeenCalled();
-  });
-
-  it("keeps existing tab selection from changing the recent-open order", async () => {
-    const first = noteMeta("note-1", "one.md", "One");
-    const second = noteMeta("note-2", "two.md", "Two");
-    const client = configureVault([first, second]);
-    client.openNote.mockImplementation(async (id) => {
-      const meta = id === first.noteId ? first : second;
-      return documentFor(meta, `# ${meta.title}\n`);
-    });
-    const { app, root } = mountApp();
-    app.bindGlobalEvents();
-    await app.boot();
-
-    await openRecentNote(root, "One");
-    await until(() => editorMock.instances[0]?.getSnapshot()?.source === "# One\n");
-    await openRecentNote(root, "Two");
-    await until(() => editorMock.instances[0]?.getSnapshot()?.source === "# Two\n");
-    root.querySelector<HTMLButtonElement>('.tab[title="One"]')?.click();
-    await until(() => root.querySelector('.tab.active[title="One"]') !== null &&
-      editorMock.instances[0]?.getSnapshot()?.source === "# One\n");
-    window.dispatchEvent(new KeyboardEvent("keydown", { key: "p", ctrlKey: true, cancelable: true }));
-    await until(() => client.quickOpen.mock.calls.length > 0);
-
-    expect(client.quickOpen.mock.calls.at(-1)?.[0].recentNoteIds).toStrictEqual([second.noteId, first.noteId]);
-  });
-
   it("requeries stale search hits without applying their source range", async () => {
     const note = noteMeta("note-1", "one.md", "One");
     const client = configureVault([note]);

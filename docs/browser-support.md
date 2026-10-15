@@ -6,8 +6,8 @@ the branded Chrome or Safari applications. Browser versions are pinned in
 `package.json`, and the frontend bundle targets `ESNext`. Firefox is outside the
 supported browser matrix.
 
-WebP clipboard images upload as-is. Other image types require
-`createImageBitmap` and `OffscreenCanvas` for conversion to WebP.
+WebP clipboard images upload as-is. Other image types use `createImageBitmap`,
+Canvas 2D, and the lazy-loaded WebP WebAssembly encoder for conversion.
 
 Run `node bench/visual-review.mjs` to inspect deterministic Chromium screenshots
 at the supported desktop widths and 200% zoom. The copied fixture, generated

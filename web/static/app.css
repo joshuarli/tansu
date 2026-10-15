@@ -1158,6 +1158,17 @@ button {
 
 .outline-row[aria-current="location"] { font-weight: 520; }
 
+@media (min-width: 1280px) {
+  .main.has-note-outline > .workspace { transform: translate(-50px, 50px); }
+  .note-outline { transform: translateX(-100px); }
+}
+
+@media (min-width: 1440px) {
+  .main.has-note-outline:has(.cm-editor.tansu-has-sidenotes) {
+    grid-template-columns: minmax(0, 1fr) 190px minmax(0, min(1018px, calc(100% - 300px))) minmax(0, 1fr);
+  }
+}
+
 .main {
   grid-template-rows: 62px minmax(0, 1fr) 0;
 }
@@ -1385,12 +1396,14 @@ button {
   box-shadow: 0 6px 18px rgb(0 0 0 / 17%), inset 0 0 0 0.5px rgb(0 0 0 / 4.5%);
 }
 
-.search-panel {
+.search-panel,
+.note-dialog-panel.is-create {
   top: 52px;
   left: 50%;
   display: flex;
   flex-direction: column;
   width: min(560px, calc(100vw - 32px));
+  overflow: hidden;
   height: auto;
   max-height: min(520px, calc(100vh - 48px));
   border-radius: 12px;
@@ -1525,8 +1538,7 @@ button {
   border-bottom: 1px solid #e2e4e8;
 }
 
-.command-search-icon,
-.quick-open-search-icon {
+.command-search-icon {
   position: absolute;
   top: 50%;
   left: 6px;
@@ -1535,8 +1547,7 @@ button {
   transform: translateY(-50%);
 }
 
-.command-search-icon::before,
-.quick-open-search-icon::before {
+.command-search-icon::before {
   position: absolute;
   top: 1px;
   left: 1px;
@@ -1547,8 +1558,7 @@ button {
   content: "";
 }
 
-.command-search-icon::after,
-.quick-open-search-icon::after {
+.command-search-icon::after {
   position: absolute;
   top: 11px;
   left: 11px;
@@ -1624,137 +1634,10 @@ button {
   text-align: right;
 }
 
-.quick-open-panel {
-  top: 50%;
-  left: 50%;
-  display: flex;
-  flex-direction: column;
-  width: min(528px, calc(100vw - 32px));
-  height: min(392px, calc(100vh - 32px));
-  max-height: none;
-  padding: 0;
-  border-radius: 12px;
-  transform: translate(-50%, -50%);
-}
-
-.recent-notes-header {
-  display: flex;
-  flex: 0 0 52px;
-  align-items: center;
-  justify-content: space-between;
-  height: 52px;
-  padding: 0 24px;
-}
-
-.recent-notes-header h2 {
-  position: relative;
-  top: 5px;
-  margin: 0;
-  color: rgb(33 36 41);
-  font-size: 17px;
-  font-weight: 600;
-  line-height: 24px;
-}
-
-.recent-notes-count {
-  position: relative;
-  top: 6px;
-  color: rgb(110 117 128);
-  font-size: 12px;
-  line-height: 18px;
-}
-
-.quick-open-field {
-  position: relative;
-  flex: 0 0 40px;
-  height: 40px;
-  margin: 0 16px;
-  border-bottom: 1px solid #e2e4e8;
-}
-
-.quick-open-search-icon {
-  left: 8px;
-}
-
-.quick-open-field .command-input {
-  position: absolute;
-  top: 1px;
-  left: 34px;
-  width: calc(100% - 34px);
-  height: 39px;
-  min-height: 39px;
-  padding: 0;
-  color: rgb(33 36 41);
-  font-size: 14px;
-  line-height: 20px;
-}
-
-.quick-open-field .command-input::placeholder {
-  color: rgb(135 143 153);
-  opacity: 1;
-}
-
 .command-field .command-input:focus,
-.command-field .command-input:focus-visible,
-.quick-open-field .command-input:focus,
-.quick-open-field .command-input:focus-visible {
+.command-field .command-input:focus-visible {
   outline: none;
   box-shadow: none;
-}
-
-.quick-open-panel .quick-open-results {
-  flex: 1 1 auto;
-  gap: 4px;
-  max-height: none;
-  padding: 16px 12px 12px;
-}
-
-.quick-open-results .command-row {
-  display: flex;
-  flex: 0 0 62px;
-  flex-direction: column;
-  align-items: flex-start;
-  justify-content: center;
-  opacity: 1;
-  min-height: 62px;
-  height: 62px;
-  border-radius: 8px;
-  padding: 6px 12px;
-  color: rgb(33 36 41);
-  white-space: normal;
-}
-
-.quick-open-results .command-row + .command-row { margin-top: 0; }
-
-.quick-open-results .command-row.selected,
-.quick-open-results .command-row:hover {
-  background: rgb(238 239 242);
-}
-
-.recent-note-title {
-  overflow: hidden;
-  position: relative;
-  top: 2px;
-  width: 100%;
-  color: rgb(33 36 41);
-  font-size: 15px;
-  font-weight: 550;
-  line-height: 21px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.recent-note-detail {
-  overflow: hidden;
-  position: relative;
-  top: 2px;
-  width: 100%;
-  color: rgb(110 117 128);
-  font-size: 12.5px;
-  font-weight: 400;
-  line-height: 19px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .note-dialog-panel.is-rename {
@@ -2129,7 +2012,7 @@ button {
     grid-template-columns: minmax(0, 1fr);
     column-gap: 0;
   }
-  .main.has-note-outline > .workspace { grid-column: 1; }
+  .main.has-note-outline > .workspace { grid-column: 1; transform: none; }
   .note-outline { display: none; }
 }
 

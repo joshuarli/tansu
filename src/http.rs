@@ -117,7 +117,7 @@ impl HttpResponse {
             .header("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
             .header(
                 "Content-Security-Policy",
-                "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
+                "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
             );
         for (name, value) in self.headers {
             builder = builder.header(name, value);
@@ -1734,6 +1734,7 @@ mod tests {
         assert_eq!(response.headers()["X-Content-Type-Options"], "nosniff");
         let csp = response.headers()["Content-Security-Policy"].to_str().unwrap();
         assert!(csp.contains("script-src 'self'"));
+        assert!(csp.contains("'wasm-unsafe-eval'"));
         assert!(!csp.contains("'unsafe-eval'"));
     }
 

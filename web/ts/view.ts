@@ -12,7 +12,7 @@ import {
 } from "./state.ts";
 import { vaultId } from "./app/identity.ts";
 import { sameTabIdentity, type TabIdentity } from "./app/tab-identity.ts";
-import type { V2OverlayCoverage, V2QuickOpenResponse, V2SearchHit } from "./types.generated.ts";
+import type { V2OverlayCoverage, V2SearchHit } from "./types.generated.ts";
 import type { FindMatch, Outline } from "./editor/source-navigation.js";
 
 export type ViewActions = {
@@ -641,41 +641,6 @@ function renderOverlays(state: State, actions: ViewActions): HTMLElement {
     host.append(backdrop(actions), panel);
     focusOnOpen(input);
   }
-  if (state.quickOpen) {
-    const input = document.createElement("input");
-    input.className = "command-input";
-    input.dataset["key"] = "quick-open-input";
-    input.value = state.quickOpenQuery;
-    input.placeholder = "Filter recent notes";
-    input.addEventListener("input", () => actions.dispatch({ type: "quickOpen.input", query: input.value }));
-    const hits = state.quickOpenHits ?? [];
-    const orderedHits = state.quickOpenQuery.trim() === ""
-      ? [...hits].toSorted((left, right) => {
-        const leftIndex = state.recent.indexOf(left.noteId);
-        const rightIndex = state.recent.indexOf(right.noteId);
-        return (leftIndex === -1 ? Number.MAX_SAFE_INTEGER : leftIndex) -
-          (rightIndex === -1 ? Number.MAX_SAFE_INTEGER : rightIndex);
-      })
-      : hits;
-    const list = el("div", "command-list quick-open-results");
-    for (const [index, hit] of orderedHits.entries()) {
-      list.append(quickOpenHitRow(hit, actions, state.quickOpenQuery, index === 0));
-    }
-    const count = hits.length;
-    const quickOpenIcon = el("span", "quick-open-search-icon");
-    quickOpenIcon.setAttribute("aria-hidden", "true");
-    const quickOpenField = el("div", "quick-open-field", quickOpenIcon, input);
-    const panel = el(
-      "div",
-      "command-panel quick-open-panel",
-      el("header", "recent-notes-header", el("h2", "", "Recent notes"), span(`${count} recent notes`, "recent-notes-count")),
-      quickOpenField,
-      list,
-    );
-    panel.dataset["key"] = "modal:quick-open";
-    host.append(backdrop(actions), panel);
-    focusOnOpen(input);
-  }
   if (state.revisionsOpen) {
     host.append(backdrop(actions), renderRevisionsPanel(state, actions));
   }
@@ -901,7 +866,7 @@ function renderNoteDialog(state: State, actions: ViewActions): HTMLElement {
   if (inputEl !== null && promotionPending) inputEl.disabled = true;
   const panel = el(
     "form",
-    `modal-panel note-dialog-panel${isRename ? " is-rename" : ""}`,
+    `modal-panel note-dialog-panel${dialog?.kind === "create" ? " is-create" : ""}${isRename ? " is-rename" : ""}`,
     el(
       "div",
       "modal-header",
@@ -1090,28 +1055,6 @@ function draftCoverageMessage(coverage: V2OverlayCoverage | null): HTMLElement |
   if (coverage?.status !== "partial") return null;
   const count = coverage.skippedNoteCount;
   return span(`Draft search skipped ${count} ${count === 1 ? "draft" : "drafts"}`, "empty-outline");
-}
-
-function quickOpenHitRow(
-  hit: V2QuickOpenResponse["hits"][number],
-  actions: ViewActions,
-  query: string,
-  selected: boolean,
-): HTMLElement {
-  const row = button(
-    "",
-    hit.title,
-    () => actions.dispatch({ type: "quickOpen.hitOpen", hit }),
-    "command-row search-result-row",
-  );
-  row.dataset["key"] = `quick-open:${hit.noteId}`;
-  row.dataset["noteId"] = hit.noteId;
-  if (selected) row.classList.add("selected");
-  row.append(span(hit.title, "recent-note-title"));
-  const preview = query.trim() === "" ? actions.recentPreview(hit.noteId) : null;
-  const detail = preview === null || preview === "" ? hit.path : preview;
-  if (detail !== null && detail !== "") row.append(span(detail, "recent-note-detail"));
-  return row;
 }
 
 function renderScore(hit: V2SearchHit): HTMLElement {

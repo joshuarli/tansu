@@ -6,7 +6,6 @@ import type {
   V2RevisionMeta,
   V2OverlayCoverage,
   V2SearchHit,
-  V2QuickOpenResponse,
   V2VaultBootstrapResponse,
   V2VaultMeta,
 } from "./types.generated.ts";
@@ -92,9 +91,6 @@ export type State = {
   closedTabs: WorkspaceTab[];
   activeTab: TabIdentity | null;
   searchOpen: boolean;
-  quickOpen: boolean;
-  quickOpenQuery: string;
-  quickOpenHits: V2QuickOpenResponse["hits"] | null;
   findOpen: boolean;
   findQuery: string;
   findIndex: number;
@@ -134,9 +130,6 @@ export function createState(vault: VaultId): State {
     closedTabs: [],
     activeTab: null,
     searchOpen: false,
-    quickOpen: false,
-    quickOpenQuery: "",
-    quickOpenHits: null,
     findOpen: false,
     findQuery: "",
     findIndex: 0,

@@ -79,6 +79,15 @@ keep each cell on one line and scroll horizontally inside the editor.
 Callouts use `> [!type] Title`. The adapter decorates valid headers and leaves
 malformed syntax as authored Markdown. Frontmatter remains in the document.
 
+Margin notes use a footnote reference and a matching top-level definition on one
+line: `Text[^label]` and `[^label]: Note text`. Labels are case-insensitive and
+must be unique. Live mode shows a numbered marker and the note beside its first
+reference at viewport widths of 1440 pixels or more. Narrower screens place the
+note under the reference.
+Click a marker to reveal its source definition. Source mode shows the original
+Markdown. The note body is displayed as plain text. Unmatched references,
+duplicate definitions, code blocks, and frontmatter stay unchanged.
+
 Copy and cut read the selected source ranges from CodeMirror's document. Plain
 text paste goes through CodeMirror. Rich HTML paste passes through
 `sanitizeHtmlToMarkdown`, which removes active elements, event attributes, and
@@ -88,8 +97,9 @@ When `uploadPastedImage` is configured, image paste keeps WebP clipboard bytes
 as-is and converts other clipboard files to WebP. It passes the blob, note ID,
 source revision, selection, and an abort signal to the upload callback. The
 callback returns the server's `z-images/`
-asset name and wiki-image Markdown. The adapter inserts that Markdown only into
-the captured session and selection while the source revision is still current.
+asset name and wiki-image Markdown. The adapter displays a temporary image
+preview while the upload runs. It inserts the returned Markdown only into the
+captured session and selection while the source revision is still current.
 An intervening edit, clean reload, or read-only change aborts the request and
 reports it as stale. The state callback reports uploading, inserted, stale,
 and failed states. Its preview object URL is revoked on every terminal state
@@ -112,7 +122,12 @@ source unchanged.
 Atomic source closure, CSS, and MIT license under
 `web/ts/editor/vendor/atomic/`. `UPSTREAM.md` records the upstream commit and
 local patches. The vendor tree omits Atomic's React component and language
-packages.
+packages. Tansu also vendors the non-SIMD encoder from
+[`@jsquash/webp` 1.5.0](https://github.com/jamsinclair/jSquash) under
+`web/ts/editor/vendor/jsquash-webp/`. The JavaScript is Apache-2.0 licensed.
+The libwebp codec is BSD-3-Clause licensed. The app serves its encoder and
+281 KB WebAssembly file as separate assets and loads them only when a pasted
+image needs conversion.
 
 Build the fixture page with the same esbuild dependency used by the app:
 

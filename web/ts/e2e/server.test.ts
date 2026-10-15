@@ -12,6 +12,7 @@ import {
   type Browser,
   type BrowserType,
   type Page,
+  type Response as PlaywrightResponse,
 } from "playwright";
 import { expect, afterAll, beforeEach, describe, beforeAll, it } from "vitest";
 
@@ -149,7 +150,7 @@ describe("real server harness", () => {
     ).toBeLessThanOrEqual(3);
     await page.locator('.recent-search-result[title="one.md"]').click();
     await expect.poll(() => page.locator("#editor-mount .cm-content").textContent()).not.toBe("");
-    await openQuickNote(page, "visual");
+    await openSearchNote(page, "visual");
     await page.waitForSelector('.cm-content img[data-image-name="z-images/sample.webp"]');
     await page.waitForFunction(() => {
       const image = document.querySelector<HTMLImageElement>("#editor-mount .cm-atomic-image img");
@@ -162,7 +163,7 @@ describe("real server harness", () => {
     const page = await newLoggedPage();
     await page.goto(baseUrl);
     await page.waitForSelector(".main");
-    await openQuickNote(page, "Visual Check");
+    await openSearchNote(page, "Visual Check");
 
     const firstHeading = page.locator(".outline-row").filter({ hasText: "Visual Check" });
     const secondHeading = page.locator(".outline-row").filter({ hasText: "Second Section" });
@@ -227,15 +228,15 @@ describe("real server harness", () => {
     });
     await page.goto(baseUrl);
     await page.waitForSelector(".main");
-    await page.keyboard.press(`${shortcutModifier()}+p`);
-    await page.waitForSelector(".quick-open-panel .command-input");
+    await page.keyboard.press("Control+/");
+    await page.waitForSelector(".search-panel .command-input");
     await page.keyboard.press("Escape");
     await page.waitForSelector(".search-panel", { state: "detached" });
     await page.keyboard.press(`${shortcutModifier()}+k`);
     await page.waitForSelector(".command-panel .command-input");
     await page.keyboard.press("Escape");
     await page.waitForSelector(".command-panel", { state: "detached" });
-    await openQuickNote(page, "One");
+    await openSearchNote(page, "One");
     await expect(page.locator(".workspace > .toolbar").count()).resolves.toBe(0);
     await expect(page.locator(".selection-toolbar").count()).resolves.toBe(1);
     await expect(page.locator(".selection-toolbar").isVisible()).resolves.toBeFalsy();
@@ -298,13 +299,13 @@ describe("real server harness", () => {
     await page.waitForSelector(".main");
     const searchBefore = await openSeededDocument("search.md");
 
-    await openQuickNote(page, "One");
+    await openSearchNote(page, "One");
     await page.waitForFunction(() =>
       document.querySelector(".cm-content")?.textContent?.includes("alpha") === true,
     );
     await page.locator(".cm-content").fill("# One\n\nalpha edited in One\n");
 
-    await openQuickNote(page, "Search Fixture");
+    await openSearchNote(page, "Search Fixture");
     await page.waitForFunction(() =>
       document.querySelector(".cm-content")?.textContent?.includes("Search Fixture") === true,
     );
@@ -527,18 +528,28 @@ describe("real server harness", () => {
     expect(asset.ok).toBeTruthy();
     await expect(asset.arrayBuffer()).resolves.toHaveProperty("byteLength", 3);
     await expect.poll(() => page.locator(".cm-content").textContent()).toContain("old");
-    await runPaletteCommand(page, "source");
     await page.keyboard.press("Control+End");
-    const pastedUpload = page.waitForResponse((response) =>
-      new URL(response.url()).pathname.endsWith("/images") && response.status() === 201
+    let pastedUploadResponse: PlaywrightResponse | undefined;
+    page.on("response", (response) => {
+      if (new URL(response.url()).pathname.endsWith("/images") && response.status() === 201) {
+        pastedUploadResponse = response;
+      }
+    });
+    const pastedNoteSave = page.waitForResponse((response) =>
+      response.request().method() === "PUT" && response.status() === 200
     );
-    const pastedSave = page.waitForResponse(
-      (response) => response.request().method() === "PUT" && response.status() === 200,
-      { timeout: 5_000 },
-    );
-    await page.locator(".cm-content").evaluate((content) => {
+    await page.locator(".cm-content").evaluate(async (content) => {
+      const canvas = document.createElement("canvas");
+      canvas.width = 1;
+      canvas.height = 1;
+      const context = canvas.getContext("2d");
+      if (context === null) throw new Error("2D canvas is unavailable");
+      context.fillRect(0, 0, 1, 1);
+      const blob = await new Promise<Blob>((resolveBlob, rejectBlob) => {
+        canvas.toBlob((result) => result === null ? rejectBlob(new Error("Could not create PNG fixture")) : resolveBlob(result));
+      });
       const clipboard = new DataTransfer();
-      clipboard.items.add(new File([new Uint8Array([4, 5, 6])], "pasted.webp", { type: "image/webp" }));
+      clipboard.items.add(new File([blob], "pasted.png", { type: "image/png" }));
       const paste = new Event("paste", {
         bubbles: true,
         cancelable: true,
@@ -546,14 +557,12 @@ describe("real server harness", () => {
       Object.defineProperty(paste, "clipboardData", { value: clipboard });
       content.dispatchEvent(paste);
     });
-    const pasted = await pastedUpload.then((response) => response.json());
-    await expect.poll(() => page.locator(".cm-content").textContent(), { timeout: 3_000 })
-      .toContain(pasted.name);
-    await expect.poll(() => page.locator(".tab.active").textContent()).toContain("•");
-    await page.keyboard.press(`${shortcutModifier()}+s`);
-    await pastedSave;
-    await expect.poll(() => page.locator(".statusbar").textContent()).toContain("Saved");
-    await page.close();
+    await expect.poll(() => page.locator(".tansu-pasted-image-preview img").count()).toBe(1);
+    await expect.poll(() => page.locator(".tansu-pasted-image-preview").count()).toBe(0);
+    await expect.poll(() => pastedUploadResponse !== undefined).toBe(true);
+    await pastedNoteSave;
+    const pastedNote = await loadNoteByPath(vaultOneId, "recover.md");
+    expect(pastedNote.content).toContain("![[z-images/");
   });
 
   it("applies V2 delta edits against the requested source revision", async () => {
@@ -963,12 +972,12 @@ async function runPaletteCommand(page: Page, commandID: string): Promise<void> {
   await page.locator(`.command-panel .command-row[data-command-id="${commandID}"]`).click();
 }
 
-async function openQuickNote(page: Page, query: string): Promise<void> {
-  await page.keyboard.press(`${shortcutModifier()}+p`);
-  const panel = page.locator(".quick-open-panel");
+async function openSearchNote(page: Page, query: string): Promise<void> {
+  await page.keyboard.press("Control+/");
+  const panel = page.locator(".search-panel");
   await panel.waitFor({ state: "visible" });
   await panel.locator(".command-input").fill(query);
-  await panel.locator(".quick-open-results .command-row").first().click();
+  await panel.locator(".search-result-row").first().click();
   await panel.waitFor({ state: "detached" });
   await expect.poll(() => page.locator("#editor-mount .cm-content").textContent()).not.toBe("");
 }

@@ -32,6 +32,70 @@
   background: var(--callout-background, color-mix(in srgb, currentColor 5%, transparent));
 }
 
+.cm-line.tansu-sidenote-anchor {
+  position: relative;
+}
+
+.tansu-sidenote-reference {
+  white-space: nowrap;
+}
+
+.tansu-sidenote-marker {
+  display: inline;
+  border: 0;
+  background: transparent;
+  color: var(--atomic-editor-accent);
+  padding: 0 1px;
+  font: inherit;
+  font-size: 0.72em;
+  vertical-align: super;
+  line-height: 0;
+  cursor: pointer;
+}
+
+.tansu-sidenote-marker:hover,
+.tansu-sidenote-marker:focus-visible {
+  color: var(--atomic-editor-fg);
+  text-decoration: underline;
+}
+
+.tansu-sidenote-card {
+  display: block;
+  position: static;
+  width: auto;
+  margin: 8px 0 14px;
+  border-left: 2px solid color-mix(in srgb, var(--atomic-editor-accent) 55%, transparent);
+  color: var(--atomic-editor-fg-muted);
+  padding: 2px 0 2px 12px;
+  font-size: 0.84em;
+  line-height: 1.45;
+  white-space: normal;
+}
+
+@media (min-width: 1440px) {
+  .cm-editor.tansu-has-sidenotes .tansu-sidenote-card {
+    position: absolute;
+    top: 0;
+    left: calc(100% + 28px);
+    width: 212px;
+    margin: 0;
+    border-left: 0;
+    border-top: 1px solid color-mix(in srgb, var(--atomic-editor-accent) 35%, transparent);
+    padding: 5px 0 0;
+  }
+}
+
+@media (min-width: 1440px) {
+  .cm-editor.tansu-has-sidenotes .cm-content {
+    margin-left: 0;
+    margin-right: 0;
+  }
+}
+
+.tansu-pasted-image-preview img {
+  opacity: 0.82;
+}
+
 .cm-line.tansu-callout-warning,
 .cm-line.tansu-callout-caution,
 .cm-line.tansu-callout-danger {

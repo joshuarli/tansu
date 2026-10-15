@@ -303,26 +303,6 @@ describe("view rendering", () => {
     expectDispatched(actions, { type: "dialog.submit", value: "" });
   });
 
-  it("renders recent note excerpts in recency order with the first row selected", () => {
-    const state = baseState();
-    state.quickOpen = true;
-    state.quickOpenHits = [
-      { noteId: "gallery", sourceHash: "hash-gallery", title: "Gallery", path: "Gallery.md", score: 0 },
-      { noteId: "reading", sourceHash: "hash-reading", title: "Reading Queue", path: "Reading Queue.md", score: 0 },
-    ];
-    state.recent = ["reading", "gallery"];
-    const actions = actionSpies();
-    actions.recentPreview.mockImplementation((id) => id === "reading" ? "Pinned research notes." : "Gallery excerpt.");
-
-    const root = render(state, actions);
-    const rows = [...root.querySelectorAll<HTMLButtonElement>(".quick-open-results .command-row")];
-
-    expect(rows.map((row) => row.dataset["noteId"])).toStrictEqual(["reading", "gallery"]);
-    expect(rows[0]?.classList.contains("selected")).toBeTruthy();
-    expect(rows[0]?.textContent).toContain("Pinned research notes.");
-    expect(root.querySelector(".recent-notes-count")?.textContent).toBe("2 recent notes");
-  });
-
   it("renders search excerpts as text and preserves highlighted ranges", () => {
     const state = baseState();
     state.searchOpen = true;

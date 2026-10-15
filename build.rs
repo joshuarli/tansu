@@ -33,6 +33,7 @@ fn main() {
             Some("html") => "text/html; charset=utf-8",
             Some("js") => "text/javascript; charset=utf-8",
             Some("css") => "text/css; charset=utf-8",
+            Some("wasm") => "application/wasm",
             _ => panic!("asset MIME type is not allowed"),
         };
         assert_eq!(content_type, actual_content_type, "manifest MIME type must match the asset allowlist");

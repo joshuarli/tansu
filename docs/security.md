@@ -10,6 +10,10 @@ and initial enrollment use server-side one-time tickets or the enrollment
 capability instead. `GET /api/v2/health` is public, but still checks `Host` and
 any supplied `Origin`. The server does not enable cross-origin access.
 
+App responses restrict scripts to same-origin files and permit WebAssembly
+compilation with `wasm-unsafe-eval` for the lazy-loaded pasted-image encoder.
+The policy does not permit JavaScript `eval`.
+
 WebAuthn credentials bind to the configured origin and RP ID. Changing either
 value clears credentials, sessions, enrollment capabilities, and pending
 ceremonies in one database transaction. Enroll credentials again after changing

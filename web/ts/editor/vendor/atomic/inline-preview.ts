@@ -501,7 +501,9 @@ function buildInlineDecorations(view: EditorView): DecorationSet {
             parent = parent.parent;
           }
           if (parent && parent.name === 'Link') {
-            shouldHide = !activeLinkStarts.has(parent.from);
+            const sourceLine = doc.lineAt(parent.from);
+            const sidenoteDefinition = sourceLine.from === parent.from && /^\[\^[\w-]+\]:/u.test(sourceLine.text);
+            shouldHide = !sidenoteDefinition && !activeLinkStarts.has(parent.from);
           } else {
             shouldHide = !activeLines.has(lineNum);
           }

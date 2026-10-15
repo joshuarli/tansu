@@ -12,7 +12,6 @@ describe("native command palette definitions", () => {
       ["create", "New Note", "⌃N"],
       ["save", "Save Note", "⌘S"],
       ["search", "Search Vault", "⌃G"],
-      ["open", "Recent Notes", "⌃O"],
       ["find", "Find in Note", "⌃F"],
       ["rename", "Rename Current Note", "⌃L"],
       ["close", "Close Current Tab", "⌃X"],

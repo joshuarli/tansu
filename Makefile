@@ -47,8 +47,6 @@ audit:
 	pnpm audit --prod --audit-level=high
 	# cargo deny check
 
-ci: lint coverage test-e2e-chromium test-e2e-webkit audit
-
 types:
 	deno task build
 	cargo run --quiet --bin gen-api-types
@@ -118,4 +116,4 @@ bench-long-session:
 	mkdir -p "$(CURDIR)/.work/tmp"
 	TMPDIR="$(CURDIR)/.work/tmp" node bench/long-session.mjs
 
-.PHONY: audit bench bench-full bench-long-session build-linux-musl-aarch64 build-linux-musl-both build-linux-musl-docker build-linux-musl-x86_64 ci coverage coverage-html coverage-rs deploy dev dev-config check lint test-package types types-check types-generated ts test test-e2e-chromium test-e2e-webkit test-rs
+.PHONY: audit bench bench-full bench-long-session build-linux-musl-aarch64 build-linux-musl-both build-linux-musl-docker build-linux-musl-x86_64 coverage coverage-html coverage-rs deploy dev dev-config check lint test-package types types-check types-generated ts test test-e2e-chromium test-e2e-webkit test-rs

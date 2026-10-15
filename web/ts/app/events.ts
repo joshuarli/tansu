@@ -1,11 +1,10 @@
 import type { NoteId, RevisionEventId } from "../state.ts";
 import type { FindMatch, OutlineHeading } from "../editor/source-navigation.js";
-import type { V2QuickOpenResponse, V2SearchHit } from "../types.generated.ts";
+import type { V2SearchHit } from "../types.generated.ts";
 import type { LocalDraftId, VaultId } from "./identity.ts";
 import type { TabIdentity } from "./tab-identity.ts";
 
 export type CommandId =
-  | "open"
   | "create"
   | "save"
   | "rename"
@@ -42,9 +41,6 @@ export type ViewEvent =
   | { type: "search.historySelect"; query: string }
   | { type: "search.hitOpen"; hit: V2SearchHit }
   | { type: "search.recentOpen"; noteId: NoteId }
-  | { type: "quickOpen.open" }
-  | { type: "quickOpen.input"; query: string }
-  | { type: "quickOpen.hitOpen"; hit: V2QuickOpenResponse["hits"][number] }
   | { type: "find.open" }
   | { type: "find.input"; query: string }
   | { type: "find.move"; direction: -1 | 1 }

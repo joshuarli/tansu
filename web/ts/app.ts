@@ -29,7 +29,7 @@ import {
   type Tab,
 } from "./state.ts";
 import { disposeAppView, renderApp, renderAuthGate, renderLoading, renderNoVaultConfigured, updateAppView, updateStatusBar, type ViewActions } from "./view.ts";
-import type { Settings, V2BootstrapResponse, V2MutationResponse, V2NoteDocument, V2NoteMeta, V2QuickOpenResponse, V2SearchHit, V2SearchOverlay, V2ServerEvent } from "./types.generated.ts";
+import type { Settings, V2BootstrapResponse, V2MutationResponse, V2NoteDocument, V2NoteMeta, V2SearchHit, V2SearchOverlay, V2ServerEvent } from "./types.generated.ts";
 import type { DraftJournalRecord, WorkspaceState } from "./app/workspace-store.ts";
 import type { OutlineHeading } from "./editor/source-navigation.js";
 
@@ -91,7 +91,6 @@ export class TansuApp {
   private noticeTimer: number | undefined;
   private disposeTask: Promise<void> | null = null;
   private searchOverlayRequestSeq = 0;
-  private quickOpenRequestSeq = 0;
   private bootGeneration = 0;
   private sessionGeneration = 0;
   private transitioningVault = false;
@@ -119,7 +118,6 @@ export class TansuApp {
     this.transitioningVault = true;
     this.state.imageUploads.clear();
     this.searchOverlayRequestSeq += 1;
-    this.quickOpenRequestSeq += 1;
     this.eventSubscription?.close();
     this.eventSubscription = null;
     this.cancelAutoSaves();
@@ -287,9 +285,6 @@ export class TansuApp {
       if (modifier && key === "k" && !event.altKey && !event.shiftKey) {
         event.preventDefault();
         this.dispatch({ type: "command.open" });
-      } else if (modifier && key === "p" && !event.altKey && !event.shiftKey) {
-        event.preventDefault();
-        this.dispatch({ type: "quickOpen.open" });
       } else if (modifier && event.shiftKey && key === "f" && !event.altKey) {
         event.preventDefault();
         this.dispatch({ type: "search.open" });
@@ -1079,56 +1074,8 @@ export class TansuApp {
     this.render();
   }
 
-  private async updateQuickOpen(): Promise<void> {
-    const request = ++this.quickOpenRequestSeq;
-    const query = this.state.quickOpenQuery.trim();
-    const client = this.vaultClient;
-    const serverIdentity = this.identity;
-    if (client === null || serverIdentity === null) {
-      this.state.quickOpenHits = null;
-      this.render();
-      return;
-    }
-    const response = await client.quickOpen({
-      query,
-      pinnedNoteIds: [...this.state.pinned],
-      recentNoteIds: this.state.recent,
-      limit: 50,
-    });
-    if (request !== this.quickOpenRequestSeq || this.state.quickOpenQuery.trim() !== query ||
-      !this.isCurrentVault(serverIdentity, client)) return;
-    this.state.quickOpenHits = response.hits;
-    this.render();
-  }
-
   private async openRecentNote(noteId: ReturnType<typeof toNoteId>): Promise<void> {
     await this.openNote(noteId);
-    this.state.searchOpen = false;
-    this.state.quickOpen = false;
-    this.overlayReturn = null;
-    this.editor?.focus();
-    this.render();
-  }
-
-  private async openQuickOpenHit(hit: V2QuickOpenResponse["hits"][number]): Promise<void> {
-    const client = this.vaultClient;
-    const serverIdentity = this.identity;
-    if (client === null || serverIdentity === null) return;
-    const document = await client.openNote(hit.noteId);
-    if (!this.isCurrentVault(serverIdentity, client)) return;
-    if (document.meta.sourceHash !== hit.sourceHash) {
-      await this.updateQuickOpen();
-      return;
-    }
-    this.state.notes.set(document.meta.noteId, document.meta);
-    await this.openNote(toNoteId(hit.noteId));
-    const active = activeTab(this.state);
-    const source = active === undefined ? null : loadedDraft(active);
-    if (source === null || await canonicalSourceHash(source) !== hit.sourceHash) {
-      await this.updateQuickOpen();
-      return;
-    }
-    this.state.quickOpen = false;
     this.state.searchOpen = false;
     this.overlayReturn = null;
     this.editor?.focus();
@@ -1184,7 +1131,6 @@ export class TansuApp {
       this.editor?.revealSelection({ anchor: hit.sourceRange.startUtf16, head: hit.sourceRange.endUtf16 });
     }
     this.state.searchOpen = false;
-    this.state.quickOpen = false;
     this.state.commandOpen = false;
     this.state.findOpen = false;
     this.overlayReturn = null;
@@ -1552,7 +1498,6 @@ export class TansuApp {
         this.captureOverlayReturn();
         this.clearFindHighlights();
         this.state.searchOpen = true;
-        this.state.quickOpen = false;
         this.state.findOpen = false;
         this.state.commandOpen = false;
         this.state.searchOverlayQuery = "";
@@ -1588,34 +1533,11 @@ export class TansuApp {
         this.runAsync(this.openRecentNote(event.noteId), "Open failed");
         return;
       }
-      case "quickOpen.open": {
-        this.captureOverlayReturn();
-        this.clearFindHighlights();
-        this.state.quickOpen = true;
-        this.state.searchOpen = false;
-        this.state.findOpen = false;
-        this.state.commandOpen = false;
-        this.state.quickOpenQuery = "";
-        this.state.quickOpenHits = null;
-        this.runAsync(this.updateQuickOpen(), "Quick open failed");
-        this.render();
-        return;
-      }
-      case "quickOpen.input": {
-        this.state.quickOpenQuery = event.query;
-        this.runAsync(this.updateQuickOpen(), "Quick open failed");
-        return;
-      }
-      case "quickOpen.hitOpen": {
-        this.runAsync(this.openQuickOpenHit(event.hit), "Quick-open result could not be opened");
-        return;
-      }
       case "find.open": {
         this.captureOverlayReturn();
         this.state.findOpen = true;
         this.state.findIndex = 0;
         this.state.searchOpen = false;
-        this.state.quickOpen = false;
         this.state.commandOpen = false;
         this.setFindHighlights(this.editor?.find(this.state.findQuery) ?? [], 0);
         this.render();
@@ -1685,7 +1607,6 @@ export class TansuApp {
         this.clearFindHighlights();
         this.state.commandOpen = true;
         this.state.searchOpen = false;
-        this.state.quickOpen = false;
         this.state.findOpen = false;
         this.state.commandFilter = "";
         this.render();
@@ -1825,10 +1746,6 @@ export class TansuApp {
     switch (id) {
       case "create": {
         this.runAsync(this.commandCreate(), "Create failed");
-        break;
-      }
-      case "open": {
-        this.dispatch({ type: "quickOpen.open" });
         break;
       }
       case "save": {
@@ -2085,7 +2002,6 @@ export class TansuApp {
     this.clearFindHighlights();
     this.state.commandOpen = false;
     this.state.searchOpen = false;
-    this.state.quickOpen = false;
     this.state.findOpen = false;
     this.state.revisionsOpen = false;
     this.state.settingsOpen = false;
@@ -2098,7 +2014,7 @@ export class TansuApp {
   }
 
   private hasOverlay(): boolean {
-    return this.state.commandOpen || this.state.searchOpen || this.state.quickOpen || this.state.findOpen || this.state.revisionsOpen || this.state.settingsOpen || this.state.conflictDraft !== null || this.state.noteDialog !== null || this.state.contextMenu !== null;
+    return this.state.commandOpen || this.state.searchOpen || this.state.findOpen || this.state.revisionsOpen || this.state.settingsOpen || this.state.conflictDraft !== null || this.state.noteDialog !== null || this.state.contextMenu !== null;
   }
 
   private captureOverlayReturn(): void {
@@ -2196,7 +2112,6 @@ export class TansuApp {
     this.state.authError = null;
     this.state.boot = null;
     this.state.searchOpen = false;
-    this.state.quickOpen = false;
     this.state.findOpen = false;
     this.state.commandOpen = false;
     this.state.revisionsOpen = false;

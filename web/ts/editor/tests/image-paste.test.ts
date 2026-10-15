@@ -2,6 +2,7 @@ import { EditorView } from "@codemirror/view";
 import { Transaction } from "@codemirror/state";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createCodeMirrorEditor, type EditorHandle } from "../codemirror-adapter.js";
+import * as imageEncoder from "../image-encoder.js";
 import type { EditorImagePasteState, EditorImageUploadRequest, EditorImageUploadResult } from "../tansu-extensions.js";
 
 type Deferred<T> = {
@@ -33,27 +34,26 @@ const restores: Array<() => void> = [];
 
 function installImageApis() {
   const bitmapClose = vi.fn();
-  const canvasConvert = vi.fn(async ({ type }: ImageEncodeOptions) =>
-    new Blob(["webp"], { type: type ?? "image/webp" })
+  const imageData = { width: 12, height: 8, data: new Uint8ClampedArray(12 * 8 * 4) } as ImageData;
+  const context = {
+    drawImage: vi.fn(),
+    getImageData: vi.fn(() => imageData),
+  } as unknown as CanvasRenderingContext2D;
+  const getContextDescriptor = Object.getOwnPropertyDescriptor(HTMLCanvasElement.prototype, "getContext");
+  Object.defineProperty(HTMLCanvasElement.prototype, "getContext", {
+    configurable: true,
+    value: vi.fn(() => context),
+    writable: true,
+  });
+  const encode = vi.spyOn(imageEncoder, "encodeImageDataAsWebp").mockResolvedValue(
+    new Blob(["webp"], { type: "image/webp" }),
   );
   const bitmapDescriptor = Object.getOwnPropertyDescriptor(globalThis, "createImageBitmap");
-  const canvasDescriptor = Object.getOwnPropertyDescriptor(globalThis, "OffscreenCanvas");
   Object.defineProperty(globalThis, "createImageBitmap", {
     configurable: true,
     value: vi.fn(async () => ({ width: 12, height: 8, close: bitmapClose })),
     writable: true,
   });
-  Object.defineProperty(globalThis, "OffscreenCanvas", {
-    configurable: true,
-    value: vi.fn(function () {
-      return {
-        getContext: () => ({ drawImage: vi.fn() }),
-        convertToBlob: canvasConvert,
-      };
-    }),
-    writable: true,
-  });
-
   const createUrl = vi.fn(() => "blob:image-preview");
   const revokeUrl = vi.fn();
   const createUrlDescriptor = Object.getOwnPropertyDescriptor(URL, "createObjectURL");
@@ -64,15 +64,15 @@ function installImageApis() {
   restores.push(() => {
     if (bitmapDescriptor) Object.defineProperty(globalThis, "createImageBitmap", bitmapDescriptor);
     else Reflect.deleteProperty(globalThis, "createImageBitmap");
-    if (canvasDescriptor) Object.defineProperty(globalThis, "OffscreenCanvas", canvasDescriptor);
-    else Reflect.deleteProperty(globalThis, "OffscreenCanvas");
+    if (getContextDescriptor) Object.defineProperty(HTMLCanvasElement.prototype, "getContext", getContextDescriptor);
+    else Reflect.deleteProperty(HTMLCanvasElement.prototype, "getContext");
     if (createUrlDescriptor) Object.defineProperty(URL, "createObjectURL", createUrlDescriptor);
     else Reflect.deleteProperty(URL, "createObjectURL");
     if (revokeUrlDescriptor) Object.defineProperty(URL, "revokeObjectURL", revokeUrlDescriptor);
     else Reflect.deleteProperty(URL, "revokeObjectURL");
   });
 
-  return { bitmapClose, canvasConvert, createUrl, revokeUrl };
+  return { bitmapClose, context, createUrl, encode, imageData, revokeUrl };
 }
 
 function mountEditor(
@@ -128,7 +128,7 @@ describe("CodeMirror image paste uploads", () => {
   });
 
   it("inserts into the captured session and selection after switching notes", async () => {
-    const { bitmapClose, canvasConvert, createUrl, revokeUrl } = installImageApis();
+    const { bitmapClose, createUrl, encode, imageData, revokeUrl } = installImageApis();
     const requestSeen = deferred<EditorImageUploadRequest>();
     const response = deferred<EditorImageUploadResult>();
     const finished = deferred<EditorImagePasteState>();
@@ -146,6 +146,8 @@ describe("CodeMirror image paste uploads", () => {
 
     view.dispatch({ selection: { anchor: 7 } });
     const event = pasteImage(view);
+    const preview = view.dom.querySelector<HTMLImageElement>(".tansu-pasted-image-preview img");
+    expect(preview?.src).toBe("blob:image-preview");
     const request = await requestSeen.promise;
     // oxlint-disable-next-line vitest/prefer-to-be-truthy -- Keep the exact boolean result.
     expect(event.defaultPrevented).toBe(true);
@@ -156,7 +158,7 @@ describe("CodeMirror image paste uploads", () => {
       image: { type: "image/webp" },
     });
     expect(states[0]).toMatchObject({ status: "uploading", previewUrl: "blob:image-preview" });
-    expect(canvasConvert).toHaveBeenCalledWith({ type: "image/webp", quality: 0.85 });
+    expect(encode).toHaveBeenCalledWith(imageData);
     expect(bitmapClose).toHaveBeenCalledTimes(1);
     expect(createUrl).toHaveBeenCalledTimes(1);
 
@@ -165,6 +167,7 @@ describe("CodeMirror image paste uploads", () => {
     editor.attachSession(second);
     response.resolve({ name: "z-images/photo.webp", markdown: "![[z-images/photo.webp]]" });
     await expect(finished.promise).resolves.toMatchObject({ status: "inserted", noteId: "note-a", revision: 0 });
+    expect(view.dom.querySelector(".tansu-pasted-image-preview")).toBeNull();
 
     expect(editor.getSnapshot()?.source).toBe("another note");
     editor.attachSession(first);
@@ -180,7 +183,7 @@ describe("CodeMirror image paste uploads", () => {
   });
 
   it("uploads existing WebP bytes without re-encoding them", async () => {
-    const { bitmapClose, canvasConvert } = installImageApis();
+    const { bitmapClose, encode } = installImageApis();
     const requestSeen = deferred<EditorImageUploadRequest>();
     const finished = deferred<EditorImagePasteState>();
     const { editor, view } = mountEditor("text", {
@@ -199,7 +202,7 @@ describe("CodeMirror image paste uploads", () => {
     await expect(request.image.text()).resolves.toBe("image-bytes");
     await expect(finished.promise).resolves.toMatchObject({ status: "inserted" });
     expect(bitmapClose).not.toHaveBeenCalled();
-    expect(canvasConvert).not.toHaveBeenCalled();
+    expect(encode).not.toHaveBeenCalled();
     expect(editor.getSnapshot()?.source).toBe("![[z-images/photo.webp]]text");
   });
 

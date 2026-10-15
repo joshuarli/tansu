@@ -33,7 +33,10 @@ import { wikiLinks } from "./vendor/atomic/wiki-links.js";
 import { calloutDecoration } from "./callout-decoration.js";
 import { sanitizeHtmlToMarkdown } from "./clipboard.js";
 import { findLiteral, outlineFromSyntaxTree, type FindMatch, type Outline, type OutlineHeading } from "./source-navigation.js";
+import { encodeImageDataAsWebp } from "./image-encoder.js";
 import { tagsSourceEdit } from "./tag-source.js";
+import { tufteNotes } from "./tufte-notes.js";
+import { addPendingImagePreview, pendingImagePreviews, removePendingImagePreview } from "./pasted-image-preview.js";
 import {
   createCalloutExtension,
   type EditorChange,
@@ -448,8 +451,10 @@ function editorExtensions(config: EditorConfig, live: boolean, onFrontmatterTogg
   extensions.push(
     inlinePreview(config.onLinkOpen ? { onLinkClick: config.onLinkOpen } : {}),
     imageBlocks((source) => resolveMarkdownImageUrl(source, resolveVaultAsset)),
+    pendingImagePreviews,
     tables(config.onLinkOpen ? { onLinkClick: config.onLinkOpen } : {}),
     calloutDecoration({ icons: callout.icons }),
+    tufteNotes(),
   );
   if (configured.some((extension) => extension.kind === "wiki-links")) {
     extensions.push(wikiLinks(wikiConfig));
@@ -594,6 +599,15 @@ export function createCodeMirrorEditor(container: HTMLElement, initialConfig: Ed
     notifyImagePasteState({ ...imagePasteContext(paste), ...outcome });
   }
 
+  function removeImagePastePreview(paste: PendingImagePaste): void {
+    queueMicrotask(() => {
+      if (disposed) return;
+      const transaction = { effects: removePendingImagePreview.of(paste.uploadId) };
+      if (activeSession === paste.session) view.dispatch(transaction);
+      else paste.data.state = paste.data.state.update(transaction).state;
+    });
+  }
+
   function markImagePasteFinished(paste: PendingImagePaste): boolean {
     if (paste.finished) return false;
     paste.finished = true;
@@ -603,6 +617,7 @@ export function createCodeMirrorEditor(container: HTMLElement, initialConfig: Ed
 
   function finishImagePaste(paste: PendingImagePaste, outcome: ImagePasteOutcome): void {
     if (!markImagePasteFinished(paste)) return;
+    removeImagePastePreview(paste);
     notifyImagePaste(paste, outcome);
   }
 
@@ -652,15 +667,19 @@ export function createCodeMirrorEditor(container: HTMLElement, initialConfig: Ed
   async function encodeImageAsWebp(file: File): Promise<Blob> {
     if (file.type === "image/webp") return file;
     const bitmap = await createImageBitmap(file);
+    const canvas = document.createElement("canvas");
+    canvas.width = bitmap.width;
+    canvas.height = bitmap.height;
     try {
-      const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
       const context = canvas.getContext("2d");
       if (context === null) throw new Error("Could not create an image conversion context");
       context.drawImage(bitmap, 0, 0);
-      const image = await canvas.convertToBlob({ type: "image/webp", quality: 0.85 });
+      const image = await encodeImageDataAsWebp(context.getImageData(0, 0, bitmap.width, bitmap.height));
       if (image.type !== "image/webp") throw new Error("Browser did not convert the pasted image to WebP");
       return image;
     } finally {
+      canvas.width = 0;
+      canvas.height = 0;
       bitmap.close();
     }
   }
@@ -671,6 +690,7 @@ export function createCodeMirrorEditor(container: HTMLElement, initialConfig: Ed
     const transaction = {
       changes: { from, to, insert: markdown },
       selection: { anchor: from + markdown.length },
+      effects: removePendingImagePreview.of(paste.uploadId),
       annotations: [transactionOrigin.of("userEdit"), Transaction.userEvent.of("input.image-paste")],
     };
 
@@ -777,6 +797,13 @@ export function createCodeMirrorEditor(container: HTMLElement, initialConfig: Ed
       finished: false,
     };
     imagePastes.set(paste.uploadId, paste);
+    view.dispatch({
+      effects: addPendingImagePreview.of({
+        uploadId: paste.uploadId,
+        position: paste.selection.head,
+        src: paste.previewUrl,
+      }),
+    });
     notifyImagePasteState({
       ...imagePasteContext(paste),
       status: "uploading",

@@ -5,7 +5,6 @@ const nativeCommands: readonly CommandItem[] = [
   { id: "create", label: "New Note", shortcut: "⌃N" },
   { id: "save", label: "Save Note", shortcut: "⌘S" },
   { id: "search", label: "Search Notes", shortcut: "/" },
-  { id: "open", label: "Recent Notes", shortcut: "⌃O" },
   { id: "find", label: "Find in Note", shortcut: "⌃F" },
   { id: "rename", label: "Rename Current Note", shortcut: "⌃L" },
   { id: "close", label: "Close Current Tab", shortcut: "⌃X" },
