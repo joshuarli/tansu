@@ -1,0 +1,22 @@
+{
+  "files": [
+    {
+      "url": "/",
+      "file": "index.html",
+      "contentType": "text/html; charset=utf-8",
+      "immutable": false
+    },
+    {
+      "url": "/assets/app.c46c7eaff584073d.js",
+      "file": "assets/app.c46c7eaff584073d.js",
+      "contentType": "text/javascript; charset=utf-8",
+      "immutable": true
+    },
+    {
+      "url": "/assets/app.0551376eecea8019.css",
+      "file": "assets/app.0551376eecea8019.css",
+      "contentType": "text/css; charset=utf-8",
+      "immutable": true
+    }
+  ]
+}

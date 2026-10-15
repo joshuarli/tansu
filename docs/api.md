@@ -66,6 +66,15 @@ in v2.
 Legacy `/api/` routes return `api_version_unsupported` before dispatch. They do
 not interpret `X-Tansu-Vault` or mutate a default vault.
 
+### Rust API compatibility
+
+The V1 Rust adapters `api::handle_api`, `api::api_error_response`,
+`App::vault_entries`, `App::handle_events`, index-based `App::vault`, and
+`App::handle_log_stream` were removed with V2. Their removal breaks downstream
+Rust callers. The remaining public `VaultRuntime` methods and DTOs have not
+been audited for external use. Audit consumers before removing more Rust API
+surface.
+
 ### Source and hashes
 
 Editor source is the complete Markdown file, including frontmatter, represented

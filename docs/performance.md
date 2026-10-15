@@ -26,3 +26,16 @@ count, live editor views, editor DOM mounts and removals, event stream count,
 server RSS, queue capacities, and overflow count at idle checkpoints under
 `.work/tmp/bench-results`. Search queue occupancy is not exposed; the runner
 checks the public dirty/degraded state and recorded overflow events.
+
+## Recorded results
+
+On 2026-10-14, the corrected search-to-painted benchmark measured the original
+Rust path at 743.4 ms median and 769.2 ms p95. The optimized path measured
+44.9 ms median and 51.7 ms p95. The earlier `chromium.search` result measured
+the API request, not painted results. API p95 fell from 781 ms to 31.02 ms.
+The idle-host `make bench` gate passed its 100 ms search-to-painted target.
+
+The 2026-10-14 long-session run used Chromium 156.0.8078.4 and 20 rounds. Heap
+after forced GC grew by 2,668,000 bytes and tapered over the final five
+checkpoints. No leak root was established, and the cause of the growth remains
+unresolved.
