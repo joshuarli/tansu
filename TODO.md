@@ -1,7 +1,7 @@
 # Tansu2 TODO
 
 Prefix: TNS
-Next: 37
+Next: 38
 
 ### TNS-024 · P1 · Serialize vault mutations across server processes
 
@@ -91,5 +91,14 @@ Next: 37
 - **Problem:** The release workflow builds and uploads archives without running the existing packaged-binary smoke check. A binary can compile and still fail its packaged runtime checks after the release is published.
 - **Recommendation:** Run the narrow package smoke check on release artifacts before uploading them.
 - **Fix with:** none
+- **Effort:** S
+
+### TNS-037 · P2 · Use the search shortcut in the real-server e2e
+
+- **Area:** Tests
+- **Where:** `web/ts/e2e/server.test.ts:155-156`, `web/ts/app.ts:300`
+- **Problem:** The real-server startup test presses `/` and waits for search results, while the app opens search only for Ctrl+/. The filtered Chromium test fails on this mismatch on both the current tree and the TNS-035 base, so the e2e suite cannot pass this case.
+- **Recommendation:** Press `Control+/` or use a shared helper that matches the app shortcut.
+- **Fix with:** renovate-tests
 - **Effort:** S
 
