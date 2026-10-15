@@ -28,8 +28,10 @@ Source mode reconfigures the same document through a CodeMirror compartment. It
 does not create a textarea or serialize the editor DOM.
 
 The note title and tag controls render inside the scrolling editor header, in
-that order before Markdown content. The tag row follows the active note and
-keeps its read-only and frontmatter-lock states.
+that order before Markdown content. Live mode folds frontmatter by default.
+The Frontmatter control appears before the tag controls and reveals the source
+for editing. Source mode always shows the full document. The tag row follows
+the active note and keeps its read-only and frontmatter-lock states.
 
 ## Read-only sessions
 

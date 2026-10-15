@@ -118,6 +118,46 @@ describe("CodeMirror editor sessions", () => {
     expect(editor.getSnapshot()?.mode).toBe("live");
   });
 
+  it("folds frontmatter in live mode until the header control reveals it", () => {
+    const source = "---\ntags:\n  - alpha\n---\n\n# Body\n";
+    const { container, editor } = mountEditor(source, { noteTitle: "Note" });
+    const button = container.querySelector<HTMLButtonElement>(".tag-frontmatter-toggle");
+
+    expect(button).not.toBeNull();
+    expect(button?.hidden).toBeFalsy();
+    expect(button?.getAttribute("aria-expanded")).toBe("false");
+    expect(container.querySelector(".cm-content")?.textContent).not.toContain("tags:");
+    expect(editor.getSnapshot()).toMatchObject({ source, mode: "live", revision: 0, dirty: false });
+
+    button?.click();
+
+    expect(button?.getAttribute("aria-expanded")).toBe("true");
+    expect(container.querySelector(".cm-content")?.textContent).toContain("tags:");
+    editor.revealSelection({ anchor: source.indexOf("tags:") + 2, head: source.indexOf("tags:") + 2 });
+    button?.click();
+
+    expect(button?.getAttribute("aria-expanded")).toBe("false");
+    expect(container.querySelector(".cm-content")?.textContent).not.toContain("tags:");
+    expect(editor.getSnapshot()).toMatchObject({
+      source,
+      selection: { anchor: source.indexOf("# Body"), head: source.indexOf("# Body") },
+      revision: 0,
+      dirty: false,
+    });
+    editor.revealSelection({ anchor: source.indexOf("tags:") + 2, head: source.indexOf("tags:") + 2 });
+    expect(container.querySelector(".cm-content")?.textContent).not.toContain("tags:");
+    expect(editor.getSnapshot()?.selection).toStrictEqual({
+      anchor: source.indexOf("# Body"),
+      head: source.indexOf("# Body"),
+    });
+
+    editor.setMode("source");
+    expect(container.querySelector(".cm-content")?.textContent).toContain("tags:");
+    expect(button?.hidden).toBeTruthy();
+    editor.setMode("live");
+    expect(container.querySelector(".cm-content")?.textContent).not.toContain("tags:");
+  });
+
   it("rejects editor, extension, task, table, paste, and resize changes while read-only", () => {
     const source = "- [ ] task\n\n| A | B |\n| --- | --- |\n| x | y |\n\n![[photo]]";
     const { container, editor, view } = mountEditor(source, {

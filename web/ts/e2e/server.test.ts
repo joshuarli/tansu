@@ -167,11 +167,56 @@ describe("real server harness", () => {
     const firstHeading = page.locator(".outline-row").filter({ hasText: "Visual Check" });
     const secondHeading = page.locator(".outline-row").filter({ hasText: "Second Section" });
     await expect.poll(() => firstHeading.getAttribute("aria-current")).toBe("location");
+    const outlineBox = await page.locator(".note-outline").boundingBox();
+    const workspaceBox = await page.locator(".workspace").boundingBox();
+    if (outlineBox === null || workspaceBox === null) throw new Error("outline layout is not visible");
+    expect(outlineBox.x + outlineBox.width).toBeLessThan(workspaceBox.x);
 
     await page.locator("#editor-mount .cm-scroller").evaluate((scroller) => {
       scroller.scrollTop = scroller.scrollHeight;
     });
     await expect.poll(() => secondHeading.getAttribute("aria-current")).toBe("location");
+    await page.close();
+  });
+
+  it("folds frontmatter until revealed and places clicks on the selected line", async () => {
+    const page = await newLoggedPage();
+    await page.goto(baseUrl);
+    await page.waitForSelector(".main");
+    await createCodeMirrorNote(page, "Frontmatter Layout");
+    const source = ["---", "tags:", "  - alpha", "---", "", "# Body", ""].join("\n");
+    const save = page.waitForResponse((response) =>
+      response.request().method() === "PUT" && response.url().includes("/notes/") && response.status() === 200
+    );
+    await page.locator("#editor-mount .cm-content").fill(source);
+    await page.keyboard.press(`${shortcutModifier()}+s`);
+    await save;
+
+    const content = page.locator("#editor-mount .cm-content");
+    const disclosure = page.locator("#editor-mount .tag-frontmatter-toggle");
+    await expect.poll(() =>
+      page.locator("#editor-mount .cm-scroller").evaluate((scroller) => getComputedStyle(scroller).scrollbarWidth)
+    ).toBe("none");
+    await expect.poll(() => disclosure.isVisible()).toBe(true);
+    await expect.poll(() => disclosure.getAttribute("aria-expanded")).toBe("true");
+    await disclosure.click();
+    await expect.poll(() => content.textContent()).not.toContain("tags:");
+    await expect.poll(() => disclosure.getAttribute("aria-expanded")).toBe("false");
+    await disclosure.click();
+    await expect.poll(() => content.textContent()).toContain("tags:");
+    const metadataLine = page.locator("#editor-mount .cm-line.cm-frontmatter-line").filter({ hasText: "tags:" });
+    const lineBox = await metadataLine.boundingBox();
+    if (lineBox === null) throw new Error("frontmatter line is not visible after reveal");
+    await page.mouse.click(lineBox.x + 24, lineBox.y + lineBox.height / 2);
+    await expect.poll(() => page.locator("#editor-mount .cm-line.cm-activeLine").textContent()).toContain("tags:");
+    await expect.poll(async () => {
+      const caret = await page.locator("#editor-mount .cm-cursor").first().boundingBox();
+      return caret !== null && caret.y >= lineBox.y && caret.y + caret.height <= lineBox.y + lineBox.height;
+    }).toBe(true);
+    const caretBox = await page.locator("#editor-mount .cm-cursor").first().boundingBox();
+    if (caretBox === null) throw new Error("editor caret is not visible after click");
+    expect(caretBox.y).toBeGreaterThanOrEqual(lineBox.y);
+    expect(caretBox.y + caretBox.height).toBeLessThanOrEqual(lineBox.y + lineBox.height);
     await page.close();
   });
 

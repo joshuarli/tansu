@@ -1,6 +1,7 @@
 import { closeBrackets, closeBracketsKeymap } from "@codemirror/autocomplete";
 import { indentWithTab, defaultKeymap, history, historyKeymap, redo, undo } from "@codemirror/commands";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
+import { codeFolding, foldEffect, foldedRanges, unfoldEffect } from "@codemirror/language";
 import {
   Annotation,
   Compartment,
@@ -68,12 +69,17 @@ function sameNoteTags(left: NoteTags | undefined, right: NoteTags | undefined): 
 }
 
 class NoteHeaderWidget extends WidgetType {
-  constructor(readonly title: string, readonly tags: NoteTags | undefined) {
+  constructor(
+    readonly title: string,
+    readonly tags: NoteTags | undefined,
+    readonly onFrontmatterToggle: () => void,
+  ) {
     super();
   }
 
   override eq(other: WidgetType): boolean {
-    return other instanceof NoteHeaderWidget && this.title === other.title && sameNoteTags(this.tags, other.tags);
+    return other instanceof NoteHeaderWidget && this.title === other.title &&
+      sameNoteTags(this.tags, other.tags) && this.onFrontmatterToggle === other.onFrontmatterToggle;
   }
 
   override toDOM(): HTMLElement {
@@ -84,7 +90,7 @@ class NoteHeaderWidget extends WidgetType {
     title.className = "document-title";
     title.textContent = this.title;
     header.append(title);
-    if (this.tags !== undefined) header.append(renderNoteTags(this.tags));
+    header.append(renderNoteTags(this.tags, this.onFrontmatterToggle));
     return header;
   }
 
@@ -93,43 +99,59 @@ class NoteHeaderWidget extends WidgetType {
   }
 }
 
-function renderNoteTags(tags: NoteTags): HTMLElement {
+function renderNoteTags(tags: NoteTags | undefined, onFrontmatterToggle: () => void): HTMLElement {
   const row = document.createElement("div");
   row.className = "tag-row";
-  for (const tag of tags.tags) {
-    const remove = document.createElement("button");
-    remove.type = "button";
-    remove.className = "tag";
-    remove.disabled = tags.status !== "editable";
-    remove.title = `Remove ${tag}`;
-    remove.setAttribute("aria-label", `Remove ${tag}`);
-    remove.textContent = `#${tag} x`;
-    remove.addEventListener("click", () => tags.onRemoveTag(tag));
-    row.append(remove);
-  }
-  if (tags.status !== "read-only") {
-    const add = document.createElement("button");
-    add.type = "button";
-    add.className = "tag tag-add";
-    add.disabled = tags.status === "locked";
-    add.title = "Add tag";
-    add.setAttribute("aria-label", "Add tag");
-    add.textContent = "+ tag";
-    add.addEventListener("click", tags.onAddTag);
-    row.append(add);
-  }
-  if (tags.status === "locked") {
-    const locked = document.createElement("span");
-    locked.className = "tag-disabled";
-    locked.textContent = "Tags locked";
-    row.append(locked);
+  row.hidden = tags === undefined;
+  const frontmatterToggle = document.createElement("button");
+  frontmatterToggle.type = "button";
+  frontmatterToggle.className = "tag tag-frontmatter-toggle";
+  frontmatterToggle.hidden = true;
+  frontmatterToggle.title = "Show frontmatter";
+  frontmatterToggle.setAttribute("aria-label", "Show frontmatter");
+  frontmatterToggle.setAttribute("aria-expanded", "false");
+  frontmatterToggle.textContent = "Frontmatter";
+  frontmatterToggle.addEventListener("pointerdown", (event) => event.preventDefault());
+  frontmatterToggle.addEventListener("click", onFrontmatterToggle);
+  row.append(frontmatterToggle);
+  if (tags !== undefined) {
+    for (const tag of tags.tags) {
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "tag";
+      remove.disabled = tags.status !== "editable";
+      remove.title = `Remove ${tag}`;
+      remove.setAttribute("aria-label", `Remove ${tag}`);
+      remove.textContent = `#${tag} x`;
+      remove.addEventListener("click", () => tags.onRemoveTag(tag));
+      row.append(remove);
+    }
+    if (tags.status !== "read-only") {
+      const add = document.createElement("button");
+      add.type = "button";
+      add.className = "tag tag-add";
+      add.disabled = tags.status === "locked";
+      add.title = "Add tag";
+      add.setAttribute("aria-label", "Add tag");
+      add.textContent = "+ tag";
+      add.addEventListener("click", tags.onAddTag);
+      row.append(add);
+    }
+    if (tags.status === "locked") {
+      const locked = document.createElement("span");
+      locked.className = "tag-disabled";
+      locked.textContent = "Tags locked";
+      row.append(locked);
+    }
   }
   return row;
 }
 
-function frontmatterDecorations(state: EditorState): DecorationSet {
+type FrontmatterRange = { from: number; to: number; closingLine: number };
+
+function frontmatterRange(state: EditorState): FrontmatterRange | null {
   const firstLine = state.doc.line(1);
-  if (firstLine.text !== "---" && firstLine.text !== "\uFEFF---") return Decoration.none;
+  if (firstLine.text !== "---" && firstLine.text !== "\uFEFF---") return null;
 
   let closingLine = 0;
   for (let number = 2; number <= state.doc.lines; number++) {
@@ -138,13 +160,46 @@ function frontmatterDecorations(state: EditorState): DecorationSet {
       break;
     }
   }
-  if (closingLine === 0) return Decoration.none;
+  if (closingLine === 0) return null;
+
+  const closing = state.doc.line(closingLine);
+  let to = closing.to;
+  while (to < state.doc.length && state.doc.sliceString(to, to + 1) === "\n") to++;
+  return { from: firstLine.from, to, closingLine };
+}
+
+function frontmatterDecorations(state: EditorState): DecorationSet {
+  const frontmatter = frontmatterRange(state);
+  if (frontmatter === null) return Decoration.none;
 
   const decorations = [];
-  for (let number = 1; number <= closingLine; number++) {
+  for (let number = 1; number <= frontmatter.closingLine; number++) {
     decorations.push(Decoration.line({ class: "cm-frontmatter-line" }).range(state.doc.line(number).from));
   }
   return Decoration.set(decorations, true);
+}
+
+function hasFrontmatterFold(state: EditorState, range: FrontmatterRange): boolean {
+  let found = false;
+  foldedRanges(state).between(range.from, range.to, (from, to) => {
+    if (from === range.from && to > from) found = true;
+  });
+  return found;
+}
+
+function selectionTouchesFrontmatter(selection: EditorSelection, range: FrontmatterRange): boolean {
+  return selection.ranges.some((selected) => selected.empty
+    ? selected.head >= range.from && selected.head < range.to
+    : selected.from < range.to && selected.to > range.from);
+}
+
+function foldFrontmatterState(state: EditorState, mode: EditorMode, expanded: boolean): EditorState {
+  const range = frontmatterRange(state);
+  if (range === null || mode !== "live" || expanded) return state;
+  return state.update({
+    selection: EditorSelection.cursor(range.to),
+    effects: foldEffect.of(range),
+  }).state;
 }
 
 const frontmatterAppearance = StateField.define<DecorationSet>({
@@ -227,6 +282,7 @@ type SessionData = {
   revision: number;
   dirty: boolean;
   mode: EditorMode;
+  frontmatterExpanded: boolean;
   readOnly: boolean;
   sourceCache: string;
   sourceCacheRevision: number;
@@ -333,11 +389,11 @@ function sessionData(session: EditorSession, owner: symbol): SessionData {
   return data;
 }
 
-function editorExtensions(config: EditorConfig, live: boolean): Extension[] {
+function editorExtensions(config: EditorConfig, live: boolean, onFrontmatterToggle: () => void): Extension[] {
   const extensions: Extension[] = [];
   if ((config.noteTitle !== undefined && config.noteTitle !== "") || config.noteTags !== undefined) {
     const decoration = Decoration.widget({
-      widget: new NoteHeaderWidget(config.noteTitle ?? "", config.noteTags),
+      widget: new NoteHeaderWidget(config.noteTitle ?? "", config.noteTags, onFrontmatterToggle),
       side: -1,
       block: true,
     }).range(0);
@@ -463,11 +519,14 @@ function createState(
   updateListener: Extension,
   clipboardHandler: Extension,
   pasteHandler: Extension,
+  onFrontmatterToggle: () => void,
 ): EditorState {
   return EditorState.create({
     doc: source,
     extensions: [
       history(),
+      codeFolding({ placeholderText: "" }),
+      EditorView.atomicRanges.of((view) => foldedRanges(view.state)),
       findHighlightField,
       frontmatterAppearance,
       markdown({ base: markdownLanguage, codeLanguages: [], extensions: [highlightMarkdown] }),
@@ -484,7 +543,7 @@ function createState(
           ? { annotations: transactionOrigin.of("userEdit") }
           : null,
       ),
-      modeCompartment.of(editorExtensions(config, mode === "live")),
+      modeCompartment.of(editorExtensions(config, mode === "live", onFrontmatterToggle)),
       readOnlyCompartment.of(readOnlyExtension(readOnly)),
       drawSelection(),
       rectangularSelection(),
@@ -732,13 +791,23 @@ export function createCodeMirrorEditor(container: HTMLElement, initialConfig: Ed
     });
   }
 
-  let scheduleSelectionToolbarSync = (): void => {};
+  let scheduleSelectionToolbarSyncAction: (() => void) | null = null;
+  let toggleFrontmatterAction: (() => void) | null = null;
+  let syncFrontmatterDisclosureAction: (() => void) | null = null;
+  const scheduleSelectionToolbarSync = () => scheduleSelectionToolbarSyncAction?.();
+  const toggleFrontmatter = () => toggleFrontmatterAction?.();
+  const syncFrontmatterDisclosure = () => syncFrontmatterDisclosureAction?.();
   const updateListener = EditorView.updateListener.of((update) => {
     scheduleSelectionToolbarSync();
     if (activeSession === null) return;
     const data = sessionData(activeSession, owner);
     data.state = update.state;
     data.scroll = { top: view.scrollDOM.scrollTop, left: view.scrollDOM.scrollLeft };
+    if (update.docChanged) {
+      const range = frontmatterRange(update.state);
+      data.frontmatterExpanded = range !== null && !hasFrontmatterFold(update.state, range);
+    }
+    syncFrontmatterDisclosure();
     scheduleActiveHeadingSync();
     const userTransactions = update.transactions.filter(
       (transaction) => transaction.docChanged && transaction.annotation(transactionOrigin) === "userEdit",
@@ -827,12 +896,71 @@ export function createCodeMirrorEditor(container: HTMLElement, initialConfig: Ed
     updateListener,
     clipboardHandler,
     pasteHandler,
+    toggleFrontmatter,
   );
   const view = new EditorView({ state: initialState, parent: container });
   if (config.className) view.dom.classList.add(config.className);
   let activeHeadingFrom: number | null | undefined;
   let activeHeadingFrame: number | null = null;
   let selectionToolbarFrame: number | null = null;
+
+  function updateFrontmatterFold(data: SessionData): void {
+    const state = view.state;
+    const range = frontmatterRange(state);
+    const folds: { from: number; to: number }[] = [];
+    foldedRanges(state).between(0, state.doc.length, (from, to) => {
+      if (from === 0) folds.push({ from, to });
+    });
+    const currentFold = folds[0] ?? null;
+    const shouldFold = range !== null && data.mode === "live" && !data.frontmatterExpanded;
+    const alreadyFolded = shouldFold && range !== null && currentFold?.to === range.to;
+    if (alreadyFolded || (!shouldFold && currentFold === null)) {
+      syncFrontmatterDisclosure();
+      return;
+    }
+
+    const effects: StateEffect<unknown>[] = [];
+    if (currentFold !== null) effects.push(unfoldEffect.of(currentFold));
+    if (shouldFold && range !== null) effects.push(foldEffect.of(range));
+    const selectionTouches = shouldFold && range !== null &&
+      selectionTouchesFrontmatter(view.state.selection, range);
+    view.dispatch({
+      effects,
+      ...(selectionTouches && range !== null ? { selection: EditorSelection.cursor(range.to) } : {}),
+    });
+    data.state = view.state;
+    syncFrontmatterDisclosure();
+  }
+
+  syncFrontmatterDisclosureAction = () => {
+    if (activeSession === null) return;
+    const data = sessionData(activeSession, owner);
+    const range = frontmatterRange(view.state);
+    const button = view.dom.querySelector<HTMLButtonElement>(".tag-frontmatter-toggle");
+    const row = button?.parentElement ?? null;
+    const showFrontmatter = range !== null && data.mode === "live";
+    if (button !== null) {
+      const expanded = data.mode === "source" || (range !== null && !hasFrontmatterFold(view.state, range));
+      button.hidden = !showFrontmatter;
+      button.classList.toggle("is-expanded", expanded);
+      button.setAttribute("aria-expanded", String(expanded));
+      button.setAttribute("aria-label", `${expanded ? "Hide" : "Show"} frontmatter`);
+      button.title = `${expanded ? "Hide" : "Show"} frontmatter`;
+    }
+    if (row !== null) {
+      const hasTagControls = row.querySelector(".tag:not(.tag-frontmatter-toggle), .tag-disabled") !== null;
+      row.hidden = !hasTagControls && !showFrontmatter;
+    }
+  };
+
+  toggleFrontmatterAction = () => {
+    if (activeSession === null) return;
+    const data = sessionData(activeSession, owner);
+    const range = frontmatterRange(view.state);
+    if (range === null || data.mode !== "live") return;
+    data.frontmatterExpanded = hasFrontmatterFold(view.state, range);
+    updateFrontmatterFold(data);
+  };
 
   function syncActiveHeading(): void {
     const headings = activeSession === null ? [] : outlineFromSyntaxTree(view.state).headings;
@@ -890,16 +1018,21 @@ export function createCodeMirrorEditor(container: HTMLElement, initialConfig: Ed
   ): void {
     const effects: StateEffect<unknown>[] = [];
     if (parts.editorExtensions ?? true) {
-      effects.push(modeCompartment.reconfigure(editorExtensions(config, data.mode === "live")));
+      effects.push(modeCompartment.reconfigure(editorExtensions(config, data.mode === "live", toggleFrontmatter)));
     }
     if (parts.readOnly ?? true) effects.push(readOnlyCompartment.reconfigure(readOnlyExtension(data.readOnly)));
     if (parts.keymap ?? true) effects.push(keymapCompartment.reconfigure(editorKeymap(config)));
-    if (effects.length === 0) return;
+    if (effects.length === 0) {
+      syncFrontmatterDisclosure();
+      return;
+    }
     view.dispatch({
       effects,
       annotations: transactionOrigin.of(origin),
     });
     data.state = view.state;
+    updateFrontmatterFold(data);
+    syncFrontmatterDisclosure();
   }
 
   function currentSource(data: SessionData): string {
@@ -1015,7 +1148,7 @@ export function createCodeMirrorEditor(container: HTMLElement, initialConfig: Ed
     scheduleToolbarSync();
   }
 
-  scheduleSelectionToolbarSync = scheduleToolbarSync;
+  scheduleSelectionToolbarSyncAction = scheduleToolbarSync;
   view.dom.addEventListener("pointerdown", onEditorPointerDown);
   window.addEventListener("pointerup", onPointerUp);
   window.addEventListener("resize", scheduleToolbarSync, { passive: true });
@@ -1030,23 +1163,26 @@ export function createCodeMirrorEditor(container: HTMLElement, initialConfig: Ed
       const mode = options.mode ?? config.mode ?? "live";
       const readOnly = options.readOnly ?? config.readOnly ?? false;
       const session = Object.freeze({ noteId }) as EditorSession;
+      const state = foldFrontmatterState(createState(
+        source,
+        mode,
+        readOnly,
+        config,
+        modeCompartment,
+        readOnlyCompartment,
+        keymapCompartment,
+        updateListener,
+        clipboardHandler,
+        pasteHandler,
+        toggleFrontmatter,
+      ), mode, false);
       sessions.set(session, {
         owner,
-        state: createState(
-          source,
-          mode,
-          readOnly,
-          config,
-          modeCompartment,
-          readOnlyCompartment,
-          keymapCompartment,
-          updateListener,
-          clipboardHandler,
-          pasteHandler,
-        ),
+        state,
         revision: 0,
         dirty: false,
         mode,
+        frontmatterExpanded: false,
         readOnly,
         sourceCache: source,
         sourceCacheRevision: 0,
@@ -1148,12 +1284,15 @@ export function createCodeMirrorEditor(container: HTMLElement, initialConfig: Ed
         updateListener,
         clipboardHandler,
         pasteHandler,
+        toggleFrontmatter,
       );
+      data.state = foldFrontmatterState(data.state, data.mode, data.frontmatterExpanded);
       if (activeSession === session) {
         view.setState(data.state);
         view.scrollDOM.scrollTop = 0;
         view.scrollDOM.scrollLeft = 0;
         scheduleActiveHeadingSync();
+        syncFrontmatterDisclosure();
       }
       return { kind: "reloaded", revision: data.revision };
     },
@@ -1205,8 +1344,14 @@ export function createCodeMirrorEditor(container: HTMLElement, initialConfig: Ed
         selection.anchor > data.state.doc.length ||
         selection.head > data.state.doc.length
       ) return false;
+      const frontmatter = frontmatterRange(data.state);
+      const hiddenFrontmatterSelection = data.mode === "live" && !data.frontmatterExpanded &&
+        frontmatter !== null && selectionTouchesFrontmatter(EditorSelection.single(selection.anchor, selection.head), frontmatter);
+      const target = hiddenFrontmatterSelection
+        ? { anchor: frontmatter.to, head: frontmatter.to }
+        : selection;
       view.dispatch({
-        selection: EditorSelection.single(selection.anchor, selection.head),
+        selection: EditorSelection.single(target.anchor, target.head),
         scrollIntoView: true,
       });
       return true;
