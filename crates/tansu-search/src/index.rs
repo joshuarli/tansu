@@ -393,10 +393,7 @@ fn watermark_payload(watermark: i64) -> String {
 mod tests {
     use super::*;
 
-    #[test]
-    fn active_index_writers_stay_within_shared_memory_budget() {
-        assert!(WRITER_MEMORY_BUDGET * WRITER_COUNT <= MAX_SHARED_WRITER_MEMORY_BUDGET);
-    }
+    const _: () = assert!(WRITER_MEMORY_BUDGET * WRITER_COUNT <= MAX_SHARED_WRITER_MEMORY_BUDGET);
 
     fn identity(path: &str, revision: i64) -> NoteIdentity {
         NoteIdentity::new(

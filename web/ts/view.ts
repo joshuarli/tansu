@@ -638,9 +638,25 @@ function renderOverlays(state: State, actions: ViewActions): HTMLElement {
     const list = el("div", "command-list find-results");
     const active = activeTab(state);
     const source = active === undefined ? "" : loadedDraft(active) ?? "";
-    for (const match of actions.findMatches().slice(0, 100)) {
-      const line = source.slice(0, match.from).split("\n").length;
-      const text = source.split("\n")[line - 1]?.trim() ?? "";
+    const matches = actions.findMatches().slice(0, 100);
+    const lineStarts = [0];
+    for (let offset = 0; matches.length > 0 && offset < source.length; offset++) {
+      if (source.charCodeAt(offset) === 10) lineStarts.push(offset + 1);
+    }
+    for (const match of matches) {
+      let low = 0;
+      let high = lineStarts.length;
+      while (low < high) {
+        const middle = (low + high) >>> 1;
+        if (lineStarts[middle]! <= match.from) low = middle + 1;
+        else high = middle;
+      }
+      const lineIndex = low - 1;
+      const line = lineIndex + 1;
+      const lineStart = lineStarts[lineIndex]!;
+      const nextLineStart = lineStarts[lineIndex + 1];
+      const lineEnd = nextLineStart === undefined ? source.length : nextLineStart - 1;
+      const text = source.slice(lineStart, lineEnd).trim();
       list.append(button(
         `Line ${line}: ${text}`,
         `Reveal match on line ${line}`,

@@ -1,6 +1,6 @@
 import { execFileSync, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import net from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -18,6 +18,10 @@ const BENCH_DIR = join(REPO_ROOT, "bench");
 const RESULTS_DIR = join(REPO_ROOT, ".work", "tmp", "bench-results");
 const SEARCH_QUERY = "GlobalFoundries";
 const SEARCH_RESULT_PATH = "2025-05-16-ai-arrives-in-the-middle-east-us-strikes-a-deal-with-uae-and-ksa.md";
+const LARGE_NOTE_PATH = "tns-19-20-baseline.md";
+const LARGE_NOTE_BYTES = 1024 * 1024;
+const LARGE_NOTE_MATCHES = 100;
+const LARGE_NOTE_QUERY = "needle";
 
 const args = parseArgs(process.argv.slice(2));
 const warmups = Number(args.warmups ?? 2);
@@ -37,6 +41,7 @@ async function main() {
   let server;
   try {
     const fixture = await createBenchmarkFixture(root);
+    const largeNote = await createLargeNote(fixture.vaultOne);
     const port = await freePort();
     const baseUrl = `http://127.0.0.1:${port}`;
     const serverStart = performance.now();
@@ -53,7 +58,7 @@ async function main() {
 
     const results = {
       generatedAt: new Date().toISOString(),
-      config: { warmups, runs, browsers },
+      config: { warmups, runs, browsers, largeNote: { bytes: largeNote.bytes, matches: largeNote.matches } },
       metrics: {},
     };
     await waitForReady(`${baseUrl}/api/v2/health`);
@@ -74,14 +79,14 @@ async function main() {
       }
       const browser = await type.launch();
       try {
-        results.metrics[name] = await runBrowserBenchmarks(browser, baseUrl, fixture, identity, first, second);
+        results.metrics[name] = await runBrowserBenchmarks(browser, baseUrl, fixture, identity, first, second, largeNote);
       } finally {
         await browser.close();
       }
     }
 
     results.metrics.productionBundleBytes = [
-      await fileSize(join(REPO_ROOT, "web", "static", "app.js")),
+      await productionBundleSizeBytes(),
     ];
     results.metrics.catalogBytes = [await directorySize(join(fixture.dataHome, "tansu"))];
     results.metrics.serverRssBytes = [processTreeRssBytes(server.pid)];
@@ -99,7 +104,7 @@ async function main() {
   }
 }
 
-async function runBrowserBenchmarks(browser, baseUrl, fixture, identity, first, second) {
+async function runBrowserBenchmarks(browser, baseUrl, fixture, identity, first, second, largeNote) {
   const page = await browser.newPage();
   const out = {};
   try {
@@ -216,10 +221,117 @@ async function runBrowserBenchmarks(browser, baseUrl, fixture, identity, first, 
         body: { mutationId: randomUUID(), precondition: precondition(current.meta) },
       });
     });
+    const largeNoteMeta = (await vaultJson(baseUrl, identity, "/bootstrap")).notes
+      .find((note) => note.path === largeNote.path);
+    if (largeNoteMeta === undefined) throw new Error("large benchmark note was not indexed");
+    await page.keyboard.press("Escape");
+    await page.locator(".search-panel").waitFor({ state: "detached" });
+    const largeNoteUrl = new URL(
+      `/api/v2/vaults/${encodeURIComponent(identity.vaultId)}/notes/${encodeURIComponent(largeNoteMeta.noteId)}`,
+      baseUrl,
+    ).pathname;
+    const largeNoteResponse = page.waitForResponse((response) =>
+      response.request().method() === "GET" && new URL(response.url()).pathname === largeNoteUrl
+    );
+    await page.locator(`.note-row[title="${cssEscape(largeNote.path)}"]`).first().click();
+    const loadedLargeNote = await largeNoteResponse.then((response) => response.json());
+    if (Buffer.byteLength(loadedLargeNote.content) !== largeNote.bytes) {
+      throw new Error("large benchmark note response has an unexpected size");
+    }
+    await page.locator(`.tab.active[title="${cssEscape(largeNote.title)}"]`).waitFor();
+    await page.locator(".cm-editor .cm-content").waitFor({ state: "visible" });
+    if (!(await page.locator(".cm-editor .cm-content").textContent())?.includes(LARGE_NOTE_QUERY)) {
+      throw new Error("large benchmark note content was not loaded in the editor");
+    }
+    const findInput = page.locator('.find-panel input[placeholder="Find in this note"]');
+    const findRows = page.locator(".find-panel .command-row");
+    const findShortcut = process.platform === "darwin" ? "Meta+f" : "Control+f";
+    out.largeNoteFindOpen = await measureUiTransition(
+      page,
+      async () => {
+        await page.keyboard.press(findShortcut);
+        await findInput.waitFor({ state: "visible" });
+      },
+      async () => {
+        if (!await findInput.isVisible()) throw new Error("Find panel did not open");
+      },
+      async () => {
+        await page.keyboard.press("Escape");
+        await findInput.waitFor({ state: "detached" });
+      },
+    );
+    out.largeNoteFindResults100 = await measureUiTransition(
+      page,
+      async () => {
+        await page.keyboard.press(findShortcut);
+        await findInput.waitFor({ state: "visible" });
+        await findInput.fill("");
+        if (await findRows.count() !== 0) throw new Error("Find results were not cleared before measurement");
+      },
+      async () => {
+        await findInput.fill(LARGE_NOTE_QUERY);
+        await findRows.nth(LARGE_NOTE_MATCHES - 1).waitFor({ state: "visible" });
+        const count = await findRows.count();
+        if (count !== LARGE_NOTE_MATCHES) {
+          throw new Error(`Find rendered ${count} rows; expected ${LARGE_NOTE_MATCHES}`);
+        }
+      },
+      async () => {
+        await page.keyboard.press("Escape");
+        await findInput.waitFor({ state: "detached" });
+      },
+    );
+    const sidebar = page.locator('[data-view-region="sidebar"]');
+    const sidebarToggle = page.locator(".sidebar-collapse");
+    const activateSidebarToggle = async () => {
+      await sidebarToggle.focus();
+      await page.keyboard.press("Enter");
+    };
+    out.largeNoteSidebarToggle = await measureUiTransition(
+      page,
+      async () => {
+        if (await sidebar.evaluate((element) => element.classList.contains("sidebar-collapsed"))) {
+          await activateSidebarToggle();
+        }
+        await sidebar.waitFor({ state: "visible" });
+      },
+      async () => {
+        await activateSidebarToggle();
+        await page.waitForFunction(() =>
+          document.querySelector('[data-view-region="sidebar"]')?.classList.contains("sidebar-collapsed") === true
+        );
+        if (!await page.locator(`.tab.active[title="${cssEscape(largeNote.title)}"]`).isVisible()) {
+          throw new Error("large benchmark note was not open during sidebar toggle");
+        }
+      },
+      async () => {
+        await activateSidebarToggle();
+        await page.waitForFunction(() =>
+          document.querySelector('[data-view-region="sidebar"]')?.classList.contains("sidebar-collapsed") === false
+        );
+      },
+    );
     return out;
   } finally {
     await page.close();
   }
+}
+
+async function measureUiTransition(page, setup, transition, cleanup) {
+  for (let i = 0; i < warmups; i += 1) {
+    await setup();
+    await transition();
+    await cleanup();
+  }
+  const values = [];
+  for (let i = 0; i < runs; i += 1) {
+    await setup();
+    const start = performance.now();
+    await transition();
+    values.push(performance.now() - start);
+    await cleanup();
+  }
+  return values;
 }
 
 async function measure(fn) {
@@ -322,6 +434,26 @@ async function measureSearchPaint(page, input, query, expectedPath) {
 
 async function createBenchmarkFixture(root) {
   return await createTestFixture(root, { copyVaults: true });
+}
+
+async function createLargeNote(vaultPath) {
+  const matches = `${LARGE_NOTE_QUERY}\n`.repeat(LARGE_NOTE_MATCHES);
+  const title = "TNS-19/20 Baseline";
+  const prefix = `# ${title}\n\n${matches}`;
+  const paddingBytes = LARGE_NOTE_BYTES - Buffer.byteLength(prefix);
+  const padding = `${"x".repeat(1023)}\n`.repeat(Math.floor(paddingBytes / 1024)) +
+    "x".repeat(paddingBytes % 1024);
+  const content = `${prefix}${padding}`;
+  if (Buffer.byteLength(content) !== LARGE_NOTE_BYTES) {
+    throw new Error(`large benchmark note is not ${LARGE_NOTE_BYTES} bytes`);
+  }
+  const path = join(vaultPath, LARGE_NOTE_PATH);
+  await writeFile(path, content, "utf8");
+  const info = await stat(path);
+  if (info.size !== LARGE_NOTE_BYTES || content.match(/needle/g)?.length !== LARGE_NOTE_MATCHES) {
+    throw new Error("large benchmark note has an unexpected size or match count");
+  }
+  return { path: LARGE_NOTE_PATH, title, bytes: info.size, matches: LARGE_NOTE_MATCHES };
 }
 
 async function fetchJson(url) {
@@ -518,6 +650,14 @@ function printSummary(summary, output) {
 
 async function fileSize(path) {
   return (await stat(path)).size;
+}
+
+async function productionBundleSizeBytes() {
+  const manifestPath = join(REPO_ROOT, "web", "dist", "manifest.json");
+  const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+  const javascript = manifest.files.find((file) => file.contentType === "text/javascript; charset=utf-8");
+  if (javascript === undefined) throw new Error("production web manifest has no JavaScript bundle");
+  return fileSize(join(REPO_ROOT, "web", "dist", javascript.file));
 }
 
 function processTreeRssBytes(rootPid) {

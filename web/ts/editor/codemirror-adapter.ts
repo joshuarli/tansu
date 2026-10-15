@@ -6,6 +6,7 @@ import {
   Compartment,
   EditorSelection,
   EditorState,
+  type StateEffect,
   Transaction,
   type Extension,
 } from "@codemirror/state";
@@ -144,6 +145,7 @@ type ImagePasteOutcome =
   | { status: "failed"; message: string };
 
 const sessions = new WeakMap<EditorSession, SessionData>();
+const defaultCallout = createCalloutExtension();
 
 function sessionData(session: EditorSession, owner: symbol): SessionData {
   const data = sessions.get(session);
@@ -166,7 +168,7 @@ function editorExtensions(config: EditorConfig, live: boolean): Extension[] {
     (extension): extension is Extract<EditorExtension, { kind: "callouts" }> =>
       extension.kind === "callouts",
   );
-  const callout = calloutExtensions[calloutExtensions.length - 1] ?? createCalloutExtension();
+  const callout = calloutExtensions[calloutExtensions.length - 1] ?? defaultCallout;
   const wikiConfig = {
     suggest: async (query: string) => suggestWikiTargets(query, config.wikiNotes?.() ?? []),
     resolve: async (target: string) => {
@@ -206,6 +208,57 @@ function editorExtensions(config: EditorConfig, live: boolean): Extension[] {
   return extensions;
 }
 
+function sameRecord(left: Readonly<Record<string, string>>, right: Readonly<Record<string, string>>): boolean {
+  const keys = Object.keys(left);
+  return keys.length === Object.keys(right).length && keys.every((key) =>
+    Object.hasOwn(right, key) && left[key] === right[key]
+  );
+}
+
+function sameEditorExtensionInputs(left: EditorConfig, right: EditorConfig): boolean {
+  const leftExtensions = left.extensions ?? [];
+  const rightExtensions = right.extensions ?? [];
+  const leftImages = leftExtensions.filter(
+    (extension): extension is Extract<EditorExtension, { kind: "wiki-images" }> => extension.kind === "wiki-images",
+  );
+  const rightImages = rightExtensions.filter(
+    (extension): extension is Extract<EditorExtension, { kind: "wiki-images" }> => extension.kind === "wiki-images",
+  );
+  if (leftImages.length !== rightImages.length || leftImages.some((extension, index) =>
+    extension.resolveUrl !== rightImages[index]?.resolveUrl
+  )) return false;
+
+  const leftCallouts = leftExtensions.filter(
+    (extension): extension is Extract<EditorExtension, { kind: "callouts" }> => extension.kind === "callouts",
+  );
+  const rightCallouts = rightExtensions.filter(
+    (extension): extension is Extract<EditorExtension, { kind: "callouts" }> => extension.kind === "callouts",
+  );
+  const leftCallout = leftCallouts[leftCallouts.length - 1] ?? defaultCallout;
+  const rightCallout = rightCallouts[rightCallouts.length - 1] ?? defaultCallout;
+  if (!sameRecord(leftCallout.icons, rightCallout.icons)) return false;
+
+  const leftWikiLinks = leftExtensions.some((extension) => extension.kind === "wiki-links");
+  const rightWikiLinks = rightExtensions.some((extension) => extension.kind === "wiki-links");
+  return leftWikiLinks === rightWikiLinks && left.onLinkOpen === right.onLinkOpen &&
+    (!leftWikiLinks || (
+      left.currentNotePath === right.currentNotePath &&
+      left.wikiNotes === right.wikiNotes &&
+      left.onWikiNoteOpen === right.onWikiNoteOpen
+    ));
+}
+
+function editorKeymap(config: EditorConfig): Extension {
+  return keymap.of([
+    { key: "Mod-s", run: () => { config.onSave?.(); return true; } },
+    { key: "Mod-f", run: () => { config.onFindRequested?.(); return true; } },
+    ...closeBracketsKeymap,
+    ...defaultKeymap,
+    ...historyKeymap,
+    indentWithTab,
+  ]);
+}
+
 function createState(
   source: string,
   mode: EditorMode,
@@ -213,6 +266,7 @@ function createState(
   config: EditorConfig,
   modeCompartment: Compartment,
   readOnlyCompartment: Compartment,
+  keymapCompartment: Compartment,
   updateListener: Extension,
   clipboardHandler: Extension,
   pasteHandler: Extension,
@@ -245,14 +299,7 @@ function createState(
       startAsteriskList,
       extendEmphasisPair,
       autoCloseCodeFence,
-      keymap.of([
-        { key: "Mod-s", run: () => { config.onSave?.(); return true; } },
-        { key: "Mod-f", run: () => { config.onFindRequested?.(); return true; } },
-        ...closeBracketsKeymap,
-        ...defaultKeymap,
-        ...historyKeymap,
-        indentWithTab,
-      ]),
+      keymapCompartment.of(editorKeymap(config)),
       updateListener,
       clipboardHandler,
       pasteHandler,
@@ -267,6 +314,7 @@ export function createCodeMirrorEditor(container: HTMLElement, initialConfig: Ed
   const owner = Symbol("editor");
   const modeCompartment = new Compartment();
   const readOnlyCompartment = new Compartment();
+  const keymapCompartment = new Compartment();
   const imagePastes = new Map<number, PendingImagePaste>();
   let nextImagePasteId = 1;
 
@@ -577,6 +625,7 @@ export function createCodeMirrorEditor(container: HTMLElement, initialConfig: Ed
     config,
     modeCompartment,
     readOnlyCompartment,
+    keymapCompartment,
     updateListener,
     clipboardHandler,
     pasteHandler,
@@ -596,12 +645,20 @@ export function createCodeMirrorEditor(container: HTMLElement, initialConfig: Ed
     data.scroll = { top: view.scrollDOM.scrollTop, left: view.scrollDOM.scrollLeft };
   }
 
-  function reconfigure(data: SessionData, origin: EditorOrigin): void {
+  function reconfigure(
+    data: SessionData,
+    origin: EditorOrigin,
+    parts: { editorExtensions?: boolean; readOnly?: boolean; keymap?: boolean } = {},
+  ): void {
+    const effects: StateEffect<unknown>[] = [];
+    if (parts.editorExtensions ?? true) {
+      effects.push(modeCompartment.reconfigure(editorExtensions(config, data.mode === "live")));
+    }
+    if (parts.readOnly ?? true) effects.push(readOnlyCompartment.reconfigure(readOnlyExtension(data.readOnly)));
+    if (parts.keymap ?? true) effects.push(keymapCompartment.reconfigure(editorKeymap(config)));
+    if (effects.length === 0) return;
     view.dispatch({
-      effects: [
-        modeCompartment.reconfigure(editorExtensions(config, data.mode === "live")),
-        readOnlyCompartment.reconfigure(readOnlyExtension(data.readOnly)),
-      ],
+      effects,
       annotations: transactionOrigin.of(origin),
     });
     data.state = view.state;
@@ -652,6 +709,7 @@ export function createCodeMirrorEditor(container: HTMLElement, initialConfig: Ed
           config,
           modeCompartment,
           readOnlyCompartment,
+          keymapCompartment,
           updateListener,
           clipboardHandler,
           pasteHandler,
@@ -744,13 +802,13 @@ export function createCodeMirrorEditor(container: HTMLElement, initialConfig: Ed
         config,
         modeCompartment,
         readOnlyCompartment,
+        keymapCompartment,
         updateListener,
         clipboardHandler,
         pasteHandler,
       );
       if (activeSession === session) {
         view.setState(data.state);
-        reconfigure(data, "externalReload");
         view.scrollDOM.scrollTop = 0;
         view.scrollDOM.scrollLeft = 0;
       }
@@ -765,7 +823,7 @@ export function createCodeMirrorEditor(container: HTMLElement, initialConfig: Ed
       }
       if (data.mode === mode) return;
       data.mode = mode;
-      reconfigure(data, "modeChange");
+      reconfigure(data, "modeChange", { editorExtensions: true, readOnly: false, keymap: false });
     },
 
     updateConfiguration(partial) {
@@ -780,17 +838,15 @@ export function createCodeMirrorEditor(container: HTMLElement, initialConfig: Ed
       if (Object.hasOwn(partial, "readOnly")) data.readOnly = partial.readOnly ?? false;
       if (Object.hasOwn(partial, "mode")) data.mode = partial.mode ?? data.mode;
       if (session !== null && data.readOnly) abortInvalidImagePastes(session);
-      if (
-        data.mode !== previousMode ||
-        data.readOnly !== previousReadOnly ||
-        previous.extensions !== config.extensions ||
-        previous.wikiNotes !== config.wikiNotes ||
-        previous.currentNotePath !== config.currentNotePath ||
-        previous.onWikiNoteOpen !== config.onWikiNoteOpen ||
-        previous.onLinkOpen !== config.onLinkOpen ||
-        Object.hasOwn(partial, "readOnly") ||
-        Object.hasOwn(partial, "mode")
-      ) reconfigure(data, "modeChange");
+      const modeChanged = data.mode !== previousMode;
+      const editorExtensionsChanged = modeChanged || (data.mode === "live" && !sameEditorExtensionInputs(previous, config));
+      const readOnlyChanged = data.readOnly !== previousReadOnly;
+      const keymapChanged = previous.onSave !== config.onSave || previous.onFindRequested !== config.onFindRequested;
+      reconfigure(data, "modeChange", {
+        editorExtensions: editorExtensionsChanged,
+        readOnly: readOnlyChanged,
+        keymap: keymapChanged,
+      });
     },
 
     revealSelection(selection) {

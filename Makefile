@@ -21,7 +21,14 @@ lint-ts: types-check
 	deno task lint
 
 lint-rs:
-	cargo clippy --fix --allow-dirty --all-targets --message-format=short
+	cargo clippy --workspace --all-targets --message-format=short -- \
+		-D warnings \
+		-A clippy::too_many_arguments \
+		-A clippy::redundant_closure \
+		-A clippy::collapsible_if \
+		-A clippy::question_mark \
+		-A clippy::type_complexity \
+		-A clippy::needless_borrow
 
 coverage-rs:
 	cargo llvm-cov --workspace --all-targets --ignore-filename-regex 'src/(main\.rs|bin/gen-api-types\.rs)$$' --fail-under-lines 87 --fail-under-functions 80 --no-clean
@@ -66,7 +73,7 @@ test-e2e-webkit:
 	TANSU2_E2E_BROWSER=webkit deno task test:browser
 
 test-rs:
-	cargo test -q
+	cargo test -q --workspace
 
 build-linux-musl-docker:
 	mkdir -p "$(CURDIR)/.work/tmp" "$(CURDIR)/.work/dist/$${TARGET:-x86_64-unknown-linux-musl}"

@@ -1697,7 +1697,7 @@ function createTestClient(id: string) {
     renameNote: vi.fn(async (note: string, request: Parameters<V2VaultClient["renameNote"]>[1]) => accepted(request.mutationId, noteMeta(note, request.path, request.path.replace(/\.md$/i, ""), [], request.precondition.baseRevision + 1, HASH_B))),
     deleteNote: vi.fn(async (_note: string, request: Parameters<V2VaultClient["deleteNote"]>[1]) => ({ mutationId: request.mutationId, outcome: { state: "accepted", result: null } } as V2MutationResponse)),
     listRevisions: vi.fn(async () => [] as V2RevisionMeta[]),
-    openRevision: vi.fn(async (note: string, revision: number) => ({ revision: { noteId: note, revision, kind: "save" as const, source: "user" as const, sourceHash: HASH_A, createdAtMs: 1 }, content: "# Old\n" })),
+    openRevision: vi.fn(async (note: string, revision: number): Promise<V2RevisionDocument> => ({ revision: { noteId: note, revision, kind: "save", source: "user", sourceHash: HASH_A, createdAtMs: 1 }, content: "# Old\n" })),
     openConflictDraft: vi.fn(async (note: string): Promise<V2ConflictDraftDocument> => ({ draft: conflictDraft(note), content: "# Draft\n" })),
     restoreRevision: vi.fn(async (_note: string, _revision: number, request: Parameters<V2VaultClient["restoreRevision"]>[2]) => accepted(request.mutationId, null)),
     restoreConflictDraft: vi.fn(async (_note: string, _draft: number, request: Parameters<V2VaultClient["restoreConflictDraft"]>[2]) => accepted(request.mutationId, null)),

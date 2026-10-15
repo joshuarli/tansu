@@ -44,6 +44,13 @@ export class TansuApp {
   private detachVisibilityFlush: (() => void) | null = null;
   private vaultClient: ReturnType<AppServices["api"]["forVault"]> | null = null;
   private editor: EditorHandle | null = null;
+  private cachedEditorConfig: {
+    generation: number;
+    identity: ServerIdentity | null;
+    client: ReturnType<AppServices["api"]["forVault"]> | null;
+    assetScopeRevision: number;
+    config: EditorConfig;
+  } | null = null;
   private activeEditorKey: string | null = null;
   private attachedEditor: { tab: Tab; session: EditorSession } | null = null;
   private readonly editorMount = document.createElement("div");
@@ -52,6 +59,7 @@ export class TansuApp {
   private editorCaptureTimer: number | undefined;
   private readonly inFlightActions = new Set<Promise<unknown>>();
   private readonly assetScope = new Map<string, string>();
+  private assetScopeRevision = 0;
   private readonly globalEventCleanups: Array<() => void> = [];
   private assetController: AbortController | null = null;
   private eventSubscription: { close: () => void } | null = null;
@@ -441,12 +449,23 @@ export class TansuApp {
     const generation = this.bootGeneration;
     const serverIdentity = this.identity;
     const client = this.vaultClient;
+    const cached = this.cachedEditorConfig;
+    const sameVault = cached !== null && cached.generation === generation && cached.identity === serverIdentity && cached.client === client;
+    if (sameVault && cached !== null && cached.assetScopeRevision === this.assetScopeRevision) {
+      return cached.config;
+    }
+    const extensions = [
+      createWikiImageExtension({ resolveUrl: (name) => this.resolveAssetUrl(name) }),
+      createCalloutExtension(),
+    ];
+    if (sameVault && cached !== null) {
+      const config = { ...cached.config, extensions };
+      this.cachedEditorConfig = { generation, identity: serverIdentity, client, assetScopeRevision: this.assetScopeRevision, config };
+      return config;
+    }
     const currentVault = () => serverIdentity !== null && client !== null && this.isCurrentVault(serverIdentity, client);
-    return {
-      extensions: [
-        createWikiImageExtension({ resolveUrl: (name) => this.resolveAssetUrl(name) }),
-        createCalloutExtension(),
-      ],
+    const config: EditorConfig = {
+      extensions,
       currentNotePath: () => activeTab(this.state)?.path ?? "",
       wikiNotes: () => [...this.state.notes.values()].map((note) => ({ noteId: note.noteId, title: note.title, path: note.path })),
       onWikiNoteOpen: (id) => {
@@ -504,6 +523,8 @@ export class TansuApp {
         this.dispatch({ type: "find.open" });
       },
     };
+    this.cachedEditorConfig = { generation, identity: serverIdentity, client, assetScopeRevision: this.assetScopeRevision, config };
+    return config;
   }
 
   private attachActiveEditor(): void {
@@ -1778,7 +1799,9 @@ export class TansuApp {
   }
 
   private async prefetchAssets(tab: Tab, source: string): Promise<void> {
+    const hadScopedAssets = this.assetScope.size > 0;
     this.cancelAssetScope();
+    if (hadScopedAssets) this.editor?.updateConfiguration(this.editorConfig());
     const controller = new AbortController();
     this.assetController = controller;
     const key = tab.key;
@@ -1793,6 +1816,7 @@ export class TansuApp {
         const blob = await this.vaultClient.loadAsset(name, controller.signal);
         if (controller.signal.aborted || generation !== this.bootGeneration || activeTab(this.state)?.key !== key) return;
         this.assetScope.set(name, URL.createObjectURL(blob));
+        this.assetScopeRevision += 1;
         this.editor?.updateConfiguration(this.editorConfig());
       } catch (error) {
         if (!controller.signal.aborted) logClientEvent("warn", "client.asset", { error: errorSummary(error) });
@@ -1808,6 +1832,7 @@ export class TansuApp {
   private cancelAssetScope(): void {
     this.assetController?.abort();
     this.assetController = null;
+    if (this.assetScope.size > 0) this.assetScopeRevision += 1;
     for (const url of this.assetScope.values()) URL.revokeObjectURL(url);
     this.assetScope.clear();
   }
