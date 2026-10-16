@@ -1468,6 +1468,36 @@ describe("v2 desktop shell", () => {
     expect(editorMock.instances[0]?.updateTags).toHaveBeenCalledWith(["alpha", "beta"]);
   });
 
+  it("clamps settings to the server's upper bounds before saving", async () => {
+    const note = noteMeta("note-1", "one.md", "One");
+    const client = configureVault([note], workspaceSeed([
+      { noteId: note.noteId, title: note.title, path: note.path, cursorOffset: null, sourceMode: false },
+    ], note.noteId));
+    const { app, root } = mountApp();
+    await app.boot();
+    await runCommand(root, "settings");
+    root.querySelector<HTMLInputElement>('input[title="Autosave delay"]')!.value = "999999999";
+    root.querySelector<HTMLInputElement>('input[title="Undo stack"]')!.value = "999999";
+    root.querySelector<HTMLButtonElement>(".settings-panel .primary-button")?.click();
+    await flushAsync();
+    expect(client.saveSettings.mock.calls[0]?.[0].settings).toMatchObject({ autosaveDelayMs: 3_600_000, undoStackMax: 10_000 });
+  });
+
+  it("does not save settings with an invalid excluded folder", async () => {
+    const note = noteMeta("note-1", "one.md", "One");
+    const client = configureVault([note], workspaceSeed([
+      { noteId: note.noteId, title: note.title, path: note.path, cursorOffset: null, sourceMode: false },
+    ], note.noteId));
+    const { app, root } = mountApp();
+    await app.boot();
+    await runCommand(root, "settings");
+    root.querySelector<HTMLInputElement>('input[title="Excluded folders"]')!.value = "docs/private";
+    root.querySelector<HTMLButtonElement>(".settings-panel .primary-button")?.click();
+    await flushAsync();
+    expect(client.saveSettings).not.toHaveBeenCalled();
+    expect(root.querySelector(".settings-panel .settings-error")?.textContent).toMatch(/single folder name/);
+  });
+
   it("gives the editor the booted and the saved undo depth and image quality", async () => {
     const note = noteMeta("note-1", "one.md", "One");
     const client = configureVault([note], workspaceSeed([

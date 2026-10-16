@@ -27,7 +27,8 @@ authentication settings. Per-vault settings remain in each vault's SQLite
 catalog and include excluded folders, search weights, autosave delay, undo
 history size, and image quality. The settings dialog bounds autosave delay,
 undo history size, and image quality with the limits in
-`web/ts/app/settings-policy.ts`. App-wide settings live under the config home;
+`web/ts/app/settings-policy.ts`, which a unit test keeps equal to the ranges in
+`src/api_types.rs`. App-wide settings live under the config home;
 vault catalogs and other durable state live under `tansu/` in `XDG_DATA_HOME`
 or `~/.local/share/tansu/` when unset.
 
@@ -45,10 +46,11 @@ persisted:
 | `searchTitleWeight`, `searchHeadingWeight`, `searchTagWeight`, `searchContentWeight`, `recencyBoost` | finite, 0 to 1,000 |
 | `excludedFolders` | each entry is a single folder name: nonempty, not `.` or `..`, no `/`, `\`, or NUL |
 
-The lower bounds match the settings form. The upper bounds and the weight
-range exist only on the server. Settings saved by an earlier version are not
-revalidated on load, so an out-of-range stored value is served unchanged until
-the next save, which must bring it into range.
+The settings form enforces the same limits: it clamps numbers, rejects an
+invalid excluded folder entry with an inline error, and shows stored
+out-of-range values clamped. Settings saved by an earlier version are not
+revalidated on load, so an out-of-range stored value is served unchanged and
+the client accepts it; the next save from the form brings it into range.
 
 The app data directory contains stable server and vault identities, catalogs,
 revision snapshots, conflict drafts, and derived search indexes. Vault IDs

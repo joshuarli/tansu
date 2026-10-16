@@ -11,7 +11,7 @@ import {
   type Tab,
 } from "./state.ts";
 import { vaultId } from "./app/identity.ts";
-import { SETTINGS_LIMITS } from "./app/settings-policy.ts";
+import { excludedFoldersProblem, normalizeSettings, SETTINGS_LIMITS } from "./app/settings-policy.ts";
 import { sameTabIdentity, type TabIdentity } from "./app/tab-identity.ts";
 import type { V2OverlayCoverage, V2SearchHit } from "./types.generated.ts";
 import type { FindMatch, Outline } from "./editor/source-navigation.js";
@@ -822,11 +822,11 @@ function renderConflictPanel(state: State, actions: ViewActions): HTMLElement {
 }
 
 function renderSettingsPanel(state: State, actions: ViewActions): HTMLElement {
-  const settings = state.boot!.settings;
+  const settings = normalizeSettings(state.boot!.settings);
   const excluded = input("Excluded folders", settings.excludedFolders.join(", "));
   const { autosaveDelayMs, undoStackMax, imageWebpQuality } = SETTINGS_LIMITS;
-  const autosave = input("Autosave delay", String(settings.autosaveDelayMs), "number", String(autosaveDelayMs.min));
-  const undo = input("Undo stack", String(settings.undoStackMax), "number", String(undoStackMax.min));
+  const autosave = input("Autosave delay", String(settings.autosaveDelayMs), "number", String(autosaveDelayMs.min), String(autosaveDelayMs.max));
+  const undo = input("Undo stack", String(settings.undoStackMax), "number", String(undoStackMax.min), String(undoStackMax.max));
   const quality = input(
     "Image quality",
     String(settings.imageWebpQuality),
@@ -838,6 +838,8 @@ function renderSettingsPanel(state: State, actions: ViewActions): HTMLElement {
   for (const field of [excluded, autosave, undo, quality]) {
     field.dataset["preserveValue"] = "";
   }
+  const formError = el("p", "settings-error", "");
+  formError.setAttribute("role", "alert");
   const appSettings = el("a", "text-button", span("Manage vaults and authentication"));
   appSettings.setAttribute("href", "/setup");
   const panel = el(
@@ -853,6 +855,7 @@ function renderSettingsPanel(state: State, actions: ViewActions): HTMLElement {
     el("label", "field-label", span("Autosave delay ms"), autosave),
     el("label", "field-label", span("Undo stack max"), undo),
     el("label", "field-label", span("Image WebP quality"), quality),
+    formError,
     appSettings,
     el(
       "div",
@@ -875,6 +878,9 @@ function renderSettingsPanel(state: State, actions: ViewActions): HTMLElement {
         "Save",
         "Save settings",
         () => {
+          const problem = excludedFoldersProblem(excluded.value);
+          formError.textContent = problem ?? "";
+          if (problem !== null) return;
           actions.dispatch({
             type: "settings.submit",
             settings: {

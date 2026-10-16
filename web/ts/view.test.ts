@@ -311,13 +311,50 @@ describe("view rendering", () => {
       return { min: field.min, max: field.max, step: field.step };
     };
 
-    expect(attributes("Autosave delay")).toStrictEqual({ min: String(SETTINGS_LIMITS.autosaveDelayMs.min), max: "", step: "" });
-    expect(attributes("Undo stack")).toStrictEqual({ min: String(SETTINGS_LIMITS.undoStackMax.min), max: "", step: "" });
+    expect(attributes("Autosave delay")).toStrictEqual({
+      min: String(SETTINGS_LIMITS.autosaveDelayMs.min),
+      max: String(SETTINGS_LIMITS.autosaveDelayMs.max),
+      step: "",
+    });
+    expect(attributes("Undo stack")).toStrictEqual({
+      min: String(SETTINGS_LIMITS.undoStackMax.min),
+      max: String(SETTINGS_LIMITS.undoStackMax.max),
+      step: "",
+    });
     expect(attributes("Image quality")).toStrictEqual({
       min: String(SETTINGS_LIMITS.imageWebpQuality.min),
       max: String(SETTINGS_LIMITS.imageWebpQuality.max),
       step: String(SETTINGS_LIMITS.imageWebpQuality.step),
     });
+  });
+
+  it("shows an inline error and dispatches nothing for an invalid excluded folder", () => {
+    const state = baseState();
+    state.settingsOpen = true;
+    const actions = actionSpies();
+    const root = render(state, actions);
+    root.querySelector<HTMLInputElement>('input[title="Excluded folders"]')!.value = "ok, a/b";
+    root.querySelector<HTMLButtonElement>('[title="Save settings"]')!.click();
+
+    expect(root.querySelector(".settings-panel .settings-error")?.textContent).toMatch(/single folder name/);
+    expect(actions.dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: "settings.submit" }));
+
+    root.querySelector<HTMLInputElement>('input[title="Excluded folders"]')!.value = "ok";
+    root.querySelector<HTMLButtonElement>('[title="Save settings"]')!.click();
+    expect(root.querySelector(".settings-panel .settings-error")?.textContent).toBe("");
+    expect(actions.dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: "settings.submit" }));
+  });
+
+  it("shows stored values outside the server range clamped", () => {
+    const state = baseState();
+    state.settingsOpen = true;
+    state.boot!.settings = { ...state.boot!.settings, autosaveDelayMs: 0, undoStackMax: 10_000_000 };
+    const root = render(state, actionSpies());
+
+    expect(root.querySelector<HTMLInputElement>('input[title="Autosave delay"]')!.value)
+      .toBe(String(SETTINGS_LIMITS.autosaveDelayMs.min));
+    expect(root.querySelector<HTMLInputElement>('input[title="Undo stack"]')!.value)
+      .toBe(String(SETTINGS_LIMITS.undoStackMax.max));
   });
 
   it("renders empty search and delete/tag dialogs", () => {
