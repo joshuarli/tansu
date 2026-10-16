@@ -1084,8 +1084,8 @@ fn revision_from_sql(row: &rusqlite::Row<'_>) -> rusqlite::Result<RevisionMeta> 
         event_id: row.get(0)?,
         note_id: row.get(1)?,
         seq: row.get(2)?,
-        kind: note_event_kind(row.get::<_, String>(3)?.as_str()),
-        source: note_event_source(row.get::<_, String>(4)?.as_str()),
+        kind: note_event_kind(row.get::<_, String>(3)?.as_str()).map_err(|error| invalid_column(3, error))?,
+        source: note_event_source(row.get::<_, String>(4)?.as_str()).map_err(|error| invalid_column(4, error))?,
         content_hash: row.get(5)?,
         created_at_ms: row.get(6)?,
     })
@@ -1197,8 +1197,8 @@ fn event_kind(kind: NoteEventKind) -> &'static str {
     }
 }
 
-fn note_event_kind(kind: &str) -> NoteEventKind {
-    match kind {
+fn note_event_kind(kind: &str) -> std::result::Result<NoteEventKind, String> {
+    Ok(match kind {
         "baseline" => NoteEventKind::Baseline,
         "create" => NoteEventKind::Create,
         "import" => NoteEventKind::Import,
@@ -1209,8 +1209,8 @@ fn note_event_kind(kind: &str) -> NoteEventKind {
         "external_rename" => NoteEventKind::ExternalRename,
         "external_delete" => NoteEventKind::ExternalDelete,
         "conflict_recovery" => NoteEventKind::ConflictRecovery,
-        _ => NoteEventKind::Save,
-    }
+        other => return Err(format!("unknown note event kind: {other:?}")),
+    })
 }
 
 fn event_source(source: NoteEventSource) -> &'static str {
@@ -1222,14 +1222,14 @@ fn event_source(source: NoteEventSource) -> &'static str {
     }
 }
 
-fn note_event_source(source: &str) -> NoteEventSource {
-    match source {
+fn note_event_source(source: &str) -> std::result::Result<NoteEventSource, String> {
+    Ok(match source {
         "user" => NoteEventSource::User,
         "import" => NoteEventSource::Import,
         "external" => NoteEventSource::External,
         "repair" => NoteEventSource::Repair,
-        _ => NoteEventSource::User,
-    }
+        other => return Err(format!("unknown note event source: {other:?}")),
+    })
 }
 
 fn unresolved_reason(reason: UnresolvedReason) -> &'static str {
@@ -1416,5 +1416,25 @@ mod tests {
             .execute("UPDATE notes SET tombstoned=2", [])
             .unwrap();
         assert!(catalog.note_by_id(&note_id).is_err());
+    }
+
+    #[test]
+    fn unknown_note_event_kind_is_an_error() {
+        let (_dir, catalog, note_id) = open_catalog_with_note();
+        catalog
+            .conn
+            .execute("UPDATE note_events SET kind='bogus'", [])
+            .unwrap();
+        assert!(catalog.revisions(&note_id).is_err());
+    }
+
+    #[test]
+    fn unknown_note_event_source_is_an_error() {
+        let (_dir, catalog, note_id) = open_catalog_with_note();
+        catalog
+            .conn
+            .execute("UPDATE note_events SET source='bogus'", [])
+            .unwrap();
+        assert!(catalog.revisions(&note_id).is_err());
     }
 }
