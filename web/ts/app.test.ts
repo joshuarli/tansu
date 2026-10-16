@@ -2880,3 +2880,66 @@ describe("saved tab load completions", () => {
     expect(root.querySelector(".unavailable-state")).toBeNull();
   });
 });
+
+describe("document controller outlives its tab", () => {
+  useShellFixtures();
+
+  it("loads a reopened note only after the closing save settles", async () => {
+    vi.useFakeTimers();
+    const note = noteMeta("note-1", "one.md", "One");
+    const saved = noteMeta(note.noteId, note.path, note.title, [], 2, HASH_B);
+    const client = configureVault([note], workspaceSeed([
+      { noteId: note.noteId, title: note.title, path: note.path, cursorOffset: null, sourceMode: false },
+    ], note.noteId));
+    client.openNote.mockResolvedValue(documentFor(note, "# One\n"));
+    const save = deferred<V2MutationResponse>();
+    client.saveNote.mockReturnValue(save.promise);
+    const { app, root } = mountApp();
+    await app.boot();
+    editorMock.instances[0]!.simulateEdit("# Closed early\n");
+    await vi.advanceTimersByTimeAsync(150);
+    await flushAsync();
+
+    root.querySelector<HTMLButtonElement>(".tab.active .tab-close")?.click();
+    await flushAsync();
+    expect(client.saveNote).toHaveBeenCalledTimes(1);
+    await openRecentNote(root, "One");
+    await flushAsync();
+    expect(client.openNote).toHaveBeenCalledTimes(1);
+
+    client.openNote.mockResolvedValue(documentFor(saved, "# Closed early\n"));
+    save.resolve(accepted(client.saveNote.mock.calls[0]![1].mutationId, saved));
+    await until(() => client.openNote.mock.calls.length === 2);
+    await until(() => editorMock.instances[0]?.getSnapshot()?.source === "# Closed early\n");
+  });
+
+  it("loads a reopened note only after an in-flight revision restore settles", async () => {
+    const note = noteMeta("note-1", "one.md", "One");
+    const restored = noteMeta(note.noteId, note.path, note.title, [], 2, HASH_B);
+    const revision = { noteId: note.noteId, revision: 4, kind: "save" as const, source: "user" as const, sourceHash: HASH_B, createdAtMs: 5 };
+    const client = configureVault([note], workspaceSeed([
+      { noteId: note.noteId, title: note.title, path: note.path, cursorOffset: null, sourceMode: false },
+    ], note.noteId));
+    client.openNote.mockResolvedValue(documentFor(note, "# One\n"));
+    client.listRevisions.mockResolvedValue([revision]);
+    client.openRevision.mockResolvedValue({ revision, content: "# Restored\n" });
+    const restore = deferred<V2MutationResponse>();
+    client.restoreRevision.mockReturnValue(restore.promise);
+    const { app, root } = mountApp();
+    await app.boot();
+    await runCommand(root, "revisions");
+    root.querySelector<HTMLButtonElement>(".revision-row")?.click();
+    await flushAsync();
+    root.querySelector<HTMLButtonElement>(".revisions-panel .primary-button")?.click();
+    await until(() => client.restoreRevision.mock.calls.length === 1);
+    root.querySelector<HTMLButtonElement>(".tab-close")?.click();
+    await flushAsync();
+    await openRecentNote(root, "One");
+    await flushAsync();
+    expect(client.openNote).toHaveBeenCalledTimes(1);
+
+    client.openNote.mockResolvedValue(documentFor(restored, "# Restored\n"));
+    restore.resolve(accepted(client.restoreRevision.mock.calls[0]![2].mutationId, restored));
+    await until(() => editorMock.instances[0]?.getSnapshot()?.source === "# Restored\n");
+  });
+});

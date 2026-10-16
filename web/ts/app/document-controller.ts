@@ -37,8 +37,16 @@ export type SessionSource = {
   subscribe(listener: (state: DocumentSessionState) => void): () => void;
 };
 
+export type ClosableSession = {
+  save(): Promise<unknown>;
+  close(): void;
+};
+
+export type CloseDisposition = "flush" | "discard";
+
 export class DocumentController {
   private load: Promise<void> | null = null;
+  private readonly mutations = new Set<Promise<unknown>>();
   private autoSaveTimer: number | undefined;
   private session: SessionSource | null = null;
   private unsubscribe: (() => void) | null = null;
@@ -57,9 +65,39 @@ export class DocumentController {
     this.session = null;
   }
 
+  track<T>(mutation: Promise<T>): Promise<T> {
+    const tracked = mutation.finally(() => this.mutations.delete(tracked));
+    tracked.catch(() => {});
+    this.mutations.add(tracked);
+    return tracked;
+  }
+
+  async settled(): Promise<void> {
+    while (this.mutations.size > 0) await Promise.allSettled(this.mutations);
+  }
+
+  hasPendingMutations(): boolean {
+    return this.mutations.size > 0;
+  }
+
+  retire(): void {
+    this.cancelAutoSave();
+    this.detachSession();
+    this.load = null;
+  }
+
+  close(session: ClosableSession, disposition: CloseDisposition): Promise<void> {
+    this.retire();
+    if (disposition === "discard") {
+      session.close();
+      return Promise.resolve();
+    }
+    return this.track(session.save().finally(() => session.close())).then(() => {});
+  }
+
   ensureLoaded(start: () => Promise<void>): Promise<void> {
     if (this.load !== null) return this.load;
-    const load = start().finally(() => {
+    const load = (this.hasPendingMutations() ? this.settled().then(start) : start()).finally(() => {
       if (this.load === load) this.load = null;
     });
     this.load = load;
@@ -95,9 +133,26 @@ export class DocumentControllers {
 
   release(id: NoteId): void {
     const controller = this.controllers.get(id);
-    controller?.cancelAutoSave();
-    controller?.detachSession();
-    this.controllers.delete(id);
+    if (controller === undefined) return;
+    controller.retire();
+    this.forgetWhenSettled(id, controller);
+  }
+
+  close(id: NoteId, session: ClosableSession, disposition: CloseDisposition): Promise<void> {
+    const controller = this.for(id);
+    const closing = controller.close(session, disposition);
+    this.forgetWhenSettled(id, controller);
+    return closing;
+  }
+
+  private forgetWhenSettled(id: NoteId, controller: DocumentController): void {
+    if (!controller.hasPendingMutations()) {
+      if (this.controllers.get(id) === controller) this.controllers.delete(id);
+      return;
+    }
+    void controller.settled().then(() => {
+      if (this.controllers.get(id) === controller && !controller.hasPendingMutations()) this.controllers.delete(id);
+    });
   }
 
   cancelAutoSaves(): void {

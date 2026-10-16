@@ -185,3 +185,45 @@ describe("dirtySnapshot", () => {
     expect(dirtySnapshot(saving.state)).toMatchObject({ dirty: true, saving: true, savePending: false });
   });
 });
+
+describe("DocumentControllers close", () => {
+  it("keeps the controller until a flushing close settles and delays a new load behind it", async () => {
+    const controllers = new DocumentControllers();
+    let finish = (): void => {};
+    const close = vi.fn();
+    const session = { save: () => new Promise<void>((resolve) => { finish = resolve; }), close };
+    const closing = controllers.close(noteId("a"), session, "flush");
+    const start = vi.fn(() => Promise.resolve());
+    const reopened = controllers.for(noteId("a")).ensureLoaded(start);
+    await Promise.resolve();
+    expect(start).not.toHaveBeenCalled();
+    expect(close).not.toHaveBeenCalled();
+
+    finish();
+    await closing;
+    await reopened;
+    expect(close).toHaveBeenCalledTimes(1);
+    expect(start).toHaveBeenCalledTimes(1);
+  });
+
+  it("closes the session when the flush fails and still releases the controller", async () => {
+    const controllers = new DocumentControllers();
+    const close = vi.fn();
+    const failure = new Error("offline");
+    const closing = controllers.close(noteId("a"), { save: () => Promise.reject(failure), close }, "flush");
+    await expect(closing).rejects.toBe(failure);
+    expect(close).toHaveBeenCalledTimes(1);
+    const start = vi.fn(() => Promise.resolve());
+    await controllers.for(noteId("a")).ensureLoaded(start);
+    expect(start).toHaveBeenCalledTimes(1);
+  });
+
+  it("discards without saving", async () => {
+    const controllers = new DocumentControllers();
+    const save = vi.fn(() => Promise.resolve());
+    const close = vi.fn();
+    await controllers.close(noteId("a"), { save, close }, "discard");
+    expect(save).not.toHaveBeenCalled();
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+});

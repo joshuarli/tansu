@@ -778,8 +778,7 @@ export class TansuApp {
     const session = new DocumentSession(identity, generation, this.workspaceId, services);
     tab.session = session;
     this.documents.for(tab.noteId).attachSession(session, (value) => this.onDocumentSessionState(tab, session, serverIdentity, client, value));
-    const isLoadCurrent = () => !this.disposed && tab.session === session && this.state.tabs.includes(tab) &&
-      this.isCurrentVault(serverIdentity, client);
+    const isLoadCurrent = () => tab.session === session && this.isTabLive(tab, serverIdentity, client);
     const [checkpoint, cached] = await Promise.all([
       this.services.workspace.getDraftCheckpoint(identity, this.workspaceId, tab.noteId),
       this.services.workspace.getCachedNoteBody(identity, this.state.notes.get(tab.noteId) ?? { noteId: tab.noteId, sourceHash: "" }),
@@ -840,7 +839,7 @@ export class TansuApp {
       checkpoint: this.services.workspace.localCheckpointWriter(journal),
     });
     const checkpoint = await this.services.workspace.getLocalDraftCheckpoint(identity, this.workspaceId, tab.localDraftId);
-    if (!this.isCurrentVault(identity, client) || !this.state.tabs.includes(tab)) return;
+    if (!this.isTabLive(tab, identity, client)) return;
     if (checkpoint !== null) {
       session.recover(checkpoint);
     } else {
@@ -849,7 +848,7 @@ export class TansuApp {
     }
     tab.session = session;
     session.subscribe((value) => {
-      if (tab.session !== session || !this.state.tabs.includes(tab) || !this.isCurrentVault(identity, client)) return;
+      if (tab.session !== session || !this.isTabLive(tab, identity, client)) return;
       tab.title = value.titleDraft;
       tab.draft = value.source;
       tab.selection = value.selection;
@@ -997,11 +996,12 @@ export class TansuApp {
     }
     const [closed] = this.state.tabs.splice(this.state.tabs.indexOf(candidate), 1);
     if (closed === undefined) return;
-    if (closed.kind === "saved") this.documents.release(closed.noteId);
-    if (closed.kind === "saved" && closed.session !== null) {
-      const session = closed.session;
-      if (reason === "user") this.runAsync(session.save().finally(() => session.close()), "Save failed");
-      else session.close();
+    if (closed.kind === "saved") {
+      if (closed.session === null) this.documents.release(closed.noteId);
+      else {
+        const closing = this.documents.close(closed.noteId, closed.session, reason === "user" ? "flush" : "discard");
+        if (reason === "user") this.runAsync(closing, "Save failed");
+      }
     }
     if (reason === "user") this.state.closedTabs = [workspaceTabFromTab(closed), ...this.state.closedTabs.filter((item) => !sameTabIdentity(identityOfWorkspace(item), identity))].slice(0, 50);
     if (sameTabIdentity(this.state.activeTab, identity)) {
@@ -1195,6 +1195,10 @@ export class TansuApp {
   ): boolean {
     return !this.disposed && this.identity?.serverInstanceId === identity.serverInstanceId &&
       this.identity.vaultId === identity.vaultId && this.vaultClient === client;
+  }
+
+  private isTabLive(tab: Tab, identity: ServerIdentity, client: ReturnType<AppServices["api"]["forVault"]>): boolean {
+    return this.isCurrentVault(identity, client) && this.state.tabs.includes(tab);
   }
 
   private isCurrentTab(
@@ -1432,11 +1436,13 @@ export class TansuApp {
     if (tab?.kind !== "saved" || selected === null || selected.revision.noteId !== tab.noteId ||
       this.state.revisionNoteId !== tab.noteId || status === undefined || !("base" in status) ||
       identity === null || client === null) return;
-    const response = await client.restoreRevision(tab.noteId, selected.revision.revision, {
-      mutationId: mutationId(),
-      precondition: { baseRevision: status.base.revision, baseSourceHash: status.base.sourceHash, baseDiskHash: status.base.diskHash },
-    });
-    await this.handleMutation(response, { identity, client, tab }, status.draft.localRevision);
+    await this.documents.for(tab.noteId).track((async () => {
+      const response = await client.restoreRevision(tab.noteId, selected.revision.revision, {
+        mutationId: mutationId(),
+        precondition: { baseRevision: status.base.revision, baseSourceHash: status.base.sourceHash, baseDiskHash: status.base.diskHash },
+      });
+      await this.handleMutation(response, { identity, client, tab }, status.draft.localRevision);
+    })());
     if (this.isCurrentVault(identity, client) && activeTab(this.state) === tab && this.state.revisionNoteId === tab.noteId) {
       this.state.revisionsOpen = false;
     }
@@ -1463,20 +1469,22 @@ export class TansuApp {
     if (tab?.kind !== "saved" || status?.status !== "conflict" || identity === null || client === null) return;
     const { meta } = status.canonical;
     const precondition = { baseRevision: meta.revision, baseSourceHash: meta.sourceHash, baseDiskHash: meta.diskHash };
-    let response: V2MutationResponse;
-    if (status.conflictDraft === null) {
-      const content = status.draft.source;
-      response = await client.saveNote(tab.noteId, {
-        mutationId: mutationId(),
-        precondition,
-        content,
-        sourceHash: await canonicalSourceHash(content),
-      });
-    } else {
-      if (this.state.conflictDraft === null) return;
-      response = await client.restoreConflictDraft(tab.noteId, status.conflictDraft.draftId, { mutationId: mutationId(), precondition });
-    }
-    await this.handleMutation(response, { identity, client, tab }, status.draft.localRevision);
+    await this.documents.for(tab.noteId).track((async () => {
+      let response: V2MutationResponse;
+      if (status.conflictDraft === null) {
+        const content = status.draft.source;
+        response = await client.saveNote(tab.noteId, {
+          mutationId: mutationId(),
+          precondition,
+          content,
+          sourceHash: await canonicalSourceHash(content),
+        });
+      } else {
+        if (this.state.conflictDraft === null) return;
+        response = await client.restoreConflictDraft(tab.noteId, status.conflictDraft.draftId, { mutationId: mutationId(), precondition });
+      }
+      await this.handleMutation(response, { identity, client, tab }, status.draft.localRevision);
+    })());
     if (this.isCurrentTab(tab, identity, client)) this.state.conflictDraft = null;
   }
 
