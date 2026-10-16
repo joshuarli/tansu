@@ -1689,6 +1689,59 @@ describe("v2 desktop shell", () => {
     expect(revokeUrl).toHaveBeenCalledWith("blob:image");
   });
 
+  it("loads note images with bounded concurrency and one reconfiguration per batch", async () => {
+    const note = noteMeta("note-1", "one.md", "One");
+    const client = configureVault([note], workspaceSeed([
+      { noteId: note.noteId, title: note.title, path: note.path, cursorOffset: null, sourceMode: false },
+    ], note.noteId));
+    const imageCount = 12;
+    client.openNote.mockResolvedValue(documentFor(note, Array.from({ length: imageCount }, (_, index) => `![[z-images/p${index}.webp]]`).join("\n") + "\n"));
+    let inFlight = 0;
+    let maxInFlight = 0;
+    client.loadAsset.mockImplementation(async () => {
+      inFlight += 1;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      await flushAsync();
+      inFlight -= 1;
+      return new Blob(["image"], { type: "image/webp" });
+    });
+    let urlSequence = 0;
+    vi.spyOn(URL, "createObjectURL").mockImplementation(() => `blob:image-${++urlSequence}`);
+    vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+    const { app } = mountApp();
+    await app.boot();
+    const editor = editorMock.instances[0]!;
+    const before = vi.mocked(editor.updateConfiguration).mock.calls.length;
+    await until(() => urlSequence === imageCount);
+    await flushAsync();
+    expect(client.loadAsset).toHaveBeenCalledTimes(imageCount);
+    expect(maxInFlight).toBeGreaterThan(1);
+    expect(maxInFlight).toBeLessThanOrEqual(4);
+    expect(vi.mocked(editor.updateConfiguration).mock.calls.length - before).toBeLessThanOrEqual(Math.ceil(imageCount / 4));
+  });
+
+  it("revokes every created image URL on dispose", async () => {
+    const note = noteMeta("note-1", "one.md", "One");
+    const client = configureVault([note], workspaceSeed([
+      { noteId: note.noteId, title: note.title, path: note.path, cursorOffset: null, sourceMode: false },
+    ], note.noteId));
+    client.openNote.mockResolvedValue(documentFor(note, "![[z-images/a.webp]]\n![[z-images/b.webp]]\n![[z-images/c.webp]]\n"));
+    const created: string[] = [];
+    const revoked: string[] = [];
+    vi.spyOn(URL, "createObjectURL").mockImplementation(() => {
+      const url = `blob:image-${created.length}`;
+      created.push(url);
+      return url;
+    });
+    vi.spyOn(URL, "revokeObjectURL").mockImplementation((url) => { revoked.push(url); });
+    const { app } = mountApp();
+    await app.boot();
+    await until(() => created.length === 3);
+    await flushAsync();
+    await app.dispose();
+    expect(revoked.sort()).toEqual([...created].sort());
+  });
+
   it("uploads pasted images through the current vault and reports status", async () => {
     const note = noteMeta("note-1", "one.md", "One");
     const client = configureVault([note], workspaceSeed([

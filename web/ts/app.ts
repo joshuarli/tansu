@@ -38,6 +38,8 @@ import type { OutlineHeading } from "./editor/source-navigation.js";
 const SESSION_SAVE_DELAY_MS = 250;
 const EDITOR_CAPTURE_DELAY_MS = 150;
 const MIN_SEARCH_QUERY_CHARS = 1;
+const ASSET_PREFETCH_CONCURRENCY = 4;
+const ASSET_CACHE_LIMIT = 64;
 const THEME_STORAGE_KEY = "tansu2.theme.v1";
 
 type TabCloseReason = "user" | "deleted" | "materialized";
@@ -206,7 +208,7 @@ export class TansuApp {
         workspace = this.workspaceSnapshot(this.identity);
       }
     }
-    this.cancelAssetScope();
+    this.clearAssetScope();
     for (const tab of this.state.tabs) if (tab.kind === "saved") tab.session?.close();
     for (const timer of this.autoSaveTimers.values()) window.clearTimeout(timer);
     this.autoSaveTimers.clear();
@@ -375,7 +377,7 @@ export class TansuApp {
     }
     this.eventSubscription?.close();
     this.eventSubscription = null;
-    this.cancelAssetScope();
+    this.clearAssetScope();
     this.detachVisibilityFlush?.();
     this.detachVisibilityFlush = null;
     for (const tab of this.state.tabs) if (tab.kind === "saved") tab.session?.close();
@@ -913,7 +915,7 @@ export class TansuApp {
     this.captureActiveEditor();
     if (outgoingTab?.kind === "saved" && tabIsDirty(outgoingTab)) this.scheduleAutoSave(outgoingTab);
     this.state.activeTab = identity;
-    this.cancelAssetScope();
+    this.abortAssetLoads();
     this.render();
     const tab = activeTab(this.state);
     if (tab !== undefined) await this.ensureTabLoaded(tab);
@@ -1018,7 +1020,7 @@ export class TansuApp {
       this.state.activeTab = this.state.tabs[Math.max(0, index - 1)] === undefined
         ? this.state.tabs[0] === undefined ? null : tabIdentity(this.state.tabs[0])
         : tabIdentity(this.state.tabs[Math.max(0, index - 1)]!);
-      this.cancelAssetScope();
+      this.abortAssetLoads();
     }
     if (closed.kind === "saved" && this.identity !== null && this.vaultClient !== null) {
       const identity = this.identity;
@@ -1903,9 +1905,7 @@ export class TansuApp {
   }
 
   private async prefetchAssets(tab: Tab, source: string): Promise<void> {
-    const hadScopedAssets = this.assetScope.size > 0;
-    this.cancelAssetScope();
-    if (hadScopedAssets) this.editor?.updateConfiguration(this.editorConfig());
+    this.abortAssetLoads();
     const controller = new AbortController();
     this.assetController = controller;
     const key = tab.key;
@@ -1914,17 +1914,48 @@ export class TansuApp {
       [...source.matchAll(/(?:^|\[|\(|\/)((?:\/?z-images\/)[^\s)"'>\]|]+)/g)]
         .map((match) => match[1]!.replace(/^\//, "")),
     );
-    if (this.vaultClient === null) return;
+    const client = this.vaultClient;
+    if (client === null) return;
+    const missing: string[] = [];
     for (const name of names) {
-      try {
-        const blob = await this.vaultClient.loadAsset(name, controller.signal);
-        if (controller.signal.aborted || generation !== this.bootGeneration || activeTab(this.state)?.key !== key) return;
-        this.assetScope.set(name, URL.createObjectURL(blob));
-        this.assetScopeRevision += 1;
-        this.editor?.updateConfiguration(this.editorConfig());
-      } catch (error) {
-        if (!controller.signal.aborted) logClientEvent("warn", "client.asset", { error: errorSummary(error) });
+      const url = this.assetScope.get(name);
+      if (url === undefined) missing.push(name);
+      else {
+        this.assetScope.delete(name);
+        this.assetScope.set(name, url);
       }
+    }
+    const isCurrent = () => !controller.signal.aborted && generation === this.bootGeneration && activeTab(this.state)?.key === key;
+    for (let start = 0; start < missing.length; start += ASSET_PREFETCH_CONCURRENCY) {
+      const batch = missing.slice(start, start + ASSET_PREFETCH_CONCURRENCY);
+      const loaded = await Promise.all(batch.map(async (name) => {
+        try {
+          return { name, blob: await client.loadAsset(name, controller.signal) };
+        } catch (error) {
+          if (!controller.signal.aborted) logClientEvent("warn", "client.asset", { error: errorSummary(error) });
+          return null;
+        }
+      }));
+      if (!isCurrent()) return;
+      let changed = false;
+      for (const entry of loaded) {
+        if (entry === null) continue;
+        this.assetScope.set(entry.name, URL.createObjectURL(entry.blob));
+        changed = true;
+      }
+      if (!changed) continue;
+      this.evictAssetsBeyondLimit(names);
+      this.assetScopeRevision += 1;
+      this.editor?.updateConfiguration(this.editorConfig());
+    }
+  }
+
+  private evictAssetsBeyondLimit(keep: ReadonlySet<string>): void {
+    for (const [name, url] of this.assetScope) {
+      if (this.assetScope.size <= ASSET_CACHE_LIMIT) return;
+      if (keep.has(name)) continue;
+      URL.revokeObjectURL(url);
+      this.assetScope.delete(name);
     }
   }
 
@@ -1933,9 +1964,13 @@ export class TansuApp {
     return this.assetScope.get(normalized) ?? null;
   }
 
-  private cancelAssetScope(): void {
+  private abortAssetLoads(): void {
     this.assetController?.abort();
     this.assetController = null;
+  }
+
+  private clearAssetScope(): void {
+    this.abortAssetLoads();
     if (this.assetScope.size > 0) this.assetScopeRevision += 1;
     for (const url of this.assetScope.values()) URL.revokeObjectURL(url);
     this.assetScope.clear();

@@ -3,15 +3,6 @@
 Prefix: TNS
 Next: 54
 
-### TNS-045 · P3 · Bound and stabilize asset prefetch
-
-- **Area:** Performance
-- **Where:** `web/ts/app.ts:1857`
-- **Problem:** `prefetchAssets()` loads assets one at a time and reconfigures the editor after each, and the cache is cleared on every tab switch. Image-heavy notes load slowly and reconfigure the editor repeatedly. Unmeasured.
-- **Recommendation:** Load with bounded concurrency, visible images first, batch the editor reconfiguration, and keep a cache stable across tab switches. Keep the abort and object-URL cleanup discipline, with a leak check from TNS-048.
-- **Fix with:** make-it-fast
-- **Effort:** M
-
 ### TNS-050 · P3 · Move document state into a per-document controller
 
 - **Area:** Architecture
