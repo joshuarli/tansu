@@ -78,6 +78,26 @@ pub struct VaultRuntime {
     search_rx: Mutex<Option<Receiver<SearchJob>>>,
     search_needs_reconciliation: AtomicBool,
     logs: LogHub,
+    _owner_lock: VaultOwnerLock,
+}
+
+struct VaultOwnerLock {
+    _directory: File,
+}
+
+impl VaultOwnerLock {
+    fn acquire(root: &Path) -> Result<Self> {
+        let directory = File::open(root)?;
+        match directory.try_lock() {
+            Ok(()) => Ok(Self {
+                _directory: directory,
+            }),
+            Err(fs::TryLockError::WouldBlock) => Err(Error::VaultAlreadyOwned {
+                root: root.to_path_buf(),
+            }),
+            Err(fs::TryLockError::Error(error)) => Err(Error::Io(error)),
+        }
+    }
 }
 
 struct EventQueue<T> {
@@ -740,6 +760,7 @@ fn run_search_worker(runtime: Arc<VaultRuntime>, receiver: Receiver<SearchJob>) 
 impl VaultRuntime {
     pub fn open(index: usize, config: &VaultConfig, logs: LogHub) -> Result<Self> {
         fs::create_dir_all(&config.path)?;
+        let owner_lock = VaultOwnerLock::acquire(&config.path)?;
         initialize_state_dir(&config.path, &config.state_path)?;
         let vault_id = config
             .state_path
@@ -804,6 +825,7 @@ impl VaultRuntime {
             search_rx: Mutex::new(Some(search_rx)),
             search_needs_reconciliation: AtomicBool::new(search_needs_reconciliation),
             logs,
+            _owner_lock: owner_lock,
         })
     }
 
@@ -5414,6 +5436,53 @@ mod tests {
         assert!(result.is_err());
         assert!(!state_path.join("vault.db").exists());
         assert!(external_legacy_state.join("vault.db").exists());
+    }
+
+    fn config_for(root: &Path, state_path: PathBuf) -> VaultConfig {
+        VaultConfig {
+            name: "Test".to_string(),
+            path: root.to_path_buf(),
+            state_path,
+        }
+    }
+
+    #[test]
+    fn second_open_of_the_same_root_is_rejected_until_the_owner_drops() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        let state = tempfile::tempdir().unwrap();
+        let logs = || LogHub::new(crate::logging::LogMode::Off);
+
+        let owner =
+            VaultRuntime::open(0, &config_for(&root, state.path().join("first")), logs()).unwrap();
+        let rejected =
+            VaultRuntime::open(1, &config_for(&root, state.path().join("second")), logs());
+        assert!(matches!(
+            rejected,
+            Err(Error::VaultAlreadyOwned { root: ref rejected_root }) if *rejected_root == root
+        ));
+        assert!(!state.path().join("second").join("vault.db").exists());
+
+        drop(owner);
+        VaultRuntime::open(0, &config_for(&root, state.path().join("second")), logs()).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn second_open_through_a_symlinked_root_is_rejected() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("vault");
+        fs::create_dir(&root).unwrap();
+        let alias = dir.path().join("alias");
+        std::os::unix::fs::symlink(&root, &alias).unwrap();
+        let state = tempfile::tempdir().unwrap();
+        let logs = || LogHub::new(crate::logging::LogMode::Off);
+
+        let _owner =
+            VaultRuntime::open(0, &config_for(&root, state.path().join("first")), logs()).unwrap();
+        let rejected =
+            VaultRuntime::open(1, &config_for(&alias, state.path().join("second")), logs());
+        assert!(matches!(rejected, Err(Error::VaultAlreadyOwned { .. })));
     }
 
     fn test_vault_with_note(path: &str, content: &str) -> VaultRuntime {

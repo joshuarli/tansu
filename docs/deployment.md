@@ -1,5 +1,8 @@
 # Deployment
 
+Run one Tansu2 server per vault root. A second server, or a second config
+naming the same directory, exits at startup with an "already owned" error.
+
 Tansu2 binds to `127.0.0.1` on port `3000` by default. Without authentication
 settings, the server uses loopback mode and passkey routes are disabled. Keep
 the default for local use.

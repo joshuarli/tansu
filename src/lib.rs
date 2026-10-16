@@ -43,6 +43,7 @@ pub enum Error {
     Sql(rusqlite::Error),
     NotFound(String),
     Internal(String),
+    VaultAlreadyOwned { root: std::path::PathBuf },
 }
 
 impl Error {
@@ -58,6 +59,11 @@ impl std::fmt::Display for Error {
             Self::BadRequest(message) | Self::NotFound(message) | Self::Internal(message) => {
                 f.write_str(message)
             }
+            Self::VaultAlreadyOwned { root } => write!(
+                f,
+                "vault root {} is already owned by another Tansu2 server",
+                root.display()
+            ),
             Self::Io(error) => write!(f, "{error}"),
             Self::Json(error) => write!(f, "{error}"),
             Self::Sql(error) => write!(f, "{error}"),

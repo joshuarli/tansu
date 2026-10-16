@@ -12,6 +12,11 @@ catalog and revision state in the XDG data path, keyed by stable vault ID. See
 - Each accepted content-changing write has a full recoverable snapshot.
 - A stale save preserves canonical content and creates a conflict draft.
 - Mutations within one vault stay serialized by its operation mutex.
+- One server process owns a vault root at a time. Startup takes an exclusive
+  advisory lock on the root directory itself, so any path or config naming the
+  same directory collides. The lock is held from startup reconciliation until
+  the runtime drops or the process exits. A second owner fails startup with
+  `vault root ... is already owned by another Tansu2 server`.
 - Search is derived state. Indexing failure cannot fail an accepted write.
 - Watcher events request reconciliation instead of making semantic edits.
 - Bootstrap returns note metadata, not all note bodies.

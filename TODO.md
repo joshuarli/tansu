@@ -3,15 +3,6 @@
 Prefix: TNS
 Next: 54
 
-### TNS-024 · P1 · Serialize vault mutations across server processes
-
-- **Area:** Concurrency
-- **Where:** `src/vault.rs:72`, `src/vault.rs:1380`, `src/catalog.rs:373`
-- **Problem:** Mutation serialization uses a `Mutex` owned by one `VaultRuntime`. Two server processes opening the same vault have separate mutexes, so both can validate the same base revision before either materializes its content. Both writes can be accepted and the later materialization can overwrite the earlier one without a conflict draft.
-- **Recommendation:** Hold an exclusive OS lifetime lock per vault, keyed by the canonical root so two configs naming the same root still collide, from startup reconciliation through shutdown. Reject a second server owner at startup. Do not rely on the auth database or search index locks, which do not cover vault files. Test with two processes and two configs naming one root.
-- **Fix with:** durable-state
-- **Effort:** M
-
 ### TNS-038 · P1 · Keep auth database validation available in release builds
 
 - **Area:** Data
