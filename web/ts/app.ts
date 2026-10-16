@@ -778,6 +778,8 @@ export class TansuApp {
     const session = new DocumentSession(identity, generation, this.workspaceId, services);
     tab.session = session;
     this.documents.for(tab.noteId).attachSession(session, (value) => this.onDocumentSessionState(tab, session, serverIdentity, client, value));
+    const isLoadCurrent = () => !this.disposed && tab.session === session && this.state.tabs.includes(tab) &&
+      this.isCurrentVault(serverIdentity, client);
     const [checkpoint, cached] = await Promise.all([
       this.services.workspace.getDraftCheckpoint(identity, this.workspaceId, tab.noteId),
       this.services.workspace.getCachedNoteBody(identity, this.state.notes.get(tab.noteId) ?? { noteId: tab.noteId, sourceHash: "" }),
@@ -785,9 +787,7 @@ export class TansuApp {
     const cachedDocument: V2NoteDocument | null = cached !== null && this.state.notes.has(tab.noteId)
       ? { meta: this.state.notes.get(tab.noteId)!, content: cached.content }
       : null;
-    if (this.disposed || tab.session !== session || !this.state.tabs.includes(tab) ||
-      this.identity.serverInstanceId !== serverIdentity.serverInstanceId ||
-      this.identity.vaultId !== serverIdentity.vaultId || this.vaultClient !== client) return;
+    if (!isLoadCurrent()) return;
     if (cachedDocument !== null && tab.doc === null) {
       tab.doc = cachedDocument;
       tab.draft = cachedDocument.content;
@@ -798,9 +798,7 @@ export class TansuApp {
     }
     try {
       const document = await client.openNote(tab.noteId);
-      if (this.disposed || tab.session !== session || !this.state.tabs.includes(tab) ||
-        this.identity?.serverInstanceId !== serverIdentity.serverInstanceId ||
-        this.identity.vaultId !== serverIdentity.vaultId || this.vaultClient !== client) return;
+      if (!isLoadCurrent()) return;
       const cached = tab.doc;
       tab.doc = document;
       tab.selection = selectionWithin(tab.selection, document.content.length);
@@ -814,9 +812,7 @@ export class TansuApp {
       const editor = tab.editorSession;
       if (editor !== null) this.editor?.reloadIfClean(editor, loadedDraft(tab) ?? document.content);
     } catch (error) {
-      if (this.disposed || tab.session !== session || !this.state.tabs.includes(tab) ||
-        this.identity?.serverInstanceId !== serverIdentity.serverInstanceId ||
-        this.identity.vaultId !== serverIdentity.vaultId || this.vaultClient !== client) return;
+      if (!isLoadCurrent()) return;
       if (error instanceof V2ApiError && error.kind?.code === "auth_required") {
         await this.lockForAuthentication();
         return;

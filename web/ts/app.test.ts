@@ -2807,3 +2807,76 @@ describe("asset url cache", () => {
     expect(revoked.length).toBeGreaterThan(0);
   });
 });
+
+describe("saved tab load completions", () => {
+  useShellFixtures();
+  const first = noteMeta("first", "first.md", "First");
+  const second = noteMeta("second", "second.md", "Second");
+
+  it("drops a network body that arrives after the vault switched", async () => {
+    const oldClient = configureVault([first], workspaceSeed([
+      { noteId: first.noteId, title: first.title, path: first.path, cursorOffset: null, sourceMode: false },
+    ], first.noteId));
+    const pending = deferred<V2NoteDocument>();
+    oldClient.openNote.mockReturnValue(pending.promise);
+    configureVault([second], workspaceSeed([
+      { noteId: second.noteId, title: second.title, path: second.path, cursorOffset: null, sourceMode: false },
+    ], second.noteId), "vault-2");
+    const { app, root } = mountApp();
+    const oldBoot = app.boot();
+    await until(() => oldClient.openNote.mock.calls.length === 1);
+    await app.boot("vault-2");
+
+    pending.resolve(documentFor(first, "# Old vault body\n"));
+    await oldBoot;
+    await flushAsync();
+
+    expect(memory.cached.has(first.noteId)).toBe(false);
+    expect(root.textContent).not.toContain("Old vault body");
+    expect(root.querySelector('.tab[title="First"]')).toBeNull();
+  });
+
+  it("neither caches nor resurrects a note whose tab closed while it loaded", async () => {
+    const other = noteMeta("other", "other.md", "Other");
+    const client = configureVault([first, other], workspaceSeed([
+      { noteId: first.noteId, title: first.title, path: first.path, cursorOffset: null, sourceMode: false },
+      { noteId: other.noteId, title: other.title, path: other.path, cursorOffset: null, sourceMode: false },
+    ], first.noteId));
+    const pending = deferred<V2NoteDocument>();
+    client.openNote.mockImplementation((id) => id === first.noteId ? pending.promise : Promise.resolve(documentFor(other, "# Other\n")));
+    const { app, root } = mountApp();
+    const booting = app.boot();
+    await until(() => client.openNote.mock.calls.some(([id]) => id === first.noteId));
+    root.querySelector<HTMLButtonElement>('.tab[title="First"] .tab-close')!.click();
+    await flushAsync();
+
+    pending.resolve(documentFor(first, "# Late\n"));
+    await booting;
+    await flushAsync();
+
+    expect(memory.cached.has(first.noteId)).toBe(false);
+    expect(root.querySelector('.tab[title="First"]')).toBeNull();
+  });
+
+  it("does not report a load failure for a tab that closed while it loaded", async () => {
+    const other = noteMeta("other", "other.md", "Other");
+    const client = configureVault([first, other], workspaceSeed([
+      { noteId: first.noteId, title: first.title, path: first.path, cursorOffset: null, sourceMode: false },
+      { noteId: other.noteId, title: other.title, path: other.path, cursorOffset: null, sourceMode: false },
+    ], first.noteId));
+    const pending = deferred<V2NoteDocument>();
+    client.openNote.mockImplementation((id) => id === first.noteId ? pending.promise : Promise.resolve(documentFor(other, "# Other\n")));
+    const { app, root } = mountApp();
+    const booting = app.boot();
+    await until(() => client.openNote.mock.calls.some(([id]) => id === first.noteId));
+    root.querySelector<HTMLButtonElement>('.tab[title="First"] .tab-close')!.click();
+    await flushAsync();
+
+    pending.reject(new Error("offline"));
+    await booting;
+    await flushAsync();
+
+    expect(root.querySelector('.tab[title="First"]')).toBeNull();
+    expect(root.querySelector(".unavailable-state")).toBeNull();
+  });
+});
