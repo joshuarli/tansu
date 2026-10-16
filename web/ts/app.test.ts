@@ -2612,3 +2612,82 @@ async function runCommand(root: HTMLElement, query: string): Promise<void> {
   command?.click();
   await flushAsync();
 }
+
+function useShellFixtures(): void {
+  beforeEach(() => {
+    clients.clear();
+    memory.workspaces.clear();
+    memory.cached.clear();
+    memory.savedDrafts.clear();
+    memory.localDrafts.clear();
+    memory.promoted.length = 0;
+    memory.workspaceWrites.length = 0;
+    memory.failWrites = false;
+    editorMock.instances.length = 0;
+    api.bootstrap.mockReset().mockResolvedValue({
+      apiVersion: 2,
+      serverInstanceId: "server-1",
+      vaults: [{ vaultId: DEFAULT_VAULT, name: "Notes" }, { vaultId: "vault-2", name: "Other notes" }],
+    });
+    api.forVault.mockClear();
+    htmlImport.pickHtmlImport.mockReset().mockResolvedValue(null);
+    let sequence = 0;
+    vi.stubGlobal("crypto", {
+      randomUUID: vi.fn(() => `mutation-${++sequence}`),
+      subtle: { digest: vi.fn(async () => new Uint8Array(32).buffer) },
+    });
+    document.body.replaceChildren();
+  });
+  afterEach(async () => {
+    await Promise.all(apps.splice(0).map((app) => app.dispose()));
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+    document.body.replaceChildren();
+  });
+}
+
+describe("wiki link failure notices", () => {
+  useShellFixtures();
+  const one = noteMeta("note-1", "one.md", "One");
+
+  async function mountWithLink(source: string, notes: V2NoteMeta[]) {
+    const client = configureVault(notes, workspaceSeed([
+      { noteId: one.noteId, title: one.title, path: one.path, cursorOffset: 0, sourceMode: false },
+    ], one.noteId));
+    client.openNote.mockImplementation(async (id) => {
+      const meta = notes.find((item) => item.noteId === id)!;
+      return documentFor(meta, id === one.noteId ? source : `# ${meta.title}\n`);
+    });
+    const mounted = mountApp({ ...createServices(), editor: { createEditor: createCodeMirrorEditor } });
+    await mounted.app.boot();
+    await until(() => mounted.root.querySelector("[data-wiki-link-target]") !== null);
+    return { client, ...mounted };
+  }
+
+  function clickLink(root: HTMLElement): void {
+    root.querySelector<HTMLElement>("[data-wiki-link-target]")!
+      .dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 }));
+  }
+
+  it("tells the user when a link target is ambiguous", async () => {
+    const { root } = await mountWithLink("See [[Dup]]\n", [one, noteMeta("note-2", "a/Dup.md", "Dup"), noteMeta("note-3", "b/Dup.md", "Dup")]);
+    clickLink(root);
+    await until(() => root.textContent?.includes('Link "Dup" matches more than one note') === true);
+  });
+
+  it("tells the user when a link target does not exist", async () => {
+    const { root } = await mountWithLink("See [[Nowhere]]\n", [one]);
+    clickLink(root);
+    await until(() => root.textContent?.includes('No note found for link "Nowhere"') === true);
+  });
+
+  it("does not show a notice for a link that resolves", async () => {
+    const two = noteMeta("note-2", "two.md", "Two");
+    const { root } = await mountWithLink("See [[Two]]\n", [one, two]);
+    await until(() => root.querySelector("[data-wiki-link-target]")?.classList.contains("cm-atomic-wiki-link-resolved") === true);
+    clickLink(root);
+    await until(() => root.querySelector<HTMLButtonElement>(".tab.active")?.title === "Two");
+    expect(root.textContent).not.toContain("No note found");
+    expect(root.textContent).not.toContain("more than one note");
+  });
+});

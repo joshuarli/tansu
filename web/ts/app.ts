@@ -12,6 +12,7 @@ import { V2ApiError } from "./app/v2-api.ts";
 import type { EditorHandle, EditorSession, EditorSnapshot } from "./editor/codemirror-adapter.ts";
 import { createCalloutExtension, createWikiImageExtension, createWikiLinkExtension, type EditorConfig } from "./editor/tansu-extensions.ts";
 import { canMutateTags } from "./editor/tag-source.ts";
+import { resolveWikiTarget } from "./editor/wiki-target.ts";
 import { normalizeTag } from "./markdown-tags.ts";
 import { canonicalSourceHash } from "./source-hash.ts";
 import {
@@ -328,6 +329,14 @@ export class TansuApp {
         this.render();
       }
     };
+    const onWikiLinkClick = (event: MouseEvent) => {
+      if (event.button !== 0 || event.shiftKey || event.altKey || !(event.target instanceof Element)) return;
+      const target = event.target.closest<HTMLElement>("[data-wiki-link-target]")?.dataset["wikiLinkTarget"];
+      if (!target) return;
+      const resolution = resolveWikiTarget(target, activeTab(this.state)?.path ?? "", this.wikiNotes());
+      if (resolution.kind === "ambiguous") this.notify(`Link "${target}" matches more than one note`);
+      else if (resolution.kind !== "resolved") this.notify(`No note found for link "${target}"`);
+    };
     const onWheel = (event: WheelEvent) => {
       if (event.defaultPrevented || event.ctrlKey || event.deltaY === 0) return;
       const target = event.target;
@@ -351,11 +360,13 @@ export class TansuApp {
     window.addEventListener("keydown", onKeyDown);
     window.addEventListener("click", onClick);
     this.root.addEventListener("wheel", onWheel, { passive: false });
+    this.editorMount.addEventListener("click", onWikiLinkClick, true);
     this.globalEventCleanups.push(
       () => window.removeEventListener("beforeunload", onBeforeUnload),
       () => window.removeEventListener("keydown", onKeyDown),
       () => window.removeEventListener("click", onClick),
       () => this.root.removeEventListener("wheel", onWheel),
+      () => this.editorMount.removeEventListener("click", onWikiLinkClick, true),
     );
   }
 
@@ -513,6 +524,10 @@ export class TansuApp {
     this.editor = this.services.editor.createEditor(this.editorMount, this.editorConfig());
   }
 
+  private wikiNotes() {
+    return [...this.state.notes.values()].map((note) => ({ noteId: note.noteId, title: note.title, path: note.path }));
+  }
+
   private editorConfig(): EditorConfig {
     const generation = this.bootGeneration;
     const serverIdentity = this.identity;
@@ -540,7 +555,7 @@ export class TansuApp {
       noteTitle: activeTab(this.state)?.title ?? "",
       ...(noteTags === undefined ? {} : { noteTags }),
       currentNotePath: () => activeTab(this.state)?.path ?? "",
-      wikiNotes: () => [...this.state.notes.values()].map((note) => ({ noteId: note.noteId, title: note.title, path: note.path })),
+      wikiNotes: () => this.wikiNotes(),
       onWikiNoteOpen: (id) => {
         if (generation === this.bootGeneration && !this.transitioningVault && currentVault()) {
           this.runAsync(this.openNote(toNoteId(id)), "Open failed");
