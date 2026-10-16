@@ -3,15 +3,6 @@
 Prefix: TNS
 Next: 54
 
-### TNS-043 · P2 · Use the platform current-directory value for relative roots
-
-- **Area:** Portability
-- **Where:** `src/paths.rs:266-270`, `src/paths.rs:396-400`, `src/paths.rs:488-493`
-- **Problem:** Unix path operations pass `-100` as the `openat` directory descriptor for root paths. That is Linux's `AT_FDCWD`; Darwin uses `-2`. Absolute roots work because `openat` ignores the descriptor for absolute paths, but direct path API calls or `VaultRuntime::open` with a relative root fail on macOS.
-- **Recommendation:** Use the platform's `AT_FDCWD` value through a platform abstraction and cover relative-root operations on each supported Unix target.
-- **Fix with:** os-boundaries
-- **Effort:** S
-
 ### TNS-044 · P2 · Cache editor layout metadata between document changes
 
 - **Area:** Performance

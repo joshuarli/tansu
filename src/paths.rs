@@ -264,7 +264,7 @@ fn open_visible_parent(root: &Path, note_path: &str, create: bool) -> Result<(Fi
         })
         .collect::<Result<Vec<_>>>()?;
     let root_directory = openat_path(
-        -100,
+        current_directory(),
         root.as_os_str(),
         O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC,
     )?;
@@ -394,7 +394,7 @@ pub fn write_vault_asset_new(root: &Path, name: &str, bytes: &[u8]) -> Result<()
         return Err(Error::BadRequest("asset must be under z-images/".to_string()));
     }
     let mut directory = openat_path(
-        -100,
+        current_directory(),
         root.as_os_str(),
         O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC,
     )?;
@@ -487,7 +487,7 @@ pub fn write_vault_asset_new(root: &Path, name: &str, bytes: &[u8]) -> Result<()
 #[cfg(unix)]
 fn open_vault_file(root: &Path, relative: &Path) -> Result<File> {
     let root_fd = openat_path(
-        -100,
+        current_directory(),
         root.as_os_str(),
         O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC,
     )?;
@@ -550,6 +550,11 @@ const O_NONBLOCK: i32 = 0x4;
 const O_CLOEXEC: i32 = 0x80000;
 #[cfg(target_os = "macos")]
 const O_CLOEXEC: i32 = 0x1000000;
+
+#[cfg(unix)]
+fn current_directory() -> RawFd {
+    rustix::fs::CWD.as_raw_fd()
+}
 
 #[cfg(unix)]
 fn openat_path(directory: RawFd, path: &std::ffi::OsStr, flags: i32) -> Result<File> {
@@ -733,6 +738,26 @@ mod tests {
         assert!(write_visible_note_bytes_new(root.path(), "nested/new.md", b"clobber").is_err());
         write_visible_note_bytes_atomic(root.path(), "nested/new.md", b"replace").unwrap();
         assert_eq!(fs::read(root.path().join("nested/new.md")).unwrap(), b"replace");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn operations_accept_a_root_relative_to_the_current_directory() {
+        let root = tempfile::tempdir().unwrap().keep().canonicalize().unwrap();
+        let current = std::env::current_dir().unwrap();
+        let mut relative = PathBuf::new();
+        for _ in current.components().skip(1) {
+            relative.push("..");
+        }
+        relative.push(root.strip_prefix("/").unwrap());
+        assert!(relative.is_relative());
+
+        write_visible_note_bytes_new(&relative, "nested/note.md", b"note").unwrap();
+        assert_eq!(read_visible_bytes(&relative, "nested/note.md").unwrap(), b"note");
+        write_vault_asset_new(&relative, "z-images/image.webp", b"image").unwrap();
+        assert_eq!(read_vault_asset(&relative, "z-images/image.webp").unwrap(), b"image");
+
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[cfg(unix)]
