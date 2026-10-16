@@ -1,6 +1,7 @@
-import { ensureSyntaxTree, syntaxTree } from "@codemirror/language";
+import { syntaxTree } from "@codemirror/language";
 import type { EditorState, Extension, Range } from "@codemirror/state";
 import { Decoration, EditorView, ViewPlugin, WidgetType, type DecorationSet, type ViewUpdate } from "@codemirror/view";
+import { deriveFromSyntaxTree } from "./syntax-tree-cache.js";
 import { readOnlyFacet } from "./vendor/atomic/read-only.js";
 
 type NoteDefinition = {
@@ -15,6 +16,13 @@ type NoteReference = {
   from: number;
   to: number;
   lineFrom: number;
+};
+
+type SidenoteScan = {
+  definitions: ReadonlyMap<string, NoteDefinition>;
+  references: readonly NoteReference[];
+  firstReference: ReadonlyMap<string, NoteReference>;
+  markerNumbers: ReadonlyMap<string, string>;
 };
 
 type SidenoteLayout = {
@@ -123,9 +131,7 @@ function frontmatterEnd(state: EditorState): number {
   return state.doc.length;
 }
 
-function buildSidenoteLayout(state: EditorState): SidenoteLayout {
-  const readOnly = state.facet(readOnlyFacet);
-  const tree = ensureSyntaxTree(state, state.doc.length, 200) ?? syntaxTree(state);
+const scanSidenotes = deriveFromSyntaxTree((state, tree): SidenoteScan => {
   const frontmatterTo = frontmatterEnd(state);
   const codeRanges: Array<{ from: number; to: number }> = [];
   tree.iterate({
@@ -166,13 +172,19 @@ function buildSidenoteLayout(state: EditorState): SidenoteLayout {
     },
   });
 
-  const activeLine = state.doc.lineAt(state.selection.main.head).from;
   const firstReference = new Map<string, NoteReference>();
   for (const reference of references) {
     if (!firstReference.has(reference.label)) firstReference.set(reference.label, reference);
   }
+  const markerNumbers = new Map([...firstReference.keys()].map((label, index) => [label, superscript(index + 1)]));
+  return { definitions, references, firstReference, markerNumbers };
+});
+
+function buildSidenoteLayout(state: EditorState): SidenoteLayout {
+  const readOnly = state.facet(readOnlyFacet);
+  const { definitions, references, firstReference, markerNumbers } = scanSidenotes(state);
   const visibleLabels = [...firstReference.keys()];
-  const markerNumbers = new Map(visibleLabels.map((label, index) => [label, superscript(index + 1)]));
+  const activeLine = state.doc.lineAt(state.selection.main.head).from;
   const ranges: Range<Decoration>[] = [];
   const anchorLines = new Set<number>();
 
@@ -227,7 +239,8 @@ export function tufteNotes(): Extension {
     }
 
     update(update: ViewUpdate): void {
-      if (update.docChanged || update.selectionSet || update.viewportChanged ||
+      if (update.docChanged || update.selectionSet ||
+        syntaxTree(update.startState) !== syntaxTree(update.state) ||
         update.startState.facet(readOnlyFacet) !== update.state.facet(readOnlyFacet)) this.refresh();
     }
 

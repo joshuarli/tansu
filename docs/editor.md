@@ -125,7 +125,10 @@ They replace only that cell's source span. Find treats the query as literal
 text, uses smart case, and returns UTF-16 source ranges. The outline reads
 headings from the Markdown syntax tree and skips frontmatter and fenced code.
 As the editor scrolls, the outline highlights the heading at the reading
-position and fades the highlight between headings.
+position and fades the highlight between headings. The outline and the
+margin-note layout derive from the syntax tree once per document and tree
+version and are reused across selection, scroll, and viewport updates; only a
+document change or a newer syntax tree rebuilds them.
 Tag updates edit the top-level `tags` field and leave all other frontmatter and
 the Markdown body unchanged. Tansu reads only tag metadata from frontmatter.
 

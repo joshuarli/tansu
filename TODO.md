@@ -3,15 +3,6 @@
 Prefix: TNS
 Next: 54
 
-### TNS-044 · P2 · Cache editor layout metadata between document changes
-
-- **Area:** Performance
-- **Where:** `web/ts/editor/tufte-notes.ts:219`, `web/ts/editor/source-navigation.ts:35`, `web/ts/editor/codemirror-adapter.ts:998`
-- **Problem:** `tufteNotes()` rebuilds the full layout, including a full-document `ensureSyntaxTree` and a line scan, on document, selection, and viewport changes. `outlineFromSyntaxTree()` walks the whole document on scroll. Cost grows with note length during cursor movement and scrolling. Unmeasured.
-- **Recommendation:** Cache heading and footnote metadata keyed to document changes, so selection and viewport changes reuse it. Measure sustained cursor movement and scroll on long prose, many headings, many footnotes, and image-heavy notes before and after, following `benchmark-checklist`.
-- **Fix with:** make-it-fast
-- **Effort:** M
-
 ### TNS-046 · P2 · Wire wiki-link navigation into the app editor
 
 - **Area:** Tests

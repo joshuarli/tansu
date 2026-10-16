@@ -1,5 +1,5 @@
-import { ensureSyntaxTree, syntaxTree } from "@codemirror/language";
 import type { EditorState } from "@codemirror/state";
+import { deriveFromSyntaxTree } from "./syntax-tree-cache.js";
 
 export type FindMatch = {
   from: number;
@@ -32,8 +32,7 @@ export function findLiteral(source: string, query: string): FindMatch[] {
   return matches;
 }
 
-export function outlineFromSyntaxTree(state: EditorState): Outline {
-  const tree = ensureSyntaxTree(state, state.doc.length, 200) ?? syntaxTree(state);
+export const outlineFromSyntaxTree = deriveFromSyntaxTree((state, tree): Outline => {
   const frontmatterEnd = findFrontmatterEnd(state);
   const headings: OutlineHeading[] = [];
   tree.iterate({
@@ -52,7 +51,7 @@ export function outlineFromSyntaxTree(state: EditorState): Outline {
     },
   });
   return { headings, complete: tree.length >= state.doc.length };
-}
+});
 
 function findFrontmatterEnd(state: EditorState): number {
   if (state.doc.lines === 0) return 0;

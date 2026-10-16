@@ -1004,11 +1004,14 @@ export function createCodeMirrorEditor(container: HTMLElement, initialConfig: Ed
         active = headings[headings.length - 1] ?? null;
       } else {
         const threshold = scroller.scrollTop + activeHeadingOffset(scroller);
-        for (const heading of headings) {
-          if (view.lineBlockAt(heading.from).top > threshold) break;
-          active = heading;
+        let low = 0;
+        let high = headings.length;
+        while (low < high) {
+          const middle = (low + high) >>> 1;
+          if (view.lineBlockAt(headings[middle]!.from).top > threshold) high = middle;
+          else low = middle + 1;
         }
-        active ??= headings[0] ?? null;
+        active = headings[Math.max(low - 1, 0)] ?? null;
       }
     }
     const from = active?.from ?? null;
