@@ -1,4 +1,5 @@
 import { commandItems } from "./app/commands.ts";
+import { keyboardShortcutFor } from "./app/keyboard-shortcuts.ts";
 import type { CommandId, SettingsFormValue, ViewEvent } from "./app/events.ts";
 import { applySettingsForm } from "./app/settings-policy.ts";
 import { DocumentSession, defaultDocumentSessionServices, type DocumentSessionServices, type DocumentSessionState } from "./app/document-session.ts";
@@ -298,29 +299,26 @@ export class TansuApp {
     };
     const onKeyDown = (event: KeyboardEvent) => {
       if (this.transitioningVault || this.state.authRequired || this.state.boot === null) return;
-      const modifier = event.metaKey || event.ctrlKey;
-      const key = event.key.toLowerCase();
-      if (modifier && key === "k" && !event.altKey && !event.shiftKey) {
-        event.preventDefault();
-        this.dispatch({ type: "command.open" });
-      } else if (modifier && event.shiftKey && key === "f" && !event.altKey) {
-        event.preventDefault();
-        this.dispatch({ type: "search.open" });
-      } else if (modifier && !event.shiftKey && !event.altKey && key === "f") {
-        event.preventDefault();
-        this.dispatch({ type: "find.open" });
-      } else if (modifier && key === "s" && !event.altKey && !event.shiftKey) {
-        event.preventDefault();
-        this.runAsync(this.manualSave(), "Save failed");
-      } else if (modifier && event.altKey && !event.shiftKey && key === "n") {
-        event.preventDefault();
-        this.runAsync(this.commandCreate(), "Create failed");
-      } else if (event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey && event.key === "/") {
-        event.preventDefault();
-        if (!this.state.searchOpen) this.dispatch({ type: "search.open" });
-      } else if (event.key === "Escape" && this.hasOverlay()) {
+      if (event.key === "Escape" && this.hasOverlay()) {
         event.preventDefault();
         this.runAsync(this.closeOverlays(), "Local recovery storage failed");
+        return;
+      }
+      const shortcut = keyboardShortcutFor(event);
+      if (shortcut === undefined) return;
+      event.preventDefault();
+      if (shortcut.action === "command.open") {
+        this.dispatch({ type: "command.open" });
+      } else if (shortcut.action === "help.open") {
+        event.preventDefault();
+        this.state.helpOpen = true;
+        this.render();
+      } else if (shortcut.action === "search") {
+        if (!this.state.searchOpen) this.dispatch({ type: "search.open" });
+      } else if (shortcut.action === "find") {
+        this.dispatch({ type: "find.open" });
+      } else {
+        this.executeCommand(shortcut.action);
       }
     };
     const onClick = (event: MouseEvent) => {
@@ -2104,6 +2102,7 @@ export class TansuApp {
     this.state.findOpen = false;
     this.state.revisionsOpen = false;
     this.state.settingsOpen = false;
+    this.state.helpOpen = false;
     this.state.conflictDraft = null;
     this.state.noteDialog = null;
     this.state.contextMenu = null;
@@ -2114,7 +2113,7 @@ export class TansuApp {
   }
 
   private hasOverlay(): boolean {
-    return this.state.commandOpen || this.state.searchOpen || this.state.findOpen || this.state.revisionsOpen || this.state.settingsOpen || this.state.conflictDraft !== null || this.state.noteDialog !== null || this.state.contextMenu !== null;
+    return this.state.commandOpen || this.state.searchOpen || this.state.findOpen || this.state.revisionsOpen || this.state.settingsOpen || this.state.helpOpen || this.state.conflictDraft !== null || this.state.noteDialog !== null || this.state.contextMenu !== null;
   }
 
   private captureOverlayReturn(): void {
@@ -2216,6 +2215,7 @@ export class TansuApp {
     this.state.commandOpen = false;
     this.state.revisionsOpen = false;
     this.state.settingsOpen = false;
+    this.state.helpOpen = false;
     this.state.conflictDraft = null;
     this.state.noteDialog = null;
     this.state.contextMenu = null;

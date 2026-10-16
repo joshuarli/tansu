@@ -543,7 +543,6 @@ button {
   flex-wrap: wrap;
   align-items: center;
   gap: 5px;
-  overflow: hidden;
 }
 
 .tag {
@@ -564,7 +563,6 @@ button {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  max-width: min(100%, 28ch);
   background: oklch(var(--tag-bg-lightness) var(--tag-bg-chroma) var(--tag-hue));
   color: oklch(var(--tag-fg-lightness) var(--tag-fg-chroma) var(--tag-hue));
   line-height: 18px;
@@ -572,9 +570,7 @@ button {
 }
 
 .tag-pill-label {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  min-width: max-content;
 }
 
 button.tag-pill:not(:disabled) {
@@ -995,6 +991,52 @@ button.tag-pill:not(:disabled):hover::after {
 
 .settings-panel {
   width: min(480px, calc(100vw - 28px));
+}
+
+.keyboard-help-panel {
+  width: min(460px, calc(100vw - 28px));
+  top: 50%;
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100dvh - 32px);
+  overflow: hidden;
+  transform: translate(-50%, -50%);
+}
+
+.keyboard-help-panel .modal-header {
+  flex: 0 0 36px;
+}
+
+.keyboard-help-list {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.help-shortcut-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  min-height: 36px;
+  padding: 0 8px;
+  border-top: 1px solid var(--color-border);
+  color: var(--color-text-muted);
+  font-size: 13px;
+}
+
+.help-shortcut-key {
+  flex: 0 0 auto;
+  color: var(--color-text);
+  font: inherit;
+  font-weight: 550;
+  white-space: nowrap;
+}
+
+.help-shortcut-description {
+  min-width: 0;
+  text-align: right;
 }
 
 .note-dialog-panel {
@@ -1562,47 +1604,11 @@ button.tag-pill:not(:disabled):hover::after {
   padding: 0 16px;
 }
 
-.search-icon {
-  position: absolute;
-  top: 20px;
-  left: 20px;
-  display: grid;
-  width: 16px;
-  height: 16px;
-  place-items: center;
-  color: transparent;
-  font-size: 0;
-  line-height: 1;
-}
-
-.search-icon::before {
-  position: absolute;
-  top: 2px;
-  left: 2px;
-  width: 10px;
-  height: 10px;
-  border: 1.5px solid #737984;
-  border-radius: 50%;
-  content: "";
-}
-
-.search-icon::after {
-  position: absolute;
-  top: 12px;
-  left: 12px;
-  width: 6px;
-  height: 1.5px;
-  transform: rotate(48deg);
-  transform-origin: left center;
-  background: #737984;
-  content: "";
-}
-
 .search-field .command-input {
   position: absolute;
   top: 17px;
-  left: 48px;
-  width: calc(100% - 72px);
+  left: 16px;
+  width: calc(100% - 32px);
   height: 25px;
   min-height: 25px;
   padding: 0;
@@ -1671,43 +1677,11 @@ button.tag-pill:not(:disabled):hover::after {
   border-bottom: 1px solid var(--color-border);
 }
 
-.command-search-icon {
-  position: absolute;
-  top: 50%;
-  left: 6px;
-  width: 16px;
-  height: 16px;
-  transform: translateY(-50%);
-}
-
-.command-search-icon::before {
-  position: absolute;
-  top: 1px;
-  left: 1px;
-  width: 10px;
-  height: 10px;
-  border: 1.7px solid #737984;
-  border-radius: 50%;
-  content: "";
-}
-
-.command-search-icon::after {
-  position: absolute;
-  top: 11px;
-  left: 11px;
-  width: 6px;
-  height: 1.7px;
-  background: #737984;
-  content: "";
-  transform: rotate(48deg);
-  transform-origin: left center;
-}
-
 .command-field .command-input {
   position: absolute;
   top: 1px;
-  left: 32px;
-  width: calc(100% - 32px);
+  left: 0;
+  width: 100%;
   height: 55px;
   min-height: 55px;
   padding: 0;
@@ -1954,26 +1928,17 @@ button.tag-pill:not(:disabled):hover::after {
 
 .search-panel .search-result-tags {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 5px;
   min-width: 0;
-  overflow: hidden;
-  white-space: nowrap;
+  white-space: normal;
 }
 
 .search-panel .search-result-tags .tag-pill {
-  flex: 0 1 auto;
-  min-width: 0;
+  flex: 0 0 auto;
   padding: 0 7px;
   font-size: 11.5px;
-  line-height: 18px;
-}
-
-.search-result-tags-overflow {
-  flex: 0 0 auto;
-  color: var(--color-text-subtle);
-  font-size: 11.5px;
-  font-variant-numeric: tabular-nums;
   line-height: 18px;
 }
 
@@ -2039,8 +2004,8 @@ button.tag-pill:not(:disabled):hover::after {
 }
 
 .find-input {
-  flex: 0 0 133.5px;
-  width: 133.5px;
+  flex: 1 1 auto;
+  width: auto;
   min-width: 0;
   height: 20px;
   border: 0;
@@ -2050,41 +2015,6 @@ button.tag-pill:not(:disabled):hover::after {
   padding: 0;
   font-size: 13px;
   transform: translateY(2px);
-}
-
-.find-icon {
-  display: grid;
-  flex: 0 0 32.5px;
-  width: 32.5px;
-  height: 20px;
-  place-items: center;
-  position: relative;
-  color: transparent;
-  font-size: 0;
-  line-height: 1;
-}
-
-.find-icon::before {
-  position: absolute;
-  top: 5px;
-  left: 11.5px;
-  width: 7px;
-  height: 7px;
-  border: 1px solid #6f7580;
-  border-radius: 50%;
-  content: "";
-}
-
-.find-icon::after {
-  position: absolute;
-  top: 12px;
-  left: 19.5px;
-  width: 4px;
-  height: 1px;
-  background: #6f7580;
-  content: "";
-  transform: rotate(48deg);
-  transform-origin: left center;
 }
 
 .find-input:focus-visible { outline: none; }

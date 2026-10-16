@@ -219,6 +219,57 @@ describe("v2 desktop shell", () => {
     expect(root.querySelector(".command-panel")).toBeNull();
   });
 
+  it("opens the command palette from Ctrl+P", async () => {
+    configureVault([]);
+    const { app, root } = mountApp();
+    app.bindGlobalEvents();
+    await app.boot();
+
+    const open = new KeyboardEvent("keydown", { key: "p", ctrlKey: true, cancelable: true });
+    window.dispatchEvent(open);
+    await flushAsync();
+
+    expect(open.defaultPrevented).toBeTruthy();
+    expect(root.querySelector(".command-panel")).not.toBeNull();
+    expect(root.textContent).toContain("Import HTML");
+    expect(root.textContent).toContain("Settings");
+  });
+
+  it("opens a new note tab with Ctrl+N and Ctrl+T", async () => {
+    configureVault([]);
+    const { app, root } = mountApp();
+    app.bindGlobalEvents();
+    await app.boot();
+
+    for (const key of ["n", "t"]) {
+      const open = new KeyboardEvent("keydown", { key, ctrlKey: true, cancelable: true });
+      window.dispatchEvent(open);
+      await until(() => root.querySelector(".note-dialog-panel") !== null);
+      expect(open.defaultPrevented).toBeTruthy();
+      expect(root.querySelector(".note-dialog-panel input")).not.toBeNull();
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", cancelable: true }));
+      await until(() => root.querySelector(".note-dialog-panel") === null);
+    }
+  });
+
+  it("opens keyboard shortcut help with Escape and closes it with Escape", async () => {
+    configureVault([]);
+    const { app, root } = mountApp();
+    app.bindGlobalEvents();
+    await app.boot();
+
+    const open = new KeyboardEvent("keydown", { key: "Escape", cancelable: true });
+    window.dispatchEvent(open);
+    await flushAsync();
+    expect(open.defaultPrevented).toBeTruthy();
+    expect(root.textContent).toContain("Keyboard shortcuts");
+    expect(root.textContent).toContain("Find in current note");
+
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", cancelable: true }));
+    await flushAsync();
+    expect(root.textContent).not.toContain("Keyboard shortcuts");
+  });
+
   it("closes a note context menu when the user clicks outside it", async () => {
     const note = noteMeta("note-1", "one.md", "One");
     configureVault([note]);
