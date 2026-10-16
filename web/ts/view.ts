@@ -11,6 +11,7 @@ import {
   type Tab,
 } from "./state.ts";
 import { vaultId } from "./app/identity.ts";
+import { SETTINGS_LIMITS } from "./app/settings-policy.ts";
 import { sameTabIdentity, type TabIdentity } from "./app/tab-identity.ts";
 import type { V2OverlayCoverage, V2SearchHit } from "./types.generated.ts";
 import type { FindMatch, Outline } from "./editor/source-navigation.js";
@@ -823,15 +824,16 @@ function renderConflictPanel(state: State, actions: ViewActions): HTMLElement {
 function renderSettingsPanel(state: State, actions: ViewActions): HTMLElement {
   const settings = state.boot!.settings;
   const excluded = input("Excluded folders", settings.excludedFolders.join(", "));
-  const autosave = input("Autosave delay", String(settings.autosaveDelayMs), "number");
-  const undo = input("Undo stack", String(settings.undoStackMax), "number");
+  const { autosaveDelayMs, undoStackMax, imageWebpQuality } = SETTINGS_LIMITS;
+  const autosave = input("Autosave delay", String(settings.autosaveDelayMs), "number", String(autosaveDelayMs.min));
+  const undo = input("Undo stack", String(settings.undoStackMax), "number", String(undoStackMax.min));
   const quality = input(
     "Image quality",
     String(settings.imageWebpQuality),
     "number",
-    "0.1",
-    "1",
-    "0.05",
+    String(imageWebpQuality.min),
+    String(imageWebpQuality.max),
+    String(imageWebpQuality.step),
   );
   for (const field of [excluded, autosave, undo, quality]) {
     field.dataset["preserveValue"] = "";

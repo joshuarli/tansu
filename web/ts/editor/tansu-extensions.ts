@@ -10,6 +10,8 @@ export type EditorConfig = {
   extensions?: readonly EditorExtension[];
   readOnly?: boolean;
   mode?: "live" | "source";
+  undoStackMax?: number;
+  imageWebpQuality?: number;
   className?: string;
   noteTitle?: string;
   noteTags?: {

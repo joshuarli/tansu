@@ -26,7 +26,7 @@ export type CommandItem = {
   shortcut?: string;
 };
 
-type SettingsFormValue = {
+export type SettingsFormValue = {
   excludedFoldersText: string;
   autosaveDelayMs: number;
   undoStackMax: number;

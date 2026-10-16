@@ -524,6 +524,10 @@ function sameEditorExtensionInputs(left: EditorConfig, right: EditorConfig): boo
     ));
 }
 
+function historyExtension(config: EditorConfig): Extension {
+  return config.undoStackMax === undefined ? history() : history({ minDepth: config.undoStackMax });
+}
+
 function editorKeymap(config: EditorConfig): Extension {
   return keymap.of([
     { key: "Mod-s", run: () => { config.onSave?.(); return true; } },
@@ -543,6 +547,7 @@ function createState(
   modeCompartment: Compartment,
   readOnlyCompartment: Compartment,
   keymapCompartment: Compartment,
+  historyCompartment: Compartment,
   updateListener: Extension,
   clipboardHandler: Extension,
   pasteHandler: Extension,
@@ -551,7 +556,7 @@ function createState(
   return EditorState.create({
     doc: source,
     extensions: [
-      history(),
+      historyCompartment.of(historyExtension(config)),
       codeFolding({ placeholderText: "" }),
       EditorView.atomicRanges.of((view) => foldedRanges(view.state)),
       findHighlightField,
@@ -598,6 +603,7 @@ export function createCodeMirrorEditor(container: HTMLElement, initialConfig: Ed
   const modeCompartment = new Compartment();
   const readOnlyCompartment = new Compartment();
   const keymapCompartment = new Compartment();
+  const historyCompartment = new Compartment();
   const imagePastes = new Map<number, PendingImagePaste>();
   let nextImagePasteId = 1;
 
@@ -698,7 +704,9 @@ export function createCodeMirrorEditor(container: HTMLElement, initialConfig: Ed
       const context = canvas.getContext("2d");
       if (context === null) throw new Error("Could not create an image conversion context");
       context.drawImage(bitmap, 0, 0);
-      const image = await encodeImageDataAsWebp(context.getImageData(0, 0, bitmap.width, bitmap.height));
+      const quality = config.imageWebpQuality;
+      if (quality === undefined) throw new TypeError("Converting a pasted image requires imageWebpQuality");
+      const image = await encodeImageDataAsWebp(context.getImageData(0, 0, bitmap.width, bitmap.height), quality);
       if (image.type !== "image/webp") throw new Error("Browser did not convert the pasted image to WebP");
       return image;
     } finally {
@@ -944,6 +952,7 @@ export function createCodeMirrorEditor(container: HTMLElement, initialConfig: Ed
     modeCompartment,
     readOnlyCompartment,
     keymapCompartment,
+    historyCompartment,
     updateListener,
     clipboardHandler,
     pasteHandler,
@@ -1068,7 +1077,7 @@ export function createCodeMirrorEditor(container: HTMLElement, initialConfig: Ed
   function reconfigure(
     data: SessionData,
     origin: EditorOrigin,
-    parts: { editorExtensions?: boolean; readOnly?: boolean; keymap?: boolean } = {},
+    parts: { editorExtensions?: boolean; readOnly?: boolean; keymap?: boolean; history?: boolean } = {},
   ): void {
     const effects: StateEffect<unknown>[] = [];
     if (parts.editorExtensions ?? true) {
@@ -1077,6 +1086,7 @@ export function createCodeMirrorEditor(container: HTMLElement, initialConfig: Ed
     }
     if (parts.readOnly ?? true) effects.push(readOnlyCompartment.reconfigure(readOnlyExtension(data.readOnly)));
     if (parts.keymap ?? true) effects.push(keymapCompartment.reconfigure(editorKeymap(config)));
+    if (parts.history ?? true) effects.push(historyCompartment.reconfigure(historyExtension(config)));
     if (effects.length === 0) {
       syncFrontmatterDisclosure();
       return;
@@ -1226,6 +1236,7 @@ export function createCodeMirrorEditor(container: HTMLElement, initialConfig: Ed
         modeCompartment,
         readOnlyCompartment,
         keymapCompartment,
+        historyCompartment,
         updateListener,
         clipboardHandler,
         pasteHandler,
@@ -1336,6 +1347,7 @@ export function createCodeMirrorEditor(container: HTMLElement, initialConfig: Ed
         modeCompartment,
         readOnlyCompartment,
         keymapCompartment,
+        historyCompartment,
         updateListener,
         clipboardHandler,
         pasteHandler,
@@ -1360,7 +1372,7 @@ export function createCodeMirrorEditor(container: HTMLElement, initialConfig: Ed
       }
       if (data.mode === mode) return;
       data.mode = mode;
-      reconfigure(data, "modeChange", { editorExtensions: true, readOnly: false, keymap: false });
+      reconfigure(data, "modeChange", { editorExtensions: true, readOnly: false, keymap: false, history: false });
     },
 
     updateConfiguration(partial) {
@@ -1387,6 +1399,7 @@ export function createCodeMirrorEditor(container: HTMLElement, initialConfig: Ed
         editorExtensions: editorExtensionsChanged,
         readOnly: readOnlyChanged,
         keymap: keymapChanged,
+        history: previous.undoStackMax !== config.undoStackMax,
       });
     },
 

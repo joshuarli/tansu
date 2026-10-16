@@ -1,3 +1,5 @@
+import { isolateHistory, undo } from "@codemirror/commands";
+import { EditorView } from "@codemirror/view";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { startApp, TansuApp } from "./app.ts";
@@ -1395,6 +1397,58 @@ describe("v2 desktop shell", () => {
     root.querySelector<HTMLButtonElement>(".note-dialog-panel .primary-button")?.click();
     await flushAsync();
     expect(editorMock.instances[0]?.updateTags).toHaveBeenCalledWith(["alpha", "beta"]);
+  });
+
+  it("gives the editor the booted and the saved undo depth and image quality", async () => {
+    const note = noteMeta("note-1", "one.md", "One");
+    const client = configureVault([note], workspaceSeed([
+      { noteId: note.noteId, title: note.title, path: note.path, cursorOffset: null, sourceMode: false },
+    ], note.noteId));
+    const { app, root } = mountApp();
+    await app.boot();
+    expect(editorMock.instances[0]?.config).toMatchObject({ undoStackMax: 100, imageWebpQuality: 0.8 });
+
+    await runCommand(root, "settings");
+    root.querySelector<HTMLInputElement>('input[title="Undo stack"]')!.value = "60";
+    root.querySelector<HTMLInputElement>('input[title="Image quality"]')!.value = "0.5";
+    root.querySelector<HTMLButtonElement>(".settings-panel .primary-button")?.click();
+    await flushAsync();
+
+    expect(client.saveSettings.mock.calls[0]?.[0].settings).toMatchObject({ undoStackMax: 60, imageWebpQuality: 0.5 });
+    expect(editorMock.instances[0]?.config).toMatchObject({ undoStackMax: 60, imageWebpQuality: 0.5 });
+  });
+
+  it("limits the production editor undo history after settings are saved without losing the document", async () => {
+    const note = noteMeta("note-1", "one.md", "One");
+    const client = configureVault([note], workspaceSeed([
+      { noteId: note.noteId, title: note.title, path: note.path, cursorOffset: null, sourceMode: false },
+    ], note.noteId));
+    client.openNote.mockResolvedValue(documentFor(note, "# One\n"));
+    const { app, root } = mountApp({ ...createServices(), editor: { createEditor: createCodeMirrorEditor } });
+    await app.boot();
+    await until(() => root.querySelector(".cm-content")?.textContent?.includes("One") === true);
+    const view = EditorView.findFromDOM(root.querySelector<HTMLElement>(".cm-editor")!)!;
+    const typeIsolated = (count: number) => {
+      for (let index = 0; index < count; index += 1) {
+        view.dispatch({ changes: { from: view.state.doc.length, insert: "x" }, annotations: isolateHistory.of("full") });
+      }
+    };
+    typeIsolated(60);
+
+    await runCommand(root, "settings");
+    root.querySelector<HTMLInputElement>('input[title="Undo stack"]')!.value = "20";
+    root.querySelector<HTMLButtonElement>(".settings-panel .primary-button")?.click();
+    await flushAsync();
+    expect(view.state.doc.toString()).toBe(`${"# One\n"}${"x".repeat(60)}`);
+    typeIsolated(240);
+
+    const typed = view.state.doc.length;
+    let undone = 0;
+    while (undo(view)) undone += 1;
+    expect(typed).toBe("# One\n".length + 300);
+    expect(undone).toBeGreaterThanOrEqual(20);
+    expect(undone).toBeLessThanOrEqual(40);
+    expect(view.state.doc).toHaveLength(typed - undone);
   });
 
   it("reopens an imported closed tab with its saved source mode after close", async () => {

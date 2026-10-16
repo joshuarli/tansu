@@ -82,7 +82,7 @@ function mountEditor(
 ): MountedEditor {
   const container = document.createElement("div");
   document.body.append(container);
-  const editor = createCodeMirrorEditor(container, config);
+  const editor = createCodeMirrorEditor(container, { imageWebpQuality: 0.85, ...config });
   const session = editor.createSession(noteId, source);
   editor.attachSession(session);
   const root = container.querySelector<HTMLElement>(".cm-editor");
@@ -158,7 +158,7 @@ describe("CodeMirror image paste uploads", () => {
       image: { type: "image/webp" },
     });
     expect(states[0]).toMatchObject({ status: "uploading", previewUrl: "blob:image-preview" });
-    expect(encode).toHaveBeenCalledWith(imageData);
+    expect(encode).toHaveBeenCalledWith(imageData, 0.85);
     expect(bitmapClose).toHaveBeenCalledTimes(1);
     expect(createUrl).toHaveBeenCalledTimes(1);
 
@@ -180,6 +180,54 @@ describe("CodeMirror image paste uploads", () => {
     expect(editor.getSnapshot()?.source).toBe("before after");
     expect(states.map((state) => state.status)).toStrictEqual(["uploading", "inserted"]);
     expect(revokeUrl).toHaveBeenCalledWith("blob:image-preview");
+  });
+
+  it("encodes with the configured quality and follows a live quality change", async () => {
+    const { encode, imageData } = installImageApis();
+    const uploads: EditorImageUploadRequest[] = [];
+    const { editor, view } = mountEditor("text", {
+      imageWebpQuality: 0.4,
+      uploadPastedImage: async (request) => {
+        uploads.push(request);
+        return { name: "z-images/photo.webp", markdown: "![[z-images/photo.webp]]" };
+      },
+    });
+
+    pasteImage(view);
+    await vi.waitFor(() => expect(uploads).toHaveLength(1));
+    expect(encode).toHaveBeenLastCalledWith(imageData, 0.4);
+
+    editor.updateConfiguration({ imageWebpQuality: 0.9 });
+    pasteImage(view);
+    await vi.waitFor(() => expect(uploads).toHaveLength(2));
+    expect(encode).toHaveBeenLastCalledWith(imageData, 0.9);
+  });
+
+  it("fails a conversion loudly when no quality is configured", async () => {
+    installImageApis();
+    const finished = deferred<EditorImagePasteState>();
+    const upload = vi.fn();
+    const container = document.createElement("div");
+    document.body.append(container);
+    const editor = createCodeMirrorEditor(container, {
+      uploadPastedImage: upload,
+      onImagePasteStateChange(state) {
+        terminalState(finished, state);
+      },
+    });
+    editor.attachSession(editor.createSession("note-a", "text"));
+    const view = EditorView.findFromDOM(container.querySelector<HTMLElement>(".cm-editor")!)!;
+    restores.push(() => {
+      editor.dispose();
+      container.remove();
+    });
+
+    pasteImage(view);
+    await expect(finished.promise).resolves.toMatchObject({
+      status: "failed",
+      message: "Converting a pasted image requires imageWebpQuality",
+    });
+    expect(upload).not.toHaveBeenCalled();
   });
 
   it("shows a preview while a source mode image upload is pending", async () => {

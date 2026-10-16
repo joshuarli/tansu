@@ -2,6 +2,7 @@ import { vi, expect, describe, it } from "vitest";
 
 import type { CommandItem, ViewEvent } from "./app/events.ts";
 import { serverInstanceId, vaultId } from "./app/identity.ts";
+import { SETTINGS_LIMITS } from "./app/settings-policy.ts";
 import {
   createState,
   tabFromDocument,
@@ -299,6 +300,24 @@ describe("view rendering", () => {
     });
     expectDispatched(actions, { type: "conflict.restore" });
     expectDispatched(actions, { type: "dialog.submit", value: "One" });
+  });
+
+  it("bounds the settings inputs with the shared limits", () => {
+    const state = baseState();
+    state.settingsOpen = true;
+    const root = render(state, actionSpies());
+    const attributes = (title: string) => {
+      const field = root.querySelector<HTMLInputElement>(`input[title="${title}"]`)!;
+      return { min: field.min, max: field.max, step: field.step };
+    };
+
+    expect(attributes("Autosave delay")).toStrictEqual({ min: String(SETTINGS_LIMITS.autosaveDelayMs.min), max: "", step: "" });
+    expect(attributes("Undo stack")).toStrictEqual({ min: String(SETTINGS_LIMITS.undoStackMax.min), max: "", step: "" });
+    expect(attributes("Image quality")).toStrictEqual({
+      min: String(SETTINGS_LIMITS.imageWebpQuality.min),
+      max: String(SETTINGS_LIMITS.imageWebpQuality.max),
+      step: String(SETTINGS_LIMITS.imageWebpQuality.step),
+    });
   });
 
   it("renders empty search and delete/tag dialogs", () => {

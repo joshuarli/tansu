@@ -1,5 +1,6 @@
 import { commandItems } from "./app/commands.ts";
-import type { CommandId, ViewEvent } from "./app/events.ts";
+import type { CommandId, SettingsFormValue, ViewEvent } from "./app/events.ts";
+import { applySettingsForm } from "./app/settings-policy.ts";
 import { DocumentSession, defaultDocumentSessionServices, type DocumentSessionState } from "./app/document-session.ts";
 import { LocalDraftSession } from "./app/local-draft-session.ts";
 import { defaultServices, type AppServices } from "./app/services.ts";
@@ -30,7 +31,7 @@ import {
   type Tab,
 } from "./state.ts";
 import { disposeAppView, renderApp, renderAuthGate, renderLoading, renderNoVaultConfigured, updateAppView, updateStatusBar, type ViewActions } from "./view.ts";
-import type { Settings, V2BootstrapResponse, V2MutationResponse, V2NoteDocument, V2NoteMeta, V2SearchHit, V2SearchOverlay, V2ServerEvent } from "./types.generated.ts";
+import type { V2BootstrapResponse, V2MutationResponse, V2NoteDocument, V2NoteMeta, V2SearchHit, V2SearchOverlay, V2ServerEvent } from "./types.generated.ts";
 import type { DraftJournalRecord, WorkspaceState } from "./app/workspace-store.ts";
 import type { OutlineHeading } from "./editor/source-navigation.js";
 
@@ -534,6 +535,7 @@ export class TansuApp {
     const currentVault = () => serverIdentity !== null && client !== null && this.isCurrentVault(serverIdentity, client);
     const config: EditorConfig = {
       extensions,
+      ...this.editorSettings(),
       noteTitle: activeTab(this.state)?.title ?? "",
       ...(noteTags === undefined ? {} : { noteTags }),
       currentNotePath: () => activeTab(this.state)?.path ?? "",
@@ -601,11 +603,17 @@ export class TansuApp {
     return config;
   }
 
+  private editorSettings(): Pick<EditorConfig, "undoStackMax" | "imageWebpQuality"> {
+    const settings = this.state.boot?.settings;
+    return settings === undefined ? {} : { undoStackMax: settings.undoStackMax, imageWebpQuality: settings.imageWebpQuality };
+  }
+
   private editorConfigForActiveNote(config: EditorConfig): EditorConfig {
     const { noteTags: _cachedNoteTags, ...baseConfig } = config;
     const noteTags = this.editorNoteTags();
     return {
       ...baseConfig,
+      ...this.editorSettings(),
       noteTitle: activeTab(this.state)?.title ?? "",
       ...(noteTags === undefined ? {} : { noteTags }),
     };
@@ -1491,22 +1499,10 @@ export class TansuApp {
     this.render();
   }
 
-  private async saveSettings(settings: { excludedFoldersText: string; autosaveDelayMs: number; undoStackMax: number; imageWebpQuality: number }): Promise<void> {
+  private async saveSettings(form: SettingsFormValue): Promise<void> {
     const current = this.state.boot?.settings;
     if (current === undefined || this.vaultClient === null) return;
-    const next: Settings = {
-      ...current,
-      excludedFolders: settings.excludedFoldersText.split(",").map((value) => value.trim()).filter(Boolean),
-      autosaveDelayMs: Number.isFinite(settings.autosaveDelayMs)
-        ? Math.max(150, settings.autosaveDelayMs)
-        : current.autosaveDelayMs,
-      undoStackMax: Number.isFinite(settings.undoStackMax)
-        ? Math.max(20, settings.undoStackMax)
-        : current.undoStackMax,
-      imageWebpQuality: Number.isFinite(settings.imageWebpQuality)
-        ? Math.min(1, Math.max(0.1, settings.imageWebpQuality))
-        : current.imageWebpQuality,
-    };
+    const next = applySettingsForm(current, form);
     const response = await this.vaultClient.saveSettings({ mutationId: mutationId(), settings: next });
     if (this.state.boot !== null) this.state.boot.settings = response.settings;
     this.state.settingsOpen = false;

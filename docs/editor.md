@@ -20,6 +20,12 @@ Attach and detach a session to switch notes without replacing the mounted view.
 Each session keeps its own undo history. Selection and mode changes do not mark a
 session dirty. Document changes do.
 
+`undoStackMax` sets the history `minDepth`: each session keeps at least that many
+undo steps, and CodeMirror trims in batches, so up to 20 more can remain.
+`updateConfiguration({ undoStackMax })` applies to the active session at once and
+to every other session when it is attached. It keeps the document and the
+existing history; a lower value trims on the next edit.
+
 `markSaved(session, revision)` clears dirty state only when that revision is
 still current. `reloadIfClean(session, source)` refuses to replace a dirty
 session. A clean reload replaces its `EditorState` and clears its undo history.
@@ -109,7 +115,9 @@ text paste goes through CodeMirror. Rich HTML paste passes through
 unsafe URLs before converting supported HTML to Markdown.
 
 When `uploadPastedImage` is configured, image paste keeps WebP clipboard bytes
-as-is and converts other clipboard files to WebP. It passes the blob, note ID,
+as-is and converts other clipboard files to WebP at the configured
+`imageWebpQuality` (0 to 1, read when each paste converts; a conversion without it
+fails the paste). It passes the blob, note ID,
 source revision, selection, and an abort signal to the upload callback. The
 callback returns the server's `z-images/`
 asset name and wiki-image Markdown. The adapter displays a local image preview
@@ -143,7 +151,8 @@ Atomic source closure, CSS, and MIT license under
 local patches. The vendor tree omits Atomic's React component and language
 packages. Tansu also vendors the non-SIMD encoder from
 [`@jsquash/webp` 1.5.0](https://github.com/jamsinclair/jSquash) under
-`web/ts/editor/vendor/jsquash-webp/`. The JavaScript is Apache-2.0 licensed.
+`web/ts/editor/vendor/jsquash-webp/`. Tansu's `encode.js` takes the quality as
+its second argument. The JavaScript is Apache-2.0 licensed.
 The libwebp codec is BSD-3-Clause licensed. The app serves its encoder and
 281 KB WebAssembly file as separate immutable assets under a directory named
 by a hash of their contents, so a changed encoder gets new URLs. It loads them

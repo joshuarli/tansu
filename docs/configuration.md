@@ -25,7 +25,9 @@ rejected. Existing TOML files are not imported.
 App-wide settings contain registered vault names and paths, plus optional
 authentication settings. Per-vault settings remain in each vault's SQLite
 catalog and include excluded folders, search weights, autosave delay, undo
-history size, and image quality. App-wide settings live under the config home;
+history size, and image quality. The settings dialog bounds autosave delay,
+undo history size, and image quality with the limits in
+`web/ts/app/settings-policy.ts`. App-wide settings live under the config home;
 vault catalogs and other durable state live under `tansu/` in `XDG_DATA_HOME`
 or `~/.local/share/tansu/` when unset.
 

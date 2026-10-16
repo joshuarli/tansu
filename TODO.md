@@ -3,15 +3,6 @@
 Prefix: TNS
 Next: 54
 
-### TNS-047 · P2 · Propagate or remove settings that have no effect
-
-- **Area:** Architecture
-- **Where:** `web/ts/view.ts:827`, `web/ts/app.ts:1476`, `web/ts/app/v2-api.ts:768`
-- **Problem:** `undoStackMax` and `imageWebpQuality` are editable and persisted, but the editor uses bare `history()` and the WebP encoder takes only `ImageData`. The controls appear to do nothing. Source-read only.
-- **Recommendation:** Wire each setting to its consumer or remove it from the form, type, and storage. Then audit every visible control for an observable effect, a failure state, and an app-boundary test.
-- **Fix with:** single-source-of-truth
-- **Effort:** M
-
 ### TNS-048 · P2 · Replace campaign verification with a permanent acceptance suite
 
 - **Area:** Tests
