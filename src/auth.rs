@@ -398,13 +398,16 @@ impl AuthStore {
         let expires_at = now.checked_add(ttl_secs).ok_or_else(|| AuthError::InvalidRequest("ceremony expiry overflow".into()))?;
         let mut connection = self.connection.lock().expect("auth DB mutex poisoned");
         let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate).map_err(storage)?;
-        let has_credentials = credential_count(&transaction)? != 0;
-        let (capability_hash, session_hash) = if has_credentials {
+        let credentials = credential_count(&transaction)?;
+        let (capability_hash, session_hash) = if credentials != 0 {
             let session_cookie = session_cookie.ok_or(AuthError::Unauthorized)?;
             let session_hash = token_hash(session_cookie)?;
             let session = read_session(&transaction, &session_hash)?.ok_or(AuthError::Unauthorized)?;
             if session.revoked || session.expires_at <= now || !session.verified_at.checked_add(self.recent_verification_secs).is_some_and(|deadline| deadline >= now) {
                 return Err(AuthError::Unauthorized);
+            }
+            if credentials >= MAX_CREDENTIALS as u64 {
+                return Err(AuthError::CredentialLimit);
             }
             (None, Some(session_hash))
         } else {
@@ -1581,7 +1584,30 @@ mod tests {
             let credential = credentials.first().ok_or(AuthError::Unauthorized)?.clone();
             Ok(AuthenticationFinish { credential, counter: CounterResult::Unsupported })
         }).unwrap();
+        assert_eq!(
+            store.begin_registration(&state, None, Some(&session.cookie_value), 15, 30),
+            Err(AuthError::CredentialLimit),
+        );
+        assert_eq!(store.credentials().unwrap().len(), MAX_CREDENTIALS);
+    }
+
+    #[test]
+    fn a_ceremony_begun_below_the_limit_is_rejected_at_finish_when_the_limit_is_reached() {
+        let (_root, store) = store();
+        let (capability, _) = store.create_enrollment_capability(10, 30).unwrap();
+        let state = RegChallenge { challenge: "first".into(), user_id: "owner".into(), username: "owner".into() };
+        let ticket = store.begin_registration(&state, Some(&capability), None, 11, 30).unwrap();
+        store.finish_registration(&ticket.id, 12, |_| Ok(credential(1))).unwrap();
+        let login = AuthChallenge { challenge: "login".into(), allowed_credential_ids: vec![vec![1]], owner_handle: vec![7, 8] };
+        let login_ticket = store.begin_authentication(&login, 13, 30).unwrap();
+        let session = store.finish_authentication(&login_ticket.id, 14, |_, credentials| {
+            let credential = credentials.first().ok_or(AuthError::Unauthorized)?.clone();
+            Ok(AuthenticationFinish { credential, counter: CounterResult::Unsupported })
+        }).unwrap();
         let enroll = store.begin_registration(&state, None, Some(&session.cookie_value), 15, 30).unwrap();
+        for id in 2..=MAX_CREDENTIALS as u8 {
+            seed_credential(&store, &credential(id));
+        }
         assert_eq!(
             store.finish_registration(&enroll.id, 16, |_| Ok(credential(MAX_CREDENTIALS as u8 + 1))),
             Err(AuthError::CredentialLimit),
@@ -1597,9 +1623,6 @@ mod tests {
         let state = RegChallenge { challenge: "first".into(), user_id: "owner".into(), username: "owner".into() };
         let ticket = store.begin_registration(&state, Some(&capability), None, 11, 30).unwrap();
         store.finish_registration(&ticket.id, 12, |_| Ok(credential(1))).unwrap();
-        for id in 2..=MAX_CREDENTIALS as u8 {
-            seed_credential(&store, &credential(id));
-        }
         let login = AuthChallenge { challenge: "login".into(), allowed_credential_ids: vec![vec![1]], owner_handle: vec![7, 8] };
         let login_ticket = store.begin_authentication(&login, 13, 30).unwrap();
         let session = store.finish_authentication(&login_ticket.id, 14, |_, credentials| {
@@ -1607,6 +1630,9 @@ mod tests {
             Ok(AuthenticationFinish { credential, counter: CounterResult::Unsupported })
         }).unwrap();
         let enroll = store.begin_registration(&state, None, Some(&session.cookie_value), 15, 30).unwrap();
+        for id in 2..=MAX_CREDENTIALS as u8 {
+            seed_credential(&store, &credential(id));
+        }
         assert!(store.finish_registration(&enroll.id, 16, |_| Ok(credential(1))).is_ok());
         assert_eq!(store.credentials().unwrap().len(), MAX_CREDENTIALS);
     }
