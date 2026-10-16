@@ -1,7 +1,7 @@
 # Tansu2 TODO
 
 Prefix: TNS
-Next: 51
+Next: 54
 
 ### TNS-024 · P1 · Serialize vault mutations across server processes
 
@@ -184,3 +184,30 @@ Next: 51
 - **Fix with:** api-surface-and-module-boundaries
 - **Design:** `docs/rfcs/TNS-050-document-controller.md`
 - **Effort:** L
+
+### TNS-051 · P2 · Show tags as colored pills and clean up the add-tag modal
+
+- **Area:** UI
+- **Where:** `web/ts/view.ts:907`, `web/ts/view.ts:971`, `web/static/app.css`, `web/ts/view.test.ts`
+- **Problem:** Tags render as plain text and the "Add Tag" dialog does not match the visual polish of the other note dialogs.
+- **Recommendation:** Render every tag as a pill whose color derives deterministically from the normalized tag text (stable across sessions, readable in light and dark). Share one tag-pill renderer across the note header, search results, and recent notes (TNS-052). Rebuild the add-tag dialog on the same structure and styles as the existing rename/create dialogs. Cover the pill color stability and the dialog markup in `view.test.ts`.
+- **Fix with:** single-source-of-truth
+- **Effort:** M
+
+### TNS-052 · P2 · Show tags on search and recent-note entries and weigh them in search
+
+- **Area:** Search
+- **Where:** `web/ts/view.ts`, `src/search.rs:349`, `src/api_types.rs:366`, `web/ts/app/v2-api.ts`
+- **Problem:** Search results and recent-note rows do not show a note's tags, and it is unconfirmed that a tag match raises a note's rank.
+- **Recommendation:** Show the tag pills from TNS-051 on search result rows and recent-note rows (add tags to the response or preview data if missing). Confirm with a failing test whether an exact tag match outranks a body-only match; make tags a weighted search field with a tested default if not. Keep search derived state: indexing never rejects writes.
+- **Fix with:** none
+- **Effort:** M
+
+### TNS-053 · P2 · Exercise tags in the fixture vault
+
+- **Area:** Fixtures
+- **Where:** `scripts/dev-fixture.mjs`, `scripts/test-fixture.mjs`, `docs/fixtures.md`
+- **Problem:** The fixture notes do not cover tags, so pills, tag-bearing search and recent rows, and tag weighting are not exercised by `make dev` or the e2e suite.
+- **Recommendation:** Add fixture notes with varied tags (shared, unique, long, similar names, frontmatter-only and inline forms the V1 parser supports), use them in e2e coverage for pills, search rows, recent rows, and tag-weighted ranking, and update `docs/fixtures.md`.
+- **Fix with:** none
+- **Effort:** S
