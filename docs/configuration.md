@@ -46,6 +46,13 @@ persisted:
 | `searchTitleWeight`, `searchHeadingWeight`, `searchTagWeight`, `searchContentWeight`, `recencyBoost` | finite, 0 to 1,000 |
 | `excludedFolders` | each entry is a single folder name: nonempty, not `.` or `..`, no `/`, `\`, or NUL |
 
+An `excludedFolders` entry matches by exact, case-sensitive name against every
+directory or file name the vault scan visits, at any depth, so `Archive`
+excludes `Archive/` and `projects/Archive/`, and a path such as `projects/Archive`
+is not a valid entry. Saving a changed list reconciles the vault before the
+save returns: notes under an excluded folder leave the catalog and search, and
+removing an entry brings them back.
+
 The settings form enforces the same limits: it clamps numbers, rejects an
 invalid excluded folder entry with an inline error, and shows stored
 out-of-range values clamped. Settings saved by an earlier version are not

@@ -2930,8 +2930,13 @@ impl VaultRuntime {
             .map_err(|error| Error::BadRequest(error.into_message()))?;
         let _op = self.lock_op();
         let mut catalog = self.lock_catalog();
+        let excluded_folders_changed =
+            catalog.settings()?.excluded_folders != settings.as_settings().excluded_folders;
         catalog.save_settings(&settings)?;
         drop(catalog);
+        if excluded_folders_changed {
+            self.reconcile_with_op_lock_held()?;
+        }
         self.enqueue_search(SearchJob::Rebuild);
         self.broadcast(ServerEventKind::SearchChanged, Vec::new());
         if self.logs.enabled() {
@@ -3293,6 +3298,10 @@ impl VaultRuntime {
 
     fn reconcile_from_watcher(&self) -> Result<()> {
         let _op = self.lock_op();
+        self.reconcile_with_op_lock_held()
+    }
+
+    fn reconcile_with_op_lock_held(&self) -> Result<()> {
         let mut catalog = self.lock_catalog();
         let pending_resync = catalog.watcher_reconcile_pending()?;
         catalog.mark_watcher_reconcile_pending()?;
@@ -3861,6 +3870,47 @@ mod tests {
             assert!(matches!(vault.save_settings(settings), Err(Error::BadRequest(_))), "{label}");
             assert_eq!(serde_json::to_value(vault.settings().unwrap()).unwrap(), before, "{label}");
         }
+    }
+
+    #[test]
+    fn saving_excluded_folders_reconciles_search_immediately() {
+        let vault = Arc::new(test_vault_with_note("keep.md", "# Keep\n\nquasar\n"));
+        vault.start_search_worker().unwrap();
+        fs::create_dir_all(vault.root.join("Archive/deep")).unwrap();
+        fs::write(vault.root.join("Archive/old.md"), "# Old\n\nquasar\n").unwrap();
+        fs::write(vault.root.join("Archive/deep/older.md"), "# Older\n\nquasar\n").unwrap();
+        vault.reconcile_from_watcher().unwrap();
+        let search = || {
+            let deadline = std::time::Instant::now() + Duration::from_secs(10);
+            while vault.search_status().unwrap().dirty {
+                assert!(std::time::Instant::now() < deadline, "search index never settled");
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            let mut paths = vault
+                .v2_search(V2SearchRequest {
+                    query: "quasar".to_string(),
+                    mode: V2SearchMode::Default,
+                    limit: 10,
+                    overlays: Vec::new(),
+                })
+                .unwrap()
+                .hits
+                .into_iter()
+                .map(|hit| hit.path)
+                .collect::<Vec<_>>();
+            paths.sort();
+            paths
+        };
+        assert_eq!(search(), ["Archive/deep/older.md", "Archive/old.md", "keep.md"]);
+
+        let mut settings = vault.settings().unwrap();
+        settings.excluded_folders = vec!["Archive".to_string()];
+        vault.save_settings(settings.clone()).unwrap();
+        assert_eq!(search(), ["keep.md"]);
+
+        settings.excluded_folders = Vec::new();
+        vault.save_settings(settings).unwrap();
+        assert_eq!(search(), ["Archive/deep/older.md", "Archive/old.md", "keep.md"]);
     }
 
     #[test]
