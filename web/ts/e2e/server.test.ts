@@ -1,7 +1,7 @@
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { once } from "node:events";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import net from "node:net";
 import { join, resolve } from "node:path";
 
@@ -635,6 +635,47 @@ describe("real server harness", () => {
       ),
     ).resolves.toBe("noteChanged");
     await page.close();
+  });
+
+  it("shows tag pills in the note header, search rows, and recent list and ranks tag matches first", async () => {
+    const tagsDir = join(vaultOnePath, "tags");
+    await cp(resolve("tests", "fixtures", "demo-vault", "tags"), tagsDir, { recursive: true });
+    try {
+      for (const name of ["pantry-inventory.md", "storm-log.md", "field-journal.md"]) {
+        await waitForNoteByPath(`tags/${name}`);
+      }
+      const page = await newLoggedPage();
+      await page.goto(baseUrl);
+      await page.waitForSelector(".main");
+      await page.keyboard.press("Control+/");
+      const panel = page.locator(".search-panel");
+      await panel.waitFor({ state: "visible" });
+
+      const recentRow = panel.locator('.recent-search-result[title="tags/pantry-inventory.md"]');
+      await recentRow.waitFor({ state: "visible" });
+      await expect(recentRow.locator(".tag-pill-label").allTextContents()).resolves.toEqual([
+        "#baking",
+        "#Recipes",
+        "#pantry",
+      ]);
+      await expect(recentRow.locator(".search-result-tags-overflow").textContent()).resolves.toBe("+3");
+
+      await panel.locator(".command-input").fill("zephyr");
+      const rows = panel.locator(".search-result-row");
+      await expect.poll(() => rows.count()).toBe(2);
+      await expect(rows.first().locator(".tag-pill-label").allTextContents()).resolves.toEqual(["#zephyr"]);
+      await expect(rows.first().textContent()).resolves.toContain("Storm log");
+      await expect(rows.nth(1).textContent()).resolves.toContain("Field journal");
+      await expect(rows.nth(1).locator(".tag-pill").count()).resolves.toBe(0);
+
+      await rows.first().click();
+      await panel.waitFor({ state: "detached" });
+      await expect.poll(() => page.locator("#editor-mount .tag-row .tag-pill-label").allTextContents())
+        .toEqual(["#zephyr"]);
+      await page.close();
+    } finally {
+      await rm(tagsDir, { recursive: true, force: true });
+    }
   });
 
   it("reconciles external filesystem edits for the active vault", async () => {
