@@ -267,6 +267,7 @@ export type EditorHandle = {
   dispose(): void;
   focus(): void;
   getSnapshot(): EditorSnapshot | null;
+  getSessionSnapshot(session: EditorSession): EditorSnapshot;
   markSaved(session: EditorSession, revision: number): boolean;
   reloadIfClean(session: EditorSession, source: string): ReloadResult;
   setMode(mode: EditorMode): void;
@@ -1067,6 +1068,23 @@ export function createCodeMirrorEditor(container: HTMLElement, initialConfig: Ed
     return activeSession === null ? null : sessionData(activeSession, owner);
   }
 
+  function snapshotOf(session: EditorSession): EditorSnapshot {
+    const data = sessionData(session, owner);
+    if (activeSession === session) {
+      data.scroll = { top: view.scrollDOM.scrollTop, left: view.scrollDOM.scrollLeft };
+    }
+    return {
+      noteId: session.noteId,
+      source: currentSource(data),
+      revision: data.revision,
+      selection: { anchor: data.state.selection.main.anchor, head: data.state.selection.main.head },
+      mode: data.mode,
+      readOnly: data.readOnly,
+      scroll: { ...data.scroll },
+      dirty: data.dirty,
+    };
+  }
+
   function storeActiveState(): void {
     if (activeSession === null) return;
     const data = sessionData(activeSession, owner);
@@ -1307,19 +1325,13 @@ export function createCodeMirrorEditor(container: HTMLElement, initialConfig: Ed
     },
 
     getSnapshot() {
-      const data = ensureActive();
-      if (data === null || activeSession === null) return null;
-      data.scroll = { top: view.scrollDOM.scrollTop, left: view.scrollDOM.scrollLeft };
-      return {
-        noteId: activeSession.noteId,
-        source: currentSource(data),
-        revision: data.revision,
-        selection: { anchor: data.state.selection.main.anchor, head: data.state.selection.main.head },
-        mode: data.mode,
-        readOnly: data.readOnly,
-        scroll: { ...data.scroll },
-        dirty: data.dirty,
-      };
+      if (disposed) throw new TypeError("Editor has been disposed");
+      return activeSession === null ? null : snapshotOf(activeSession);
+    },
+
+    getSessionSnapshot(session) {
+      if (disposed) throw new TypeError("Editor has been disposed");
+      return snapshotOf(session);
     },
 
     markSaved(session, revision) {

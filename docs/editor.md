@@ -14,7 +14,13 @@ Each session stores the full LF source, including frontmatter. CodeMirror
 selection offsets use UTF-16 units. The adapter returns source, revision,
 selection, mode, scroll position, read-only state, and dirty state in one
 snapshot. It materializes the source string on demand and caches it by revision.
+`getSnapshot()` reads the attached session. `getSessionSnapshot(session)` reads
+any session of the editor, attached or not.
 The change callback reports only the note ID, revision, and user-edit origin.
+It fires for the session that changed, which is not always the attached one: an
+image upload that finishes in a detached session reports that session. The app
+reads the changed session's snapshot and does not assume the attached session
+changed.
 
 Attach and detach a session to switch notes without replacing the mounted view.
 Each session keeps its own undo history. Selection and mode changes do not mark a

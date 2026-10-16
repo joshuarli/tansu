@@ -104,6 +104,22 @@ describe("CodeMirror editor sessions", () => {
     expect(container.querySelectorAll(".cm-editor")).toHaveLength(1);
   });
 
+  it("snapshots an inactive session without attaching it", () => {
+    const { editor, session: first, view } = mountEditor("A", {}, "first");
+    view.dispatch({ changes: { from: 1, insert: "1" }, annotations: Transaction.userEvent.of("input.type") });
+    const second = editor.createSession("second", "B");
+    editor.attachSession(second);
+
+    expect(editor.getSessionSnapshot(first)).toMatchObject({
+      noteId: "first",
+      source: "A1",
+      revision: 1,
+      dirty: true,
+    });
+    expect(editor.getSessionSnapshot(second)).toStrictEqual(editor.getSnapshot());
+    expect(editor.getSnapshot()?.noteId).toBe("second");
+  });
+
   it("reconfigures source mode without replacing the document or marking it dirty", () => {
     const { editor, view } = mountEditor("# A\n\n**bold**");
     const documentState = view.state.doc;

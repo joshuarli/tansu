@@ -8,7 +8,7 @@ import { localDraftId, noteId, serverInstanceId, vaultId, type DocumentIdentity,
 import { sameTabIdentity, toTabKey, type TabIdentity } from "./app/tab-identity.ts";
 import { logClientEvent } from "./dev-log.ts";
 import { V2ApiError } from "./app/v2-api.ts";
-import type { EditorHandle, EditorSession } from "./editor/codemirror-adapter.ts";
+import type { EditorHandle, EditorSession, EditorSnapshot } from "./editor/codemirror-adapter.ts";
 import { createCalloutExtension, createWikiImageExtension, createWikiLinkExtension, type EditorConfig } from "./editor/tansu-extensions.ts";
 import { canMutateTags } from "./editor/tag-source.ts";
 import { normalizeTag } from "./markdown-tags.ts";
@@ -63,6 +63,9 @@ function markdownPreview(source: string): string {
     .replace(/\s+/g, " ")
     .trim();
 }
+
+type VaultClient = ReturnType<AppServices["api"]["forVault"]>;
+type MutationTarget = { identity: ServerIdentity; client: VaultClient; tab: SavedTab };
 
 export class TansuApp {
   private readonly state: State;
@@ -578,10 +581,14 @@ export class TansuApp {
           this.runAsync(this.manualSave(), "Save failed");
         }
       },
-      onChange: () => {
+      onChange: (change) => {
         if (generation !== this.bootGeneration || this.transitioningVault || !currentVault()) return;
-        const tab = activeTab(this.state);
-        if (tab === undefined || this.attachedEditor?.tab !== tab) return;
+        const tab = this.state.tabs.find((candidate) => candidate.key === change.noteId);
+        if (tab === undefined || tab.editorSession === null) return;
+        if (this.attachedEditor?.tab !== tab) {
+          this.captureInactiveEditor(tab, tab.editorSession);
+          return;
+        }
         tab.dirty = true;
         if (this.editorCaptureTimer !== undefined) window.clearTimeout(this.editorCaptureTimer);
         this.editorCaptureTimer = window.setTimeout(() => {
@@ -700,6 +707,18 @@ export class TansuApp {
     const attached = this.attachedEditor;
     if (tab === undefined || attached === null || attached.tab !== tab || attached.session !== tab.editorSession ||
       snapshot === null || snapshot === undefined || snapshot.noteId !== tab.key) return;
+    this.applyEditorSnapshot(tab, snapshot);
+  }
+
+  private captureInactiveEditor(tab: Tab, editorSession: EditorSession): void {
+    const snapshot = this.editor?.getSessionSnapshot(editorSession);
+    if (snapshot === undefined || snapshot.noteId !== tab.key || tab.editorSession !== editorSession) return;
+    this.applyEditorSnapshot(tab, snapshot);
+    this.renderStatusOnly();
+    this.scheduleWorkspaceSave();
+  }
+
+  private applyEditorSnapshot(tab: Tab, snapshot: EditorSnapshot): void {
     tab.selection = snapshot.selection;
     tab.scrollTop = snapshot.scroll.top;
     tab.sourceMode = snapshot.mode === "source";
@@ -1237,7 +1256,9 @@ export class TansuApp {
   }
 
   private async promoteLocalDraft(tab: Extract<Tab, { kind: "local-draft" }>, title: string, path: string): Promise<void> {
-    if (this.identity === null || this.vaultClient === null || tab.session === null) return;
+    const serverIdentity = this.identity;
+    const client = this.vaultClient;
+    if (serverIdentity === null || client === null || tab.session === null) return;
     if (!tab.session.state.promotionPending) tab.session.editTitle(title);
     else if (tab.session.state.titleDraft !== title) throw new Error("A pending local create cannot change its title");
     const ready = await tab.session.beginPromotion();
@@ -1246,7 +1267,7 @@ export class TansuApp {
     }
     const source = tab.session.exportSource();
     const state = tab.session.state;
-    const response = await this.vaultClient.createNote({
+    const response = await client.createNote({
       mutationId: state.mutationId,
       path,
       content: source,
@@ -1261,20 +1282,24 @@ export class TansuApp {
       throw new Error("Create response omitted its note metadata");
     }
     const noteMeta = response.outcome.result;
-    const document = await this.vaultClient.openNote(noteMeta.noteId);
-    const documentIdentity: DocumentIdentity = { ...this.identity, noteId: noteId(noteMeta.noteId) };
+    const document = await client.openNote(noteMeta.noteId);
+    const documentIdentity: DocumentIdentity = { ...serverIdentity, noteId: noteId(noteMeta.noteId) };
     const promoted = await this.services.workspace.promoteLocalDraftCheckpoint(documentIdentity, this.workspaceId, tab.localDraftId, document);
     if (promoted === null) throw new Error("Local draft checkpoint changed before promotion completed");
-    const saved = tabFromDocument(document);
-    saved.selection = selectionWithin(tab.selection, document.content.length);
-    saved.scrollTop = tab.scrollTop;
-    saved.sourceMode = tab.sourceMode;
-    saved.title = title;
-    saved.session = this.createDocumentSession(saved, promoted);
+    if (!this.isCurrentVault(serverIdentity, client)) return;
     this.state.notes.set(document.meta.noteId, document.meta);
     const index = this.state.tabs.indexOf(tab);
-    if (index !== -1) this.state.tabs.splice(index, 1, saved);
-    this.state.activeTab = { kind: "saved", noteId: saved.noteId };
+    if (index !== -1) {
+      const wasActive = sameTabIdentity(this.state.activeTab, tabIdentity(tab));
+      const saved = tabFromDocument(document);
+      saved.selection = selectionWithin(tab.selection, document.content.length);
+      saved.scrollTop = tab.scrollTop;
+      saved.sourceMode = tab.sourceMode;
+      saved.title = title;
+      saved.session = this.createDocumentSession(saved, promoted);
+      this.state.tabs.splice(index, 1, saved);
+      if (wasActive) this.state.activeTab = { kind: "saved", noteId: saved.noteId };
+    }
     tab.session = null;
     this.cacheDocument(document);
     this.state.noteDialog = null;
@@ -1435,7 +1460,7 @@ export class TansuApp {
       mutationId: mutationId(),
       precondition: { baseRevision: status.base.revision, baseSourceHash: status.base.sourceHash, baseDiskHash: status.base.diskHash },
     });
-    await this.handleMutation(response, tab, status.draft.localRevision);
+    await this.handleMutation(response, { identity, client, tab }, status.draft.localRevision);
     if (this.isCurrentVault(identity, client) && activeTab(this.state) === tab && this.state.revisionNoteId === tab.noteId) {
       this.state.revisionsOpen = false;
     }
@@ -1444,16 +1469,22 @@ export class TansuApp {
   private async viewConflictDraft(): Promise<void> {
     const tab = activeTab(this.state);
     const status = tab?.kind === "saved" ? tab.session?.state : undefined;
-    if (tab?.kind !== "saved" || status?.status !== "conflict" || status.conflictDraft === null || this.vaultClient === null) return;
-    this.state.conflictDraft = await this.vaultClient.openConflictDraft(tab.noteId, status.conflictDraft.draftId);
+    const identity = this.identity;
+    const client = this.vaultClient;
+    if (tab?.kind !== "saved" || status?.status !== "conflict" || status.conflictDraft === null ||
+      identity === null || client === null) return;
+    const draft = await client.openConflictDraft(tab.noteId, status.conflictDraft.draftId);
+    if (!this.isCurrentTab(tab, identity, client) || activeTab(this.state) !== tab) return;
+    this.state.conflictDraft = draft;
     this.render();
   }
 
   private async restoreConflictDraft(): Promise<void> {
     const tab = activeTab(this.state);
     const status = tab?.kind === "saved" ? tab.session?.state : undefined;
-    if (tab?.kind !== "saved" || status?.status !== "conflict" || this.vaultClient === null) return;
+    const identity = this.identity;
     const client = this.vaultClient;
+    if (tab?.kind !== "saved" || status?.status !== "conflict" || identity === null || client === null) return;
     const { meta } = status.canonical;
     const precondition = { baseRevision: meta.revision, baseSourceHash: meta.sourceHash, baseDiskHash: meta.diskHash };
     let response: V2MutationResponse;
@@ -1469,14 +1500,16 @@ export class TansuApp {
       if (this.state.conflictDraft === null) return;
       response = await client.restoreConflictDraft(tab.noteId, status.conflictDraft.draftId, { mutationId: mutationId(), precondition });
     }
-    await this.handleMutation(response, tab, status.draft.localRevision);
-    this.state.conflictDraft = null;
+    await this.handleMutation(response, { identity, client, tab }, status.draft.localRevision);
+    if (this.isCurrentTab(tab, identity, client)) this.state.conflictDraft = null;
   }
 
-  private async handleMutation(response: V2MutationResponse, tab: SavedTab, expectedLocalRevision: number): Promise<void> {
+  private async handleMutation(response: V2MutationResponse, target: MutationTarget, expectedLocalRevision: number): Promise<void> {
+    const { identity, client, tab } = target;
     if (response.outcome.state === "accepted") {
       if (response.outcome.result === null) throw new Error("Accepted restore response omitted note metadata");
-      const document = await this.vaultClient!.openNote(tab.noteId);
+      const document = await client.openNote(tab.noteId);
+      if (!this.isCurrentTab(tab, identity, client)) return;
       tab.doc = document;
       const sessionState = tab.session?.state;
       const matchesRevision = sessionState !== undefined && "draft" in sessionState &&
@@ -1492,6 +1525,7 @@ export class TansuApp {
       this.state.notes.set(tab.noteId, document.meta);
       this.cacheDocument(document);
     } else if (response.outcome.state === "conflict") {
+      if (!this.isCurrentTab(tab, identity, client)) return;
       tab.session?.reconcile(response.outcome.current);
       tab.doc = response.outcome.current;
       tab.conflict = true;

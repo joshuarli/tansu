@@ -3,15 +3,6 @@
 Prefix: TNS
 Next: 54
 
-### TNS-049 · P2 · Bind async mutations to captured identity, not current selection
-
-- **Area:** Concurrency
-- **Where:** `web/ts/app.ts:1411`, `web/ts/app.ts:1450`, `web/ts/app.ts:1857`
-- **Problem:** `restoreSelectedRevision()` captures the client and identity, but `handleMutation()` reads the mutable `this.vaultClient` and runs before any current-vault check. Restore, import, rename, asset loading, and delayed API responses can apply to a different vault or tab than the one that issued them. Source-level race, not reproduced.
-- **Recommendation:** Apply one rule: an async operation captures the vault identity, client, and tab identity at start, passes them to its completion, and discards or reroutes the result when they no longer match. Cover each operation with an interleaving test from TNS-048.
-- **Fix with:** lifecycle-concurrency
-- **Effort:** M
-
 ### TNS-045 · P3 · Bound and stabilize asset prefetch
 
 - **Area:** Performance

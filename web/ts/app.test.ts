@@ -1232,6 +1232,75 @@ describe("v2 desktop shell", () => {
     expect(memory.cached.get(note.noteId)?.content).toBe("# Restored\n");
   });
 
+  it("drops a revision restore that resolves after its tab was closed", async () => {
+    const first = noteMeta("first", "first.md", "First");
+    const second = noteMeta("second", "second.md", "Second");
+    const restored = noteMeta(first.noteId, first.path, first.title, [], 2, HASH_B);
+    const revision = { noteId: first.noteId, revision: 4, kind: "save" as const, source: "user" as const, sourceHash: HASH_B, createdAtMs: 5 };
+    const client = configureVault([first, second], workspaceSeed([
+      { noteId: first.noteId, title: first.title, path: first.path, cursorOffset: null, sourceMode: false },
+      { noteId: second.noteId, title: second.title, path: second.path, cursorOffset: null, sourceMode: false },
+    ], first.noteId));
+    client.listRevisions.mockResolvedValue([revision]);
+    client.openRevision.mockResolvedValue({ revision, content: "# Restored\n" });
+    const restore = deferred<V2MutationResponse>();
+    client.restoreRevision.mockReturnValue(restore.promise);
+    const { app, root } = mountApp();
+    await app.boot();
+    await runCommand(root, "revisions");
+    root.querySelector<HTMLButtonElement>(".revision-row")?.click();
+    await flushAsync();
+    root.querySelector<HTMLButtonElement>(".revisions-panel .primary-button")?.click();
+    await until(() => client.restoreRevision.mock.calls.length === 1);
+    root.querySelector<HTMLButtonElement>('.tab[title="First"] .tab-close')?.click();
+    await flushAsync();
+    await until(() => !memory.cached.has(first.noteId));
+    client.openNote.mockResolvedValue(documentFor(restored, "# Restored\n"));
+
+    restore.resolve(accepted(client.restoreRevision.mock.calls[0]![2].mutationId, restored));
+    await flushAsync();
+
+    expect(client.openNote).toHaveBeenCalledTimes(2);
+    expect(memory.cached.has(first.noteId)).toBeFalsy();
+    expect(root.querySelector(".toast")).toBeNull();
+  });
+
+  it("holds a vault switch until an in-flight revision restore settles in its own vault", async () => {
+    const oldNote = noteMeta("shared", "old.md", "Old");
+    const newNote = noteMeta("shared", "new.md", "New", [], 1, `blake3-v3:${"d".repeat(64)}`);
+    const restored = noteMeta(oldNote.noteId, oldNote.path, oldNote.title, [], 2, HASH_B);
+    const revision = { noteId: oldNote.noteId, revision: 4, kind: "save" as const, source: "user" as const, sourceHash: HASH_B, createdAtMs: 5 };
+    const oldClient = configureVault([oldNote], workspaceSeed([
+      { noteId: oldNote.noteId, title: oldNote.title, path: oldNote.path, cursorOffset: null, sourceMode: false },
+    ], oldNote.noteId));
+    const newClient = configureVault([newNote], workspaceSeed([
+      { noteId: newNote.noteId, title: newNote.title, path: newNote.path, cursorOffset: null, sourceMode: false },
+    ], newNote.noteId), "vault-2");
+    oldClient.listRevisions.mockResolvedValue([revision]);
+    oldClient.openRevision.mockResolvedValue({ revision, content: "# Restored\n" });
+    const restore = deferred<V2MutationResponse>();
+    oldClient.restoreRevision.mockReturnValue(restore.promise);
+    const { app, root } = mountApp();
+    await app.boot();
+    await runCommand(root, "revisions");
+    root.querySelector<HTMLButtonElement>(".revision-row")?.click();
+    await flushAsync();
+    root.querySelector<HTMLButtonElement>(".revisions-panel .primary-button")?.click();
+    await until(() => oldClient.restoreRevision.mock.calls.length === 1);
+
+    const switching = app.boot("vault-2");
+    await flushAsync();
+    oldClient.openNote.mockResolvedValue(documentFor(restored, "# Restored\n"));
+    restore.resolve(accepted(oldClient.restoreRevision.mock.calls[0]![2].mutationId, restored));
+    await switching;
+
+    expect(oldClient.openNote).toHaveBeenCalledTimes(2);
+    expect(newClient.openNote).toHaveBeenCalledTimes(1);
+    expect(root.textContent).toContain("New");
+    expect(editorMock.instances[0]?.getSnapshot()).toMatchObject({ noteId: "saved:shared", source: "# New\n" });
+    expect(memory.cached.get("shared")?.content).not.toBe("# Restored\n");
+  });
+
   it("ignores a revision list that resolves after switching notes", async () => {
     const first = noteMeta("first", "first.md", "First");
     const second = noteMeta("second", "second.md", "Second");
@@ -1489,6 +1558,90 @@ describe("v2 desktop shell", () => {
     await until(() => root.querySelector(".note-dialog-panel") !== null);
   });
 
+  it("keeps the user's selected tab when an import finishes creating its note", async () => {
+    const note = noteMeta("note-1", "one.md", "One");
+    const imported = noteMeta("imported", "imported.md", "Imported");
+    const client = configureVault([note], workspaceSeed([
+      { noteId: note.noteId, title: note.title, path: note.path, cursorOffset: null, sourceMode: false },
+    ], note.noteId));
+    const created = deferred<V2MutationResponse>();
+    client.createNote.mockReturnValue(created.promise);
+    client.openNote.mockImplementation(async (id) => id === imported.noteId
+      ? documentFor(imported, "# Imported\n")
+      : documentFor(note, "# One\n"));
+    htmlImport.pickHtmlImport.mockResolvedValue({ path: "imported.md", content: "# Imported\n" });
+    const { app, root } = mountApp();
+    await app.boot();
+    await runCommand(root, "import");
+    await until(() => client.createNote.mock.calls.length === 1);
+    root.querySelector<HTMLButtonElement>('.tab[title="One"]')?.click();
+    await flushAsync();
+
+    created.resolve(accepted(client.createNote.mock.calls[0]![0].mutationId, imported));
+    await until(() => root.querySelector('.tab[title="Imported"]') !== null);
+
+    expect(root.querySelector(".tab.active")?.getAttribute("title")).toBe("One");
+  });
+
+  it("does not select a note whose import draft tab was closed while it was being created", async () => {
+    const note = noteMeta("note-1", "one.md", "One");
+    const imported = noteMeta("imported", "imported.md", "Imported");
+    const client = configureVault([note], workspaceSeed([
+      { noteId: note.noteId, title: note.title, path: note.path, cursorOffset: null, sourceMode: false },
+    ], note.noteId));
+    const created = deferred<V2MutationResponse>();
+    client.createNote.mockReturnValue(created.promise);
+    client.openNote.mockImplementation(async (id) => id === imported.noteId
+      ? documentFor(imported, "# Imported\n")
+      : documentFor(note, "# One\n"));
+    htmlImport.pickHtmlImport.mockResolvedValue({ path: "imported.md", content: "# Imported\n" });
+    const { app, root } = mountApp();
+    await app.boot();
+    await runCommand(root, "import");
+    await until(() => client.createNote.mock.calls.length === 1);
+    root.querySelector<HTMLButtonElement>('.tab.active .tab-close')?.click();
+    await flushAsync();
+    expect(root.querySelector(".tab.active")?.getAttribute("title")).toBe("One");
+
+    created.resolve(accepted(client.createNote.mock.calls[0]![0].mutationId, imported));
+    await until(() => client.openNote.mock.calls.some((call) => call[0] === imported.noteId));
+    await flushAsync();
+
+    expect(root.querySelector(".tab.active")?.getAttribute("title")).toBe("One");
+    expect(root.querySelector('.tab[title="Imported"]')).toBeNull();
+  });
+
+  it("drops a conflict draft preview that resolves after switching notes", async () => {
+    const first = noteMeta("first", "first.md", "First");
+    const second = noteMeta("second", "second.md", "Second");
+    const remote = noteMeta(first.noteId, first.path, first.title, [], 2, HASH_B);
+    const client = configureVault([first, second], workspaceSeed([
+      { noteId: first.noteId, title: first.title, path: first.path, cursorOffset: null, sourceMode: false },
+      { noteId: second.noteId, title: second.title, path: second.path, cursorOffset: null, sourceMode: false },
+    ], first.noteId));
+    client.saveNote.mockImplementation(async (_id, request) => ({
+      mutationId: request.mutationId,
+      outcome: { state: "conflict", current: documentFor(remote, "# Remote\n"), draft: conflictDraft(first.noteId) },
+    }));
+    const preview = deferred<V2ConflictDraftDocument>();
+    client.openConflictDraft.mockReturnValue(preview.promise);
+    const { app, root } = mountApp();
+    await app.boot();
+    editorMock.instances[0]!.simulateEdit("# Draft\n");
+    await runCommand(root, "save");
+    await until(() => root.textContent?.includes("Save conflict") === true);
+    root.querySelector<HTMLButtonElement>('[title="View conflict draft"]')?.click();
+    await until(() => client.openConflictDraft.mock.calls.length === 1);
+    root.querySelector<HTMLButtonElement>('.tab[title="Second"]')?.click();
+    await flushAsync();
+
+    preview.resolve({ draft: conflictDraft(first.noteId), content: "# Draft\n" });
+    await flushAsync();
+
+    expect(root.querySelector(".tab.active")?.getAttribute("title")).toBe("Second");
+    expect(root.querySelector('[data-key="modal:conflict"]')).toBeNull();
+  });
+
   it("routes note image loads through the active vault and revokes object URLs on dispose", async () => {
     const note = noteMeta("note-1", "one.md", "One");
     const client = configureVault([note], workspaceSeed([
@@ -1565,6 +1718,39 @@ describe("v2 desktop shell", () => {
       note.noteId,
       expect.objectContaining({ content: "![[z-images/image.webp]]\n" }),
     );
+  });
+
+  it("captures a change reported for an inactive note into that note's session", async () => {
+    vi.useFakeTimers();
+    const first = noteMeta("one", "one.md", "One");
+    const second = noteMeta("two", "two.md", "Two");
+    const client = configureVault([first, second], workspaceSeed([
+      { noteId: first.noteId, title: first.title, path: first.path, cursorOffset: null, sourceMode: false },
+      { noteId: second.noteId, title: second.title, path: second.path, cursorOffset: null, sourceMode: false },
+    ], first.noteId));
+    const saved = deferred<V2MutationResponse>();
+    client.saveNote.mockReturnValue(saved.promise);
+    const { app, root } = mountApp();
+    await app.boot();
+    await flushAsync();
+    const editor = editorMock.instances[0]!;
+    root.querySelector<HTMLButtonElement>('.tab[title="Two"]')?.click();
+    await flushAsync();
+    expect(editor.attachedSession?.noteId).toBe("saved:two");
+
+    editor.simulateEditIn("saved:one", "![[z-images/a.webp]]\n# One\n");
+    await vi.advanceTimersByTimeAsync(150);
+    await flushAsync();
+
+    expect(root.querySelector('.tab[title="One"]')?.textContent).toContain("•");
+    expect(root.querySelector('.tab[title="Two"]')?.textContent).not.toContain("•");
+    await vi.advanceTimersByTimeAsync(900);
+    await flushAsync();
+    expect(client.saveNote).toHaveBeenCalledTimes(1);
+    expect(client.saveNote.mock.calls[0]?.[0]).toBe(first.noteId);
+    expect(client.saveNote.mock.calls[0]?.[1]).toMatchObject({ content: "![[z-images/a.webp]]\n# One\n" });
+    expect(memory.savedDrafts.get(first.noteId)?.source).toBe("![[z-images/a.webp]]\n# One\n");
+    expect(memory.savedDrafts.has(second.noteId)).toBeFalsy();
   });
 
   it("debounces workspace session writes while typing", async () => {
@@ -2008,7 +2194,7 @@ describe("v2 desktop shell", () => {
       expect(client.saveNote).not.toHaveBeenCalled();
     });
 
-    it.fails("saves an image inserted into a note after the user switched away (known gap: inactive-session edits are not captured)", async () => {
+    it("saves an image inserted into a note after the user switched away", async () => {
       vi.useFakeTimers();
       const { first, client } = twoNoteVault();
       const { app, root } = mountApp();
@@ -2219,6 +2405,11 @@ function createFakeEditor(initialConfig?: EditorConfig): FakeEditor {
     dispose: vi.fn(() => { active = null; }),
     focus: vi.fn(),
     getSnapshot: vi.fn(() => active === null ? null : snapshots.get(active) ?? null),
+    getSessionSnapshot: vi.fn((session: EditorSession) => {
+      const snapshot = snapshots.get(session);
+      if (snapshot === undefined) throw new Error("Unknown editor session");
+      return snapshot;
+    }),
     markSaved: vi.fn((session: EditorSession, revision: number) => {
       const snapshot = snapshots.get(session);
       if (snapshot === undefined || snapshot.revision !== revision) return false;
@@ -2268,12 +2459,20 @@ function createFakeEditor(initialConfig?: EditorConfig): FakeEditor {
       snapshots.set(active, updated);
       (config["onChange"] as ((change: { noteId: string; revision: number; origin: "userEdit" }) => void) | undefined)?.({ noteId: updated.noteId, revision: updated.revision, origin: "userEdit" });
     },
+    simulateEditIn(noteId: string, source: string) {
+      const session = [...snapshots.keys()].find((candidate) => candidate.noteId === noteId);
+      if (session === undefined) throw new Error(`No editor session for ${noteId}`);
+      const snapshot = snapshots.get(session)!;
+      const updated = { ...snapshot, source, revision: snapshot.revision + 1, dirty: true };
+      snapshots.set(session, updated);
+      (config["onChange"] as ((change: { noteId: string; revision: number; origin: "userEdit" }) => void) | undefined)?.({ noteId, revision: updated.revision, origin: "userEdit" });
+    },
   };
   editorMock.instances.push(editor);
   return editor;
 }
 
-type FakeEditor = EditorHandle & { readonly config: Record<string, unknown>; readonly snapshots: Map<EditorSession, EditorSnapshot>; readonly attachedSession: EditorSession | null; simulateEdit: (source: string, selection?: EditorSnapshot["selection"]) => void; simulateInactiveEdit: (noteKey: string, source: string) => void };
+type FakeEditor = EditorHandle & { readonly config: Record<string, unknown>; readonly snapshots: Map<EditorSession, EditorSnapshot>; readonly attachedSession: EditorSession | null; simulateEdit: (source: string, selection?: EditorSnapshot["selection"]) => void; simulateInactiveEdit: (noteKey: string, source: string) => void; simulateEditIn: (noteId: string, source: string) => void };
 
 function mountApp(services: AppServices = createServices()): { app: TansuApp; root: HTMLElement } {
   const root = document.createElement("div");
