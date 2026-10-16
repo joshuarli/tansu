@@ -1537,8 +1537,16 @@ export class TansuApp {
   }
 
   private async importHtml(): Promise<void> {
+    const identity = this.identity;
+    const client = this.vaultClient;
+    const generation = this.bootGeneration;
+    if (identity === null || client === null) return;
     const imported = await this.services.htmlImport.pickHtmlImport(this.state.notes.values());
-    if (imported === null) return;
+    if (imported === null || generation !== this.bootGeneration || this.transitioningVault || !this.isCurrentVault(identity, client)) return;
+    await this.trackAction(this.openImportedHtml(imported));
+  }
+
+  private async openImportedHtml(imported: { path: string; content: string }): Promise<void> {
     const tab = this.localDraftTab(localDraftId(mutationId()), imported.path.replace(/\.md$/i, ""), imported.content);
     tab.path = imported.path;
     this.state.tabs.push(tab);
@@ -1858,7 +1866,7 @@ export class TansuApp {
         break;
       }
       case "import": {
-        this.runAsync(this.importHtml(), "Import failed");
+        this.runAsync(this.importHtml(), "Import failed", false);
         break;
       }
       case "revisions": {

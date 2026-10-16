@@ -2691,3 +2691,45 @@ describe("wiki link failure notices", () => {
     expect(root.textContent).not.toContain("more than one note");
   });
 });
+
+describe("html import picker", () => {
+  useShellFixtures();
+  const note = noteMeta("note-1", "one.md", "One");
+  const other = noteMeta("note-2", "two.md", "Two");
+
+  it("does not hold a vault switch while the file picker is open", async () => {
+    const client = configureVault([note]);
+    configureVault([other], null, "vault-2");
+    const picker = deferred<{ path: string; content: string } | null>();
+    htmlImport.pickHtmlImport.mockReturnValue(picker.promise);
+    const { app, root } = mountApp();
+    await app.boot();
+    await runCommand(root, "import");
+    await until(() => htmlImport.pickHtmlImport.mock.calls.length === 1);
+
+    await app.boot("vault-2");
+
+    expect(root.textContent).toContain("Two");
+    expect(client.createNote).not.toHaveBeenCalled();
+  });
+
+  it("discards a picked file that arrives after the vault changed", async () => {
+    const oldClient = configureVault([note]);
+    const newClient = configureVault([other], null, "vault-2");
+    const picker = deferred<{ path: string; content: string } | null>();
+    htmlImport.pickHtmlImport.mockReturnValue(picker.promise);
+    const { app, root } = mountApp();
+    await app.boot();
+    await runCommand(root, "import");
+    await until(() => htmlImport.pickHtmlImport.mock.calls.length === 1);
+    await app.boot("vault-2");
+
+    picker.resolve({ path: "imported.md", content: "# Imported\n" });
+    await flushAsync();
+    await flushAsync();
+
+    expect(oldClient.createNote).not.toHaveBeenCalled();
+    expect(newClient.createNote).not.toHaveBeenCalled();
+    expect(root.querySelector('.tab[title="imported"]')).toBeNull();
+  });
+});
