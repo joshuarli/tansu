@@ -26,6 +26,30 @@ function mounted(source: string, config: Parameters<typeof createCodeMirrorEdito
 }
 
 describe("source-preserving Markdown operations", () => {
+  it("offers a movable link pill over links in read-only articles", () => {
+    const opened: string[] = [];
+    const { container, dispose } = mounted("[article link](https://example.test/article)", {
+      readOnly: true,
+      onLinkOpen: (url) => opened.push(url),
+    });
+    try {
+      const link = container.querySelector<HTMLElement>(".cm-atomic-link");
+      expect(link).not.toBeNull();
+      link!.dispatchEvent(new Event("pointerover", { bubbles: true }));
+
+      const pill = document.querySelector<HTMLButtonElement>(".article-link-pill");
+      expect(pill?.textContent).toBe("https://example.test/article");
+      link!.dispatchEvent(new MouseEvent("pointerout", { bubbles: true, relatedTarget: pill }));
+      pill!.dispatchEvent(new Event("pointerenter"));
+      expect(document.querySelector(".article-link-pill")).toBe(pill);
+      pill!.click();
+      expect(opened).toStrictEqual(["https://example.test/article"]);
+      expect(document.querySelector(".article-link-pill")).toBeNull();
+    } finally {
+      dispose();
+    }
+  });
+
   it("adds and removes tags without changing body bytes or source outside frontmatter", () => {
     const source = "\uFEFF---\ntags:\n  - old\n---\n\n# Body\n\n";
     const edit = tagsSourceEdit(source, ["#alpha", "two words", "alpha"]);

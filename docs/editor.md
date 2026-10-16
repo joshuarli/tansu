@@ -52,6 +52,10 @@ control. Find highlights remain separate from the document selection and do not
 change source or undo history.
 Blank lines between Markdown paragraphs carry native paragraph spacing in the
 rendered editor without changing source text.
+CodeMirror measures wrapped lines without CSS pretty wrapping so rendered text
+stays aligned with source positions. In read-only live mode, hovering a Markdown
+link shows a pill with its destination. Move the pointer onto the pill and click
+to open the link through `onLinkClick`.
 The adapter shows a floating formatting toolbar centered above the selection
 head. It hides the toolbar when the selection collapses or the session is
 read-only.

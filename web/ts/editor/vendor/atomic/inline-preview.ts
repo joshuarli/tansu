@@ -119,6 +119,118 @@ function linkElementFromEvent(event: MouseEvent, root?: HTMLElement): HTMLElemen
   return linkEl;
 }
 
+function linkUrlFromElement(view: EditorView, linkEl: HTMLElement): string | null {
+  const pos = view.posAtDOM(linkEl);
+  if (pos < 0) return null;
+
+  const tree = syntaxTree(view.state);
+  let node: SyntaxNode | null = tree.resolveInner(pos, 1);
+  let visibleUrl: SyntaxNode | null = null;
+  while (node && node.name !== 'Link') {
+    if (node.name === 'URL') visibleUrl = node;
+    node = node.parent;
+  }
+  const urlNode = node ? linkDestinationUrl(node, view.state.doc) : visibleUrl;
+  if (!urlNode) return null;
+  return view.state.doc.sliceString(urlNode.from, urlNode.to) || null;
+}
+
+function makeReadOnlyLinkPopup(onLinkClick: (url: string) => void): Extension {
+  return ViewPlugin.fromClass(
+    class {
+      private popup: HTMLButtonElement | null = null;
+      private hideTimer: number | null = null;
+
+      constructor(private readonly view: EditorView) {
+        view.dom.addEventListener('pointerover', this.onPointerOver);
+        view.dom.addEventListener('pointerout', this.onPointerOut);
+        window.addEventListener('scroll', this.close, true);
+        window.addEventListener('resize', this.close);
+      }
+
+      update(update: ViewUpdate) {
+        if (update.docChanged || !update.view.state.facet(readOnlyFacet)) this.close();
+      }
+
+      destroy() {
+        this.close();
+        this.view.dom.removeEventListener('pointerover', this.onPointerOver);
+        this.view.dom.removeEventListener('pointerout', this.onPointerOut);
+        window.removeEventListener('scroll', this.close, true);
+        window.removeEventListener('resize', this.close);
+      }
+
+      private readonly onPointerOver = (event: PointerEvent) => {
+        if (!this.view.state.facet(readOnlyFacet)) return;
+        const link = linkElementFromEvent(event, this.view.contentDOM);
+        if (!link) return;
+        const url = linkUrlFromElement(this.view, link);
+        if (url) this.show(url, link.getBoundingClientRect());
+      };
+
+      private readonly onPointerOut = (event: PointerEvent) => {
+        const related = event.relatedTarget;
+        if (related instanceof Node && this.view.contentDOM.contains(related)) return;
+        this.scheduleClose();
+      };
+
+      private readonly onPopupPointerEnter = () => this.clearHideTimer();
+      private readonly onPopupPointerLeave = () => this.scheduleClose();
+      private readonly close = () => {
+        this.clearHideTimer();
+        this.popup?.remove();
+        this.popup = null;
+      };
+
+      private show(url: string, rect: DOMRect) {
+        this.clearHideTimer();
+        if (this.popup?.dataset['url'] === url) {
+          this.position(rect);
+          return;
+        }
+        this.popup?.remove();
+        const popup = document.createElement('button');
+        popup.type = 'button';
+        popup.className = 'article-link-pill';
+        popup.dataset['url'] = url;
+        popup.textContent = url;
+        popup.setAttribute('aria-label', `Open ${url}`);
+        popup.addEventListener('pointerenter', this.onPopupPointerEnter);
+        popup.addEventListener('pointerleave', this.onPopupPointerLeave);
+        popup.addEventListener('click', () => {
+          onLinkClick(url);
+          this.close();
+        });
+        document.body.append(popup);
+        this.popup = popup;
+        this.position(rect);
+      }
+
+      private position(rect: DOMRect) {
+        const popup = this.popup;
+        if (!popup) return;
+        const width = popup.getBoundingClientRect().width;
+        const height = popup.getBoundingClientRect().height;
+        const left = Math.max(8, Math.min(rect.left, window.innerWidth - width - 8));
+        popup.style.left = `${left}px`;
+        const below = rect.bottom + 6;
+        popup.style.top = `${below + height <= window.innerHeight - 8 ? below : Math.max(8, rect.top - height - 6)}px`;
+      }
+
+      private scheduleClose() {
+        this.clearHideTimer();
+        this.hideTimer = window.setTimeout(this.close, 350);
+      }
+
+      private clearHideTimer() {
+        if (this.hideTimer === null) return;
+        window.clearTimeout(this.hideTimer);
+        this.hideTimer = null;
+      }
+    },
+  );
+}
+
 // Tracks mouse state on the editor and drives the freeze flag. We listen
 // on the content DOM for pointerdown and on the window for pointerup —
 // users can release outside the editor after a drag, and we'd miss the
@@ -1197,22 +1309,7 @@ function makeLinkClickHandler(onLinkClick: (url: string) => void): Extension {
         : linkIconHitTarget(event, view.contentDOM);
       if (!linkEl) return false;
 
-      const pos = view.posAtDOM(linkEl);
-      if (pos < 0) return false;
-
-      const tree = syntaxTree(view.state);
-      let node: SyntaxNode | null = tree.resolveInner(pos, 1);
-      let visibleUrl: SyntaxNode | null = null;
-      while (node && node.name !== 'Link') {
-        if (node.name === 'URL') visibleUrl = node;
-        node = node.parent;
-      }
-      const urlNode = node
-        ? linkDestinationUrl(node, view.state.doc)
-        : visibleUrl;
-      if (!urlNode) return false;
-
-      const url = view.state.doc.sliceString(urlNode.from, urlNode.to);
+      const url = linkUrlFromElement(view, linkEl);
       if (!url) return false;
 
       event.preventDefault();
@@ -1238,6 +1335,7 @@ export function inlinePreview(config: InlinePreviewConfig = {}): Extension {
     fencedCodeSelectionPlugin,
     freezeMousePlugin,
     treeProgressPlugin,
+    makeReadOnlyLinkPopup(onLinkClick),
     makeLinkClickHandler(onLinkClick),
     // Prec.highest to beat @codemirror/lang-markdown's own Enter
     // handler, which is registered internally by the `markdown()`

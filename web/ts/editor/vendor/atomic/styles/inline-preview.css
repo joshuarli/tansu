@@ -44,7 +44,6 @@
   font-size: var(--atomic-editor-body-size, 1.0625rem);
   line-height: var(--atomic-editor-body-leading, 1.7);
   color: var(--atomic-editor-fg, #dcddde);
-  text-wrap: pretty;
 }
 
 /* Heading lines. Padding-top (not margin-top) creates the rhythm so
