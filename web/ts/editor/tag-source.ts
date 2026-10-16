@@ -1,3 +1,5 @@
+import { normalizeTag } from "../markdown-tags.ts";
+
 export type SourceEdit = {
   from: number;
   to: number;
@@ -150,12 +152,6 @@ function supportedTagScalar(value: string): boolean {
     return scalar.length >= 2 && scalar.endsWith(quote) && !scalar.slice(1, -1).includes(quote);
   }
   return !/(?:^|\s)#|:\s|[\[\]{}|>]|^[-?:,](?:\s|$)|^[!&*%@`]/u.test(scalar);
-}
-
-function normalizeTag(value: string): string | null {
-  const tag = value.trim().replace(/^#/, "");
-  if (tag === "" || /[\r\n]/.test(tag)) return null;
-  return tag;
 }
 
 function yamlScalar(value: string): string {

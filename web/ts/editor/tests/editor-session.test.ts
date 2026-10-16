@@ -157,6 +157,16 @@ describe("CodeMirror editor sessions", () => {
     expect(locked.container.querySelector<HTMLButtonElement>(".tag-add")?.disabled).toBeTruthy();
   });
 
+  it("skips header tags that normalize to empty instead of failing the header render", () => {
+    const { container } = mountEditor("# Body\n", {
+      noteTitle: "Note",
+      noteTags: { tags: ["#", "alpha", "  "], status: "editable", onAddTag: vi.fn(), onRemoveTag: vi.fn() },
+    });
+
+    expect(container.querySelector(".document-title")?.textContent).toBe("Note");
+    expect([...container.querySelectorAll(".tag-row .tag-pill")].map((pill) => pill.textContent)).toStrictEqual(["#alpha"]);
+  });
+
   it("folds frontmatter in live mode until the header control reveals it", () => {
     const source = "---\ntags:\n  - alpha\n---\n\n# Body\n";
     const { container, editor } = mountEditor(source, { noteTitle: "Note" });
