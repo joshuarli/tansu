@@ -3,15 +3,6 @@
 Prefix: TNS
 Next: 54
 
-### TNS-028 · P2 · Reject public-suffix RP IDs on exact host matches
-
-- **Area:** Security
-- **Where:** `src/auth.rs:73-77`, `docs/rfcs/0002-webauthn-rp-id-validation.md:7-20`
-- **Problem:** The exact-host branch accepts an RP ID before checking the Public Suffix List. This contradicts the accepted RP ID decision and permits startup with a value such as `com`, which browsers reject for WebAuthn ceremonies.
-- **Recommendation:** Apply the public-suffix validation to every domain RP ID, with explicit handling for local names and IP addresses.
-- **Fix with:** os-boundaries
-- **Effort:** S
-
 ### TNS-029 · P2 · Keep vault identity fields immutable to callers
 
 - **Area:** Architecture

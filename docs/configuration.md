@@ -49,7 +49,9 @@ tansu2 config init \
 
 The origin must use HTTPS. The RP ID must match the origin host or be a
 registrable domain suffix of it. Public suffixes such as `com` and `co.uk` are
-rejected. Passkeys live under `tansu/identity/auth` in the data home. The
+rejected even when they equal the origin host, and so are IP addresses.
+`localhost` and single-label local names such as `devbox` are accepted when
+they equal the origin host. Passkeys live under `tansu/identity/auth` in the data home. The
 `externalOrigin` must exactly match the HTTPS URL browsers use. For Tailscale
 Serve, use the machine's HTTPS tailnet DNS name and set `rpId` to that hostname
 or an allowed parent domain. See [Deployment](deployment.md).

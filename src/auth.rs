@@ -72,14 +72,20 @@ impl AuthPolicy {
             return Err(AuthError::InvalidRequest("authenticated mode requires an HTTPS origin".into()));
         }
         let rp_id = rp_id.to_ascii_lowercase();
-        let hostname = host.split(':').next().unwrap_or(&host).trim_matches(['[', ']']);
+        let hostname = match host.strip_prefix('[') {
+            Some(bracketed) => bracketed.split_once(']').map_or(bracketed, |(address, _)| address),
+            None => host.split_once(':').map_or(host.as_str(), |(name, _)| name),
+        };
         let exact_origin_host = hostname == rp_id;
-        let registrable_origin_suffix = hostname
-            .strip_suffix(&rp_id)
-            .is_some_and(|prefix| prefix.ends_with('.') && psl::domain_str(&rp_id).is_some());
-        if !exact_origin_host && !registrable_origin_suffix {
+        let origin_suffix = hostname.strip_suffix(&rp_id).is_some_and(|prefix| prefix.ends_with('.'));
+        if !exact_origin_host && !origin_suffix {
             return Err(AuthError::InvalidRequest(
                 "RP ID must match the origin host or be a registrable domain suffix".into(),
+            ));
+        }
+        if !is_valid_rp_id_domain(&rp_id) {
+            return Err(AuthError::InvalidRequest(
+                "RP ID must be a registrable domain, localhost, or a single-label local name, not a public suffix or IP address".into(),
             ));
         }
         Ok(Self::Authenticated {
@@ -1003,6 +1009,16 @@ struct SessionRow {
     revoked: bool,
 }
 
+fn is_valid_rp_id_domain(rp_id: &str) -> bool {
+    if rp_id.parse::<std::net::IpAddr>().is_ok() {
+        return false;
+    }
+    if rp_id == "localhost" || psl::domain_str(rp_id).is_some() {
+        return true;
+    }
+    !rp_id.contains('.') && !psl::suffix(rp_id.as_bytes()).is_some_and(|suffix| suffix.is_known())
+}
+
 fn split_origin(origin: &str) -> Result<(&str, String), AuthError> {
     let (scheme, authority) = origin.split_once("://").ok_or_else(|| AuthError::InvalidRequest("origin must have a scheme and authority".into()))?;
     if !matches!(scheme, "https" | "http") || authority.is_empty() || authority.contains(['/', '?', '#', '@']) {
@@ -1804,6 +1820,24 @@ mod tests {
         assert!(AuthPolicy::authenticated("https://notes.example.co.uk", "example.co.uk", "Tansu").is_ok());
         assert!(AuthPolicy::authenticated("https://login.dev.example.com", "dev.example.com", "Tansu").is_ok());
         assert!(AuthPolicy::authenticated("https://notes.example.com", "notes.example.com", "Tansu").is_ok());
+    }
+
+    #[test]
+    fn authenticated_mode_rejects_public_suffix_rp_ids_equal_to_the_origin_host() {
+        assert!(AuthPolicy::authenticated("https://com", "com", "Tansu").is_err());
+        assert!(AuthPolicy::authenticated("https://co.uk", "co.uk", "Tansu").is_err());
+        assert!(AuthPolicy::authenticated("https://co.uk:8443", "co.uk", "Tansu").is_err());
+        assert!(AuthPolicy::authenticated("https://example.co.uk:8443", "example.co.uk", "Tansu").is_ok());
+    }
+
+    #[test]
+    fn authenticated_mode_accepts_local_names_and_rejects_ip_addresses_as_rp_ids() {
+        assert!(AuthPolicy::authenticated("https://localhost:8443", "localhost", "Tansu").is_ok());
+        assert!(AuthPolicy::authenticated("https://devbox", "devbox", "Tansu").is_ok());
+        assert!(AuthPolicy::authenticated("https://devbox:8443", "DEVBOX", "Tansu").is_ok());
+        assert!(AuthPolicy::authenticated("https://127.0.0.1:8443", "127.0.0.1", "Tansu").is_err());
+        assert!(AuthPolicy::authenticated("https://[::1]:8443", "::1", "Tansu").is_err());
+        assert!(AuthPolicy::authenticated("https://[::1]:8443", "[::1]", "Tansu").is_err());
     }
 
     #[test]
