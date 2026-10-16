@@ -3,7 +3,7 @@ set -euo pipefail
 tailnet_dns_name=$1
 stage=$2
 origin="https://$tailnet_dns_name"
-config_file=/var/lib/tansu2/config/tansu/config.toml
+settings_database=/var/lib/tansu2/config/tansu/settings.sqlite3
 restart_server=0
 restart_redirect=0
 units_changed=0
@@ -26,50 +26,45 @@ fi
 
 install -d -o root -g tansu2 -m 0750 /opt/tansu2
 install -d -o root -g tansu2 -m 0750 /var/lib/tansu2
-install -d -o root -g tansu2 -m 0750 /var/lib/tansu2/config/tansu
+install -d -o tansu2 -g tansu2 -m 0750 /var/lib/tansu2/config/tansu
 install -d -o tansu2 -g tansu2 -m 0750 /var/lib/tansu2/data
 install -d -o tansu2 -g tansu2 -m 0750 /var/lib/tansu2/vault
 
-if [[ -L "$config_file" || ( -e "$config_file" && ! -f "$config_file" ) ]]; then
-  printf 'Tansu2 config must be a regular file: %s\n' "$config_file" >&2
+if [[ -L "$settings_database" || ( -e "$settings_database" && ! -f "$settings_database" ) ]]; then
+  printf 'Tansu2 settings database must be a regular file: %s\n' "$settings_database" >&2
   exit 1
 fi
 
-if [[ ! -e "$config_file" ]]; then
-  config_stage="$config_file.new"
-  cat > "$config_stage" <<CONFIG
-[[vaults]]
-name = "Personal"
-path = "/var/lib/tansu2/vault"
-
-[auth]
-mode = "authenticated"
-external_origin = "$origin"
-rp_id = "$tailnet_dns_name"
-rp_name = "Tansu"
-state_directory = "auth"
-CONFIG
-  chown root:tansu2 "$config_stage"
-  chmod 0640 "$config_stage"
-  mv -f "$config_stage" "$config_file"
+if [[ ! -e "$settings_database" ]]; then
+  runuser -u tansu2 -- env \
+    HOME=/var/lib/tansu2 \
+    XDG_CONFIG_HOME=/var/lib/tansu2/config \
+    XDG_DATA_HOME=/var/lib/tansu2/data \
+    "$stage/tansu2" config init \
+    --vault Personal /var/lib/tansu2/vault \
+    --auth "$origin" "$tailnet_dns_name" Tansu
   restart_server=1
 fi
 
-python3 - "$config_file" "$tailnet_dns_name" <<'CONFIG_CHECK'
+python3 - "$settings_database" "$tailnet_dns_name" <<'CONFIG_CHECK'
+import json
+import sqlite3
 import sys
-import tomllib
 
-with open(sys.argv[1], "rb") as config_file:
-    config = tomllib.load(config_file)
+with sqlite3.connect(f"file:{sys.argv[1]}?mode=ro", uri=True) as database:
+    row = database.execute("SELECT value FROM settings WHERE key='app'").fetchone()
+if row is None:
+    raise SystemExit("Tansu2 app settings are not initialized")
+config = json.loads(row[0])
 
 auth = config.get("auth", {})
 expected_origin = f"https://{sys.argv[2]}"
-if auth.get("mode") != "authenticated" or auth.get("external_origin") != expected_origin or auth.get("rp_id") != sys.argv[2]:
+if auth.get("externalOrigin") != expected_origin or auth.get("rpId") != sys.argv[2]:
     raise SystemExit("Tansu2 config must use authenticated mode with the current Oracle HTTPS origin and RP ID")
 CONFIG_CHECK
 
-chown root:tansu2 "$config_file"
-chmod 0640 "$config_file"
+chown tansu2:tansu2 "$settings_database"
+chmod 0640 "$settings_database"
 
 if [[ -L /opt/tansu2/tansu2 || ( -e /opt/tansu2/tansu2 && ! -f /opt/tansu2/tansu2 ) ]]; then
   printf 'Tansu2 executable path must be a regular file: /opt/tansu2/tansu2\n' >&2

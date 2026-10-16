@@ -86,25 +86,15 @@ describe("v2 API client", () => {
     expect(JSON.parse(String(at(calls, 0).init.body))).toStrictEqual({});
   });
 
-  it("decodes the one-time legacy workspace import seed", () => {
+  it("decodes a vault bootstrap without server-side workspace state", () => {
     const bootstrap = decodeV2VaultBootstrap({
       vault: { vaultId: "vault-1", name: "Notes" },
       notes: [],
       settings: settings(),
       searchStatus: { dirty: false, degraded: false },
-      legacyWorkspace: {
-        session: {
-          openTabs: [{ noteId: "note-1", title: "Note", path: "note.md", cursorOffset: 2, sourceMode: false }],
-          activeNoteId: "note-1",
-          closedTabs: [],
-        },
-        pinnedNoteIds: ["note-1"],
-        recentNoteIds: ["note-1"],
-      },
     });
 
-    expect(bootstrap.legacyWorkspace?.session.activeNoteId).toBe("note-1");
-    expect(bootstrap.legacyWorkspace?.pinnedNoteIds).toStrictEqual(["note-1"]);
+    expect(bootstrap.vault.vaultId).toBe("vault-1");
   });
 
   it("uses stable identity headers and routes all note operations through v2", async () => {
@@ -219,7 +209,7 @@ describe("v2 API client", () => {
     })).toThrow(V2ProtocolError);
   });
 
-  it("requires the legacy workspace field in vault bootstrap responses", () => {
+  it("requires only current fields in vault bootstrap responses", () => {
     const bootstrap = {
       vault: { vaultId: "vault-1", name: "Notes" },
       notes: [],
@@ -227,8 +217,7 @@ describe("v2 API client", () => {
       searchStatus: { dirty: false, degraded: false },
     };
 
-    expect(() => decodeV2VaultBootstrap(bootstrap)).toThrow(V2ProtocolError);
-    expect(decodeV2VaultBootstrap({ ...bootstrap, legacyWorkspace: null }).legacyWorkspace).toBeNull();
+    expect(decodeV2VaultBootstrap(bootstrap).vault.name).toBe("Notes");
   });
 
   it("keeps error code details and retries only classified transient failures", async () => {
@@ -414,7 +403,6 @@ describe("v2 API client", () => {
       notes: [],
       settings: settings(),
       searchStatus: { dirty: false, degraded: false },
-      legacyWorkspace: null,
     }).bootstrap()).rejects.toBeInstanceOf(V2ProtocolError);
 
     await expect(vaultWithResponse({ meta: noteMeta("other-note"), content: "# Other\n" })
@@ -504,7 +492,6 @@ describe("v2 API client", () => {
           notes: [],
           settings: settings(),
           searchStatus: { dirty: false, degraded: false },
-          legacyWorkspace: null,
         });
       }
       if (path.endsWith("/notes")) {

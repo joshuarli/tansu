@@ -153,13 +153,10 @@ def run(binary):
         cwd = run_root / "empty-cwd"
         empty_path = run_root / "empty-path"
         vault = run_root / "vault"
-        config_directory = config_home / "tansu"
-        for directory in (home, config_home, config_directory, data_home, cache_home, temp_home, cwd, empty_path, vault):
+        for directory in (home, config_home, data_home, cache_home, temp_home, cwd, empty_path, vault):
             directory.mkdir()
         note_path = vault / "package.md"
         note_path.write_text("# Package runtime\n\nOriginal package source.\n")
-        config_path = config_directory / "config.toml"
-        config_path.write_text(f"[[vaults]]\nname = \"Package\"\npath = {json.dumps(str(vault))}\n")
         require(not (cwd / "web").exists(), "package working directory contains web assets")
         require(not (home / "d").exists(), "isolated home unexpectedly contains developer checkouts")
         require(not any(shutil.which(tool, path=str(empty_path)) for tool in ("node", "pnpm", "deno")), "package runtime PATH is not empty")
@@ -173,6 +170,15 @@ def run(binary):
             "LANG": "C.UTF-8",
             "TANSU2_LOGS": "off",
         }
+        subprocess.run(
+            [str(binary), "config", "init", "--vault", "Package", str(vault)],
+            cwd=cwd,
+            env=environment,
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=10,
+        )
         opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
         port = available_port()
         process, base_url = start_server(binary, port, cwd, environment, opener)

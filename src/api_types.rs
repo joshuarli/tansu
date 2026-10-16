@@ -113,6 +113,35 @@ pub struct Settings {
     pub image_webp_quality: f32,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AppVaultSettings {
+    pub name: String,
+    pub path: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AppAuthSettings {
+    pub external_origin: String,
+    pub rp_id: String,
+    pub rp_name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AppSettings {
+    pub vaults: Vec<AppVaultSettings>,
+    pub auth: Option<AppAuthSettings>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct V2AppSettingsResponse {
+    pub settings: Option<AppSettings>,
+    pub restart_required: bool,
+}
+
 impl Default for Settings {
     fn default() -> Self {
         Self {
@@ -127,24 +156,6 @@ impl Default for Settings {
             image_webp_quality: 0.85,
         }
     }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct SessionState {
-    pub open_tabs: Vec<SessionTab>,
-    pub active_note_id: Option<String>,
-    pub closed_tabs: Vec<SessionTab>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct SessionTab {
-    pub note_id: String,
-    pub title: String,
-    pub path: String,
-    pub cursor_offset: Option<usize>,
-    pub source_mode: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -170,21 +181,6 @@ pub struct SearchHit {
     pub snippet: String,
     pub score: f32,
     pub field_scores: SearchFieldScores,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct BootstrapResponse {
-    #[ts(type = "number")]
-    pub api_version: u32,
-    pub vaults: Vec<VaultEntry>,
-    pub active_vault: usize,
-    pub notes: Vec<NoteMeta>,
-    pub pinned_note_ids: Vec<String>,
-    pub recent_note_ids: Vec<String>,
-    pub settings: Settings,
-    pub session: SessionState,
-    pub search_status: SearchStatus,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -359,15 +355,6 @@ pub struct V2VaultBootstrapResponse {
     pub notes: Vec<V2NoteMeta>,
     pub settings: Settings,
     pub search_status: SearchStatus,
-    pub legacy_workspace: Option<LegacyWorkspace>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct LegacyWorkspace {
-    pub session: SessionState,
-    pub pinned_note_ids: Vec<String>,
-    pub recent_note_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]

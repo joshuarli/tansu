@@ -26,6 +26,7 @@ let serverInstanceId = "";
 let vaultOneId = "";
 let vaultTwoId = "";
 let serverBinaryBuilt = false;
+let settingsSeeded = false;
 const serverOutput: string[] = [];
 const e2eBrowser = browserTypeFromEnv();
 
@@ -964,6 +965,13 @@ async function startFixtureServer(): Promise<void> {
   }
   const targetDirectory = resolve(process.env["CARGO_TARGET_DIR"] ?? "target");
   const serverBinary = join(targetDirectory, "debug", process.platform === "win32" ? "tansu2.exe" : "tansu2");
+  if (!settingsSeeded) {
+    execFileSync(serverBinary, [
+      "config", "init", "--vault", "One", fixture.vaultOne,
+      "--vault", "Two", fixture.vaultTwo,
+    ], { cwd: process.cwd(), env: environment, stdio: "pipe" });
+    settingsSeeded = true;
+  }
   server = spawn(serverBinary, ["--port", String(serverPort)], {
     cwd: process.cwd(),
     env: environment,

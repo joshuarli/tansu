@@ -1,6 +1,6 @@
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { once } from "node:events";
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm } from "node:fs/promises";
 import { request as httpRequest } from "node:http";
 import { createServer as createHttpsServer, request as httpsRequest } from "node:https";
 import net from "node:net";
@@ -37,12 +37,6 @@ describe("authenticated Chromium server", () => {
       XDG_CONFIG_HOME: fixture.configHome,
       XDG_DATA_HOME: fixture.dataHome,
     };
-    const configPath = join(fixture.configHome, "tansu", "config.toml");
-    await writeFile(
-      configPath,
-      `[[vaults]]\nname = "One"\npath = ${JSON.stringify(fixture.vaultOne)}\n\n[[vaults]]\nname = "Two"\npath = ${JSON.stringify(fixture.vaultTwo)}\n\n[auth]\nmode = "authenticated"\nexternal_origin = ${JSON.stringify(origin)}\nrp_id = "localhost"\nrp_name = "Tansu"\nstate_directory = "auth"\n`,
-      "utf8",
-    );
     execFileSync("cargo", ["build", "--quiet", "--bin", "tansu2"], {
       cwd: process.cwd(),
       env: environment,
@@ -50,6 +44,11 @@ describe("authenticated Chromium server", () => {
     });
     const targetDirectory = resolve(process.env["CARGO_TARGET_DIR"] ?? "target");
     const serverBinary = join(targetDirectory, "debug", process.platform === "win32" ? "tansu2.exe" : "tansu2");
+    execFileSync(serverBinary, [
+      "config", "init", "--vault", "One", fixture.vaultOne,
+      "--vault", "Two", fixture.vaultTwo,
+      "--auth", origin, "localhost", "Tansu",
+    ], { cwd: process.cwd(), env: environment, stdio: "pipe" });
     const capability = execFileSync(serverBinary, ["auth", "enroll"], {
       cwd: process.cwd(),
       env: environment,

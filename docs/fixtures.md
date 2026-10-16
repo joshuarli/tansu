@@ -1,8 +1,8 @@
 # Fixtures
 
 The dev app uses the single-note vault in `tests/fixtures/demo-vault/`.
-`scripts/dev-fixture.mjs` copies it to `.dev/vault` and writes isolated config
-and data under `.dev/`.
+`scripts/dev-fixture.mjs` copies it to `.dev/vault` and initializes isolated
+SQLite settings and data under `.dev/`.
 
 ## Regenerate dev state
 

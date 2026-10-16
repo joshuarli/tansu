@@ -24,11 +24,6 @@ const sources = [
 ];
 const notePaths = ["visual-review.md", "long-text.md", "image-heavy.md", "wide-table.md", "long-fence.md"];
 await Promise.all(sources.map((source, index) => writeFile(join(fixture.vaultOne, notePaths[index]), source)));
-await writeFile(
-  join(fixture.configHome, "tansu", "config.toml"),
-  `[[vaults]]\nname = "One"\npath = "${fixture.vaultOne}"\n\n[[vaults]]\nname = "Two"\npath = "${fixture.vaultTwo}"\n\n[[vaults]]\nname = "Empty"\npath = "${emptyVault}"\n`,
-);
-
 execFileSync("deno", ["task", "build"], { env: { ...process.env, TMPDIR: resolve(".work/tmp") } });
 const port = await freePort();
 const env = {
@@ -40,6 +35,11 @@ const env = {
   XDG_DATA_HOME: fixture.dataHome,
 };
 execFileSync("cargo", ["build", "--quiet", "--bin", "tansu2"], { env });
+execFileSync(join(target, "debug", "tansu2"), [
+  "config", "init", "--vault", "One", fixture.vaultOne,
+  "--vault", "Two", fixture.vaultTwo,
+  "--vault", "Empty", emptyVault,
+], { env, stdio: "inherit" });
 const bundledWebAssets = join(work, "web-dist");
 await rm(bundledWebAssets, { recursive: true, force: true });
 await rename(resolve("web/dist"), bundledWebAssets);

@@ -41,7 +41,6 @@ pub enum Error {
     Io(std::io::Error),
     Json(serde_json::Error),
     Sql(rusqlite::Error),
-    Toml(toml::de::Error),
     NotFound(String),
     Internal(String),
 }
@@ -62,7 +61,6 @@ impl std::fmt::Display for Error {
             Self::Io(error) => write!(f, "{error}"),
             Self::Json(error) => write!(f, "{error}"),
             Self::Sql(error) => write!(f, "{error}"),
-            Self::Toml(error) => write!(f, "{error}"),
         }
     }
 }
@@ -99,12 +97,6 @@ impl From<tantivy::TantivyError> for Error {
     }
 }
 
-impl From<toml::de::Error> for Error {
-    fn from(value: toml::de::Error) -> Self {
-        Self::Toml(value)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -112,14 +104,12 @@ mod tests {
     #[test]
     fn errors_preserve_display_and_dependency_context() {
         let json_error = serde_json::from_str::<serde_json::Value>("{").unwrap_err();
-        let toml_error = toml::from_str::<toml::Value>("[").unwrap_err();
         let errors = [
             Error::api(ApiErrorKind::PathCollision { path: "A.md".to_string() }),
             Error::BadRequest("bad request".to_string()),
             Error::Io(std::io::Error::other("filesystem")),
             Error::Json(json_error),
             Error::Sql(rusqlite::Error::InvalidQuery),
-            Error::Toml(toml_error),
             Error::NotFound("missing".to_string()),
             Error::Internal("internal".to_string()),
             notify::Error::generic("watcher").into(),
@@ -133,9 +123,9 @@ mod tests {
         assert!(!messages[3].is_empty());
         assert!(!messages[4].is_empty());
         assert!(!messages[5].is_empty());
-        assert_eq!(messages[6], "missing");
-        assert_eq!(messages[7], "internal");
-        assert!(messages[8].contains("watcher"));
-        assert!(messages[9].contains("query"));
+        assert_eq!(messages[5], "missing");
+        assert_eq!(messages[6], "internal");
+        assert!(messages[7].contains("watcher"));
+        assert!(messages[8].contains("query"));
     }
 }

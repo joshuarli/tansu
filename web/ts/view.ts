@@ -786,6 +786,8 @@ function renderSettingsPanel(state: State, actions: ViewActions): HTMLElement {
   for (const field of [excluded, autosave, undo, quality]) {
     field.dataset["preserveValue"] = "";
   }
+  const appSettings = el("a", "text-button", span("Manage vaults and authentication"));
+  appSettings.setAttribute("href", "/setup");
   const panel = el(
     "div",
     "modal-panel settings-panel",
@@ -799,6 +801,7 @@ function renderSettingsPanel(state: State, actions: ViewActions): HTMLElement {
     el("label", "field-label", span("Autosave delay ms"), autosave),
     el("label", "field-label", span("Undo stack max"), undo),
     el("label", "field-label", span("Image WebP quality"), quality),
+    appSettings,
     el(
       "div",
       "storage-preference",

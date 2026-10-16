@@ -24,8 +24,8 @@ make test-e2e-webkit
 ```
 
 `make dev` serves the app on port `3000` with one demo note and its WebP images.
-It generates isolated config, data, and a copied vault under `.dev/`; it does
-not use your real vault configuration. See [Fixtures](fixtures.md) for fixture
+It creates isolated SQLite settings, data, and a copied vault under `.dev/`; it
+does not use your real vault configuration. See [Fixtures](fixtures.md) for fixture
 setup and [Logging](logging.md) for the dev and e2e log stream.
 
 `make check` verifies generated types, TypeScript types, and Rust compilation.
@@ -38,8 +38,8 @@ backup and recovery procedures.
 
 ## Build
 
-`deno task build` creates fingerprinted frontend bundles and a manifest under
-`web/dist/`. That directory is generated and ignored. Cargo runs `build.rs`
+`deno task build` uses Vite 8 to create fingerprinted frontend bundles and a
+manifest under `web/dist/`. That directory is generated and ignored. Cargo runs `build.rs`
 whenever it compiles the root package, and that script reads the manifest.
 `make check`, `make test`, `make types`, and `make types-check` build production
 assets first. `make dev` builds development assets before generating API types.

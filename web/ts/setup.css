@@ -1,0 +1,62 @@
+:root {
+  color-scheme: light dark;
+  font: 16px/1.5 system-ui, sans-serif;
+  background: #f5f2eb;
+  color: #24231f;
+}
+
+body {
+  margin: 0;
+  padding: 3rem 1rem;
+}
+
+main {
+  box-sizing: border-box;
+  max-width: 42rem;
+  margin: 0 auto;
+  padding: 2rem;
+  border: 1px solid #d6d0c5;
+  border-radius: 1rem;
+  background: #fffdf8;
+}
+
+h1 { margin-top: 0; }
+
+form, #vaults, label {
+  display: grid;
+  gap: 1rem;
+}
+
+.vault {
+  display: grid;
+  grid-template-columns: 1fr 2fr auto;
+  gap: 0.75rem;
+  align-items: end;
+}
+
+label { gap: 0.35rem; }
+
+input, button {
+  box-sizing: border-box;
+  min-height: 2.5rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid #aaa293;
+  border-radius: 0.4rem;
+  font: inherit;
+}
+
+button { cursor: pointer; }
+
+details { padding: 1rem 0; }
+
+#status { min-height: 1.5rem; }
+
+@media (prefers-color-scheme: dark) {
+  :root { background: #181816; color: #efede7; }
+  main { background: #23221f; border-color: #49463f; }
+  input, button { background: #302e29; color: inherit; border-color: #696459; }
+}
+
+@media (max-width: 36rem) {
+  .vault { grid-template-columns: 1fr; }
+}

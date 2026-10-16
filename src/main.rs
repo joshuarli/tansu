@@ -4,17 +4,14 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use tansu2::app::App;
+use tansu2::api_types::{AppAuthSettings, AppSettings, AppVaultSettings};
 use tansu2::auth::{AuthError, AuthStore};
-use tansu2::config::{AuthConfig, Config, load_config, prepare_auth_state_directory};
+use tansu2::config::{AuthConfig, Config, ConfigStore, prepare_auth_state_directory};
 use tansu2::http::{
     EventEnvelope, EventSource, EventSourceError, EventSubscription, EventSubscriptionStream,
-    ServerServices, serve_with_services,
+    ServerServices, serve_setup, serve_with_services,
 };
 use tansu2::vault::{V2EventEnvelope, V2EventSubscription};
-
-mod migration;
-
-use migration::run_migration;
 
 const SESSION_TTL_SECS: u64 = 8 * 60 * 60;
 const OWNER_VERIFICATION_TTL_SECS: u64 = 5 * 60;
@@ -29,13 +26,23 @@ fn main() {
 
 fn run() -> tansu2::Result<()> {
     match parse_command(std::env::args_os().skip(1))? {
-        Command::Serve { port } => run_server(load_config()?, port),
-        Command::Migrate { config_path, dry_run } => {
-            println!("{}", run_migration(&config_path, dry_run)?);
+        Command::Serve { port } => {
+            let store = ConfigStore::open_default()?;
+            match store.config()? {
+                Some(config) => run_server(config, store, port),
+                None => run_setup_server(store, port),
+            }
+        }
+        Command::InitializeSettings(settings) => {
+            ConfigStore::open_default()?.initialize_settings(&settings)?;
+            println!("Application settings saved.");
             Ok(())
         }
         Command::Auth(command) => {
-            let output = run_auth_command(&load_config()?, command)?;
+            let config = ConfigStore::open_default()?
+                .config()?
+                .ok_or_else(|| tansu2::Error::BadRequest("application settings are not configured".to_string()))?;
+            let output = run_auth_command(&config, command)?;
             match output {
                 AuthCommandOutput::EnrollmentCapability(capability) => println!("{capability}"),
                 AuthCommandOutput::Message(message) => println!("{message}"),
@@ -45,9 +52,13 @@ fn run() -> tansu2::Result<()> {
     }
 }
 
-fn run_server(config: Config, port: u16) -> tansu2::Result<()> {
+fn run_setup_server(store: ConfigStore, port: u16) -> tansu2::Result<()> {
+    serve_setup(App::setup_only(store), port)
+}
+
+fn run_server(config: Config, store: ConfigStore, port: u16) -> tansu2::Result<()> {
     let auth_config = config.auth.clone();
-    let app = App::new(config)?;
+    let app = App::from_settings(config, store)?;
     let auth = auth_config
         .map(|auth_config| {
             prepare_auth_state_directory(&auth_config)?;
@@ -75,7 +86,7 @@ fn run_server(config: Config, port: u16) -> tansu2::Result<()> {
 #[derive(Debug, PartialEq, Eq)]
 enum Command {
     Serve { port: u16 },
-    Migrate { config_path: PathBuf, dry_run: bool },
+    InitializeSettings(AppSettings),
     Auth(AuthCommand),
 }
 
@@ -102,16 +113,9 @@ fn parse_command(args: impl IntoIterator<Item = OsString>) -> tansu2::Result<Com
                 .ok_or_else(usage_error)?;
             Ok(Command::Serve { port })
         }
-        [migrate, dry_run, path] if migrate == "migrate" && dry_run == "--dry-run" => {
-            Ok(Command::Migrate {
-                config_path: PathBuf::from(path),
-                dry_run: true,
-            })
+        [config, init, args @ ..] if config == "config" && init == "init" => {
+            Ok(Command::InitializeSettings(parse_settings_args(args)?))
         }
-        [migrate, path] if migrate == "migrate" => Ok(Command::Migrate {
-            config_path: PathBuf::from(path),
-            dry_run: false,
-        }),
         [auth, subcommand] if auth == "auth" && subcommand == "enroll" => {
             Ok(Command::Auth(AuthCommand::Enroll))
         }
@@ -125,9 +129,38 @@ fn parse_command(args: impl IntoIterator<Item = OsString>) -> tansu2::Result<Com
     }
 }
 
+fn parse_settings_args(args: &[OsString]) -> tansu2::Result<AppSettings> {
+    let mut vaults = Vec::new();
+    let mut auth = None;
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].to_str() {
+            Some("--vault") if index + 2 < args.len() => {
+                let name = args[index + 1].to_str().ok_or_else(usage_error)?;
+                let path = args[index + 2].to_str().ok_or_else(usage_error)?;
+                vaults.push(AppVaultSettings { name: name.to_string(), path: path.to_string() });
+                index += 3;
+            }
+            Some("--auth") if index + 3 < args.len() && auth.is_none() => {
+                auth = Some(AppAuthSettings {
+                    external_origin: args[index + 1].to_str().ok_or_else(usage_error)?.to_string(),
+                    rp_id: args[index + 2].to_str().ok_or_else(usage_error)?.to_string(),
+                    rp_name: args[index + 3].to_str().ok_or_else(usage_error)?.to_string(),
+                });
+                index += 4;
+            }
+            _ => return Err(usage_error()),
+        }
+    }
+    if vaults.is_empty() {
+        return Err(usage_error());
+    }
+    Ok(AppSettings { vaults, auth })
+}
+
 fn usage_error() -> tansu2::Error {
     tansu2::Error::BadRequest(
-        "usage: tansu2 [--port PORT] | tansu2 migrate [--dry-run] CONFIG | tansu2 auth enroll | tansu2 auth backup PATH | tansu2 auth restore PATH".to_string(),
+        "usage: tansu2 [--port PORT] | tansu2 config init --vault NAME PATH [--vault NAME PATH] [--auth ORIGIN RP_ID RP_NAME] | tansu2 auth enroll | tansu2 auth backup PATH | tansu2 auth restore PATH".to_string(),
     )
 }
 
@@ -242,26 +275,42 @@ mod tests {
             parse_command(["auth".into(), "enroll".into()]).unwrap(),
             Command::Auth(AuthCommand::Enroll),
         );
-        assert_eq!(
-            parse_command(["migrate".into(), "--dry-run".into(), "copy.toml".into()]).unwrap(),
-            Command::Migrate {
-                config_path: PathBuf::from("copy.toml"),
-                dry_run: true,
-            },
-        );
-        assert_eq!(
-            parse_command(["migrate".into(), "copy.toml".into()]).unwrap(),
-            Command::Migrate {
-                config_path: PathBuf::from("copy.toml"),
-                dry_run: false,
-            },
-        );
+        assert!(parse_command(["migrate".into()]).is_err());
         let path = OsString::from("backup.db");
         assert_eq!(
             parse_command(["auth".into(), "backup".into(), path.clone()]).unwrap(),
             Command::Auth(AuthCommand::Backup(PathBuf::from(path))),
         );
         assert!(parse_command(["auth".into(), "unknown".into()]).is_err());
+    }
+
+    #[test]
+    fn parses_app_settings_initialization_command() {
+        assert_eq!(
+            parse_command([
+                "config".into(), "init".into(),
+                "--vault".into(), "Notes".into(), "/notes".into(),
+                "--vault".into(), "Work".into(), "/work".into(),
+                "--auth".into(), "https://notes.example.com".into(),
+                "example.com".into(), "Tansu".into(),
+            ]).unwrap(),
+            Command::InitializeSettings(AppSettings {
+                vaults: vec![
+                    AppVaultSettings { name: "Notes".into(), path: "/notes".into() },
+                    AppVaultSettings { name: "Work".into(), path: "/work".into() },
+                ],
+                auth: Some(AppAuthSettings {
+                    external_origin: "https://notes.example.com".into(),
+                    rp_id: "example.com".into(),
+                    rp_name: "Tansu".into(),
+                }),
+            }),
+        );
+        assert!(parse_command(["config".into(), "init".into()]).is_err());
+        assert!(parse_command([
+            "config".into(), "init".into(), "--vault".into(), "Notes".into(), "/notes".into(),
+            "--auth".into(), "https://notes.example.com".into(), "example.com".into(),
+        ]).is_err());
     }
 
     #[test]

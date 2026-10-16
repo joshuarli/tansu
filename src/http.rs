@@ -26,7 +26,7 @@ use hyper::{HeaderMap, Method, Request, Response, StatusCode};
 use serde::{Deserialize, Serialize};
 
 use crate::api::{decode_path_segment, handle_v2_api, validate_v2_server_instance, v2_api_error_response};
-use crate::api_types::V2ApiErrorKind;
+use crate::api_types::{AppSettings, V2AppSettingsResponse, V2ApiErrorKind};
 use crate::app::App;
 use crate::auth::{
     AuthError, AuthPolicy, AuthRequestContext, AuthStore, RequestAction, SessionLease,
@@ -283,6 +283,10 @@ pub fn serve_with_services(app: App, port: u16, services: ServerServices) -> Res
     let listener = TcpListener::bind(("127.0.0.1", port))?;
     log_listen(&app, port);
     serve_until_signal(app, listener, services)
+}
+
+pub fn serve_setup(app: App, port: u16) -> Result<()> {
+    serve_with_services(app, port, ServerServices::default())
 }
 
 pub fn serve_listener(app: App, listener: TcpListener) -> Result<()> {
@@ -1394,6 +1398,9 @@ fn sse_resync_event(event_version: u64) -> Bytes {
 }
 
 fn route(app: &App, request: &HttpRequest) -> HttpResponse {
+    if request.path == "/api/v2/app/settings" {
+        return handle_app_settings(app, request).with_no_store();
+    }
     if request.path.starts_with("/api/dev/logs") {
         return handle_dev_logs(app, request);
     }
@@ -1410,13 +1417,37 @@ fn route(app: &App, request: &HttpRequest) -> HttpResponse {
             &request_id(request).unwrap_or_else(|| "request".to_string()),
         ).with_no_store();
     }
-    serve_static_path(&request.path).unwrap_or_else(|error| {
+    let path = if app.setup_mode() && request.path == "/" { "/setup" } else { &request.path };
+    serve_static_path(path).unwrap_or_else(|error| {
         if matches!(error, Error::NotFound(_)) {
             HttpResponse::text(404, "not found")
         } else {
             HttpResponse::text(500, &error.to_string())
         }
     })
+}
+
+fn handle_app_settings(app: &App, request: &HttpRequest) -> HttpResponse {
+    match request.method.as_str() {
+        "GET" => match app.app_settings() {
+            Ok(settings) => HttpResponse::json(200, &V2AppSettingsResponse {
+                settings,
+                restart_required: false,
+            }).unwrap_or_else(|error| HttpResponse::text(500, &error.to_string())),
+            Err(error) => HttpResponse::text(500, &error.to_string()),
+        },
+        "PUT" => match serde_json::from_slice::<AppSettings>(&request.body) {
+            Ok(settings) => match app.save_app_settings(&settings) {
+                Ok(()) => HttpResponse::json(200, &V2AppSettingsResponse {
+                    settings: Some(settings),
+                    restart_required: true,
+                }).unwrap_or_else(|error| HttpResponse::text(500, &error.to_string())),
+                Err(error) => HttpResponse::text(400, &error.to_string()),
+            },
+            Err(error) => HttpResponse::text(400, &error.to_string()),
+        },
+        _ => HttpResponse::text(405, "method not allowed").with_header("Allow", "GET, PUT"),
+    }
 }
 
 fn handle_dev_logs(app: &App, request: &HttpRequest) -> HttpResponse {
@@ -1528,7 +1559,7 @@ mod tests {
     use std::net::TcpStream;
     use std::thread;
 
-    use crate::config::{Config, VaultConfig};
+    use crate::config::{Config, ConfigStore, VaultConfig};
 
     #[test]
     fn request_metadata_and_error_fields_preserve_transport_contracts() {
@@ -1613,7 +1644,7 @@ mod tests {
                 name: "Test".into(),
                 path: vault_path,
                 state_path: root.path().join("state"),
-                excluded_folders: Vec::new(),
+
             }],
             auth: None,
         })
@@ -1666,6 +1697,42 @@ mod tests {
         assert!(app.logs().snapshot().events.is_empty());
     }
 
+    #[test]
+    fn first_run_setup_saves_app_settings_and_requires_restart() {
+        let root = tempfile::tempdir().unwrap();
+        let store = ConfigStore::open(&root.path().join("config/settings.sqlite3")).unwrap();
+        let app = App::setup_only(store);
+        let request = |method: &str, path: &str, body: &[u8]| HttpRequest {
+            method: method.to_string(),
+            path: path.to_string(),
+            headers: Vec::new(),
+            body: body.to_vec(),
+        };
+
+        let setup = route(&app, &request("GET", "/", &[]));
+        assert_eq!(setup.status(), 200);
+        assert!(String::from_utf8_lossy(setup.body()).contains("Set up Tansu2"));
+
+        let initial = route(&app, &request("GET", "/api/v2/app/settings", &[]));
+        let initial: serde_json::Value = serde_json::from_slice(initial.body()).unwrap();
+        assert_eq!(initial["settings"], serde_json::Value::Null);
+        assert_eq!(initial["restartRequired"], false);
+
+        let body = serde_json::json!({
+            "vaults": [{ "name": "Notes", "path": root.path().join("notes") }],
+            "auth": null,
+        }).to_string();
+        let saved = route(&app, &request("PUT", "/api/v2/app/settings", body.as_bytes()));
+        assert_eq!(saved.status(), 200, "{}", String::from_utf8_lossy(saved.body()));
+        let saved: serde_json::Value = serde_json::from_slice(saved.body()).unwrap();
+        assert_eq!(saved["restartRequired"], true);
+        assert_eq!(saved["settings"]["vaults"][0]["name"], "Notes");
+        assert!(app.setup_mode());
+
+        let invalid = route(&app, &request("PUT", "/api/v2/app/settings", br##"{"vaults":[],"auth":null,"unknown":true}"##));
+        assert_eq!(invalid.status(), 400);
+    }
+
     fn spawn_server(
         app: App,
         listener: TcpListener,
@@ -1698,7 +1765,7 @@ mod tests {
                 name: "Test".to_string(),
                 path: root.path().join("vault"),
                 state_path: root.path().join("state"),
-                excluded_folders: Vec::new(),
+
             }],
             auth: None,
         })
@@ -1718,7 +1785,11 @@ mod tests {
         assert_eq!(shell.header("cache-control"), Some("no-cache"));
         let html = String::from_utf8_lossy(shell.body());
         let js = html.split("src=\"/assets/").nth(1).unwrap().split('"').next().unwrap();
-        let css = html.split("href=\"/assets/").nth(1).unwrap().split('"').next().unwrap();
+        let css = html
+            .split("href=\"/assets/")
+            .filter_map(|value| value.split('"').next())
+            .find(|asset| asset.starts_with("app.") && asset.ends_with(".css"))
+            .unwrap();
         assert!(js.starts_with("app.") && js.ends_with(".js"));
         assert!(css.starts_with("app.") && css.ends_with(".css"));
         assert_eq!(serve_static_path(&format!("/assets/{js}")).unwrap().header("cache-control"), Some("public, max-age=31536000, immutable"));
@@ -1992,7 +2063,7 @@ mod tests {
                 name: "Test".into(),
                 path: vault_path,
                 state_path: root.path().join("state"),
-                excluded_folders: Vec::new(),
+
             }],
             auth: None,
         }).unwrap();
@@ -2042,7 +2113,7 @@ mod tests {
                 name: "Test".into(),
                 path: vault_path,
                 state_path: root.path().join("state"),
-                excluded_folders: Vec::new(),
+
             }],
             auth: None,
         }).unwrap();
@@ -2095,7 +2166,6 @@ mod tests {
                 name: "Test".into(),
                 path: vault_path.clone(),
                 state_path,
-                excluded_folders: Vec::new(),
             }],
             auth: None,
         }).unwrap();
@@ -2121,7 +2191,6 @@ mod tests {
                 name: "Test".into(),
                 path: vault_path,
                 state_path,
-                excluded_folders: Vec::new(),
             }],
             auth: None,
         }).unwrap();

@@ -1,5 +1,4 @@
 import type {
-  SessionState,
   Settings,
   V2ApiErrorKind,
   V2ApiErrorResponse,
@@ -55,15 +54,7 @@ export class V2ProtocolError extends Error {
   }
 }
 
-export type LegacyWorkspacePayload = {
-  session: SessionState;
-  pinnedNoteIds: string[];
-  recentNoteIds: string[];
-};
-
-export type V2VaultBootstrap = V2VaultBootstrapResponse & {
-  legacyWorkspace: LegacyWorkspacePayload | null;
-};
+export type V2VaultBootstrap = V2VaultBootstrapResponse;
 
 export type V2VaultSnapshot = {
   bootstrap: V2VaultBootstrap;
@@ -431,39 +422,6 @@ export function decodeV2VaultBootstrap(value: unknown): V2VaultBootstrap {
     notes: decodeV2NoteMetaArray(field(body, "notes")),
     settings: decodeSettings(field(body, "settings")),
     searchStatus: decodeSearchStatus(field(body, "searchStatus")),
-    legacyWorkspace: decodeLegacyWorkspacePayload(field(body, "legacyWorkspace")),
-  };
-}
-
-function decodeLegacyWorkspacePayload(value: unknown): LegacyWorkspacePayload | null {
-  if (value === null) {
-    return null;
-  }
-  const body = record(value, "legacy workspace");
-  const sessionBody = record(field(body, "session"), "legacy session");
-  const decodeTabs = (items: unknown, name: string) =>
-    array(items, name).map((item) => {
-      const tab = record(item, "legacy session tab");
-      const cursorOffset = field(tab, "cursorOffset");
-      return {
-        noteId: nonEmptyString(field(tab, "noteId"), "noteId"),
-        title: string(field(tab, "title"), "title"),
-        path: string(field(tab, "path"), "path"),
-        cursorOffset: cursorOffset === null ? null : integer(cursorOffset, "cursorOffset"),
-        sourceMode: boolean(field(tab, "sourceMode"), "sourceMode"),
-      };
-    });
-  const activeNoteId = field(sessionBody, "activeNoteId");
-  return {
-    session: {
-      openTabs: decodeTabs(field(sessionBody, "openTabs"), "openTabs"),
-      activeNoteId: activeNoteId === null ? null : nonEmptyString(activeNoteId, "activeNoteId"),
-      closedTabs: decodeTabs(field(sessionBody, "closedTabs"), "closedTabs"),
-    },
-    pinnedNoteIds: array(field(body, "pinnedNoteIds"), "pinnedNoteIds")
-      .map((item) => nonEmptyString(item, "pinnedNoteId")),
-    recentNoteIds: array(field(body, "recentNoteIds"), "recentNoteIds")
-      .map((item) => nonEmptyString(item, "recentNoteId")),
   };
 }
 

@@ -19,12 +19,13 @@ fn main() {
     push::<ConflictDraftMeta>(&mut output);
     push::<ConflictDraftDocument>(&mut output);
     push::<Settings>(&mut output);
-    push::<SessionState>(&mut output);
-    push::<SessionTab>(&mut output);
+    push::<AppVaultSettings>(&mut output);
+    push::<AppAuthSettings>(&mut output);
+    push::<AppSettings>(&mut output);
+    push::<V2AppSettingsResponse>(&mut output);
     push::<SearchStatus>(&mut output);
     push::<SearchFieldScores>(&mut output);
     push::<SearchHit>(&mut output);
-    push::<BootstrapResponse>(&mut output);
     push::<ServerEvent>(&mut output);
     push::<ServerEventKind>(&mut output);
     push::<CreateNoteRequest>(&mut output);
@@ -42,7 +43,6 @@ fn main() {
     push::<V2VaultMeta>(&mut output);
     push::<V2BootstrapResponse>(&mut output);
     push::<V2VaultBootstrapResponse>(&mut output);
-    push::<LegacyWorkspace>(&mut output);
     push::<V2NoteMeta>(&mut output);
     push::<V2NoteDocument>(&mut output);
     push::<V2NotePrecondition>(&mut output);

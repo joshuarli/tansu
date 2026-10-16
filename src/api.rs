@@ -1086,7 +1086,6 @@ mod tests {
                 name: (*name).to_string(),
                 state_path: root.path().join(format!("state-{index}")),
                 path,
-                excluded_folders: Vec::new(),
             });
         }
         AppFixture {

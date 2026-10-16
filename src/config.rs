@@ -3,9 +3,9 @@ use std::fs::{File, OpenOptions};
 use std::io::{ErrorKind, Write};
 use std::path::{Path, PathBuf};
 
-use serde::Deserialize;
+use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
 
-use crate::api_types::PathValidationReason;
+use crate::api_types::{AppSettings, PathValidationReason};
 use crate::auth::AuthPolicy;
 use crate::{Error, Result};
 
@@ -36,7 +36,93 @@ pub struct VaultConfig {
     pub name: String,
     pub path: PathBuf,
     pub state_path: PathBuf,
-    pub excluded_folders: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ConfigStore {
+    path: PathBuf,
+}
+
+impl ConfigStore {
+    pub fn open_default() -> Result<Self> {
+        Self::open(&settings_database_path()?)
+    }
+
+    pub fn open(path: &Path) -> Result<Self> {
+        let parent = path.parent().ok_or_else(|| Error::BadRequest("settings database needs a parent".to_string()))?;
+        let file_name = path.file_name().ok_or_else(|| Error::BadRequest("settings database needs a file name".to_string()))?;
+        fs::create_dir_all(parent)?;
+        let metadata = fs::symlink_metadata(parent)?;
+        if metadata.file_type().is_symlink() || !metadata.is_dir() {
+            return Err(Error::BadRequest("settings directory must be a real directory".to_string()));
+        }
+        let canonical_parent = parent.canonicalize()?;
+        let path = canonical_parent.join(file_name);
+        if let Ok(metadata) = fs::symlink_metadata(&path)
+            && (metadata.file_type().is_symlink() || !metadata.is_file())
+        {
+            return Err(Error::BadRequest("settings database must be a regular file".to_string()));
+        }
+        let connection = open_settings_database(&path)?;
+        let version: u32 = connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
+        if version > 1 {
+            return Err(Error::BadRequest(format!("settings database version {version} is newer than supported")));
+        }
+        connection.execute_batch(
+            "PRAGMA journal_mode = WAL; PRAGMA synchronous = FULL; PRAGMA busy_timeout = 5000;
+             CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);",
+        )?;
+        if version == 0 {
+            connection.pragma_update(None, "user_version", 1)?;
+        }
+        Ok(Self { path })
+    }
+
+    pub fn settings(&self) -> Result<Option<AppSettings>> {
+        let connection = open_settings_database(&self.path)?;
+        let value = connection
+            .query_row("SELECT value FROM settings WHERE key='app'", [], |row| row.get::<_, String>(0))
+            .optional()?;
+        value.map(|value| serde_json::from_str(&value).map_err(Into::into)).transpose()
+    }
+
+    pub fn config(&self) -> Result<Option<Config>> {
+        self.settings()?.map(config_from_settings).transpose()
+    }
+
+    pub fn save_settings(&self, settings: &AppSettings) -> Result<()> {
+        config_from_settings(settings.clone())?;
+        let mut connection = open_settings_database(&self.path)?;
+        let transaction = connection.transaction()?;
+        transaction.execute(
+            "INSERT INTO settings(key, value) VALUES('app', ?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            params![serde_json::to_string(settings)?],
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    pub fn initialize_settings(&self, settings: &AppSettings) -> Result<()> {
+        config_from_settings(settings.clone())?;
+        let mut connection = open_settings_database(&self.path)?;
+        let transaction = connection.transaction()?;
+        let existing = transaction
+            .query_row("SELECT 1 FROM settings WHERE key='app'", [], |_| Ok(()))
+            .optional()?;
+        if existing.is_some() {
+            return Err(Error::BadRequest("application settings are already initialized".to_string()));
+        }
+        transaction.execute("INSERT INTO settings(key, value) VALUES('app', ?1)", params![serde_json::to_string(settings)?])?;
+        transaction.commit()?;
+        Ok(())
+    }
+}
+
+fn open_settings_database(path: &Path) -> Result<Connection> {
+    Ok(Connection::open_with_flags(
+        path,
+        OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_CREATE | OpenFlags::SQLITE_OPEN_NOFOLLOW,
+    )?)
 }
 
 pub fn initialize_state_layout(vaults: &[VaultConfig]) -> Result<(String, Vec<VaultConfig>)> {
@@ -347,98 +433,53 @@ fn valid_opaque_id(value: &str) -> bool {
     value.len() == 32 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct RawConfig {
-    vaults: Vec<RawVault>,
-    auth: Option<RawAuthConfig>,
-}
-
-#[derive(Debug, Deserialize)]
-struct RawVault {
-    name: String,
-    path: String,
-    #[serde(default)]
-    excluded_folders: Vec<String>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct RawAuthConfig {
-    mode: String,
-    external_origin: String,
-    rp_id: String,
-    rp_name: String,
-    state_directory: String,
-}
-
-pub fn default_config_path() -> Result<PathBuf> {
+pub fn settings_database_path() -> Result<PathBuf> {
     let base = xdg_path("XDG_CONFIG_HOME", ".config")?;
-    Ok(base.join("tansu").join("config.toml"))
+    Ok(base.join("tansu").join("settings.sqlite3"))
 }
 
-pub fn load_config() -> Result<Config> {
-    load_config_from_path(&default_config_path()?)
+pub fn load_config() -> Result<Option<Config>> {
+    ConfigStore::open_default()?.config()
 }
 
-pub fn load_config_from_path(path: &Path) -> Result<Config> {
-    let text = fs::read_to_string(path).map_err(|error| {
-        if error.kind() == std::io::ErrorKind::NotFound {
-            Error::BadRequest(format!("missing config: {}", path.display()))
-        } else {
-            Error::Io(error)
-        }
-    })?;
-    parse_config(&text)
-}
-
-pub fn parse_config(text: &str) -> Result<Config> {
-    let raw: RawConfig = toml::from_str(text)?;
-    if raw.vaults.is_empty() {
+pub fn config_from_settings(settings: AppSettings) -> Result<Config> {
+    if settings.vaults.is_empty() {
         return Err(Error::BadRequest(
             "config must contain at least one vault".to_string(),
         ));
     }
     let data_root = xdg_path("XDG_DATA_HOME", ".local/share")?.join("tansu");
-    let vaults = raw
+    let vaults = settings
         .vaults
         .into_iter()
         .map(|vault| {
+            if vault.name.trim().is_empty() {
+                return Err(Error::BadRequest("vault name cannot be empty".to_string()));
+            }
             let path = expand_tilde(&vault.path)?;
+            if !path.is_absolute() {
+                return Err(Error::BadRequest("vault path must be absolute".to_string()));
+            }
             let state_path = data_root.join(state_dir_name(&vault.name));
             Ok(VaultConfig {
                 name: vault.name,
                 path,
                 state_path,
-                excluded_folders: vault.excluded_folders,
             })
         })
         .collect::<Result<Vec<_>>>()?;
     validate_vaults(&vaults)?;
-    let auth = raw
+    let auth = settings
         .auth
         .map(|auth| {
-            if auth.mode != "authenticated" {
-                return Err(Error::BadRequest(
-                    "auth mode must be 'authenticated'".to_string(),
-                ));
-            }
             if auth.rp_name.trim().is_empty() {
                 return Err(Error::BadRequest("auth RP name cannot be empty".to_string()));
-            }
-            let directory = Path::new(&auth.state_directory);
-            if directory.components().count() != 1
-                || !matches!(directory.components().next(), Some(std::path::Component::Normal(_)))
-            {
-                return Err(Error::BadRequest(
-                    "auth state_directory must be one child directory name".to_string(),
-                ));
             }
             let policy = AuthPolicy::authenticated(&auth.external_origin, &auth.rp_id, &auth.rp_name)
                 .map_err(|error| Error::BadRequest(error.to_string()))?;
             Ok(AuthConfig {
                 policy,
-                state_directory: data_root.join("identity").join(directory),
+                state_directory: data_root.join("identity").join("auth"),
             })
         })
         .transpose()?;
@@ -545,10 +586,14 @@ fn normalize_for_compare(path: &Path) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::api_types::{AppAuthSettings, AppVaultSettings};
 
     #[test]
-    fn parses_config_and_expands_tilde() {
-        let config = parse_config("[[vaults]]\nname='Main'\npath='~/notes'\n").unwrap();
+    fn builds_config_from_sqlite_settings_and_expands_tilde() {
+        let config = config_from_settings(AppSettings {
+            vaults: vec![AppVaultSettings { name: "Main".into(), path: "~/notes".into() }],
+            auth: None,
+        }).unwrap();
         assert_eq!(config.vaults[0].name, "Main");
         assert!(config.vaults[0].path.ends_with("notes"));
         assert!(config.vaults[0].state_path.ends_with("tansu/Main"));
@@ -556,13 +601,15 @@ mod tests {
     }
 
     #[test]
-    fn parses_authenticated_config_under_stable_identity_directory() {
-        let config = parse_config(
-            "[[vaults]]\nname='Main'\npath='/notes'\n\
-             [auth]\nmode='authenticated'\nexternal_origin='https://notes.example.com'\n\
-             rp_id='example.com'\nrp_name='Tansu'\nstate_directory='auth'\n",
-        )
-        .unwrap();
+    fn builds_authenticated_config_under_stable_identity_directory() {
+        let config = config_from_settings(AppSettings {
+            vaults: vec![AppVaultSettings { name: "Main".into(), path: "/notes".into() }],
+            auth: Some(AppAuthSettings {
+                external_origin: "https://notes.example.com".into(),
+                rp_id: "example.com".into(),
+                rp_name: "Tansu".into(),
+            }),
+        }).unwrap();
         let auth = config.auth.unwrap();
         assert_eq!(
             auth.policy().rp(),
@@ -572,98 +619,76 @@ mod tests {
     }
 
     #[test]
-    fn rejects_misspelled_authentication_settings() {
-        let misspelled_table = parse_config(
-            "[[vaults]]\nname='Main'\npath='/notes'\n\
-             [auh]\nmode='authenticated'\nexternal_origin='https://notes.example.com'\n\
-             rp_id='example.com'\nrp_name='Tansu'\nstate_directory='auth'\n",
-        )
-        .unwrap_err();
-        assert!(misspelled_table.to_string().contains("unknown field"));
-
-        let misspelled_field = parse_config(
-            "[[vaults]]\nname='Main'\npath='/notes'\n\
-             [auth]\nmode='authenticated'\nexternal_origin='https://notes.example.com'\n\
-             rp_id='example.com'\nrp_nam='Tansu'\nstate_directory='auth'\n",
-        )
-        .unwrap_err();
-        assert!(misspelled_field.to_string().contains("unknown field"));
-    }
-
-    #[test]
-    fn rejects_incomplete_or_unsafe_authenticated_config() {
-        let prefix = "[[vaults]]\nname='Main'\npath='/notes'\n[auth]\nmode='authenticated'\nexternal_origin='https://notes.example.com'\nrp_id='example.com'\nrp_name='Tansu'\n";
-        let missing_directory = parse_config(prefix).unwrap_err();
-        assert!(missing_directory.to_string().contains("state_directory"));
-
-        let parent_directory = parse_config(&format!("{prefix}state_directory='../auth'\n"))
-            .unwrap_err();
-        assert!(parent_directory.to_string().contains("one child directory"));
-
-        let wrong_mode = parse_config(
-            "[[vaults]]\nname='Main'\npath='/notes'\n\
-             [auth]\nmode='loopback'\nexternal_origin='https://notes.example.com'\n\
-             rp_id='example.com'\nrp_name='Tansu'\nstate_directory='auth'\n",
-        )
-        .unwrap_err();
-        assert!(wrong_mode.to_string().contains("auth mode"));
-
-        let wrong_origin = parse_config(
-            "[[vaults]]\nname='Main'\npath='/notes'\n\
-             [auth]\nmode='authenticated'\nexternal_origin='http://notes.example.com'\n\
-             rp_id='example.com'\nrp_name='Tansu'\nstate_directory='auth'\n",
-        )
-        .unwrap_err();
-        assert!(wrong_origin.to_string().contains("HTTPS"));
-    }
-
-    #[test]
-    fn rejects_nested_vaults() {
-        let error = parse_config(
-            "[[vaults]]\nname='A'\npath='/tmp/a'\n[[vaults]]\nname='B'\npath='/tmp/a/b'\n",
-        )
-        .unwrap_err();
-        assert!(error.to_string().contains("nested vaults"));
-    }
-
-    #[test]
-    fn parses_excluded_folders_and_rejects_empty_vault_list() {
-        let config = parse_config(
-            "[[vaults]]\nname='Main'\npath='/tmp/notes'\nexcluded_folders=['tmp','.cache']\n",
-        )
-        .unwrap();
-        assert_eq!(config.vaults[0].excluded_folders, vec!["tmp", ".cache"]);
-
-        let error = parse_config("vaults=[]").unwrap_err();
+    fn rejects_invalid_sqlite_settings() {
+        let error = config_from_settings(AppSettings { vaults: vec![], auth: None }).unwrap_err();
         assert!(error.to_string().contains("at least one vault"));
+
+        let error = config_from_settings(AppSettings {
+            vaults: vec![
+                AppVaultSettings { name: "A".into(), path: "/tmp/a".into() },
+                AppVaultSettings { name: "B".into(), path: "/tmp/a/b".into() },
+            ],
+            auth: None,
+        }).unwrap_err();
+        assert!(error.to_string().contains("nested vaults"));
+
+        let error = config_from_settings(AppSettings {
+            vaults: vec![AppVaultSettings { name: "A".into(), path: "relative".into() }],
+            auth: None,
+        }).unwrap_err();
+        assert!(error.to_string().contains("must be absolute"));
+
+        let error = config_from_settings(AppSettings {
+            vaults: vec![AppVaultSettings { name: "A".into(), path: "/tmp/a".into() }],
+            auth: Some(AppAuthSettings {
+                external_origin: "http://notes.example.com".into(),
+                rp_id: "example.com".into(),
+                rp_name: "Tansu".into(),
+            }),
+        }).unwrap_err();
+        assert!(error.to_string().contains("HTTPS"));
     }
 
     #[test]
-    fn sanitizes_and_requires_unique_state_paths() {
-        let config = parse_config("[[vaults]]\nname='A/B'\npath='/tmp/a'\n").unwrap();
-        assert!(config.vaults[0].state_path.ends_with("tansu/A_B"));
-
-        let dot = parse_config("[[vaults]]\nname='..'\npath='/tmp/a'\n").unwrap();
-        assert!(dot.vaults[0].state_path.ends_with("tansu/vault"));
-
-        let error = parse_config(
-            "[[vaults]]\nname='A/B'\npath='/tmp/a'\n[[vaults]]\nname='A:B'\npath='/tmp/b'\n",
-        )
-        .unwrap_err();
-        assert!(error.to_string().contains("state paths"));
-    }
-
-    #[test]
-    fn load_config_reports_missing_files_and_keeps_sibling_vaults() {
+    fn sqlite_settings_round_trip_and_initialize_only_once() {
         let root = tempfile::tempdir().unwrap();
-        let missing = load_config_from_path(&root.path().join("missing.toml")).unwrap_err();
-        assert!(missing.to_string().contains("missing config"));
+        let store = ConfigStore::open(&root.path().join("settings.sqlite3")).unwrap();
+        assert_eq!(store.settings().unwrap(), None);
+        let settings = AppSettings {
+            vaults: vec![AppVaultSettings { name: "A".into(), path: "/tmp/a".into() }],
+            auth: None,
+        };
+        store.initialize_settings(&settings).unwrap();
+        assert_eq!(store.settings().unwrap(), Some(settings.clone()));
+        assert_eq!(store.config().unwrap().unwrap().vaults.len(), 1);
+        assert!(store.initialize_settings(&settings).is_err());
 
-        let config = parse_config(
-            "[[vaults]]\nname='A'\npath='/tmp/a/../a-one'\n[[vaults]]\nname='B'\npath='/tmp/a-two'\n",
-        )
-        .unwrap();
-        assert_eq!(config.vaults.len(), 2);
+        let updated = AppSettings {
+            vaults: vec![AppVaultSettings { name: "B".into(), path: "/tmp/b".into() }],
+            auth: None,
+        };
+        store.save_settings(&updated).unwrap();
+        assert_eq!(store.settings().unwrap(), Some(updated));
+    }
+
+    #[test]
+    fn settings_database_rejects_unknown_schema_versions_and_symlink_files() {
+        let root = tempfile::tempdir().unwrap();
+        let future = root.path().join("future.sqlite3");
+        let connection = Connection::open(&future).unwrap();
+        connection.pragma_update(None, "user_version", 2).unwrap();
+        drop(connection);
+        assert!(ConfigStore::open(&future).unwrap_err().to_string().contains("newer than supported"));
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::symlink;
+            let target = root.path().join("target.sqlite3");
+            let link = root.path().join("link.sqlite3");
+            Connection::open(&target).unwrap();
+            symlink(&target, &link).unwrap();
+            assert!(ConfigStore::open(&link).is_err());
+        }
     }
 
     #[test]
@@ -678,13 +703,13 @@ mod tests {
             name: "First".to_string(),
             path: first_root,
             state_path: data.join("First"),
-            excluded_folders: Vec::new(),
+
         };
         let second = VaultConfig {
             name: "Second".to_string(),
             path: second_root,
             state_path: data.join("Second"),
-            excluded_folders: Vec::new(),
+
         };
 
         let (server_id, original) = initialize_state_layout(&[first.clone(), second.clone()]).unwrap();
@@ -694,7 +719,7 @@ mod tests {
             name: "Renamed".to_string(),
             path: first.path.clone(),
             state_path: data.join("Renamed"),
-            excluded_folders: Vec::new(),
+
         };
         let (renamed_server_id, renamed_state) = initialize_state_layout(&[renamed]).unwrap();
 
@@ -718,7 +743,7 @@ mod tests {
             name: "Named".to_string(),
             path: vault_root,
             state_path: legacy.clone(),
-            excluded_folders: Vec::new(),
+
         };
 
         let (_, migrated) = initialize_state_layout(&[config]).unwrap();
@@ -746,7 +771,7 @@ mod tests {
             name: name.to_string(),
             path,
             state_path: data.join(name),
-            excluded_folders: Vec::new(),
+
         };
 
         assert!(initialize_state_layout(&[config("Real", real), config("Alias", alias)]).is_err());

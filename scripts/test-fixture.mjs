@@ -1,4 +1,4 @@
-import { cp, mkdir, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 
@@ -27,25 +27,12 @@ export async function createTestFixture(root, opts = {}) {
   await rm(generatedVaultTwo, { recursive: true, force: true });
   await rm(join(fixtureRoot, "vault"), { recursive: true, force: true });
 
-  await mkdir(join(configHome, "tansu"), { recursive: true });
+  await mkdir(configHome, { recursive: true });
   await mkdir(dataHome, { recursive: true });
   if (copyVaults) {
     await cp(join(SOURCE_ROOT, "vault-one"), vaultOne, { recursive: true });
     await cp(join(SOURCE_ROOT, "vault-two"), vaultTwo, { recursive: true });
   }
-
-  await writeFile(
-    join(configHome, "tansu", "config.toml"),
-    `[[vaults]]
-name = "One"
-path = "${vaultOne}"
-
-[[vaults]]
-name = "Two"
-path = "${vaultTwo}"
-`,
-    "utf8",
-  );
 
   return { configHome, dataHome, vaultOne, vaultTwo };
 }

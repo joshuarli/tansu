@@ -14,20 +14,15 @@ Rename the extracted `tansu2-<target>` binary to `tansu2` and put it on your
 
 ## Run Tansu2
 
-Create a vault directory and configure it in
-`~/.config/tansu/config.toml`:
+Create a vault directory, run Tansu2, and open the first-run setup page:
 
 ```sh
-mkdir -p "$HOME/Documents/Notes" "$HOME/.config/tansu"
-cat > "$HOME/.config/tansu/config.toml" <<'EOF'
-[[vaults]]
-name = "Notes"
-path = "~/Documents/Notes"
-EOF
+mkdir -p "$HOME/Documents/Notes"
+tansu2
 ```
 
-Run `tansu2` and open `http://127.0.0.1:3000`. Use `tansu2 --port PORT` to
-choose another port. The server listens on loopback; use
+Add `$HOME/Documents/Notes` in the setup page. The server listens on loopback;
+use
 [Deployment](docs/deployment.md) for remote access.
 
 Read [Migration](docs/migration.md) before opening an existing vault.

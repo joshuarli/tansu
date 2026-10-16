@@ -1,7 +1,8 @@
 use std::sync::Arc;
 
 use crate::api_types::V2BootstrapResponse;
-use crate::config::{Config, initialize_state_layout};
+use crate::api_types::AppSettings;
+use crate::config::{Config, ConfigStore, initialize_state_layout};
 use crate::logging::{LogHub, LogLevel, fields};
 use crate::vault::{EventSubscription, VaultRuntime};
 use crate::{Error, Result};
@@ -11,14 +12,28 @@ pub struct App {
     vaults: Arc<Vec<Arc<VaultRuntime>>>,
     server_instance_id: Arc<String>,
     logs: LogHub,
+    config_store: Option<ConfigStore>,
 }
 
 impl App {
     pub fn new(config: Config) -> Result<Self> {
-        Self::from_config(config, LogHub::from_env())
+        Self::from_config(config, LogHub::from_env(), None)
     }
 
-    fn from_config(config: Config, logs: LogHub) -> Result<Self> {
+    pub fn from_settings(config: Config, config_store: ConfigStore) -> Result<Self> {
+        Self::from_config(config, LogHub::from_env(), Some(config_store))
+    }
+
+    pub fn setup_only(config_store: ConfigStore) -> Self {
+        Self {
+            vaults: Arc::new(Vec::new()),
+            server_instance_id: Arc::new("setup".to_string()),
+            logs: LogHub::from_env(),
+            config_store: Some(config_store),
+        }
+    }
+
+    fn from_config(config: Config, logs: LogHub, config_store: Option<ConfigStore>) -> Result<Self> {
         let (server_instance_id, vault_configs) = initialize_state_layout(&config.vaults)?;
         let mut runtimes = Vec::new();
         for (index, vault) in vault_configs.iter().enumerate() {
@@ -28,6 +43,7 @@ impl App {
             vaults: Arc::new(runtimes),
             server_instance_id: Arc::new(server_instance_id),
             logs,
+            config_store,
         };
         if app.logs.enabled() {
             app.logs.server_event(
@@ -60,6 +76,24 @@ impl App {
 
     pub fn server_instance_id(&self) -> &str {
         self.server_instance_id.as_str()
+    }
+
+    pub fn setup_mode(&self) -> bool {
+        self.vaults.is_empty()
+    }
+
+    pub fn app_settings(&self) -> Result<Option<AppSettings>> {
+        self.config_store
+            .as_ref()
+            .map(ConfigStore::settings)
+            .unwrap_or(Ok(None))
+    }
+
+    pub fn save_app_settings(&self, settings: &AppSettings) -> Result<()> {
+        self.config_store
+            .as_ref()
+            .ok_or_else(|| Error::Internal("application settings store is unavailable".to_string()))?
+            .save_settings(settings)
     }
 
     pub fn v2_bootstrap(&self) -> V2BootstrapResponse {
@@ -96,7 +130,7 @@ mod tests {
                 name: "Notes".to_string(),
                 path: root.path().join("notes"),
                 state_path: root.path().join("state"),
-                excluded_folders: Vec::new(),
+
             }],
             auth: None,
         }
@@ -106,7 +140,7 @@ mod tests {
     fn app_records_startup_and_resolves_v2_event_subscriptions_by_vault_id() {
         let root = tempfile::tempdir().unwrap();
         let logs = LogHub::new(LogMode::Buffer);
-        let app = App::from_config(config(&root), logs.clone()).unwrap();
+        let app = App::from_config(config(&root), logs.clone(), None).unwrap();
         let startup = logs.snapshot();
         assert!(startup.events.iter().any(|event| {
             event.fields["system"]["component"] == "startup"

@@ -6,10 +6,12 @@ DEPLOY_HOST ?= ubuntu@oracle
 
 dev:
 	deno task build:dev
-	$(MAKE) types-generated dev-config
+	$(MAKE) types-generated
+	node scripts/dev-fixture.mjs "$(DEV_DIR)"
 	TANSU2_LOGS=pretty XDG_CONFIG_HOME="$(DEV_CONFIG_HOME)" XDG_DATA_HOME="$(DEV_DATA_HOME)" cargo run --bin $(NAME) -- --port 3000
 
 dev-config:
+	deno task build:dev
 	node scripts/dev-fixture.mjs "$(DEV_DIR)"
 
 check: types-check

@@ -1,56 +1,55 @@
 # Configuration
 
-Tansu2 reads `tansu/config.toml` from `XDG_CONFIG_HOME`. If that variable is
-unset, it reads `~/.config/tansu/config.toml`. If `XDG_CONFIG_HOME` is set but
-the file is missing, startup fails instead of checking the home-directory path.
+Application settings are stored in SQLite at
+`$XDG_CONFIG_HOME/tansu/settings.sqlite3`. When `XDG_CONFIG_HOME` is unset,
+Tansu2 uses `~/.config/tansu/settings.sqlite3`. Start Tansu2 without settings
+to open the first-run setup page at `http://127.0.0.1:3000`.
 
-The file must contain at least one vault. Each vault needs a unique name and a
-path. `excluded_folders` is optional and lists folder names to skip at any depth.
+The setup page stores the app-wide vault list and optional authentication
+policy. Saving settings asks for a restart before the configured vaults are
+opened. The first-run server binds to loopback and exposes only setup.
 
-```toml
-[[vaults]]
-name = "Personal"
-path = "~/notes"
-excluded_folders = ["archive", "tmp"]
+For scripts and development fixtures, initialize settings from the command
+line:
 
-[[vaults]]
-name = "Work"
-path = "~/work-notes"
+```sh
+tansu2 config init --vault Notes "$HOME/Documents/Notes"
 ```
 
-Tansu2 expands `~` and `~/` at the start of a vault path. Nested vault paths
-and duplicate app-state directories are rejected.
+Repeat `--vault NAME PATH` for more vaults. Paths must be absolute; `~` and
+`~/` are expanded. Nested vault roots and duplicate app-state directories are
+rejected. Existing TOML files are not imported.
 
-Tansu2 stores app state under `tansu/` in `XDG_DATA_HOME`. If `XDG_DATA_HOME`
-is unset, it uses `~/.local/share/tansu/`. The `identity/` directory contains
-the server ID and vault-root mapping. Each vault's catalog, revision snapshots,
-and derived search index live under `vaults/<vaultId>/`. Vault IDs follow the
-canonical vault root, so renaming a vault in the config does not move its state.
-Choose a data home outside your vaults to keep app state separate from note
-files. Back up the data home with the vaults. See [Deployment](deployment.md).
+## Settings layers
+
+App-wide settings contain registered vault names and paths, plus optional
+authentication settings. Per-vault settings remain in each vault's SQLite
+catalog and include excluded folders, search weights, autosave delay, undo
+history size, and image quality. App-wide settings live under the config home;
+vault catalogs and other durable state live under `tansu/` in `XDG_DATA_HOME`
+or `~/.local/share/tansu/` when unset.
+
+The app data directory contains stable server and vault identities, catalogs,
+revision snapshots, conflict drafts, and derived search indexes. Vault IDs
+follow the canonical vault root, so renaming a vault does not move its state.
+Keep app data and vaults in backups from the same point in time. See
+[Deployment](deployment.md).
 
 ## Authenticated mode
 
-Without an `[auth]` section, Tansu2 uses loopback development mode. To expose a
-server through HTTPS, add the authenticated settings below:
+Authentication is optional for loopback use. To enable passkeys, set the
+external HTTPS origin, relying party ID, and relying party name in the setup
+page, or initialize from the command line:
 
-```toml
-[auth]
-mode = "authenticated"
-external_origin = "https://notes.example.com"
-rp_id = "example.com"
-rp_name = "Tansu"
-state_directory = "auth"
+```sh
+tansu2 config init \
+  --vault Notes "$HOME/Documents/Notes" \
+  --auth https://notes.example.com example.com Tansu
 ```
 
-All five fields are required. The origin must use HTTPS. The RP ID must match
-the origin host or be a registrable domain suffix of it. A parent RP ID equal
-to a public suffix such as `com` or `co.uk` is rejected. Tansu2 stores
-passkeys under `tansu/identity/<state_directory>` in `XDG_DATA_HOME`; the value
-must be one directory name. The auth directory is private to the server account.
-`external_origin` must be the exact HTTPS URL that browsers use. For Tailscale
-Serve, use the machine's HTTPS tailnet DNS name and set `rp_id` to that hostname
-or a parent domain allowed by WebAuthn.
-
-For passkey enrollment, backup, restore, and remote access, see
-[Deployment](deployment.md).
+The origin must use HTTPS. The RP ID must match the origin host or be a
+registrable domain suffix of it. Public suffixes such as `com` and `co.uk` are
+rejected. Passkeys live under `tansu/identity/auth` in the data home. The
+`externalOrigin` must exactly match the HTTPS URL browsers use. For Tailscale
+Serve, use the machine's HTTPS tailnet DNS name and set `rpId` to that hostname
+or an allowed parent domain. See [Deployment](deployment.md).

@@ -3,8 +3,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 
 use crate::api_types::{
-    ConflictDraftMeta, LegacyWorkspace, NoteEventKind, NoteEventSource, NoteMeta, RevisionMeta,
-    SearchStatus, SessionState, Settings, UnresolvedReason,
+    ConflictDraftMeta, NoteEventKind, NoteEventSource, NoteMeta, RevisionMeta,
+    SearchStatus, Settings, UnresolvedReason,
 };
 use crate::{Error, Result};
 
@@ -131,18 +131,6 @@ impl Catalog {
               content_hash TEXT NOT NULL,
               created_at_ms INTEGER NOT NULL
             );
-            CREATE TABLE IF NOT EXISTS pins (
-              note_id TEXT PRIMARY KEY,
-              pinned_at_ms INTEGER NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS recent (
-              note_id TEXT PRIMARY KEY,
-              touched_at_ms INTEGER NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS session (
-              key TEXT PRIMARY KEY,
-              value TEXT NOT NULL
-            );
             CREATE TABLE IF NOT EXISTS settings (
               key TEXT PRIMARY KEY,
               value TEXT NOT NULL
@@ -167,6 +155,9 @@ impl Catalog {
               created_at_ms INTEGER NOT NULL
             );
             ",
+        )?;
+        self.conn.execute_batch(
+            "DROP TABLE IF EXISTS pins; DROP TABLE IF EXISTS recent; DROP TABLE IF EXISTS session;",
         )?;
         ensure_column(
             &self.conn,
@@ -955,41 +946,6 @@ impl Catalog {
             .map_err(Into::into)
     }
 
-    pub fn touch_recent(&mut self, note_id: &str) -> Result<()> {
-        self.conn.execute(
-            "INSERT INTO recent(note_id, touched_at_ms) VALUES(?1, ?2) ON CONFLICT(note_id) DO UPDATE SET touched_at_ms=excluded.touched_at_ms",
-            params![note_id, now_ms()],
-        )?;
-        self.advance_sync()
-    }
-
-    pub fn recent(&self) -> Result<Vec<String>> {
-        let mut stmt = self
-            .conn
-            .prepare("SELECT note_id FROM recent ORDER BY touched_at_ms DESC LIMIT 50")?;
-        collect_strings(stmt.query_map([], |row| row.get(0))?)
-    }
-
-    pub fn set_pin(&mut self, note_id: &str, pinned: bool) -> Result<()> {
-        if pinned {
-            self.conn.execute(
-                "INSERT OR REPLACE INTO pins(note_id, pinned_at_ms) VALUES(?1, ?2)",
-                params![note_id, now_ms()],
-            )?;
-        } else {
-            self.conn
-                .execute("DELETE FROM pins WHERE note_id=?1", params![note_id])?;
-        }
-        self.advance_sync()
-    }
-
-    pub fn pinned(&self) -> Result<Vec<String>> {
-        let mut stmt = self
-            .conn
-            .prepare("SELECT note_id FROM pins ORDER BY pinned_at_ms ASC")?;
-        collect_strings(stmt.query_map([], |row| row.get(0))?)
-    }
-
     pub fn settings(&self) -> Result<Settings> {
         let value: Option<String> = self
             .conn
@@ -1011,46 +967,6 @@ impl Catalog {
             params![serde_json::to_string(settings)?],
         )?;
         self.set_search_dirty(true, false)?;
-        self.advance_sync()
-    }
-
-    pub fn session(&self) -> Result<SessionState> {
-        let value: Option<String> = self
-            .conn
-            .query_row("SELECT value FROM session WHERE key='session'", [], |row| {
-                row.get(0)
-            })
-            .optional()?;
-        match value {
-            Some(value) => Ok(serde_json::from_str(&value).unwrap_or_else(|_| default_session())),
-            None => Ok(default_session()),
-        }
-    }
-
-    pub fn legacy_workspace(&self) -> Result<Option<LegacyWorkspace>> {
-        let session = self.session()?;
-        let pinned_note_ids = self.pinned()?;
-        let recent_note_ids = self.recent()?;
-        if session.open_tabs.is_empty()
-            && session.active_note_id.is_none()
-            && session.closed_tabs.is_empty()
-            && pinned_note_ids.is_empty()
-            && recent_note_ids.is_empty()
-        {
-            return Ok(None);
-        }
-        Ok(Some(LegacyWorkspace {
-            session,
-            pinned_note_ids,
-            recent_note_ids,
-        }))
-    }
-
-    pub fn save_session(&mut self, session: &SessionState) -> Result<()> {
-        self.conn.execute(
-            "INSERT INTO session(key, value) VALUES('session', ?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-            params![serde_json::to_string(session)?],
-        )?;
         self.advance_sync()
     }
 
@@ -1185,24 +1101,6 @@ fn ensure_column(conn: &Connection, table: &str, column: &str, declaration: &str
     Ok(())
 }
 
-fn collect_strings(
-    rows: rusqlite::MappedRows<'_, impl FnMut(&rusqlite::Row<'_>) -> rusqlite::Result<String>>,
-) -> Result<Vec<String>> {
-    let mut out = Vec::new();
-    for row in rows {
-        out.push(row?);
-    }
-    Ok(out)
-}
-
-fn default_session() -> SessionState {
-    SessionState {
-        open_tabs: Vec::new(),
-        active_note_id: None,
-        closed_tabs: Vec::new(),
-    }
-}
-
 fn advance_sync_tx(tx: &Transaction<'_>) -> Result<()> {
     let value: String = tx.query_row(
         "SELECT value FROM vault_meta WHERE key='sync_version'",
@@ -1322,7 +1220,6 @@ fn unresolved_reason(reason: UnresolvedReason) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::api_types::SessionTab;
 
     #[test]
     fn live_path_uniqueness_allows_tombstone_reuse() {
@@ -1360,7 +1257,7 @@ mod tests {
     }
 
     #[test]
-    fn session_and_settings_round_trip() {
+    fn settings_round_trip_and_app_state_tables_are_removed() {
         let dir = tempfile::tempdir().unwrap();
         let mut catalog = Catalog::open(&dir.path().join("vault.db")).unwrap();
         let settings = Settings {
@@ -1372,21 +1269,14 @@ mod tests {
             catalog.settings().unwrap().excluded_folders,
             vec!["Archive"]
         );
-        let session = SessionState {
-            open_tabs: vec![SessionTab {
-                note_id: "n".to_string(),
-                title: "N".to_string(),
-                path: "N.md".to_string(),
-                cursor_offset: Some(0),
-                source_mode: false,
-            }],
-            active_note_id: Some("n".to_string()),
-            closed_tabs: Vec::new(),
-        };
-        catalog.save_session(&session).unwrap();
-        assert_eq!(
-            catalog.session().unwrap().active_note_id.as_deref(),
-            Some("n")
-        );
+        let tables = ["pins", "recent", "session"];
+        for table in tables {
+            let found: Option<String> = catalog.conn.query_row(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name=?1",
+                [table],
+                |row| row.get(0),
+            ).optional().unwrap();
+            assert!(found.is_none());
+        }
     }
 }

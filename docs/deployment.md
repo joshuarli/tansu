@@ -1,8 +1,8 @@
 # Deployment
 
-Tansu2 binds to `127.0.0.1` on port `3000` by default. Without an `[auth]`
-section, the server uses loopback development mode and passkey routes are
-disabled. Keep the default for local use.
+Tansu2 binds to `127.0.0.1` on port `3000` by default. Without authentication
+settings, the server uses loopback mode and passkey routes are disabled. Keep
+the default for local use.
 
 ## Serve privately over Tailscale
 
@@ -10,14 +10,8 @@ disabled. Keep the default for local use.
 tailnet devices HTTPS access to the loopback server. Configure HTTPS for your
 tailnet, then set the browser URL as the authenticated origin:
 
-```toml
-[auth]
-mode = "authenticated"
-external_origin = "https://laptop.example-tailnet.ts.net"
-rp_id = "laptop.example-tailnet.ts.net"
-rp_name = "Tansu"
-state_directory = "auth"
-```
+Set authentication in the setup page or with
+`tansu2 config init --vault Notes /path/to/notes --auth https://laptop.example-tailnet.ts.net laptop.example-tailnet.ts.net Tansu`.
 
 Use the exact tailnet HTTPS hostname shown by Tailscale for
 `external_origin`. The RP ID must match that hostname or be one of its parent
@@ -49,7 +43,7 @@ server uses authenticated mode. The HTTP endpoint only redirects. Tailscale
 HTTPS must be enabled for your tailnet. See the
 [Tailscale Serve documentation](https://tailscale.com/docs/reference/tailscale-cli/serve).
 
-The first deployment creates an empty `Personal` vault. Enroll the first
+The deployment initializes SQLite settings for an empty `Personal` vault. Enroll the first
 passkey before editing notes. Stop the service, issue a one-time capability,
 then start the service again:
 
@@ -94,8 +88,8 @@ Stop Tansu2 and other vault writers before copying state. Back up these items
 together from one quiescent point:
 
 - Every configured vault, including Markdown files and `z-images/` assets.
-- The config file at `$XDG_CONFIG_HOME/tansu/config.toml`, or
-  `$HOME/.config/tansu/config.toml` when `XDG_CONFIG_HOME` is unset.
+- The settings database at `$XDG_CONFIG_HOME/tansu/settings.sqlite3`, or
+  `$HOME/.config/tansu/settings.sqlite3` when `XDG_CONFIG_HOME` is unset.
 - The full `tansu/` directory in `XDG_DATA_HOME`, or
   `$HOME/.local/share/tansu/` when `XDG_DATA_HOME` is unset.
 - The browser profile if you need its IndexedDB workspace and draft records.
@@ -115,7 +109,7 @@ identity and recovery state.
 
 ## Roll back
 
-Stop the server before restoring a backup. Restore the config, all vaults, and
+Stop the server before restoring a backup. Restore the settings database, all vaults, and
 the full app data directory from the same point in time before starting an older
 binary. Tansu2 may update its SQLite schema when it opens app data. The project
 does not guarantee that a newer catalog can be opened by an older binary.

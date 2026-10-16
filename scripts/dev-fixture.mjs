@@ -1,4 +1,5 @@
-import { cp, lstat, mkdir, rm, writeFile } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
+import { cp, lstat, mkdir, rm } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 
 const REPO_ROOT = resolve(import.meta.dirname, "..");
@@ -43,13 +44,13 @@ for (const path of [configHome, dataHome, vaultRoot]) {
   await rm(path, { recursive: true, force: true });
 }
 
-await mkdir(join(configHome, "tansu"), { recursive: true });
+await mkdir(configHome, { recursive: true });
 await mkdir(dataHome, { recursive: true });
 await cp(SOURCE_ROOT, vaultRoot, { recursive: true });
-await writeFile(
-  join(configHome, "tansu", "config.toml"),
-  `[[vaults]]\nname = "Demo"\npath = ${JSON.stringify(vaultRoot)}\n`,
-  "utf8",
-);
+execFileSync("cargo", ["run", "--quiet", "--bin", "tansu2", "--", "config", "init", "--vault", "Demo", vaultRoot], {
+  cwd: REPO_ROOT,
+  env: { ...process.env, XDG_CONFIG_HOME: configHome, XDG_DATA_HOME: dataHome },
+  stdio: "inherit",
+});
 
 console.log(JSON.stringify({ configHome, dataHome, vaultRoot }));

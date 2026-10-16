@@ -3,12 +3,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { startApp, TansuApp } from "./app.ts";
 import { defaultServices, type AppServices } from "./app/services.ts";
 import { canonicalSourceHash } from "./save-delta.ts";
-import { V2ApiError, type LegacyWorkspacePayload, type V2VaultClient, type V2VaultSnapshot } from "./app/v2-api.ts";
+import { V2ApiError, type V2VaultBootstrap, type V2VaultClient, type V2VaultSnapshot } from "./app/v2-api.ts";
 import { serverInstanceId, vaultId, workspaceId } from "./app/identity.ts";
 import type { EditorConfig } from "./editor/tansu-extensions.ts";
 import type { EditorHandle, EditorSession, EditorSnapshot } from "./editor/codemirror-adapter.ts";
 import type {
-  SessionState,
   Settings,
   V2BootstrapResponse,
   V2ConflictDraftDocument,
@@ -167,7 +166,7 @@ describe("v2 desktop shell", () => {
 
   it("flushes workspace and draft state before the page unloads", async () => {
     const note = noteMeta("note-1", "one.md", "One");
-    configureVault([note], legacySession([
+    configureVault([note], workspaceSeed([
       { noteId: note.noteId, title: note.title, path: note.path, cursorOffset: null, sourceMode: false },
     ], note.noteId));
     const services = createServices();
@@ -185,7 +184,7 @@ describe("v2 desktop shell", () => {
 
   it("keeps the current vault mounted when bootstrap temporarily returns no vaults", async () => {
     const note = noteMeta("note-1", "one.md", "One");
-    const client = configureVault([note], legacySession([
+    const client = configureVault([note], workspaceSeed([
       { noteId: note.noteId, title: note.title, path: note.path, cursorOffset: null, sourceMode: false },
     ], note.noteId));
     const { app, root } = mountApp();
@@ -275,7 +274,7 @@ describe("v2 desktop shell", () => {
 
   it("locks the shell after a protected save reports an expired session", async () => {
     const note = noteMeta("note-1", "one.md", "One");
-    const client = configureVault([note], legacySession([
+    const client = configureVault([note], workspaceSeed([
       { noteId: note.noteId, title: note.title, path: note.path, cursorOffset: null, sourceMode: false },
     ], note.noteId));
     client.saveNote.mockRejectedValue(new V2ApiError("Authentication required", 401, { code: "auth_required" }));
@@ -323,7 +322,7 @@ describe("v2 desktop shell", () => {
 
   it("opens current-note find with Mod+F and restores editor focus and selection on Escape", async () => {
     const note = noteMeta("note-1", "one.md", "One");
-    configureVault([note], legacySession([
+    configureVault([note], workspaceSeed([
       { noteId: note.noteId, title: note.title, path: note.path, cursorOffset: 5, sourceMode: false },
     ], note.noteId));
     const { app, root } = mountApp();
@@ -387,7 +386,7 @@ describe("v2 desktop shell", () => {
 
   it("uses a valid cached document immediately and preserves a local edit when canonical content changes", async () => {
     const note = noteMeta("note-1", "one.md", "One");
-    const client = configureVault([note], legacySession([
+    const client = configureVault([note], workspaceSeed([
       { noteId: note.noteId, title: note.title, path: note.path, cursorOffset: 1, sourceMode: false },
     ], note.noteId));
     memory.cached.set(note.noteId, { sourceHash: note.sourceHash, content: "# Cached\n" });
@@ -408,7 +407,7 @@ describe("v2 desktop shell", () => {
 
   it("clamps an imported cursor after its note is shortened", async () => {
     const note = noteMeta("note-1", "one.md", "One");
-    const client = configureVault([note], legacySession([
+    const client = configureVault([note], workspaceSeed([
       { noteId: note.noteId, title: note.title, path: note.path, cursorOffset: 80, sourceMode: false },
     ], note.noteId));
     client.openNote.mockResolvedValue(documentFor(note, "short"));
@@ -419,7 +418,7 @@ describe("v2 desktop shell", () => {
 
   it("ignores a stale cached body and stays loading until V2 content arrives", async () => {
     const note = noteMeta("note-1", "one.md", "One");
-    configureVault([note], legacySession([
+    configureVault([note], workspaceSeed([
       { noteId: note.noteId, title: note.title, path: note.path, cursorOffset: null, sourceMode: false },
     ], note.noteId));
     memory.cached.set(note.noteId, { sourceHash: HASH_B, content: "# Stale\n" });
@@ -468,7 +467,7 @@ describe("v2 desktop shell", () => {
   it("hides the previous editor session while the next tab is loading", async () => {
     const first = noteMeta("one", "one.md", "One");
     const second = noteMeta("two", "two.md", "Two");
-    const client = configureVault([first, second], legacySession([
+    const client = configureVault([first, second], workspaceSeed([
       { noteId: first.noteId, title: first.title, path: first.path, cursorOffset: null, sourceMode: false },
       { noteId: second.noteId, title: second.title, path: second.path, cursorOffset: null, sourceMode: false },
     ], first.noteId));
@@ -495,7 +494,7 @@ describe("v2 desktop shell", () => {
 
   it("hides and detaches the editor after closing the last tab", async () => {
     const note = noteMeta("one", "one.md", "One");
-    configureVault([note], legacySession([
+    configureVault([note], workspaceSeed([
       { noteId: note.noteId, title: note.title, path: note.path, cursorOffset: null, sourceMode: false },
     ], note.noteId));
     const { app, root } = mountApp();
@@ -515,7 +514,7 @@ describe("v2 desktop shell", () => {
 
   it("reopens a closed tab from cache before its network response", async () => {
     const note = noteMeta("note-1", "one.md", "One");
-    const client = configureVault([note, noteMeta("note-2", "two.md", "Two")], legacySession([], null, [
+    const client = configureVault([note, noteMeta("note-2", "two.md", "Two")], workspaceSeed([], null, [
       { noteId: note.noteId, title: note.title, path: note.path, cursorOffset: 3, sourceMode: true },
     ]));
     const load = deferred<V2NoteDocument>();
@@ -534,7 +533,7 @@ describe("v2 desktop shell", () => {
     const note = noteMeta("note-1", "one.md", "One");
     const services = createServices();
     const readCache = vi.spyOn(services.workspace, "getCachedNoteBody");
-    const client = configureVault([note], legacySession([
+    const client = configureVault([note], workspaceSeed([
       { noteId: note.noteId, title: note.title, path: note.path, cursorOffset: null, sourceMode: false },
     ], note.noteId));
     client.openNote.mockResolvedValue(documentFor(note, "# Canonical\n"));
@@ -559,7 +558,7 @@ describe("v2 desktop shell", () => {
     const newClient = configureVault([second], null, "vault-2");
     const oldBoot = deferred<V2VaultBootstrap>();
     oldClient.bootstrap.mockReturnValue(oldBoot.promise);
-    newClient.bootstrap.mockResolvedValue(vaultBootstrap([second], null, "vault-2"));
+    newClient.bootstrap.mockResolvedValue(vaultBootstrap([second], "vault-2"));
     const { app, root } = mountApp();
     const oldRequest = app.boot();
     await app.boot("vault-2");
@@ -573,7 +572,7 @@ describe("v2 desktop shell", () => {
   it("keeps the old vault event stream live when an outgoing flush fails", async () => {
     const oldNote = noteMeta("first", "first.md", "First");
     const updatedNote = noteMeta(oldNote.noteId, "updated.md", "Updated", [], 2, HASH_B);
-    const oldClient = configureVault([oldNote], legacySession([
+    const oldClient = configureVault([oldNote], workspaceSeed([
       { noteId: oldNote.noteId, title: oldNote.title, path: oldNote.path, cursorOffset: null, sourceMode: false },
     ], oldNote.noteId));
     const nextClient = configureVault([noteMeta("second", "second.md", "Second")], null, "vault-2");
@@ -627,7 +626,7 @@ describe("v2 desktop shell", () => {
 
   it("reconnects the old event stream when the global bootstrap fails", async () => {
     const note = noteMeta("note-1", "one.md", "One");
-    const oldClient = configureVault([note], legacySession([
+    const oldClient = configureVault([note], workspaceSeed([
       { noteId: note.noteId, title: note.title, path: note.path, cursorOffset: null, sourceMode: false },
     ], note.noteId));
     const { app, root } = mountApp();
@@ -641,10 +640,10 @@ describe("v2 desktop shell", () => {
   it("discards a pending old-vault cache read after switching vaults", async () => {
     const first = noteMeta("first", "first.md", "First");
     const second = noteMeta("second", "second.md", "Second");
-    const oldClient = configureVault([first], legacySession([
+    const oldClient = configureVault([first], workspaceSeed([
       { noteId: first.noteId, title: first.title, path: first.path, cursorOffset: null, sourceMode: false },
     ], first.noteId));
-    const newClient = configureVault([second], legacySession([
+    const newClient = configureVault([second], workspaceSeed([
       { noteId: second.noteId, title: second.title, path: second.path, cursorOffset: null, sourceMode: false },
     ], second.noteId), "vault-2");
     const services = createServices();
@@ -677,7 +676,7 @@ describe("v2 desktop shell", () => {
   it("keeps one editor mounted and restores a tab's selection, scroll, and source mode", async () => {
     const first = noteMeta("one", "one.md", "One");
     const second = noteMeta("two", "two.md", "Two");
-    const client = configureVault([first, second], legacySession([
+    const client = configureVault([first, second], workspaceSeed([
       { noteId: first.noteId, title: first.title, path: first.path, cursorOffset: null, sourceMode: false },
       { noteId: second.noteId, title: second.title, path: second.path, cursorOffset: null, sourceMode: false },
     ], first.noteId));
@@ -705,7 +704,7 @@ describe("v2 desktop shell", () => {
   it("preserves shell regions, keyed tabs, and the editor node across title and status updates", async () => {
     const note = noteMeta("note-1", "one.md", "One");
     const renamed = noteMeta(note.noteId, "renamed.md", "Renamed", [], 2, HASH_B);
-    const client = configureVault([note], legacySession([
+    const client = configureVault([note], workspaceSeed([
       { noteId: note.noteId, title: note.title, path: note.path, cursorOffset: null, sourceMode: false },
     ], note.noteId));
     client.openNote.mockResolvedValue(documentFor(note, "# One\n"));
@@ -739,7 +738,7 @@ describe("v2 desktop shell", () => {
     vi.useFakeTimers();
     const first = noteMeta("one", "one.md", "One");
     const second = noteMeta("two", "two.md", "Two");
-    const client = configureVault([first, second], legacySession([
+    const client = configureVault([first, second], workspaceSeed([
       { noteId: first.noteId, title: first.title, path: first.path, cursorOffset: null, sourceMode: false },
       { noteId: second.noteId, title: second.title, path: second.path, cursorOffset: null, sourceMode: false },
     ], first.noteId));
@@ -772,10 +771,10 @@ describe("v2 desktop shell", () => {
     vi.useFakeTimers();
     const first = noteMeta("first", "first.md", "First");
     const second = noteMeta("second", "second.md", "Second");
-    const oldClient = configureVault([first], legacySession([
+    const oldClient = configureVault([first], workspaceSeed([
       { noteId: first.noteId, title: first.title, path: first.path, cursorOffset: null, sourceMode: false },
     ], first.noteId));
-    const newClient = configureVault([second], legacySession([
+    const newClient = configureVault([second], workspaceSeed([
       { noteId: second.noteId, title: second.title, path: second.path, cursorOffset: null, sourceMode: false },
     ], second.noteId), "vault-2");
     const { app } = mountApp();
@@ -795,10 +794,10 @@ describe("v2 desktop shell", () => {
   it("waits for an outgoing save completion before committing the next vault", async () => {
     const oldNote = noteMeta("shared", "old.md", "Old");
     const newNote = noteMeta("shared", "new.md", "New", [], 1, HASH_B);
-    const oldClient = configureVault([oldNote], legacySession([
+    const oldClient = configureVault([oldNote], workspaceSeed([
       { noteId: oldNote.noteId, title: oldNote.title, path: oldNote.path, cursorOffset: null, sourceMode: false },
     ], oldNote.noteId));
-    const newClient = configureVault([newNote], legacySession([
+    const newClient = configureVault([newNote], workspaceSeed([
       { noteId: newNote.noteId, title: newNote.title, path: newNote.path, cursorOffset: null, sourceMode: false },
     ], newNote.noteId), "vault-2");
     const save = deferred<V2MutationResponse>();
@@ -831,7 +830,7 @@ describe("v2 desktop shell", () => {
   it("serializes saves and coalesces edits made while a save is in flight", async () => {
     vi.useFakeTimers();
     const note = noteMeta("note-1", "one.md", "One");
-    const client = configureVault([note], legacySession([
+    const client = configureVault([note], workspaceSeed([
       { noteId: note.noteId, title: note.title, path: note.path, cursorOffset: null, sourceMode: false },
     ], note.noteId));
     client.openNote.mockResolvedValue(documentFor(note, "# One\n"));
@@ -860,7 +859,7 @@ describe("v2 desktop shell", () => {
   it("captures editor source after a debounce instead of on each change callback", async () => {
     vi.useFakeTimers();
     const note = noteMeta("note-1", "one.md", "One");
-    const client = configureVault([note], legacySession([
+    const client = configureVault([note], workspaceSeed([
       { noteId: note.noteId, title: note.title, path: note.path, cursorOffset: null, sourceMode: false },
     ], note.noteId));
     client.openNote.mockResolvedValue(documentFor(note, "# One\n"));
@@ -881,7 +880,7 @@ describe("v2 desktop shell", () => {
 
   it("caches the canonical document returned by a successful save", async () => {
     const note = noteMeta("note-1", "one.md", "One");
-    const client = configureVault([note], legacySession([
+    const client = configureVault([note], workspaceSeed([
       { noteId: note.noteId, title: note.title, path: note.path, cursorOffset: null, sourceMode: false },
     ], note.noteId));
     client.openNote.mockResolvedValue(documentFor(note, "# One\n"));
@@ -1074,7 +1073,7 @@ describe("v2 desktop shell", () => {
   it("reports title-checkpoint cleanup failures after an accepted rename", async () => {
     const note = noteMeta("note-1", "one.md", "One");
     const renamed = noteMeta(note.noteId, "renamed.md", "Renamed", [], 2, HASH_B);
-    const client = configureVault([note], legacySession([
+    const client = configureVault([note], workspaceSeed([
       { noteId: note.noteId, title: note.title, path: note.path, cursorOffset: null, sourceMode: false },
     ], note.noteId));
     client.openNote.mockResolvedValue(documentFor(note, "# One\n"));
@@ -1101,7 +1100,7 @@ describe("v2 desktop shell", () => {
   it("cancels a rename on Escape and clears its pending title checkpoint", async () => {
     vi.useFakeTimers();
     const note = noteMeta("note-1", "one.md", "One");
-    const client = configureVault([note], legacySession([
+    const client = configureVault([note], workspaceSeed([
       { noteId: note.noteId, title: note.title, path: note.path, cursorOffset: null, sourceMode: false },
     ], note.noteId));
     client.openNote.mockResolvedValue(documentFor(note, "# One\n"));
@@ -1150,7 +1149,7 @@ describe("v2 desktop shell", () => {
   it("persists and recovers a dirty closed tab through its workspace and journal", async () => {
     vi.useFakeTimers();
     const note = noteMeta("note-1", "one.md", "One");
-    const client = configureVault([note], legacySession([
+    const client = configureVault([note], workspaceSeed([
       { noteId: note.noteId, title: note.title, path: note.path, cursorOffset: null, sourceMode: false },
     ], note.noteId));
     client.openNote.mockResolvedValue(documentFor(note, "# One\n"));
@@ -1185,7 +1184,7 @@ describe("v2 desktop shell", () => {
     const note = noteMeta("note-1", "one.md", "One");
     const restored = noteMeta(note.noteId, note.path, note.title, [], 2, HASH_B);
     const revision = { noteId: note.noteId, revision: 4, kind: "save" as const, source: "user" as const, sourceHash: HASH_B, createdAtMs: 5 };
-    const client = configureVault([note], legacySession([
+    const client = configureVault([note], workspaceSeed([
       { noteId: note.noteId, title: note.title, path: note.path, cursorOffset: null, sourceMode: false },
     ], note.noteId));
     client.openNote.mockResolvedValueOnce(documentFor(note, "# One\n")).mockResolvedValueOnce(documentFor(restored, "# Restored\n"));
@@ -1214,7 +1213,7 @@ describe("v2 desktop shell", () => {
     const first = noteMeta("first", "first.md", "First");
     const second = noteMeta("second", "second.md", "Second");
     const revision = { noteId: first.noteId, revision: 4, kind: "save" as const, source: "user" as const, sourceHash: HASH_B, createdAtMs: 5 };
-    const client = configureVault([first, second], legacySession([
+    const client = configureVault([first, second], workspaceSeed([
       { noteId: first.noteId, title: first.title, path: first.path, cursorOffset: null, sourceMode: false },
       { noteId: second.noteId, title: second.title, path: second.path, cursorOffset: null, sourceMode: false },
     ], first.noteId));
@@ -1238,7 +1237,7 @@ describe("v2 desktop shell", () => {
     const first = noteMeta("first", "first.md", "First");
     const second = noteMeta("second", "second.md", "Second");
     const revision = { noteId: first.noteId, revision: 4, kind: "save" as const, source: "user" as const, sourceHash: HASH_B, createdAtMs: 5 };
-    const client = configureVault([first, second], legacySession([
+    const client = configureVault([first, second], workspaceSeed([
       { noteId: first.noteId, title: first.title, path: first.path, cursorOffset: null, sourceMode: false },
       { noteId: second.noteId, title: second.title, path: second.path, cursorOffset: null, sourceMode: false },
     ], first.noteId));
@@ -1267,7 +1266,7 @@ describe("v2 desktop shell", () => {
     const note = noteMeta("note-1", "one.md", "One");
     const remote = noteMeta(note.noteId, note.path, note.title, [], 2, HASH_B);
     const restored = noteMeta(note.noteId, note.path, note.title, [], 3, HASH_B);
-    const client = configureVault([note], legacySession([
+    const client = configureVault([note], workspaceSeed([
       { noteId: note.noteId, title: note.title, path: note.path, cursorOffset: null, sourceMode: false },
     ], note.noteId));
     client.openNote.mockResolvedValueOnce(documentFor(note, "# One\n")).mockResolvedValueOnce(documentFor(restored, "# Draft\n"));
@@ -1297,7 +1296,7 @@ describe("v2 desktop shell", () => {
 
   it("clamps settings, retains non-finite values, and updates tags in the editor", async () => {
     const note = noteMeta("note-1", "one.md", "One", ["alpha"]);
-    const client = configureVault([note], legacySession([
+    const client = configureVault([note], workspaceSeed([
       { noteId: note.noteId, title: note.title, path: note.path, cursorOffset: null, sourceMode: false },
     ], note.noteId));
     const { app, root } = mountApp();
@@ -1328,7 +1327,7 @@ describe("v2 desktop shell", () => {
   it("reopens an imported closed tab with its saved source mode after close", async () => {
     const active = noteMeta("active", "active.md", "Active");
     const closed = noteMeta("closed", "closed.md", "Closed");
-    const client = configureVault([active, closed], legacySession([], null, [
+    const client = configureVault([active, closed], workspaceSeed([], null, [
       { noteId: closed.noteId, title: closed.title, path: closed.path, cursorOffset: 3, sourceMode: true },
     ]));
     client.openNote.mockImplementation(async (id) => documentFor(id === active.noteId ? active : closed, `# ${id}\n`));
@@ -1365,7 +1364,7 @@ describe("v2 desktop shell", () => {
 
   it("routes note image loads through the active vault and revokes object URLs on dispose", async () => {
     const note = noteMeta("note-1", "one.md", "One");
-    const client = configureVault([note], legacySession([
+    const client = configureVault([note], workspaceSeed([
       { noteId: note.noteId, title: note.title, path: note.path, cursorOffset: null, sourceMode: false },
     ], note.noteId));
     client.openNote.mockResolvedValue(documentFor(note, "![[z-images/photo.webp|132]]\n"));
@@ -1382,7 +1381,7 @@ describe("v2 desktop shell", () => {
 
   it("uploads pasted images through the current vault and reports status", async () => {
     const note = noteMeta("note-1", "one.md", "One");
-    const client = configureVault([note], legacySession([
+    const client = configureVault([note], workspaceSeed([
       { noteId: note.noteId, title: note.title, path: note.path, cursorOffset: null, sourceMode: false },
     ], note.noteId));
     const image = new Blob(["webp"], { type: "image/webp" });
@@ -1412,7 +1411,7 @@ describe("v2 desktop shell", () => {
   it("autosaves image insertion when upload status rerenders the shell", async () => {
     vi.useFakeTimers();
     const note = noteMeta("note-1", "one.md", "One");
-    const client = configureVault([note], legacySession([
+    const client = configureVault([note], workspaceSeed([
       { noteId: note.noteId, title: note.title, path: note.path, cursorOffset: null, sourceMode: false },
     ], note.noteId));
     const { app } = mountApp();
@@ -1444,7 +1443,7 @@ describe("v2 desktop shell", () => {
   it("debounces workspace session writes while typing", async () => {
     vi.useFakeTimers();
     const note = noteMeta("note-1", "one.md", "One");
-    const client = configureVault([note], legacySession([
+    const client = configureVault([note], workspaceSeed([
       { noteId: note.noteId, title: note.title, path: note.path, cursorOffset: null, sourceMode: false },
     ], note.noteId));
     const { app } = mountApp();
@@ -1470,7 +1469,7 @@ describe("v2 desktop shell", () => {
 
   it("reports V2 save, delete, and import failures in the shell", async () => {
     const note = noteMeta("note-1", "one.md", "One");
-    const client = configureVault([note], legacySession([
+    const client = configureVault([note], workspaceSeed([
       { noteId: note.noteId, title: note.title, path: note.path, cursorOffset: null, sourceMode: false },
     ], note.noteId));
     client.saveNote.mockRejectedValueOnce(new Error("offline"));
@@ -1492,7 +1491,7 @@ describe("v2 desktop shell", () => {
   it("awaits journal flush and clears owned timers during disposal", async () => {
     vi.useFakeTimers();
     const note = noteMeta("note-1", "one.md", "One");
-    const client = configureVault([note], legacySession([
+    const client = configureVault([note], workspaceSeed([
       { noteId: note.noteId, title: note.title, path: note.path, cursorOffset: null, sourceMode: false },
     ], note.noteId));
     client.saveNote.mockRejectedValueOnce(new Error("offline"));
@@ -1538,7 +1537,7 @@ describe("v2 desktop shell", () => {
   it("shows an export action after draft checkpoint storage fails", async () => {
     vi.useFakeTimers();
     const note = noteMeta("note-1", "one.md", "One");
-    const client = configureVault([note], legacySession([
+    const client = configureVault([note], workspaceSeed([
       { noteId: note.noteId, title: note.title, path: note.path, cursorOffset: null, sourceMode: false },
     ], note.noteId));
     client.openNote.mockResolvedValue(documentFor(note, "# One\n"));
@@ -1564,10 +1563,10 @@ describe("v2 desktop shell", () => {
 
   it("keeps an unavailable saved-note checkpoint exportable until a local recreate is checkpointed", async () => {
     const lost = noteMeta("lost", "lost.md", "Lost");
-    const legacy = legacySession([
+    const seed = workspaceSeed([
       { noteId: lost.noteId, title: lost.title, path: lost.path, cursorOffset: null, sourceMode: false },
     ], lost.noteId);
-    const client = configureVault([], legacy);
+    const client = configureVault([], seed);
     const checkpoint: DraftJournalRecord = {
       formatVersion: 1,
       serverInstanceId: "server-1",
@@ -1604,7 +1603,7 @@ describe("v2 desktop shell", () => {
 
   it("shows a retry action after an initial note load failure", async () => {
     const note = noteMeta("note-1", "one.md", "One");
-    const client = configureVault([note], legacySession([
+    const client = configureVault([note], workspaceSeed([
       { noteId: note.noteId, title: note.title, path: note.path, cursorOffset: null, sourceMode: false },
     ], note.noteId));
     client.openNote.mockRejectedValueOnce(new Error("connection refused"))
@@ -1625,7 +1624,7 @@ describe("v2 desktop shell", () => {
 
   it("locks the shell when a note retry requires authentication", async () => {
     const note = noteMeta("note-1", "one.md", "One");
-    const client = configureVault([note], legacySession([
+    const client = configureVault([note], workspaceSeed([
       { noteId: note.noteId, title: note.title, path: note.path, cursorOffset: null, sourceMode: false },
     ], note.noteId));
     client.openNote.mockRejectedValueOnce(new Error("connection refused"))
@@ -1702,7 +1701,8 @@ function createTestClient(id: string) {
   return client;
 }
 
-type V2VaultBootstrap = V2VaultBootstrapResponse & { legacyWorkspace: LegacyWorkspacePayload | null };
+type TestSessionTab = { noteId: string; title: string; path: string; cursorOffset: number | null; sourceMode: boolean };
+type WorkspaceSeed = Pick<WorkspaceState, "tabs" | "activeTab" | "closedTabs">;
 
 function testClient(id = DEFAULT_VAULT): TestClient {
   let client = clients.get(id);
@@ -1713,9 +1713,22 @@ function testClient(id = DEFAULT_VAULT): TestClient {
   return client;
 }
 
-function configureVault(notes: V2NoteMeta[], legacy: LegacyWorkspacePayload | null = null, id = DEFAULT_VAULT): TestClient {
+function configureVault(notes: V2NoteMeta[], seed: WorkspaceSeed | null = null, id = DEFAULT_VAULT): TestClient {
   const client = testClient(id);
-  client.bootstrap.mockResolvedValue(vaultBootstrap(notes, legacy, id));
+  client.bootstrap.mockResolvedValue(vaultBootstrap(notes, id));
+  if (seed !== null) {
+    memory.workspaces.set(workspaceKey("server-1", id), {
+      formatVersion: 1,
+      serverInstanceId: "server-1",
+      vaultId: id,
+      workspaceId: "workspace-1",
+      ...seed,
+      pinnedNoteIds: [],
+      recentNoteIds: [],
+      searchHistory: [],
+      savedAtMs: 1,
+    });
+  }
   client.openNote.mockImplementation(async (note) => {
     const meta = notes.find((item) => item.noteId === note) ?? noteMeta(note, `${note}.md`, note);
     return documentFor(meta, `# ${meta.title}\n`);
@@ -1723,12 +1736,16 @@ function configureVault(notes: V2NoteMeta[], legacy: LegacyWorkspacePayload | nu
   return client;
 }
 
-function vaultBootstrap(notes: V2NoteMeta[], legacy: LegacyWorkspacePayload | null = null, id = DEFAULT_VAULT): V2VaultBootstrap {
-  return { vault: { vaultId: id, name: id }, notes, settings: settings(), searchStatus: { dirty: false, degraded: false }, legacyWorkspace: legacy };
+function vaultBootstrap(notes: V2NoteMeta[], id = DEFAULT_VAULT): V2VaultBootstrapResponse {
+  return { vault: { vaultId: id, name: id }, notes, settings: settings(), searchStatus: { dirty: false, degraded: false } };
 }
 
-function legacySession(openTabs: SessionState["openTabs"], activeNoteId: string | null, closedTabs: SessionState["closedTabs"] = []): LegacyWorkspacePayload {
-  return { session: { openTabs, activeNoteId, closedTabs }, pinnedNoteIds: [], recentNoteIds: [] };
+function workspaceSeed(openTabs: TestSessionTab[], activeNoteId: string | null, closedTabs: TestSessionTab[] = []): WorkspaceSeed {
+  return {
+    tabs: openTabs.map(workspaceTabFromSeed),
+    activeTab: activeNoteId === null ? null : { kind: "saved", noteId: activeNoteId },
+    closedTabs: closedTabs.map(workspaceTabFromSeed),
+  };
 }
 
 function createServices(): AppServices {
@@ -1743,22 +1760,21 @@ function createServices(): AppServices {
       memory.workspaces.set(workspaceKey(state.serverInstanceId, state.vaultId), state);
       memory.workspaceWrites.push(state);
     },
-    importLegacyWorkspaceOnce: async (identity: { serverInstanceId: string; vaultId: string }, id: ReturnType<typeof workspaceId>, legacy: LegacyWorkspacePayload | null): Promise<WorkspaceState> => {
+    getOrCreateWorkspace: async (identity: { serverInstanceId: string; vaultId: string }, id: ReturnType<typeof workspaceId>): Promise<WorkspaceState> => {
       const key = workspaceKey(identity.serverInstanceId, identity.vaultId);
       const existing = memory.workspaces.get(key);
-      if (existing?.legacySessionImported) return existing;
+      if (existing) return existing;
       const state: WorkspaceState = {
         formatVersion: 1,
         serverInstanceId: identity.serverInstanceId,
         vaultId: identity.vaultId,
         workspaceId: id,
-        tabs: legacy?.session.openTabs.map(legacyTab) ?? [],
-        activeTab: legacy?.session.activeNoteId === null || legacy === null ? null : { kind: "saved", noteId: legacy.session.activeNoteId },
-        closedTabs: legacy?.session.closedTabs.map(legacyTab) ?? [],
-        pinnedNoteIds: legacy?.pinnedNoteIds ?? [],
-        recentNoteIds: legacy?.recentNoteIds ?? [],
+        tabs: [],
+        activeTab: null,
+        closedTabs: [],
+        pinnedNoteIds: [],
+        recentNoteIds: [],
         searchHistory: [],
-        legacySessionImported: true,
         savedAtMs: 1,
       };
       memory.workspaces.set(key, state);
@@ -1906,7 +1922,7 @@ function conflictDraft(id: string) { return { draftId: 9, noteId: id, baseRevisi
 function searchHit(meta: V2NoteMeta) { return { identity: { kind: "canonical" as const, noteId: meta.noteId, revision: meta.revision, sourceHash: meta.sourceHash }, title: meta.title, path: meta.path, score: 1, excerpt: meta.title, excerptRanges: [{ startUtf16: 0, endUtf16: meta.title.length }], sourceRange: null }; }
 function searchResponse(hits: V2SearchResponse["hits"], overlayCoverage: V2SearchResponse["overlayCoverage"] = { status: "complete" }): V2SearchResponse { return { hits, overlayCoverage }; }
 function settings(): Settings { return { excludedFolders: [], searchTitleWeight: 3, searchHeadingWeight: 2, searchTagWeight: 2, searchContentWeight: 1, recencyBoost: 0, autosaveDelayMs: 900, undoStackMax: 100, imageWebpQuality: 0.8 }; }
-function legacyTab(tab: SessionState["openTabs"][number]): WorkspaceTab { return { kind: "saved", noteId: tab.noteId, title: tab.title, path: tab.path, selection: tab.cursorOffset === null ? null : { anchor: tab.cursorOffset, head: tab.cursorOffset }, scrollTop: 0, mode: tab.sourceMode ? "source" : "live" }; }
+function workspaceTabFromSeed(tab: TestSessionTab): WorkspaceTab { return { kind: "saved", noteId: tab.noteId, title: tab.title, path: tab.path, selection: tab.cursorOffset === null ? null : { anchor: tab.cursorOffset, head: tab.cursorOffset }, scrollTop: 0, mode: tab.sourceMode ? "source" : "live" }; }
 function workspaceKey(server: string, vault: string): string { return `${server}:${vault}`; }
 function deferred<T>() { let resolve!: (value: T) => void; let reject!: (error: unknown) => void; const promise = new Promise<T>((res, rej) => { resolve = res; reject = rej; }); return { promise, resolve, reject }; }
 async function flushAsync(): Promise<void> { for (let index = 0; index < 12; index += 1) await Promise.resolve(); }

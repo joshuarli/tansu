@@ -1,4 +1,4 @@
-import type { SessionState, V2NoteDocument, V2NoteMeta } from "../types.generated.ts";
+import type { V2NoteDocument, V2NoteMeta } from "../types.generated.ts";
 import { localDraftId, type DocumentIdentity, type LocalDraftId, type ServerIdentity, type WorkspaceId } from "./identity.ts";
 
 const DATABASE_NAME = "tansu2-client-state-v2";
@@ -37,12 +37,6 @@ export type WorkspaceTabIdentity =
   | { kind: "saved"; noteId: string }
   | { kind: "local-draft"; localDraftId: LocalDraftId };
 
-export type LegacyWorkspace = {
-  session: SessionState;
-  pinnedNoteIds: string[];
-  recentNoteIds: string[];
-};
-
 export type WorkspaceState = {
   formatVersion: 1;
   serverInstanceId: string;
@@ -54,7 +48,6 @@ export type WorkspaceState = {
   pinnedNoteIds: string[];
   recentNoteIds: string[];
   searchHistory: string[];
-  legacySessionImported: boolean;
   savedAtMs: number;
 };
 
@@ -509,12 +502,10 @@ export async function saveWorkspaceState(state: WorkspaceState): Promise<void> {
   }
 }
 
-export async function importLegacyWorkspaceOnce(
+export async function getOrCreateWorkspace(
   identity: ServerIdentity,
   workspace: WorkspaceId,
-  legacyWorkspace: LegacyWorkspace | null,
 ): Promise<WorkspaceState> {
-  const legacy = legacyWorkspace === null ? null : decodeLegacyWorkspace(legacyWorkspace);
   const db = await openDatabase();
   try {
     const transaction = db.transaction(WORKSPACES, "readwrite");
@@ -523,28 +514,15 @@ export async function importLegacyWorkspaceOnce(
     const key = workspaceKey(identity, workspace);
     const raw = await requestResult(store.get(key) as IDBRequest<unknown>);
     const previous = raw === undefined ? null : decodeWorkspaceState(raw);
-    if (previous?.legacySessionImported) {
+    if (previous !== null) {
       await done;
       assertWorkspaceKey(previous, identity, workspace);
       return previous;
     }
-    const empty = emptyWorkspace(identity, workspace);
-    const imported = decodeWorkspaceState({
-      ...(previous ?? empty),
-      tabs: previous === null ? legacy?.session.openTabs.map(workspaceTabFromLegacy) ?? [] : previous.tabs,
-      activeTab: previous === null
-        ? legacy?.session.activeNoteId === null || legacy === null
-          ? null
-          : { kind: "saved", noteId: legacy.session.activeNoteId }
-        : previous.activeTab,
-      closedTabs: previous === null ? legacy?.session.closedTabs.map(workspaceTabFromLegacy) ?? [] : previous.closedTabs,
-      pinnedNoteIds: previous === null ? legacy?.pinnedNoteIds ?? [] : previous.pinnedNoteIds,
-      recentNoteIds: previous === null ? legacy?.recentNoteIds ?? [] : previous.recentNoteIds,
-      legacySessionImported: true,
-    });
-    store.put({ ...imported, savedAtMs: Date.now() });
+    const created = emptyWorkspace(identity, workspace);
+    store.put({ ...created, savedAtMs: Date.now() });
     await done;
-    return imported;
+    return created;
   } catch (error) {
     throw storageFailure(error);
   } finally {
@@ -962,18 +940,13 @@ export function decodeWorkspaceState(value: unknown): WorkspaceState {
     vaultId: identityString(body["vaultId"], "vaultId"),
     workspaceId: identityString(body["workspaceId"], "workspaceId"),
     tabs: list(body["tabs"], "tabs", 500).map(decodeWorkspaceTab),
-    activeTab: body["activeTab"] === undefined
-      ? body["activeNoteId"] === null
-        ? null
-        : { kind: "saved", noteId: identityString(body["activeNoteId"], "activeNoteId") }
-      : body["activeTab"] === null
+    activeTab: body["activeTab"] === null
       ? null
       : decodeWorkspaceTabIdentity(body["activeTab"]),
     closedTabs: list(body["closedTabs"], "closedTabs", 500).map(decodeWorkspaceTab),
     pinnedNoteIds: list(body["pinnedNoteIds"], "pinnedNoteIds", 500).map((id) => identityString(id, "pinned note id")),
     recentNoteIds: list(body["recentNoteIds"], "recentNoteIds", 500).map((id) => identityString(id, "recent note id")),
     searchHistory: list(body["searchHistory"], "searchHistory", 100).map((query) => text(query, "search query")),
-    legacySessionImported: bool(body["legacySessionImported"], "legacySessionImported"),
     savedAtMs: safeInteger(body["savedAtMs"], "savedAtMs"),
   };
 }
@@ -1049,18 +1022,6 @@ export function decodeCachedNoteBody(value: unknown): CachedNoteBody {
   };
 }
 
-export function workspaceTabFromLegacy(tab: SessionState["openTabs"][number]): WorkspaceTab {
-  return {
-    kind: "saved",
-    noteId: identityString(tab.noteId, "noteId"),
-    title: tab.title,
-    path: tab.path,
-    selection: tab.cursorOffset === null ? null : { anchor: tab.cursorOffset, head: tab.cursorOffset },
-    scrollTop: 0,
-    mode: tab.sourceMode ? "source" : "live",
-  };
-}
-
 function decodeV2NoteDocument(value: V2NoteDocument): V2NoteDocument {
   const body = object(value, "note document");
   const meta = object(body["meta"], "note metadata");
@@ -1116,34 +1077,6 @@ function decodeWorkspaceTabIdentity(value: unknown): WorkspaceTabIdentity {
   throw corrupt("Active workspace tab kind is unknown");
 }
 
-function decodeLegacyWorkspace(value: unknown): LegacyWorkspace {
-  const body = object(value, "legacy workspace");
-  return {
-    session: decodeLegacySession(body["session"]),
-    pinnedNoteIds: list(body["pinnedNoteIds"], "pinnedNoteIds", 500).map((id) => identityString(id, "pinned note id")),
-    recentNoteIds: list(body["recentNoteIds"], "recentNoteIds", 500).map((id) => identityString(id, "recent note id")),
-  };
-}
-
-function decodeLegacySession(value: unknown): SessionState {
-  const body = object(value, "legacy session");
-  const tab = (item: unknown) => {
-    const entry = object(item, "legacy session tab");
-    return {
-      noteId: identityString(entry["noteId"], "noteId"),
-      title: text(entry["title"], "title"),
-      path: text(entry["path"], "path"),
-      cursorOffset: entry["cursorOffset"] === null ? null : safeInteger(entry["cursorOffset"], "cursorOffset"),
-      sourceMode: bool(entry["sourceMode"], "sourceMode"),
-    };
-  };
-  return {
-    openTabs: list(body["openTabs"], "openTabs", 500).map(tab),
-    activeNoteId: body["activeNoteId"] === null ? null : identityString(body["activeNoteId"], "activeNoteId"),
-    closedTabs: list(body["closedTabs"], "closedTabs", 500).map(tab),
-  };
-}
-
 function emptyWorkspace(identity: ServerIdentity, workspace: WorkspaceId): WorkspaceState {
   return {
     formatVersion: 1,
@@ -1156,7 +1089,6 @@ function emptyWorkspace(identity: ServerIdentity, workspace: WorkspaceId): Works
     pinnedNoteIds: [],
     recentNoteIds: [],
     searchHistory: [],
-    legacySessionImported: false,
     savedAtMs: Date.now(),
   };
 }

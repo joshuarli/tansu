@@ -21,17 +21,19 @@ export type ConflictDraftDocument = { draft: ConflictDraftMeta, content: string,
 
 export type Settings = { excludedFolders: Array<string>, searchTitleWeight: number, searchHeadingWeight: number, searchTagWeight: number, searchContentWeight: number, recencyBoost: number, autosaveDelayMs: number, undoStackMax: number, imageWebpQuality: number, };
 
-export type SessionState = { openTabs: Array<SessionTab>, activeNoteId: string | null, closedTabs: Array<SessionTab>, };
+export type AppVaultSettings = { name: string, path: string, };
 
-export type SessionTab = { noteId: string, title: string, path: string, cursorOffset: number | null, sourceMode: boolean, };
+export type AppAuthSettings = { externalOrigin: string, rpId: string, rpName: string, };
+
+export type AppSettings = { vaults: Array<AppVaultSettings>, auth: AppAuthSettings | null, };
+
+export type V2AppSettingsResponse = { settings: AppSettings | null, restartRequired: boolean, };
 
 export type SearchStatus = { dirty: boolean, degraded: boolean, };
 
 export type SearchFieldScores = { title: number, headings: number, tags: number, content: number, };
 
 export type SearchHit = { note: NoteMeta, snippet: string, score: number, fieldScores: SearchFieldScores, };
-
-export type BootstrapResponse = { apiVersion: number, vaults: Array<VaultEntry>, activeVault: number, notes: Array<NoteMeta>, pinnedNoteIds: Array<string>, recentNoteIds: Array<string>, settings: Settings, session: SessionState, searchStatus: SearchStatus, };
 
 export type ServerEvent = { kind: ServerEventKind, vault: number, notes: Array<NoteMeta>, deletedNoteIds: Array<string>, searchStatus: SearchStatus, };
 
@@ -65,9 +67,7 @@ export type V2VaultMeta = { vaultId: string, name: string, };
 
 export type V2BootstrapResponse = { apiVersion: number, serverInstanceId: string, vaults: Array<V2VaultMeta>, };
 
-export type V2VaultBootstrapResponse = { vault: V2VaultMeta, notes: Array<V2NoteMeta>, settings: Settings, searchStatus: SearchStatus, legacyWorkspace: LegacyWorkspace | null, };
-
-export type LegacyWorkspace = { session: SessionState, pinnedNoteIds: Array<string>, recentNoteIds: Array<string>, };
+export type V2VaultBootstrapResponse = { vault: V2VaultMeta, notes: Array<V2NoteMeta>, settings: Settings, searchStatus: SearchStatus, };
 
 export type V2NoteMeta = { noteId: string, path: string, title: string, tags: Array<string>, revision: number, sourceHash: string, diskHash: string, sourceHashFormatVersion: number, diskHashFormatVersion: number, updatedAtMs: number, };
 

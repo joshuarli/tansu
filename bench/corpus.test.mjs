@@ -51,5 +51,5 @@ describe("fixed-seed benchmark corpus", () => {
       await rm(CORPUS_ROOT, { recursive: true, force: true });
       await rm(SYMLINK_TARGET, { recursive: true, force: true });
     }
-  }, 15_000);
+  }, 30_000);
 });

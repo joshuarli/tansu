@@ -159,14 +159,13 @@ export class TansuApp {
     };
     const nextClient = this.services.api.forVault(global.serverInstanceId, selected.vaultId);
     let vaultBootstrap: Awaited<ReturnType<typeof nextClient.bootstrap>>;
-    let imported: WorkspaceState;
+    let workspace: WorkspaceState;
     try {
       vaultBootstrap = await nextClient.bootstrap();
       if (generation !== this.bootGeneration || this.disposed) return;
-      imported = await this.services.workspace.importLegacyWorkspaceOnce(
+      workspace = await this.services.workspace.getOrCreateWorkspace(
         nextIdentity,
         this.workspaceId,
-        vaultBootstrap.legacyWorkspace,
       );
     } catch (error) {
       this.restoreCurrentVault(generation);
@@ -186,7 +185,7 @@ export class TansuApp {
       if (generation !== this.bootGeneration || this.disposed) return;
       if (this.identity.serverInstanceId === nextIdentity.serverInstanceId &&
         this.identity.vaultId === nextIdentity.vaultId) {
-        imported = this.workspaceSnapshot(this.identity);
+        workspace = this.workspaceSnapshot(this.identity);
       }
     }
     this.cancelAssetScope();
@@ -202,15 +201,15 @@ export class TansuApp {
     this.state.boot = { ...vaultBootstrap, serverInstanceId: global.serverInstanceId, vaults: global.vaults };
     this.state.authRequired = false;
     this.state.notes = new Map(vaultBootstrap.notes.map((meta) => [meta.noteId, meta]));
-    this.state.pinned = new Set(imported.pinnedNoteIds.filter((id) => this.state.notes.has(id)));
-    this.state.recent = imported.recentNoteIds.filter((id) => this.state.notes.has(id));
-    this.state.searchHistory = imported.searchHistory.slice(0, 100);
-    this.state.tabs = imported.tabs.map(tabFromWorkspace);
-    this.state.closedTabs = imported.closedTabs;
-    this.state.activeTab = imported.activeTab !== null && this.state.tabs.some((tab) =>
-        sameTabIdentity(tabIdentity(tab), identityOfWorkspaceIdentity(imported.activeTab!))
+    this.state.pinned = new Set(workspace.pinnedNoteIds.filter((id) => this.state.notes.has(id)));
+    this.state.recent = workspace.recentNoteIds.filter((id) => this.state.notes.has(id));
+    this.state.searchHistory = workspace.searchHistory.slice(0, 100);
+    this.state.tabs = workspace.tabs.map(tabFromWorkspace);
+    this.state.closedTabs = workspace.closedTabs;
+    this.state.activeTab = workspace.activeTab !== null && this.state.tabs.some((tab) =>
+        sameTabIdentity(tabIdentity(tab), identityOfWorkspaceIdentity(workspace.activeTab!))
       )
-      ? identityOfWorkspaceIdentity(imported.activeTab)
+      ? identityOfWorkspaceIdentity(workspace.activeTab)
       : this.state.tabs[0] === undefined ? null : tabIdentity(this.state.tabs[0]);
     if (this.state.activeTab === null && this.state.notes.size === 1) {
       const onlyNote = this.state.notes.values().next().value;
@@ -1024,7 +1023,6 @@ export class TansuApp {
       pinnedNoteIds: [...this.state.pinned],
       recentNoteIds: this.state.recent,
       searchHistory: this.state.searchHistory,
-      legacySessionImported: true,
       savedAtMs: Date.now(),
     };
   }

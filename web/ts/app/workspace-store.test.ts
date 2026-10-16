@@ -20,7 +20,7 @@ import {
   getLocalDraftCheckpoint,
   getCachedNoteBody,
   getWorkspaceState,
-  importLegacyWorkspaceOnce,
+  getOrCreateWorkspace,
   promoteLocalDraftCheckpoint,
   saveWorkspaceState,
   writeDraftCheckpoint,
@@ -56,12 +56,11 @@ describe("private workspace storage", () => {
         scrollTop: 0,
         mode: "live",
       }],
-      activeNoteId: "note-1",
+      activeTab: { kind: "saved", noteId: "note-1" },
       closedTabs: [],
       pinnedNoteIds: ["note-1"],
       recentNoteIds: ["note-1"],
       searchHistory: ["needle"],
-      legacySessionImported: true,
       savedAtMs: 3,
     });
 
@@ -297,39 +296,23 @@ describe("private workspace storage", () => {
     });
   });
 
-  it("persists workspace state and imports the legacy session only once", async () => {
+  it("creates an empty workspace and preserves it after edits", async () => {
     const identity = { serverInstanceId: serverInstanceId("server-1"), vaultId: vaultId("vault-1") };
     const workspace = workspaceId("workspace-1");
-    const legacy = {
-      session: {
-        openTabs: [{ noteId: "note-1", title: "Legacy", path: "one.md", cursorOffset: 4, sourceMode: true }],
-        activeNoteId: "note-1",
-        closedTabs: [{ noteId: "note-2", title: "Closed", path: "two.md", cursorOffset: null, sourceMode: false }],
-      },
-      pinnedNoteIds: ["note-1"],
-      recentNoteIds: ["note-2"],
-    };
 
     await expect(getWorkspaceState(identity, workspace)).resolves.toBeNull();
-    const imported = await importLegacyWorkspaceOnce(identity, workspace, legacy);
+    const created = await getOrCreateWorkspace(identity, workspace);
 
-    expect(imported).toMatchObject({
-      tabs: [{ kind: "saved", noteId: "note-1", selection: { anchor: 4, head: 4 }, mode: "source" }],
-      activeTab: { kind: "saved", noteId: "note-1" },
-      closedTabs: [{ kind: "saved", noteId: "note-2", selection: null, mode: "live" }],
-      pinnedNoteIds: ["note-1"],
-      recentNoteIds: ["note-2"],
-      legacySessionImported: true,
-    });
-    await expect(getWorkspaceState(identity, workspace)).resolves.toMatchObject(imported);
+    expect(created).toMatchObject({ tabs: [], activeTab: null, closedTabs: [], pinnedNoteIds: [], recentNoteIds: [] });
+    await expect(getWorkspaceState(identity, workspace)).resolves.toMatchObject(created);
 
     const updated: WorkspaceState = {
-      ...imported,
+      ...created,
       tabs: [{ kind: "saved", noteId: "note-3", title: "Current", path: "three.md", selection: null, scrollTop: 0, mode: "live" }],
       activeTab: { kind: "saved", noteId: "note-3" },
     };
     await saveWorkspaceState(updated);
-    await expect(importLegacyWorkspaceOnce(identity, workspace, legacy)).resolves.toMatchObject({
+    await expect(getOrCreateWorkspace(identity, workspace)).resolves.toMatchObject({
       tabs: [{ noteId: "note-3", title: "Current" }],
     });
     await expect(getWorkspaceState(identity, workspace)).resolves.toMatchObject({
@@ -417,7 +400,6 @@ describe("private workspace storage", () => {
       pinnedNoteIds: [],
       recentNoteIds: [],
       searchHistory: [],
-      legacySessionImported: true,
       savedAtMs: 3,
     };
     const accepted = noteDocument("note-1", 4, "Accepted", "accepted.md", "# Accepted\n");
@@ -516,23 +498,6 @@ describe("private workspace storage", () => {
     })).rejects.toMatchObject({ kind: "corrupt" });
   });
 
-  it("imports an empty legacy workspace once without inventing a selected note", async () => {
-    const identity = { serverInstanceId: serverInstanceId("server-1"), vaultId: vaultId("vault-1") };
-    const workspace = workspaceId("workspace-1");
-
-    await expect(importLegacyWorkspaceOnce(identity, workspace, null)).resolves.toMatchObject({
-      tabs: [],
-      activeTab: null,
-      closedTabs: [],
-      legacySessionImported: true,
-    });
-    await expect(importLegacyWorkspaceOnce(identity, workspace, {
-      session: { openTabs: [], activeNoteId: null, closedTabs: [] },
-      pinnedNoteIds: [],
-      recentNoteIds: [],
-    })).resolves.toMatchObject({ tabs: [], activeTab: null, legacySessionImported: true });
-  });
-
   it("merges local title recovery without replacing a newer saved body", async () => {
     const identity = documentIdentity("note-1");
     const workspace = workspaceId("workspace-1");
@@ -565,7 +530,6 @@ describe("private workspace storage", () => {
       pinnedNoteIds: [],
       recentNoteIds: [],
       searchHistory: [],
-      legacySessionImported: true,
       savedAtMs: 0,
     });
 

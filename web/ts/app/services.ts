@@ -15,7 +15,7 @@ import {
   getDraftCheckpoint,
   getLocalDraftCheckpoint,
   getWorkspaceState,
-  importLegacyWorkspaceOnce,
+  getOrCreateWorkspace,
   promoteLocalDraftCheckpoint,
   saveWorkspaceState,
   type DraftJournalRecord,
@@ -44,7 +44,7 @@ export type AppServices = {
     attachVisibilityFlush: (journal: DraftJournal) => () => void;
     getWorkspaceState: typeof getWorkspaceState;
     saveWorkspaceState: typeof saveWorkspaceState;
-    importLegacyWorkspaceOnce: typeof importLegacyWorkspaceOnce;
+    getOrCreateWorkspace: typeof getOrCreateWorkspace;
     getDraftCheckpoint: typeof getDraftCheckpoint;
     getLocalDraftCheckpoint: typeof getLocalDraftCheckpoint;
     promoteLocalDraftCheckpoint: typeof promoteLocalDraftCheckpoint;
@@ -99,7 +99,7 @@ export const defaultServices: AppServices = {
     attachVisibilityFlush: (journal) => journal.attachVisibilityFlush(document, window),
     getWorkspaceState,
     saveWorkspaceState,
-    importLegacyWorkspaceOnce,
+    getOrCreateWorkspace,
     getDraftCheckpoint,
     getLocalDraftCheckpoint,
     promoteLocalDraftCheckpoint,

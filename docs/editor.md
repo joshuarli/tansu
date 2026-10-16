@@ -130,7 +130,7 @@ The libwebp codec is BSD-3-Clause licensed. The app serves its encoder and
 281 KB WebAssembly file as separate assets and loads them only when a pasted
 image needs conversion.
 
-Build the fixture page with the same esbuild dependency used by the app:
+Build the fixture page with Vite 8:
 
 ```sh
 node web/ts/editor/harness/build.mjs

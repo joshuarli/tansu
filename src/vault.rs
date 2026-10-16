@@ -12,10 +12,10 @@ use rusqlite::ErrorCode;
 use serde::de::DeserializeOwned;
 
 use crate::api_types::{
-    ApiErrorKind, BootstrapResponse, CreateNoteRequest, NoteDocument, NoteEventKind,
+    ApiErrorKind, CreateNoteRequest, NoteDocument, NoteEventKind,
     NoteEventSource, NoteMeta, NoteMutationResponse, RenameNoteRequest, RevisionDocument,
     RevisionMeta, SaveNoteDeltaRequest, SaveNoteRequest, SearchHit, SearchStatus, ServerEvent,
-    ServerEventKind, SessionState, Settings, TextEdit, TextPosition, V2ApiErrorKind,
+    ServerEventKind, Settings, TextEdit, TextPosition, V2ApiErrorKind,
     V2CreateNoteRequest, V2DeleteNoteRequest, V2MutationOutcome,
     V2MutationResponse, V2NoteDocument, V2NoteMeta, V2NotePrecondition, V2QuickOpenHit,
     V2QuickOpenRequest, V2QuickOpenResponse, V2RenameNoteRequest, V2SearchHit,
@@ -25,7 +25,7 @@ use crate::api_types::{
     V2ConflictDraftDocument, V2SettingsRequest, V2SettingsResponse, V2ImageUploadResponse,
     V2SaveNoteDeltaRequest,
     V2SaveNoteRequest, V2ServerEvent, V2ServerEventUpdate, V2VaultBootstrapResponse,
-    V2VaultMeta, VaultEntry, UnresolvedReason,
+    V2VaultMeta, UnresolvedReason,
 };
 use crate::catalog::{Catalog, InsertNote, MutationIntent, MutationRecord, now_ms};
 use crate::config::VaultConfig;
@@ -750,11 +750,7 @@ impl VaultRuntime {
             .to_string();
         let mut catalog = Catalog::open(&config.state_path.join("vault.db"))?;
         let settings = catalog.settings()?;
-        let excluded = if settings.excluded_folders.is_empty() {
-            config.excluded_folders.clone()
-        } else {
-            settings.excluded_folders
-        };
+        let excluded = settings.excluded_folders;
         catalog.clear_unrecoverable_prepared_mutations()?;
         repair_pending_mutations(&config.path, &config.state_path, &mut catalog)?;
         reconcile_vault(&config.path, &config.state_path, &mut catalog, &excluded)?;
@@ -905,7 +901,6 @@ impl VaultRuntime {
             notes,
             settings: catalog.settings()?,
             search_status: catalog.search_status()?,
-            legacy_workspace: catalog.legacy_workspace()?,
         })
     }
 
@@ -1202,7 +1197,6 @@ impl VaultRuntime {
                 error => V2VaultError::Internal(error),
             }
         })?;
-        catalog.touch_recent(note_id)?;
         Ok(v2_document(&row.meta, &row.visible_hash, content)?)
     }
 
@@ -1473,7 +1467,6 @@ impl VaultRuntime {
                 mutation_id,
                 &serde_json::to_string(&response)?,
             )?;
-            catalog.touch_recent(note_id)?;
             return Ok(response);
         }
         history::write_snapshot_bytes(
@@ -2100,26 +2093,6 @@ impl VaultRuntime {
         Ok(event)
     }
 
-    pub fn bootstrap(
-        &self,
-        vaults: Vec<VaultEntry>,
-        active_vault: usize,
-    ) -> Result<BootstrapResponse> {
-        let _op = self.lock_op();
-        let catalog = self.lock_catalog();
-        Ok(BootstrapResponse {
-            api_version: crate::api::API_VERSION,
-            vaults,
-            active_vault,
-            notes: catalog.live_notes()?,
-            pinned_note_ids: catalog.pinned()?,
-            recent_note_ids: catalog.recent()?,
-            settings: catalog.settings()?,
-            session: catalog.session()?,
-            search_status: catalog.search_status()?,
-        })
-    }
-
     pub fn open_note(&self, note_id: &str) -> Result<NoteDocument> {
         let _op = self.lock_op();
         let mut catalog = self.lock_catalog();
@@ -2137,7 +2110,6 @@ impl VaultRuntime {
             }
             Err(error) => return Err(error),
         };
-        catalog.touch_recent(note_id)?;
         self.log_note_read("open", &meta, Some(content.len()));
         Ok(NoteDocument { meta, content })
     }
@@ -2188,7 +2160,6 @@ impl VaultRuntime {
         let meta = catalog
             .note_by_id(&note_id)?
             .ok_or_else(|| Error::NotFound(note_id.clone()))?;
-        catalog.touch_recent(&note_id)?;
         let sync_version = catalog.sync_version()?;
         drop(catalog);
         self.enqueue_search(SearchJob::Upsert(meta.clone(), content.clone()));
@@ -2276,7 +2247,6 @@ impl VaultRuntime {
         }
         let current = current_row.meta.clone();
         if current.content_hash == submitted_hash {
-            catalog.touch_recent(note_id)?;
             let sync_version = catalog.sync_version()?;
             let document = if include_document {
                 Some(NoteDocument {
@@ -2320,7 +2290,6 @@ impl VaultRuntime {
             NoteEventKind::Save,
             NoteEventSource::User,
         )?;
-        catalog.touch_recent(note_id)?;
         let sync_version = catalog.sync_version()?;
         if history::disk_hash(&read_visible_bytes(&self.root, &current.path)?)
             != current_row.visible_hash
@@ -2685,30 +2654,6 @@ impl VaultRuntime {
         Ok(V2QuickOpenResponse { hits })
     }
 
-    pub fn save_session(&self, session: SessionState) -> Result<()> {
-        let _op = self.lock_op();
-        self.lock_catalog().save_session(&session)?;
-        if self.logs.enabled() {
-            self.logs.server_event(
-                LogLevel::Debug,
-                "session.save",
-                None,
-                fields([
-                    (
-                        "session",
-                        serde_json::json!({
-                            "openTabs": session.open_tabs.len(),
-                            "closedTabs": session.closed_tabs.len(),
-                            "activeNoteId": session.active_note_id,
-                        }),
-                    ),
-                    ("vault", serde_json::json!(self.index)),
-                ]),
-            );
-        }
-        Ok(())
-    }
-
     pub fn settings(&self) -> Result<Settings> {
         let _op = self.lock_op();
         self.lock_catalog().settings()
@@ -2741,39 +2686,6 @@ impl VaultRuntime {
             );
         }
         Ok(settings)
-    }
-
-    pub fn set_pin(&self, note_id: &str, pinned: bool) -> Result<()> {
-        let _op = self.lock_op();
-        let mut catalog = self.lock_catalog();
-        if catalog.note_by_id(note_id)?.is_none() {
-            return Err(Error::NotFound(note_id.to_string()));
-        }
-        catalog.set_pin(note_id, pinned)?;
-        let meta = catalog
-            .note_by_id(note_id)?
-            .ok_or_else(|| Error::NotFound(note_id.to_string()))?;
-        drop(catalog);
-        self.broadcast(ServerEventKind::VaultChanged, Vec::new());
-        if self.logs.enabled() {
-            self.logs.server_event(
-                LogLevel::Info,
-                "note.pin",
-                None,
-                fields([
-                    (
-                        "note",
-                        serde_json::json!({
-                            "id": meta.note_id,
-                            "path": meta.path,
-                            "vault": self.index,
-                        }),
-                    ),
-                    ("pin", serde_json::json!({ "pinned": pinned })),
-                ]),
-            );
-        }
-        Ok(())
     }
 
     pub fn search_status(&self) -> Result<SearchStatus> {
@@ -2856,7 +2768,6 @@ impl VaultRuntime {
             NoteEventKind::Save,
             NoteEventSource::User,
         )?;
-        catalog.touch_recent(note_id)?;
         let sync_version = catalog.sync_version()?;
         write_visible_note_bytes_atomic(&self.root, &current.path, &disk_bytes)?;
         catalog.record_visible_hash(note_id, &disk_hash)?;
@@ -2932,7 +2843,6 @@ impl VaultRuntime {
             NoteEventKind::ConflictRecovery,
             NoteEventSource::User,
         )?;
-        catalog.touch_recent(note_id)?;
         let sync_version = catalog.sync_version()?;
         write_visible_note_bytes_atomic(&self.root, &current.path, &disk_bytes)?;
         catalog.record_visible_hash(note_id, &disk_hash)?;
@@ -3886,7 +3796,7 @@ mod tests {
                 name: "Test".to_string(),
                 path: dir.clone(),
                 state_path: state_path.clone(),
-                excluded_folders: Vec::new(),
+
             },
             LogHub::new(crate::logging::LogMode::Off),
         )
@@ -4008,12 +3918,12 @@ mod tests {
                 name: "Test".to_string(),
                 path: dir.path().to_path_buf(),
                 state_path: dir.path().join("state"),
-                excluded_folders: Vec::new(),
+
             },
             LogHub::new(crate::logging::LogMode::Off),
         )
         .unwrap();
-        let note = vault.bootstrap(Vec::new(), 0).unwrap().notes.remove(0);
+        let note = vault.lock_catalog().live_notes().unwrap().remove(0);
         let opened = vault.open_note(&note.note_id).unwrap();
         assert_eq!(opened.content, "\u{feff}# A\none\nlast\n");
         vault.search("A", 10).unwrap();
@@ -4356,7 +4266,7 @@ mod tests {
             name: "Test".to_string(),
             path: dir.clone(),
             state_path: state_path.clone(),
-            excluded_folders: Vec::new(),
+
         };
         let vault = VaultRuntime::open(
             0,
@@ -4432,7 +4342,7 @@ mod tests {
             name: "Test".to_string(),
             path: dir.clone(),
             state_path: state_path.clone(),
-            excluded_folders: Vec::new(),
+
         };
         let vault = VaultRuntime::open(
             0,
@@ -4519,7 +4429,6 @@ mod tests {
                 name: "Test".to_string(),
                 path: dir.clone(),
                 state_path,
-                excluded_folders: Vec::new(),
             };
             let vault = VaultRuntime::open(
                 0,
@@ -4635,7 +4544,6 @@ mod tests {
                 name: "Test".to_string(),
                 path: dir.clone(),
                 state_path,
-                excluded_folders: Vec::new(),
             };
             let vault = VaultRuntime::open(
                 0,
@@ -4913,7 +4821,7 @@ mod tests {
             name: vault.name.clone(),
             path: vault.root.clone(),
             state_path: vault.state_root.clone(),
-            excluded_folders: Vec::new(),
+
         };
         fs::write(vault.root.join("outside.md"), "# Outside\n\nedit\n").unwrap();
         crate::failure_point::inject(
@@ -4948,12 +4856,12 @@ mod tests {
                 name: "Test".to_string(),
                 path: dir.path().to_path_buf(),
                 state_path: dir.path().join("state"),
-                excluded_folders: Vec::new(),
+
             },
             LogHub::new(crate::logging::LogMode::Off),
         )
         .unwrap();
-        let note = vault.bootstrap(Vec::new(), 0).unwrap().notes.remove(0);
+        let note = vault.lock_catalog().live_notes().unwrap().remove(0);
         let saved = vault
             .save_note(
                 &note.note_id,
@@ -4984,7 +4892,7 @@ mod tests {
                 name: "Test".to_string(),
                 path: dir.path().to_path_buf(),
                 state_path: dir.path().join("state"),
-                excluded_folders: Vec::new(),
+
             },
             LogHub::new(crate::logging::LogMode::Off),
         )
@@ -5342,7 +5250,7 @@ mod tests {
             name: "Test".to_string(),
             path: dir.clone(),
             state_path: state_path.clone(),
-            excluded_folders: Vec::new(),
+
         };
         let bytes = b"webp";
         let mutation_id = "interrupted-image-upload";
@@ -5410,7 +5318,7 @@ mod tests {
                 name: "Test".to_string(),
                 path: dir.clone(),
                 state_path: state_path.clone(),
-                excluded_folders: Vec::new(),
+
             },
             LogHub::new(crate::logging::LogMode::Off),
         )
@@ -5419,7 +5327,7 @@ mod tests {
         assert!(state_path.join("vault.db").exists());
         assert!(state_path.join("history").exists());
         assert_eq!(
-            vault.bootstrap(vec![], 0).unwrap().notes[0].note_id,
+            vault.v2_vault_bootstrap().unwrap().notes[0].note_id,
             legacy_note.note_id
         );
     }
@@ -5451,7 +5359,7 @@ mod tests {
                 name: "Test".to_string(),
                 path: dir.path().to_path_buf(),
                 state_path: state_path.clone(),
-                excluded_folders: Vec::new(),
+
             },
             LogHub::new(crate::logging::LogMode::Off),
         );
@@ -5467,7 +5375,7 @@ mod tests {
                 name: "Test".to_string(),
                 path: dir.path().to_path_buf(),
                 state_path: state_path.clone(),
-                excluded_folders: Vec::new(),
+
             },
             LogHub::new(crate::logging::LogMode::Off),
         );
@@ -5498,7 +5406,7 @@ mod tests {
                 name: "Test".to_string(),
                 path: dir.path().to_path_buf(),
                 state_path: state_path.clone(),
-                excluded_folders: Vec::new(),
+
             },
             LogHub::new(crate::logging::LogMode::Off),
         );
@@ -5518,7 +5426,6 @@ mod tests {
                 name: "Test".to_string(),
                 path: dir.clone(),
                 state_path,
-                excluded_folders: Vec::new(),
             },
             LogHub::new(crate::logging::LogMode::Off),
         )
@@ -5534,7 +5441,6 @@ mod tests {
                 name: "Test".to_string(),
                 path: dir.clone(),
                 state_path,
-                excluded_folders: Vec::new(),
             },
             LogHub::new(crate::logging::LogMode::Off),
         )

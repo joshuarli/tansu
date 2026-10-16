@@ -26,10 +26,19 @@ header. Authenticated deployments require a session for bootstrap and vault
 routes. `GET /api/v2/health` is public, but still validates `Host` and rejects
 a supplied `Origin` that differs from the configured origin.
 
+App settings use a separate SQLite database and are distinct from each vault's
+catalog settings. The first-run server binds to loopback and serves the setup
+page until app settings are saved. `PUT /api/v2/app/settings` responds with
+`restartRequired: true`; restart the server to apply changed vaults or auth
+policy. In authenticated mode, writing app settings requires a session and
+CSRF token.
+
 | Method | Path | Purpose |
 | --- | --- | --- |
 | `GET` | `/api/v2/health` | Health |
 | `GET` | `/api/v2/bootstrap` | Server identity and vault list |
+| `GET` | `/api/v2/app/settings` | Read app-wide vault and authentication settings |
+| `PUT` | `/api/v2/app/settings` | Save app-wide settings; restart required |
 | `POST` | `/api/v2/auth/login/options` | Start passkey login |
 | `POST` | `/api/v2/auth/login/finish` | Finish the one-time login ceremony |
 | `POST` | `/api/v2/auth/enrollment/options` | Start initial enrollment or recent-owner credential registration |
@@ -57,11 +66,8 @@ a supplied `Origin` that differs from the configured origin.
 | `GET` | `/api/v2/vaults/:vaultId/assets?name=...` | Read one vault-local image |
 | `GET` | `/api/v2/vaults/:vaultId/events?after=:eventVersion` | Subscribe to vault events |
 
-`/api/v2/bootstrap` returns only server identity and vault IDs. A vault
-bootstrap may include `legacyWorkspace`, a one-time import seed containing the
-old server-side session, pins, and recents. The app imports it only when no
-private workspace exists. New session state, pins, and recents are client-local
-in v2.
+`/api/v2/bootstrap` returns only server identity and vault IDs. Workspace
+sessions, pins, and recents are stored in the browser's private workspace.
 
 Legacy `/api/` routes return `api_version_unsupported` before dispatch. They do
 not interpret `X-Tansu-Vault` or mutate a default vault.
@@ -69,11 +75,11 @@ not interpret `X-Tansu-Vault` or mutate a default vault.
 ### Rust API compatibility
 
 The V1 Rust adapters `api::handle_api`, `api::api_error_response`,
-`App::vault_entries`, `App::handle_events`, index-based `App::vault`, and
-`App::handle_log_stream` were removed with V2. Their removal breaks downstream
-Rust callers. The remaining public `VaultRuntime` methods and DTOs have not
-been audited for external use. Audit consumers before removing more Rust API
-surface.
+`App::vault_entries`, `App::handle_events`, index-based `App::vault`,
+`App::handle_log_stream`, `VaultRuntime::bootstrap`, `VaultRuntime::save_session`,
+`VaultRuntime::set_pin`, and their session/bootstrap DTOs were removed. These
+removals break downstream Rust callers. Other public `VaultRuntime` methods and
+DTOs have not been audited for external use.
 
 ### Source and hashes
 
