@@ -55,11 +55,28 @@ It runs two groups of tests:
 - Interleavings in `web/ts/app.test.ts` (`interleavings`). Injected services
   delay or reject one response at a time while the test switches tabs, closes a
   tab, expires auth, or finishes an image upload.
-- Persistence and conflict recovery in `web/ts/e2e/server.test.ts`
-  (`acceptance:`), against the real server in one browser. They assert the exact
-  Markdown bytes on disk: an edit closed immediately and read from a second
-  browser context, a save held in flight across a server restart, and a stale
-  save whose conflict draft restores against the canonical revision.
+- Persistence, recovery, and browser behavior in `web/ts/e2e/server.test.ts`
+  (`acceptance:`), against the real server in one browser:
+  - Exact Markdown bytes on disk after an edit closed immediately and read from
+    a second browser context, a save held in flight across a server restart, a
+    stale save whose conflict draft restores against the canonical revision, and
+    a save dropped twice by the network that is retried under one mutation id.
+  - Auth expiring during an image upload locks the app without a dangling image
+    link or lost text; a replayed stale event and a duplicated event stream do
+    not roll the note list back or move the resume cursor.
+  - A long session of opening, closing, and pasting leaves no live Worker, no
+    extra blob URL, and no second editor.
+  - Canonical light and dark screenshots of the note view and command palette.
+
+Screenshot baselines live in `web/ts/e2e/baselines/<browser>-<platform>/`.
+Fonts and text rendering differ across operating systems and browser builds, so
+a baseline is only valid for the browser and platform in its directory, and a
+platform without one fails the test. The comparison runs in the browser, ignores
+per-channel differences up to 8 and fails above 0.2% differing pixels. Create or
+refresh baselines after an intentional UI change with
+`TANSU2_UPDATE_BASELINES=1 TANSU2_E2E_BROWSER=chromium deno task test:browser -t "baselines"`
+and review the images in the diff. A failing run writes the actual image to
+`.work/tmp/baseline-actual-<name>.png`.
 
 `ACCEPTANCE_BROWSER=webkit make test-acceptance` runs the browser group in Safari's
 engine. The test named `saves an image inserted into a note after the user
