@@ -1,18 +1,14 @@
 import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { build } from "vite";
+import { webpEncoderAssets, webpEncoderBaseUrl } from "./webp-encoder.mjs";
 
 const mode = process.argv[2] === "production" ? "production" : "development";
 const root = resolve("web");
 const dist = resolve(root, "dist");
 const logMode = process.env.TANSU2_LOGS ?? (mode === "production" ? "off" : "pretty");
-const webpEncoderAssets = [
-  ["web/ts/editor/vendor/jsquash-webp/encode.js", "assets/jsquash-webp/encode.js", "text/javascript; charset=utf-8"],
-  ["web/ts/editor/vendor/jsquash-webp/meta.js", "assets/jsquash-webp/meta.js", "text/javascript; charset=utf-8"],
-  ["web/ts/editor/vendor/jsquash-webp/utils.js", "assets/jsquash-webp/utils.js", "text/javascript; charset=utf-8"],
-  ["web/ts/editor/vendor/jsquash-webp/codec/enc/webp_enc.js", "assets/jsquash-webp/codec/enc/webp_enc.js", "text/javascript; charset=utf-8"],
-  ["web/ts/editor/vendor/jsquash-webp/codec/enc/webp_enc.wasm", "assets/jsquash-webp/codec/enc/webp_enc.wasm", "application/wasm"],
-];
+const encoderBaseUrl = await webpEncoderBaseUrl();
+const encoderAssets = await webpEncoderAssets();
 
 await build({
   configFile: false,
@@ -21,6 +17,7 @@ await build({
   define: {
     "process.env.NODE_ENV": JSON.stringify(mode),
     "process.env.TANSU2_LOGS": JSON.stringify(logMode),
+    "process.env.TANSU2_WEBP_ENCODER_URL": JSON.stringify(`${encoderBaseUrl}/encode.js`),
   },
   build: {
     outDir: dist,
@@ -59,7 +56,7 @@ for (const [url, file] of pages) {
   }
 }
 
-for (const [source, file] of webpEncoderAssets) {
+for (const { source, file } of encoderAssets) {
   const target = resolve(dist, file);
   await mkdir(resolve(target, ".."), { recursive: true });
   await copyFile(resolve(source), target);
@@ -68,12 +65,7 @@ for (const [source, file] of webpEncoderAssets) {
 const manifest = {
   files: [
     ...new Map(pageAssets.map((asset) => [asset.url, asset])).values(),
-    ...webpEncoderAssets.map(([, file, contentType]) => ({
-      url: `/${file}`,
-      file,
-      contentType,
-      immutable: true,
-    })),
+    ...encoderAssets.map(({ url, file, contentType, immutable }) => ({ url, file, contentType, immutable })),
   ],
 };
 await writeFile(resolve(dist, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);

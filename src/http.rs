@@ -1816,6 +1816,23 @@ mod tests {
     }
 
     #[test]
+    fn webp_encoder_assets_are_immutable_only_under_fingerprinted_urls() {
+        let encoder_urls = embedded_assets::ASSETS
+            .iter()
+            .map(|asset| asset.url)
+            .filter(|url| url.contains("jsquash-webp"))
+            .collect::<Vec<_>>();
+        assert!(encoder_urls.iter().any(|url| url.ends_with("/webp_enc.wasm")));
+        for url in encoder_urls {
+            let directory = url.strip_prefix("/assets/jsquash-webp.").unwrap();
+            let fingerprint = directory.split('/').next().unwrap();
+            assert!(fingerprint.len() == 12 && fingerprint.bytes().all(|byte| byte.is_ascii_hexdigit()), "{url}");
+            assert_eq!(serve_static_path(url).unwrap().header("cache-control"), Some("public, max-age=31536000, immutable"));
+        }
+        assert!(serve_static_path("/assets/jsquash-webp/encode.js").is_err());
+    }
+
+    #[test]
     fn response_security_headers_are_restrictive_and_api_no_store() {
         let response = HttpResponse::json(200, &serde_json::json!({ "ok": true })).unwrap().with_no_store();
         let response = response.into_hyper();

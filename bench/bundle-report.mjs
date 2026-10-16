@@ -5,6 +5,8 @@ import { gzipSync } from "node:zlib";
 
 import esbuild from "esbuild";
 
+import { webpEncoderBaseUrl } from "../scripts/webp-encoder.mjs";
+
 const REPO_ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const entryPoint = "web/ts/main.ts";
 const cssPath = resolve(REPO_ROOT, "web/static/app.css");
@@ -24,6 +26,7 @@ async function bundle(minify) {
     define: {
       "process.env.NODE_ENV": JSON.stringify("production"),
       "process.env.TANSU2_LOGS": JSON.stringify("off"),
+      "process.env.TANSU2_WEBP_ENCODER_URL": JSON.stringify(`${await webpEncoderBaseUrl()}/encode.js`),
     },
   });
   const output = result.outputFiles.find((file) => file.path.endsWith("app.js"));

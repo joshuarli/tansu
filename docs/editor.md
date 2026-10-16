@@ -140,8 +140,9 @@ packages. Tansu also vendors the non-SIMD encoder from
 [`@jsquash/webp` 1.5.0](https://github.com/jamsinclair/jSquash) under
 `web/ts/editor/vendor/jsquash-webp/`. The JavaScript is Apache-2.0 licensed.
 The libwebp codec is BSD-3-Clause licensed. The app serves its encoder and
-281 KB WebAssembly file as separate assets and loads them only when a pasted
-image needs conversion.
+281 KB WebAssembly file as separate immutable assets under a directory named
+by a hash of their contents, so a changed encoder gets new URLs. It loads them
+only when a pasted image needs conversion.
 
 Build the fixture page with Vite 8:
 

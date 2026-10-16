@@ -3,15 +3,6 @@
 Prefix: TNS
 Next: 54
 
-### TNS-039 · P2 · Version immutable WebP encoder asset URLs
-
-- **Area:** Build
-- **Where:** `scripts/build-web.mjs:44-49`, `scripts/build-web.mjs:76-81`, `src/http.rs:1447-1455`
-- **Problem:** WebP encoder JS and WASM files use stable URLs but are marked immutable, so the server may let browsers cache old encoder bytes for a year after those files change.
-- **Recommendation:** Add content fingerprints to encoder asset URLs or serve those stable URLs with revalidation headers.
-- **Fix with:** single-source-of-truth
-- **Effort:** S
-
 ### TNS-040 · P2 · Guard benchmark runs against host load
 
 - **Area:** Performance
