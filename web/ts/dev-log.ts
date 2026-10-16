@@ -95,7 +95,7 @@ export function flushLogs(sync: boolean): void {
   }
   void fetch("/api/dev/logs", {
     method: "POST",
-    headers: { "Content-Type": "application/json", "X-Tansu-Log": "1" },
+    headers: { "Content-Type": "application/json" },
     body,
     keepalive: sync,
   })

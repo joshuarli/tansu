@@ -20,10 +20,7 @@ declare const appBrand: unique symbol;
 
 type AppBrand<T, Name extends string> = T & { readonly [appBrand]: Name };
 export type NoteId = IdentityNoteId;
-export type ContentHash = AppBrand<string, "ContentHash">;
 export type RevisionEventId = AppBrand<number, "RevisionEventId">;
-export type ConflictDraftId = AppBrand<number, "ConflictDraftId">;
-export type AssetName = AppBrand<string, "AssetName">;
 
 export type ShellBootstrap = V2VaultBootstrapResponse & {
   serverInstanceId: string;
@@ -37,9 +34,7 @@ type TabFields = {
   draft: string | null;
   dirty: boolean;
   saving: boolean;
-  savePending: boolean;
   conflict: boolean;
-  conflictDraftId: ConflictDraftId | null;
   selection: { anchor: number; head: number } | null;
   scrollTop: number;
   sourceMode: boolean;
@@ -159,20 +154,8 @@ export function toNoteId(value: string): NoteId {
   return value as NoteId;
 }
 
-export function toContentHash(value: string): ContentHash {
-  return value as ContentHash;
-}
-
 export function toRevisionEventId(value: number): RevisionEventId {
   return value as RevisionEventId;
-}
-
-export function toConflictDraftId(value: number): ConflictDraftId {
-  return value as ConflictDraftId;
-}
-
-export function toAssetName(value: string): AssetName {
-  return value as AssetName;
 }
 
 export function activeTab(state: State): Tab | undefined {
@@ -183,10 +166,6 @@ export function activeTab(state: State): Tab | undefined {
 
 export function tabById(state: State, noteId: string): SavedTab | undefined {
   return state.tabs.find((tab): tab is SavedTab => tab.kind === "saved" && tab.noteId === noteId);
-}
-
-export function tabByKey(state: State, key: string): Tab | undefined {
-  return state.tabs.find((tab) => tab.key === key);
 }
 
 export function tabIdentity(tab: Tab): TabIdentity {
@@ -207,9 +186,7 @@ export function tabFromMeta(note: V2NoteMeta): SavedTab {
     draft: null,
     dirty: false,
     saving: false,
-    savePending: false,
     conflict: false,
-    conflictDraftId: null,
     selection: null,
     scrollTop: 0,
     sourceMode: false,
@@ -236,9 +213,7 @@ export function tabFromWorkspace(tab: WorkspaceTab): Tab {
     draft: null,
     dirty: tab.kind === "local-draft",
     saving: false,
-    savePending: false,
     conflict: false,
-    conflictDraftId: null,
     selection: tab.selection,
     scrollTop: tab.scrollTop,
     sourceMode: tab.mode === "source",
@@ -248,10 +223,6 @@ export function tabFromWorkspace(tab: WorkspaceTab): Tab {
   return tab.kind === "saved"
     ? { ...fields, kind: "saved", noteId: toNoteId(tab.noteId), session: null, doc: null }
     : { ...fields, kind: "local-draft", localDraftId: tab.localDraftId, session: null, doc: null };
-}
-
-export function loadedDocument(tab: Tab): V2NoteDocument | null {
-  return tab.kind === "saved" ? tab.doc : null;
 }
 
 export function loadedDraft(tab: Tab): string | null {

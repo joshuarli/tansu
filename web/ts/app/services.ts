@@ -1,7 +1,6 @@
 import { createCodeMirrorEditor, type EditorHandle } from "../editor/codemirror-adapter.ts";
 import type { EditorConfig } from "../editor/tansu-extensions.ts";
 import { pickHtmlImport } from "../html-import.ts";
-import { markNextPaint, markPerformance } from "../performance.ts";
 import {
   cacheNoteBody,
   createDraftCheckpointClearer,
@@ -21,7 +20,7 @@ import {
   type DraftJournalRecord,
   type LocalDraftJournalRecord,
 } from "./workspace-store.ts";
-import { serverInstanceId, vaultId, type DocumentIdentity, type ServerIdentity, type WorkspaceId } from "./identity.ts";
+import type { DocumentIdentity, WorkspaceId } from "./identity.ts";
 import { enrollPasskey, loginWithPasskey } from "./passkeys.ts";
 import { createV2ApiClient, type V2ApiClient } from "./v2-api.ts";
 
@@ -71,11 +70,6 @@ export type AppServices = {
       urgency: "typing" | "structural",
       onFailure: (error: unknown) => void,
     ) => undefined | Promise<boolean>;
-    serverIdentity: (serverInstanceId: string, vaultId: string) => ServerIdentity;
-  };
-  performance: {
-    markNextPaint: typeof markNextPaint;
-    markPerformance: typeof markPerformance;
   };
   storage: {
     requestPersistent: () => Promise<boolean>;
@@ -110,12 +104,7 @@ export const defaultServices: AppServices = {
     checkpointClearer: createDraftCheckpointClearer,
     titleCheckpointClearer: createTitleDraftCheckpointClearer,
     localCheckpointWriter: createLocalDraftCheckpointWriter,
-    serverIdentity: (serverId, vault) => ({
-      serverInstanceId: serverInstanceId(serverId),
-      vaultId: vaultId(vault),
-    }),
   },
-  performance: { markNextPaint, markPerformance },
   storage: {
     requestPersistent: async () => navigator.storage?.persist() ?? false,
   },

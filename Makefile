@@ -107,10 +107,6 @@ build-linux-musl-x86_64:
 build-linux-musl-aarch64:
 	$(MAKE) build-linux-musl-docker TARGET=aarch64-unknown-linux-musl PLATFORM=linux/amd64
 
-build-linux-musl-both:
-	$(MAKE) build-linux-musl-x86_64
-	$(MAKE) build-linux-musl-aarch64
-
 deploy:
 	DEPLOY_HOST="$(DEPLOY_HOST)" TMPDIR="$(CURDIR)/.work/tmp" deploy/deploy-oracle.sh
 
@@ -127,7 +123,6 @@ bench:
 	mkdir -p "$(CURDIR)/.work/tmp"
 	$(PERF_GATE_BEFORE)
 	TMPDIR="$(CURDIR)/.work/tmp" node bench/integrated-bench.mjs --browser=chromium --warmups=2 --runs=5
-	TMPDIR="$(CURDIR)/.work/tmp" node bench/note-cache-bench.mjs --runs=9 --delay=200
 	TMPDIR="$(CURDIR)/.work/tmp" MD_WYSIWYG_BENCH=1 deno task test web/ts/editor/tests/large-note-bench.test.ts
 	$(PERF_GATE_AFTER)
 
@@ -135,14 +130,7 @@ bench-full:
 	mkdir -p "$(CURDIR)/.work/tmp"
 	$(PERF_GATE_BEFORE)
 	TMPDIR="$(CURDIR)/.work/tmp" node bench/integrated-bench.mjs --browser=chromium,webkit --warmups=5 --runs=20
-	TMPDIR="$(CURDIR)/.work/tmp" node bench/note-cache-bench.mjs --runs=20 --delay=200
 	TMPDIR="$(CURDIR)/.work/tmp" MD_WYSIWYG_BENCH=1 deno task test web/ts/editor/tests/large-note-bench.test.ts
 	$(PERF_GATE_AFTER)
 
-bench-long-session:
-	mkdir -p "$(CURDIR)/.work/tmp"
-	$(PERF_GATE_BEFORE)
-	TMPDIR="$(CURDIR)/.work/tmp" node bench/long-session.mjs
-	$(PERF_GATE_AFTER)
-
-.PHONY: auth-recovery-drill bench bench-full bench-long-session build-linux-musl-aarch64 build-linux-musl-both build-linux-musl-docker build-linux-musl-x86_64 coverage coverage-html deploy dev dev-config check lint test-package types types-check types-generated ts test test-e2e-chromium test-e2e-webkit test-rs test-sqlite-static test-acceptance
+.PHONY: auth-recovery-drill bench bench-full build-linux-musl-aarch64 build-linux-musl-docker build-linux-musl-x86_64 coverage coverage-html deploy dev dev-config check lint test-package types types-check types-generated ts test test-e2e-chromium test-e2e-webkit test-rs test-sqlite-static test-acceptance

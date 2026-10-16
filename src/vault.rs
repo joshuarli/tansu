@@ -2,7 +2,7 @@ use std::fs::{self, File};
 use std::collections::{HashMap, VecDeque};
 use std::ops::ControlFlow;
 use std::path::{Component, Path, PathBuf};
-use std::sync::mpsc::{self, Receiver, Sender, SyncSender, TryRecvError, TrySendError};
+use std::sync::mpsc::{self, Receiver, SyncSender, TryRecvError, TrySendError};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError, Weak};
 use std::time::{Duration, Instant};
@@ -13,10 +13,8 @@ use rusqlite::ErrorCode;
 use serde::de::DeserializeOwned;
 
 use crate::api_types::{
-    ApiErrorKind, CreateNoteRequest, NoteDocument, NoteEventKind,
-    NoteEventSource, NoteMeta, NoteMutationResponse, RenameNoteRequest, RevisionDocument,
-    RevisionMeta, SaveNoteDeltaRequest, SaveNoteRequest, SearchHit, SearchStatus, ServerEvent,
-    ServerEventKind, Settings, TextEdit, TextPosition, V2ApiErrorKind, ValidatedSettings,
+    ApiErrorKind, NoteEventKind, NoteEventSource, NoteMeta, Settings, TextEdit, TextPosition,
+    V2ApiErrorKind, ValidatedSettings,
     V2CreateNoteRequest, V2DeleteNoteRequest, V2MutationOutcome,
     V2MutationResponse, V2NoteDocument, V2NoteMeta, V2NotePrecondition, V2QuickOpenHit,
     V2QuickOpenRequest, V2QuickOpenResponse, V2RenameNoteRequest, V2SearchHit,
@@ -71,7 +69,6 @@ pub struct VaultRuntime {
     catalog: Mutex<Catalog>,
     search: Mutex<SearchIndex>,
     op_lock: Mutex<()>,
-    subscribers: Mutex<Vec<Sender<ServerEvent>>>,
     v2_subscribers: Arc<Mutex<Vec<(u64, Weak<EventQueue<V2EventEnvelope>>)>>>,
     next_subscriber_id: AtomicU64,
     workers: Mutex<VaultWorkers>,
@@ -962,7 +959,6 @@ impl VaultRuntime {
             catalog: Mutex::new(catalog),
             search: Mutex::new(search),
             op_lock: Mutex::new(()),
-            subscribers: Mutex::new(Vec::new()),
             v2_subscribers: Arc::new(Mutex::new(Vec::new())),
             next_subscriber_id: AtomicU64::new(1),
             workers: Mutex::new(VaultWorkers {
@@ -1109,17 +1105,6 @@ impl VaultRuntime {
                 ]),
             );
         }
-    }
-
-    pub fn subscribe(&self) -> Result<Receiver<ServerEvent>> {
-        let (tx, rx) = mpsc::channel();
-        tx.send(self.server_event(ServerEventKind::Ready, Vec::new())?)
-            .map_err(|error| Error::Internal(error.to_string()))?;
-        self.subscribers
-            .lock()
-            .expect("subscribers mutex poisoned")
-            .push(tx);
-        Ok(rx)
     }
 
     pub fn vault_meta(&self) -> V2VaultMeta {
@@ -1291,6 +1276,8 @@ impl VaultRuntime {
             source_hash: None,
             disk_hash: None,
         })?;
+        let excluded_folders_changed =
+            catalog.settings()?.excluded_folders != settings.as_settings().excluded_folders;
         catalog.save_settings(&settings)?;
         let response = V2SettingsResponse {
             mutation_id: request.mutation_id.clone(),
@@ -1301,13 +1288,15 @@ impl VaultRuntime {
             &serde_json::to_string(&response)?,
         )?;
         drop(catalog);
+        if excluded_folders_changed {
+            self.reconcile_with_op_lock_held()?;
+        }
         self.enqueue_search(SearchJob::Rebuild);
         let status = self.search.lock().expect("search mutex poisoned").search_status();
         self.record_v2_event(V2ServerEventUpdate::SearchChanged {
             dirty: status.dirty,
             degraded: status.degraded,
         })?;
-        self.broadcast(ServerEventKind::SearchChanged, Vec::new());
         Ok(response)
     }
 
@@ -1813,7 +1802,6 @@ impl VaultRuntime {
             self.broadcast_v2_event(version, update)?;
         }
         self.enqueue_search(SearchJob::Upsert(accepted_meta.clone(), content.to_string()));
-        self.broadcast(ServerEventKind::NoteChanged, Vec::new());
         self.log_note_mutation("save_v2", &accepted_meta, Some(content.len()));
         #[cfg(test)]
         crate::failure_point::check(crate::failure_point::FailurePoint::ResponseReady)?;
@@ -1920,7 +1908,6 @@ impl VaultRuntime {
             self.broadcast_v2_event(version, update)?;
         }
         self.enqueue_search(SearchJob::Upsert(meta.clone(), content.clone()));
-        self.broadcast(ServerEventKind::NoteChanged, Vec::new());
         self.log_note_mutation("create_v2", &meta, Some(content.len()));
         Ok(response)
     }
@@ -2087,7 +2074,6 @@ impl VaultRuntime {
             self.broadcast_v2_event(version, update)?;
         }
         self.enqueue_search(SearchJob::Upsert(accepted_meta.clone(), source_document.source));
-        self.broadcast(ServerEventKind::NoteChanged, Vec::new());
         self.log_note_mutation("rename_v2", &accepted_meta, None);
         Ok(response)
     }
@@ -2191,7 +2177,6 @@ impl VaultRuntime {
             self.broadcast_v2_event(version, update)?;
         }
         self.enqueue_search(SearchJob::Remove(note_id.to_string(), tombstone.seq));
-        self.broadcast(ServerEventKind::NoteChanged, vec![note_id.to_string()]);
         self.log_note_mutation("delete_v2", &row.meta, None);
         Ok(response)
     }
@@ -2357,347 +2342,6 @@ impl VaultRuntime {
         #[cfg(test)]
         crate::failure_point::check(crate::failure_point::FailurePoint::AfterEventPublish)?;
         Ok(event)
-    }
-
-    pub fn open_note(&self, note_id: &str) -> Result<NoteDocument> {
-        let _op = self.lock_op();
-        let mut catalog = self.lock_catalog();
-        reconcile_note_before_write(&self.root, &self.state_root, &mut catalog, note_id)?;
-        let meta = catalog
-            .note_by_id(note_id)?
-            .ok_or_else(|| Error::NotFound(note_id.to_string()))?;
-        let content = match read_visible_or_snapshot(&self.root, &meta) {
-            Ok(content) => content,
-            Err(Error::Api(error)) => {
-                if let ApiErrorKind::UnresolvedNote { reason, .. } = &*error {
-                    catalog.mark_unresolved(note_id, reason.clone())?;
-                }
-                return Err(Error::Api(error));
-            }
-            Err(error) => return Err(error),
-        };
-        self.log_note_read("open", &meta, Some(content.len()));
-        Ok(NoteDocument { meta, content })
-    }
-
-    pub fn create_note(&self, request: CreateNoteRequest) -> Result<NoteMutationResponse> {
-        let _op = self.lock_op();
-        let path = match normalize_note_path(&request.path) {
-            Ok(path) => path,
-            Err(reason) => {
-                return Err(Error::api(ApiErrorKind::PathInvalid { reason }));
-            }
-        };
-        let key = path_key(&path);
-        let source = request.source.unwrap_or(NoteEventSource::User);
-        let kind = match source {
-            NoteEventSource::Import => NoteEventKind::Import,
-            _ => NoteEventKind::Create,
-        };
-        let content = history::canonical_markdown_string(&request.content);
-        let disk_bytes = content.as_bytes();
-        let parsed = parse_markdown(&path, &content);
-        let hash = history::content_hash(&content);
-        let visible_hash = history::disk_hash(disk_bytes);
-        let mut catalog = self.lock_catalog();
-        let target = checked_visible_path(&self.root, &path)?;
-        if catalog.note_by_path_key(&key)?.is_some() || target.exists() {
-            return Err(Error::api(ApiErrorKind::PathCollision { path }));
-        }
-        let note_id = crate::catalog::generate_note_id();
-        history::write_snapshot_bytes(&self.state_root, &note_id, &hash, disk_bytes)?;
-        catalog.insert_note_with_id(&note_id, InsertNote {
-            path: &path,
-            path_key: &key,
-            title: &parsed.title,
-            tags: &parsed.tags,
-            content_hash: &hash,
-            visible_hash: &visible_hash,
-            kind,
-            source,
-            unresolved: None,
-        }).map_err(|error| match error {
-            Error::Sql(error) if is_unique_violation(&error) => {
-                Error::api(ApiErrorKind::PathCollision { path: path.clone() })
-            }
-            error => error,
-        })?;
-        write_visible_note_bytes_new(&self.root, &path, disk_bytes)?;
-        let meta = catalog
-            .note_by_id(&note_id)?
-            .ok_or_else(|| Error::NotFound(note_id.clone()))?;
-        let sync_version = catalog.sync_version()?;
-        drop(catalog);
-        self.enqueue_search(SearchJob::Upsert(meta.clone(), content.clone()));
-        self.broadcast(ServerEventKind::NoteChanged, Vec::new());
-        self.log_note_mutation("create", &meta, Some(content.len()));
-        Ok(NoteMutationResponse {
-            document: Some(NoteDocument {
-                meta: meta.clone(),
-                content,
-            }),
-            meta,
-            sync_version,
-        })
-    }
-
-    pub fn save_note(
-        &self,
-        note_id: &str,
-        request: SaveNoteRequest,
-    ) -> Result<NoteMutationResponse> {
-        let _op = self.lock_op();
-        let content = history::canonical_markdown_string(&request.content);
-        self.save_reconstructed_note(
-            note_id,
-            &content,
-            request.base_seq,
-            &request.base_hash,
-            true,
-        )
-    }
-
-    pub fn save_note_delta(
-        &self,
-        note_id: &str,
-        request: SaveNoteDeltaRequest,
-    ) -> Result<NoteMutationResponse> {
-        let _op = self.lock_op();
-        {
-            let catalog = self.lock_catalog();
-            let current_row = catalog
-                .note_row_by_id(note_id)?
-                .ok_or_else(|| Error::NotFound(note_id.to_string()))?;
-            if current_row.tombstoned || current_row.unresolved_reason.is_some() {
-                return Err(Error::NotFound(note_id.to_string()));
-            }
-        }
-        let base = match history::read_snapshot(&self.state_root, note_id, &request.base_hash) {
-            Ok(base) => base,
-            Err(Error::NotFound(_)) => {
-                return Err(Error::BadRequest("base snapshot not found".to_string()));
-            }
-            Err(error) => return Err(error),
-        };
-        let content = apply_text_edits(&base, &request.edits)?;
-        let submitted_hash = history::content_hash(&content);
-        if submitted_hash != request.content_hash {
-            return Err(Error::BadRequest("delta content hash mismatch".to_string()));
-        }
-        self.save_reconstructed_note(
-            note_id,
-            &content,
-            request.base_seq,
-            &request.base_hash,
-            false,
-        )
-    }
-
-    fn save_reconstructed_note(
-        &self,
-        note_id: &str,
-        content: &str,
-        base_seq: i64,
-        base_hash: &str,
-        include_document: bool,
-    ) -> Result<NoteMutationResponse> {
-        let content = history::canonical_markdown_string(content);
-        let submitted_hash = history::content_hash(&content);
-        let mut catalog = self.lock_catalog();
-        reconcile_note_before_write(&self.root, &self.state_root, &mut catalog, note_id)?;
-        let current_row = catalog
-            .note_row_by_id(note_id)?
-            .ok_or_else(|| Error::NotFound(note_id.to_string()))?;
-        if current_row.tombstoned || current_row.unresolved_reason.is_some() {
-            return Err(Error::NotFound(note_id.to_string()));
-        }
-        let current = current_row.meta.clone();
-        if current.content_hash == submitted_hash {
-            let sync_version = catalog.sync_version()?;
-            let document = if include_document {
-                Some(NoteDocument {
-                    meta: current.clone(),
-                    content: read_visible_or_snapshot(&self.root, &current)?,
-                })
-            } else {
-                None
-            };
-            return Ok(NoteMutationResponse {
-                document,
-                meta: current,
-                sync_version,
-            });
-        }
-        if current.seq != base_seq || current.content_hash != base_hash {
-            let draft =
-                catalog.create_conflict_draft(note_id, base_seq, base_hash, &submitted_hash)?;
-            history::write_conflict_draft(&self.state_root, note_id, draft.draft_id, &content)?;
-            let current_doc = NoteDocument {
-                meta: current.clone(),
-                content: read_visible_or_snapshot(&self.root, &current)?,
-            };
-            return Err(Error::api(ApiErrorKind::SaveConflict {
-                current: Box::new(current_doc),
-                draft,
-            }));
-        }
-        let current_bytes = read_visible_bytes(&self.root, &current.path)?;
-        let source_document = history::SourceDocument::from_disk(&current_bytes)?;
-        let disk_bytes = source_document.disk_bytes_for_source(&content)?;
-        let disk_hash = history::disk_hash(&disk_bytes);
-        history::write_snapshot_bytes(&self.state_root, note_id, &submitted_hash, &disk_bytes)?;
-        let parsed = parse_markdown(&current.path, &content);
-        let meta = catalog.update_note_content(
-            note_id,
-            &parsed.title,
-            &parsed.tags,
-            &submitted_hash,
-            &current_row.visible_hash,
-            NoteEventKind::Save,
-            NoteEventSource::User,
-        )?;
-        let sync_version = catalog.sync_version()?;
-        if history::disk_hash(&read_visible_bytes(&self.root, &current.path)?)
-            != current_row.visible_hash
-        {
-            reconcile_note_before_write(&self.root, &self.state_root, &mut catalog, note_id)?;
-            return Err(Error::Internal(
-                "visible file changed during save materialization".to_string(),
-            ));
-        }
-        write_visible_note_bytes_atomic(&self.root, &current.path, &disk_bytes)?;
-        catalog.record_visible_hash(note_id, &disk_hash)?;
-        drop(catalog);
-        self.enqueue_search(SearchJob::Upsert(meta.clone(), content.clone()));
-        self.broadcast(ServerEventKind::NoteChanged, Vec::new());
-        self.log_note_mutation("save", &meta, Some(content.len()));
-        let document = if include_document {
-            Some(NoteDocument {
-                meta: meta.clone(),
-                content,
-            })
-        } else {
-            None
-        };
-        Ok(NoteMutationResponse {
-            document,
-            meta,
-            sync_version,
-        })
-    }
-
-    pub fn rename_note(
-        &self,
-        note_id: &str,
-        request: RenameNoteRequest,
-    ) -> Result<NoteMutationResponse> {
-        let _op = self.lock_op();
-        {
-            let mut catalog = self.lock_catalog();
-            reconcile_note_before_write(&self.root, &self.state_root, &mut catalog, note_id)?;
-        }
-        let path = match normalize_note_path(&request.path) {
-            Ok(path) => path,
-            Err(reason) => {
-                return Err(Error::api(ApiErrorKind::PathInvalid { reason }));
-            }
-        };
-        let key = path_key(&path);
-        let mut catalog = self.lock_catalog();
-        let current = catalog
-            .note_by_id(note_id)?
-            .ok_or_else(|| Error::NotFound(note_id.to_string()))?;
-        if let Some(existing) = catalog.note_by_path_key(&key)?
-            && existing.note_id != note_id
-        {
-            return Err(Error::api(ApiErrorKind::PathCollision { path }));
-        }
-        let new_visible = checked_visible_path(&self.root, &path)?;
-        if new_visible.exists() {
-            return Err(Error::api(ApiErrorKind::PathCollision { path }));
-        }
-        let meta = match catalog.rename_note(note_id, &path, &key) {
-            Ok(meta) => meta,
-            Err(Error::Sql(error)) if is_unique_violation(&error) => {
-                return Err(Error::api(ApiErrorKind::PathCollision { path }));
-            }
-            Err(error) => return Err(error),
-        };
-        if let Some(bytes) = read_optional_visible_bytes(&self.root, &current.path)? {
-            write_visible_note_bytes_new(&self.root, &path, &bytes)?;
-            remove_visible_note_file(&self.root, &current.path)?;
-        }
-        let content = read_visible_or_snapshot(&self.root, &meta)?;
-        let sync_version = catalog.sync_version()?;
-        drop(catalog);
-        self.enqueue_search(SearchJob::Upsert(meta.clone(), content.clone()));
-        self.broadcast(ServerEventKind::NoteChanged, Vec::new());
-        self.log_note_mutation("rename", &meta, Some(content.len()));
-        Ok(NoteMutationResponse {
-            document: Some(NoteDocument {
-                meta: meta.clone(),
-                content,
-            }),
-            meta,
-            sync_version,
-        })
-    }
-
-    pub fn delete_note(&self, note_id: &str) -> Result<NoteMutationResponse> {
-        let _op = self.lock_op();
-        let mut catalog = self.lock_catalog();
-        reconcile_note_before_write(&self.root, &self.state_root, &mut catalog, note_id)?;
-        let current = catalog
-            .note_by_id(note_id)?
-            .ok_or_else(|| Error::NotFound(note_id.to_string()))?;
-        let meta = catalog.tombstone_note(note_id, NoteEventKind::Delete, NoteEventSource::User)?;
-        if read_optional_visible_bytes(&self.root, &current.path)?.is_some() {
-            remove_visible_note_file(&self.root, &current.path)?;
-        }
-        let sync_version = catalog.sync_version()?;
-        drop(catalog);
-        self.enqueue_search(SearchJob::Remove(note_id.to_string(), meta.seq));
-        self.broadcast(ServerEventKind::NoteDeleted, vec![note_id.to_string()]);
-        self.log_note_mutation("delete", &meta, None);
-        Ok(NoteMutationResponse {
-            document: None,
-            meta,
-            sync_version,
-        })
-    }
-
-    pub fn search(&self, query: &str, limit: usize) -> Result<Vec<SearchHit>> {
-        let _op = self.lock_op();
-        let (notes, settings) = {
-            let catalog = self.lock_catalog();
-            (catalog.live_notes()?, catalog.settings()?)
-        };
-        let hits = {
-            let mut search = self.search.lock().expect("search mutex poisoned");
-            search.try_search(query, &notes, limit, &settings)
-        };
-        self.persist_search_status();
-        let hits = hits?;
-        if self.logs.enabled() {
-            self.logs.server_event(
-                LogLevel::Info,
-                "search.query",
-                None,
-                fields([
-                    (
-                        "search",
-                        serde_json::json!({
-                            "queryLength": query.len(),
-                            "hits": hits.len(),
-                            "limit": limit,
-                            "notes": notes.len(),
-                        }),
-                    ),
-                    ("vault", serde_json::json!(self.index)),
-                ]),
-            );
-        }
-        Ok(hits)
     }
 
     pub fn v2_search(&self, request: V2SearchRequest) -> V2Result<V2SearchResponse> {
@@ -2872,11 +2516,6 @@ impl VaultRuntime {
                 })
             })
             .collect::<V2Result<Vec<_>>>()?;
-        let skipped = if skipped == 0 {
-            results.skipped_notes
-        } else {
-            skipped
-        };
         let overlay_coverage = if skipped == 0 {
             V2OverlayCoverage::Complete
         } else {
@@ -2927,245 +2566,6 @@ impl VaultRuntime {
     pub fn settings(&self) -> Result<Settings> {
         let _op = self.lock_op();
         self.lock_catalog().settings()
-    }
-
-    pub fn save_settings(&self, settings: Settings) -> Result<Settings> {
-        let settings = ValidatedSettings::try_from(settings)
-            .map_err(|error| Error::BadRequest(error.into_message()))?;
-        let _op = self.lock_op();
-        let mut catalog = self.lock_catalog();
-        let excluded_folders_changed =
-            catalog.settings()?.excluded_folders != settings.as_settings().excluded_folders;
-        catalog.save_settings(&settings)?;
-        drop(catalog);
-        if excluded_folders_changed {
-            self.reconcile_with_op_lock_held()?;
-        }
-        self.enqueue_search(SearchJob::Rebuild);
-        self.broadcast(ServerEventKind::SearchChanged, Vec::new());
-        if self.logs.enabled() {
-            self.logs.server_event(
-                LogLevel::Info,
-                "settings.save",
-                None,
-                fields([
-                    (
-                        "settings",
-                        serde_json::json!({
-                            "excludedFolders": settings.as_settings().excluded_folders.len(),
-                            "autosaveDelayMs": settings.as_settings().autosave_delay_ms,
-                            "undoStackMax": settings.as_settings().undo_stack_max,
-                            "imageWebpQuality": settings.as_settings().image_webp_quality,
-                        }),
-                    ),
-                    ("vault", serde_json::json!(self.index)),
-                ]),
-            );
-        }
-        Ok(settings.into_settings())
-    }
-
-    pub fn search_status(&self) -> Result<SearchStatus> {
-        let _op = self.lock_op();
-        self.lock_catalog().search_status()
-    }
-
-    pub fn revisions(&self, note_id: &str) -> Result<Vec<RevisionMeta>> {
-        let _op = self.lock_op();
-        if self.lock_catalog().note_row_by_id(note_id)?.is_none() {
-            return Err(Error::NotFound(note_id.to_string()));
-        }
-        self.lock_catalog().revisions(note_id)
-    }
-
-    pub fn revision_document(&self, note_id: &str, event_id: i64) -> Result<RevisionDocument> {
-        let _op = self.lock_op();
-        let catalog = self.lock_catalog();
-        let revision = catalog
-            .revision(note_id, event_id)?
-            .ok_or_else(|| Error::NotFound(format!("revision {event_id}")))?;
-        let hash = revision
-            .content_hash
-            .as_deref()
-            .ok_or_else(|| Error::NotFound(format!("revision {event_id}")))?;
-        let content = history::read_snapshot(&self.state_root, note_id, hash)?;
-        if self.logs.enabled() {
-            self.logs.server_event(
-                LogLevel::Info,
-                "revision.open",
-                None,
-                fields([
-                    (
-                        "revision",
-                        serde_json::json!({
-                            "eventId": event_id,
-                            "noteId": note_id,
-                            "contentHash": hash,
-                            "bytes": content.len(),
-                        }),
-                    ),
-                    ("vault", serde_json::json!(self.index)),
-                ]),
-            );
-        }
-        Ok(RevisionDocument { revision, content })
-    }
-
-    pub fn restore_revision(&self, note_id: &str, event_id: i64) -> Result<NoteMutationResponse> {
-        let _op = self.lock_op();
-        let mut catalog = self.lock_catalog();
-        reconcile_note_before_write(&self.root, &self.state_root, &mut catalog, note_id)?;
-        let current = catalog
-            .note_by_id(note_id)?
-            .ok_or_else(|| Error::NotFound(note_id.to_string()))?;
-        let current_row = catalog
-            .note_row_by_id(note_id)?
-            .ok_or_else(|| Error::NotFound(note_id.to_string()))?;
-        let revision = catalog
-            .revision(note_id, event_id)?
-            .ok_or_else(|| Error::NotFound(format!("revision {event_id}")))?;
-        let hash = revision
-            .content_hash
-            .as_deref()
-            .ok_or_else(|| Error::NotFound(format!("revision {event_id}")))?;
-        let content = history::read_snapshot(&self.state_root, note_id, hash)?;
-        let old_disk_bytes = read_visible_bytes(&self.root, &current.path)?;
-        let current_source = history::SourceDocument::from_disk(&old_disk_bytes)?;
-        let disk_bytes = current_source.disk_bytes_for_source(&content)?;
-        let disk_hash = history::disk_hash(&disk_bytes);
-        let source_hash = history::content_hash(&content);
-        history::write_snapshot_bytes(&self.state_root, note_id, &source_hash, &disk_bytes)?;
-        let parsed = parse_markdown(&current.path, &content);
-        let meta = catalog.update_note_content(
-            note_id,
-            &parsed.title,
-            &parsed.tags,
-            &source_hash,
-            &current_row.visible_hash,
-            NoteEventKind::Save,
-            NoteEventSource::User,
-        )?;
-        let sync_version = catalog.sync_version()?;
-        write_visible_note_bytes_atomic(&self.root, &current.path, &disk_bytes)?;
-        catalog.record_visible_hash(note_id, &disk_hash)?;
-        drop(catalog);
-        self.enqueue_search(SearchJob::Upsert(meta.clone(), content.clone()));
-        self.broadcast(ServerEventKind::NoteChanged, Vec::new());
-        self.log_note_mutation("restore", &meta, Some(content.len()));
-        Ok(NoteMutationResponse {
-            document: Some(NoteDocument {
-                meta: meta.clone(),
-                content,
-            }),
-            meta,
-            sync_version,
-        })
-    }
-
-    pub fn conflict_draft(
-        &self,
-        note_id: &str,
-        draft_id: i64,
-    ) -> Result<crate::api_types::ConflictDraftDocument> {
-        let _op = self.lock_op();
-        let catalog = self.lock_catalog();
-        let draft = catalog
-            .conflict_draft(note_id, draft_id)?
-            .ok_or_else(|| Error::NotFound(format!("conflict draft {draft_id}")))?;
-        let content = history::read_conflict_draft(
-            &self.state_root,
-            note_id,
-            draft.draft_id,
-            &draft.content_hash,
-        )?;
-        Ok(crate::api_types::ConflictDraftDocument { draft, content })
-    }
-
-    pub fn restore_conflict_draft(
-        &self,
-        note_id: &str,
-        draft_id: i64,
-    ) -> Result<NoteMutationResponse> {
-        let _op = self.lock_op();
-        let mut catalog = self.lock_catalog();
-        reconcile_note_before_write(&self.root, &self.state_root, &mut catalog, note_id)?;
-        let current = catalog
-            .note_by_id(note_id)?
-            .ok_or_else(|| Error::NotFound(note_id.to_string()))?;
-        let current_row = catalog
-            .note_row_by_id(note_id)?
-            .ok_or_else(|| Error::NotFound(note_id.to_string()))?;
-        let draft = catalog
-            .conflict_draft(note_id, draft_id)?
-            .ok_or_else(|| Error::NotFound(format!("conflict draft {draft_id}")))?;
-        let content = history::read_conflict_draft(
-            &self.state_root,
-            note_id,
-            draft.draft_id,
-            &draft.content_hash,
-        )?;
-        let old_disk_bytes = read_visible_bytes(&self.root, &current.path)?;
-        let current_source = history::SourceDocument::from_disk(&old_disk_bytes)?;
-        let disk_bytes = current_source.disk_bytes_for_source(&content)?;
-        let disk_hash = history::disk_hash(&disk_bytes);
-        let source_hash = history::content_hash(&content);
-        history::write_snapshot_bytes(&self.state_root, note_id, &source_hash, &disk_bytes)?;
-        let parsed = parse_markdown(&current.path, &content);
-        let meta = catalog.update_note_content(
-            note_id,
-            &parsed.title,
-            &parsed.tags,
-            &source_hash,
-            &current_row.visible_hash,
-            NoteEventKind::ConflictRecovery,
-            NoteEventSource::User,
-        )?;
-        let sync_version = catalog.sync_version()?;
-        write_visible_note_bytes_atomic(&self.root, &current.path, &disk_bytes)?;
-        catalog.record_visible_hash(note_id, &disk_hash)?;
-        drop(catalog);
-        self.enqueue_search(SearchJob::Upsert(meta.clone(), content.clone()));
-        self.broadcast(ServerEventKind::NoteChanged, Vec::new());
-        self.log_note_mutation("restore_conflict", &meta, Some(content.len()));
-        Ok(NoteMutationResponse {
-            document: Some(NoteDocument {
-                meta: meta.clone(),
-                content,
-            }),
-            meta,
-            sync_version,
-        })
-    }
-
-    pub fn upload_image(&self, bytes: &[u8]) -> Result<crate::api_types::ImageUploadResponse> {
-        if bytes.is_empty() {
-            return Err(Error::BadRequest("image body is empty".to_string()));
-        }
-        let name = format!(
-            "z-images/image-{}-{}.webp",
-            now_ms(),
-            crate::catalog::generate_note_id()
-        );
-        write_vault_asset_new(&self.root, &name, bytes)?;
-        if self.logs.enabled() {
-            self.logs.server_event(
-                LogLevel::Info,
-                "asset.upload",
-                None,
-                fields([(
-                    "asset",
-                    serde_json::json!({
-                        "name": name,
-                        "bytes": bytes.len(),
-                        "vault": self.index,
-                    }),
-                )]),
-            );
-        }
-        Ok(crate::api_types::ImageUploadResponse {
-            markdown: format!("![[{name}]]"),
-            name,
-        })
     }
 
     pub fn read_asset(&self, name: &str) -> Result<Vec<u8>> {
@@ -3366,7 +2766,6 @@ impl VaultRuntime {
             self.lock_catalog()
                 .clear_watcher_reconcile_pending()?;
         }
-        self.broadcast(ServerEventKind::VaultChanged, deleted);
         if self.logs.enabled() {
             self.logs.server_event(
                 LogLevel::Info,
@@ -3408,54 +2807,6 @@ impl VaultRuntime {
                 ("contentBytes", serde_json::json!(content_bytes)),
             ]),
         );
-    }
-
-    fn log_note_read(&self, action: &str, meta: &NoteMeta, content_bytes: Option<usize>) {
-        if !self.logs.enabled() {
-            return;
-        }
-        self.logs.server_event(
-            LogLevel::Info,
-            "note.read",
-            None,
-            fields([
-                (
-                    "note",
-                    serde_json::json!({
-                        "id": meta.note_id,
-                        "path": meta.path,
-                        "vault": self.index,
-                        "contentHash": meta.content_hash,
-                        "seq": meta.seq,
-                    }),
-                ),
-                ("read", serde_json::json!({ "action": action })),
-                ("contentBytes", serde_json::json!(content_bytes)),
-            ]),
-        );
-    }
-
-    fn server_event(
-        &self,
-        kind: ServerEventKind,
-        deleted_note_ids: Vec<String>,
-    ) -> Result<ServerEvent> {
-        let catalog = self.lock_catalog();
-        Ok(ServerEvent {
-            kind,
-            vault: self.index,
-            notes: catalog.live_notes()?,
-            deleted_note_ids,
-            search_status: catalog.search_status()?,
-        })
-    }
-
-    fn broadcast(&self, kind: ServerEventKind, deleted_note_ids: Vec<String>) {
-        let Ok(event) = self.server_event(kind, deleted_note_ids) else {
-            return;
-        };
-        let mut subscribers = self.subscribers.lock().expect("subscribers mutex poisoned");
-        subscribers.retain(|tx| tx.send(event.clone()).is_ok());
     }
 
     fn lock_op(&self) -> MutexGuard<'_, ()> {
@@ -3630,13 +2981,6 @@ fn copy_dir_recursive(from: &Path, to: &Path) -> Result<()> {
     }
 }
 
-#[cfg(not(any(target_os = "linux", target_os = "macos")))]
-fn copy_dir_recursive(_from: &Path, _to: &Path) -> Result<()> {
-    Err(Error::Internal(
-        "legacy state migration is unsupported on this platform".to_string(),
-    ))
-}
-
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 fn copy_legacy_directory_contents(
     source: &File,
@@ -3748,12 +3092,11 @@ fn is_unique_violation(error: &rusqlite::Error) -> bool {
 #[cfg(test)]
 mod tests {
     use crate::api_types::{
-        PathValidationReason, SaveNoteDeltaRequest, SaveNoteRequest, TextEdit, TextPosition,
+        TextEdit, TextPosition,
         V2CreateNoteRequest, V2DeleteNoteRequest, V2MutationOutcome, V2NotePrecondition,
         V2RenameNoteRequest, V2RestoreConflictRequest,
         V2RestoreRevisionRequest, V2SaveNoteRequest,
     };
-    use crate::paths::visible_path;
 
     use super::*;
 
@@ -3867,16 +3210,6 @@ mod tests {
     }
 
     #[test]
-    fn save_settings_rejects_invalid_values_for_rust_callers() {
-        let vault = test_vault();
-        let before = serde_json::to_value(vault.settings().unwrap()).unwrap();
-        for (label, settings) in invalid_settings_variants() {
-            assert!(matches!(vault.save_settings(settings), Err(Error::BadRequest(_))), "{label}");
-            assert_eq!(serde_json::to_value(vault.settings().unwrap()).unwrap(), before, "{label}");
-        }
-    }
-
-    #[test]
     fn saving_excluded_folders_reconciles_search_immediately() {
         let vault = Arc::new(test_vault_with_note("keep.md", "# Keep\n\nquasar\n"));
         vault.start_search_worker().unwrap();
@@ -3886,7 +3219,7 @@ mod tests {
         vault.reconcile_from_watcher().unwrap();
         let search = || {
             let deadline = std::time::Instant::now() + Duration::from_secs(10);
-            while vault.search_status().unwrap().dirty {
+            while vault.lock_catalog().search_status().unwrap().dirty {
                 assert!(std::time::Instant::now() < deadline, "search index never settled");
                 std::thread::sleep(Duration::from_millis(10));
             }
@@ -3909,11 +3242,15 @@ mod tests {
 
         let mut settings = vault.settings().unwrap();
         settings.excluded_folders = vec!["Archive".to_string()];
-        vault.save_settings(settings.clone()).unwrap();
+        vault
+            .v2_save_settings(V2SettingsRequest { mutation_id: "exclude-archive".to_string(), settings: settings.clone() })
+            .unwrap();
         assert_eq!(search(), ["keep.md"]);
 
         settings.excluded_folders = Vec::new();
-        vault.save_settings(settings).unwrap();
+        vault
+            .v2_save_settings(V2SettingsRequest { mutation_id: "include-archive".to_string(), settings })
+            .unwrap();
         assert_eq!(search(), ["Archive/deep/older.md", "Archive/old.md", "keep.md"]);
     }
 
@@ -3961,28 +3298,6 @@ mod tests {
         assert!(matches!(
             v2_check_precondition(&row, &stale_revision),
             Err(V2VaultError::Api(V2ApiErrorKind::BadRequest { .. }))
-        ));
-    }
-
-    #[test]
-    fn create_path_validation_returns_typed_api_error() {
-        let vault = test_vault();
-        let error = vault
-            .create_note(CreateNoteRequest {
-                path: "../bad.md".to_string(),
-                content: "# Bad\n".to_string(),
-                source: None,
-            })
-            .unwrap_err();
-
-        let Error::Api(error) = error else {
-            panic!("expected API error");
-        };
-        assert!(matches!(
-            *error,
-            ApiErrorKind::PathInvalid {
-                reason: PathValidationReason::Traversal
-            }
         ));
     }
 
@@ -4216,131 +3531,48 @@ mod tests {
             response.outcome,
             V2MutationOutcome::Accepted { result: Some(_) }
         ));
-        let status = vault.search_status().unwrap();
+        let status = vault.lock_catalog().search_status().unwrap();
         assert!(status.dirty);
         assert!(status.degraded);
     }
 
     #[test]
-    fn stale_save_returns_typed_conflict_with_draft_metadata() {
-        let vault = test_vault();
-        let created = vault
-            .create_note(CreateNoteRequest {
-                path: "A.md".to_string(),
-                content: "# A\n\nold\n".to_string(),
-                source: None,
-            })
-            .unwrap();
-        let base_seq = created.meta.seq;
-        let base_hash = created.meta.content_hash.clone();
-        vault
-            .save_note(
-                &created.meta.note_id,
-                SaveNoteRequest {
-                    content: "# A\n\naccepted\n".to_string(),
-                    base_seq,
-                    base_hash: base_hash.clone(),
-                    checkpoint: None,
-                },
-            )
-            .unwrap();
-
-        let error = vault
-            .save_note(
-                &created.meta.note_id,
-                SaveNoteRequest {
-                    content: "# A\n\nstale\n".to_string(),
-                    base_seq,
-                    base_hash,
-                    checkpoint: None,
-                },
-            )
-            .unwrap_err();
-
-        let Error::Api(error) = error else {
-            panic!("expected save conflict");
-        };
-        let ApiErrorKind::SaveConflict { current, draft } = *error else {
-            panic!("expected save conflict");
-        };
-        assert_eq!(current.meta.note_id, created.meta.note_id);
-        assert_eq!(draft.note_id, created.meta.note_id);
-        assert_eq!(draft.base_seq, base_seq);
-    }
-
-    #[test]
     fn save_after_external_write_before_watcher_reconcile_preserves_external_bytes() {
         let vault = test_vault();
-        let created = vault
-            .create_note(CreateNoteRequest {
-                path: "A.md".to_string(),
-                content: "# A\n\nbase\n".to_string(),
-                source: None,
-            })
-            .unwrap();
-        fs::write(
-            visible_path(&vault.root, &created.meta.path),
-            "# A\n\nexternal\n",
-        )
-        .unwrap();
+        let created = v2_create(&vault, "A.md", "# A\n\nbase\n");
+        fs::write(vault.root.join("A.md"), "# A\n\nexternal\n").unwrap();
 
-        let result = vault.save_note(
-            &created.meta.note_id,
-            SaveNoteRequest {
-                content: "# A\n\nlocal draft\n".to_string(),
-                base_seq: created.meta.seq,
-                base_hash: created.meta.content_hash.clone(),
-                checkpoint: None,
-            },
-        );
+        let result = v2_save(&vault, &created, "save-local", "# A\n\nlocal draft\n").unwrap();
 
-        assert!(matches!(
-            result,
-            Err(Error::Api(error)) if matches!(*error, ApiErrorKind::SaveConflict { .. })
-        ));
+        assert!(matches!(result.outcome, V2MutationOutcome::Conflict { .. }));
         assert_eq!(
-            fs::read(visible_path(&vault.root, &created.meta.path)).unwrap(),
+            fs::read(vault.root.join("A.md")).unwrap(),
             b"# A\n\nexternal\n"
         );
         assert_eq!(
-            vault.open_note(&created.meta.note_id).unwrap().content,
+            vault.v2_open_note(&created.note_id).unwrap().content,
             "# A\n\nexternal\n"
         );
     }
 
     #[test]
     fn no_op_open_search_and_save_preserve_exact_disk_bytes() {
-        let dir = tempfile::tempdir().unwrap();
         let bytes = b"\xef\xbb\xbf# A\r\none\nlast\r";
-        fs::write(dir.path().join("A.md"), bytes).unwrap();
-        let vault = VaultRuntime::open(
-            0,
-            &VaultConfig {
-                name: "Test".to_string(),
-                path: dir.path().to_path_buf(),
-                state_path: dir.path().join("state"),
-
-            },
-            LogHub::new(crate::logging::LogMode::Off),
-        )
-        .unwrap();
-        let note = vault.lock_catalog().live_notes().unwrap().remove(0);
-        let opened = vault.open_note(&note.note_id).unwrap();
+        let vault = test_vault_with_bytes("A.md", bytes);
+        let note = vault.v2_notes().unwrap().remove(0);
+        let opened = vault.v2_open_note(&note.note_id).unwrap();
         assert_eq!(opened.content, "\u{feff}# A\none\nlast\n");
-        vault.search("A", 10).unwrap();
         vault
-            .save_note(
-                &note.note_id,
-                SaveNoteRequest {
-                    content: opened.content,
-                    base_seq: note.seq,
-                    base_hash: note.content_hash,
-                    checkpoint: None,
-                },
-            )
+            .v2_search(V2SearchRequest {
+                query: "A".to_string(),
+                mode: V2SearchMode::Default,
+                limit: 10,
+                overlays: Vec::new(),
+            })
             .unwrap();
+        v2_save(&vault, &opened.meta, "save-noop", &opened.content).unwrap();
 
-        assert_eq!(fs::read(dir.path().join("A.md")).unwrap(), bytes);
+        assert_eq!(fs::read(vault.root.join("A.md")).unwrap(), bytes);
     }
 
     #[test]
@@ -4485,6 +3717,7 @@ mod tests {
             )
             .unwrap();
         let first_revision = vault
+            .lock_catalog()
             .revisions(&created.note_id)
             .unwrap()
             .into_iter()
@@ -5078,16 +4311,10 @@ mod tests {
     #[test]
     fn retry_repairs_pending_mutation_and_publishes_its_event() {
         let vault = test_vault();
-        let created = vault
-            .create_note(CreateNoteRequest {
-                path: "A.md".to_string(),
-                content: "# A\nold\n".to_string(),
-                source: None,
-            })
-            .unwrap();
+        let created = v2_create(&vault, "A.md", "# A\nold\n");
         let row = vault
             .lock_catalog()
-            .note_row_by_id(&created.meta.note_id)
+            .note_row_by_id(&created.note_id)
             .unwrap()
             .unwrap();
         let current_event_version = vault
@@ -5269,155 +4496,33 @@ mod tests {
 
     #[test]
     fn edited_source_keeps_bom_and_untouched_mixed_line_endings() {
-        let dir = tempfile::tempdir().unwrap();
-        fs::write(dir.path().join("A.md"), b"\xef\xbb\xbf# A\r\none\nlast\r").unwrap();
-        let vault = VaultRuntime::open(
-            0,
-            &VaultConfig {
-                name: "Test".to_string(),
-                path: dir.path().to_path_buf(),
-                state_path: dir.path().join("state"),
+        let vault = test_vault_with_bytes("A.md", b"\xef\xbb\xbf# A\r\none\nlast\r");
+        let note = vault.v2_notes().unwrap().remove(0);
+        let opened = vault.v2_open_note(&note.note_id).unwrap();
+        let saved = v2_save(&vault, &opened.meta, "save-edit", "\u{feff}# A\nchanged\nlast\n").unwrap();
 
-            },
-            LogHub::new(crate::logging::LogMode::Off),
-        )
-        .unwrap();
-        let note = vault.lock_catalog().live_notes().unwrap().remove(0);
-        let saved = vault
-            .save_note(
-                &note.note_id,
-                SaveNoteRequest {
-                    content: "\u{feff}# A\nchanged\nlast\n".to_string(),
-                    base_seq: note.seq,
-                    base_hash: note.content_hash,
-                    checkpoint: None,
-                },
-            )
-            .unwrap();
-
-        assert_eq!(saved.document.unwrap().content, "\u{feff}# A\nchanged\nlast\n");
+        assert!(matches!(saved.outcome, V2MutationOutcome::Accepted { .. }));
         assert_eq!(
-            fs::read(dir.path().join("A.md")).unwrap(),
+            vault.v2_open_note(&note.note_id).unwrap().content,
+            "\u{feff}# A\nchanged\nlast\n"
+        );
+        assert_eq!(
+            fs::read(vault.root.join("A.md")).unwrap(),
             b"\xef\xbb\xbf# A\r\nchanged\nlast\r"
         );
     }
 
     #[test]
     fn invalid_utf8_is_unresolved_and_read_only() {
-        let dir = tempfile::tempdir().unwrap();
         let invalid_bytes = [0xff, 0xfe, 0x61];
-        fs::write(dir.path().join("Bad.md"), invalid_bytes).unwrap();
-        let vault = VaultRuntime::open(
-            0,
-            &VaultConfig {
-                name: "Test".to_string(),
-                path: dir.path().to_path_buf(),
-                state_path: dir.path().join("state"),
-
-            },
-            LogHub::new(crate::logging::LogMode::Off),
-        )
-        .unwrap();
+        let vault = test_vault_with_bytes("Bad.md", &invalid_bytes);
         let row = vault.lock_catalog().all_rows().unwrap().remove(0);
-        assert!(matches!(
-            vault.open_note(&row.meta.note_id),
-            Err(Error::Api(error)) if matches!(
-                *error,
-                ApiErrorKind::UnresolvedNote {
-                    reason: crate::api_types::UnresolvedReason::InvalidUtf8,
-                    ..
-                }
-            )
-        ));
-        assert_eq!(fs::read(dir.path().join("Bad.md")).unwrap(), invalid_bytes);
-    }
-
-    #[test]
-    fn revision_restore_appends_recoverable_event() {
-        let vault = test_vault();
-        let created = vault
-            .create_note(CreateNoteRequest {
-                path: "A.md".to_string(),
-                content: "# A\n\nfirst\n".to_string(),
-                source: None,
-            })
-            .unwrap();
-        vault
-            .save_note(
-                &created.meta.note_id,
-                SaveNoteRequest {
-                    content: "# A\n\nsecond\n".to_string(),
-                    base_seq: created.meta.seq,
-                    base_hash: created.meta.content_hash.clone(),
-                    checkpoint: Some(true),
-                },
-            )
-            .unwrap();
-
-        let revisions = vault.revisions(&created.meta.note_id).unwrap();
-        let oldest = revisions.last().unwrap();
-        let restored = vault
-            .restore_revision(&created.meta.note_id, oldest.event_id)
-            .unwrap();
-
-        assert_eq!(restored.document.unwrap().content, "# A\n\nfirst\n");
-        assert!(vault.revisions(&created.meta.note_id).unwrap().len() >= 3);
-    }
-
-    #[test]
-    fn conflict_draft_can_be_restored_without_losing_current_snapshot() {
-        let vault = test_vault();
-        let created = vault
-            .create_note(CreateNoteRequest {
-                path: "A.md".to_string(),
-                content: "# A\n\nbase\n".to_string(),
-                source: None,
-            })
-            .unwrap();
-        vault
-            .save_note(
-                &created.meta.note_id,
-                SaveNoteRequest {
-                    content: "# A\n\naccepted\n".to_string(),
-                    base_seq: created.meta.seq,
-                    base_hash: created.meta.content_hash.clone(),
-                    checkpoint: None,
-                },
-            )
-            .unwrap();
-        let error = vault
-            .save_note(
-                &created.meta.note_id,
-                SaveNoteRequest {
-                    content: "# A\n\ndraft\n".to_string(),
-                    base_seq: created.meta.seq,
-                    base_hash: created.meta.content_hash,
-                    checkpoint: None,
-                },
-            )
-            .unwrap_err();
-        let Error::Api(error) = error else {
-            panic!("expected conflict");
-        };
-        let ApiErrorKind::SaveConflict { draft, .. } = *error else {
-            panic!("expected conflict");
-        };
-
-        let draft_doc = vault
-            .conflict_draft(&created.meta.note_id, draft.draft_id)
-            .unwrap();
-        assert_eq!(draft_doc.content, "# A\n\ndraft\n");
-        let restored = vault
-            .restore_conflict_draft(&created.meta.note_id, draft.draft_id)
-            .unwrap();
-
-        assert_eq!(restored.document.unwrap().content, "# A\n\ndraft\n");
-        let revisions = vault.revisions(&created.meta.note_id).unwrap();
-        assert!(
-            revisions
-                .iter()
-                .any(|revision| matches!(revision.kind, NoteEventKind::ConflictRecovery))
+        assert!(vault.v2_open_note(&row.meta.note_id).is_err());
+        assert_eq!(
+            row.unresolved_reason.as_deref(),
+            Some("invalid_utf8")
         );
+        assert_eq!(fs::read(vault.root.join("Bad.md")).unwrap(), invalid_bytes);
     }
 
     #[test]
@@ -5503,51 +4608,22 @@ mod tests {
     }
 
     #[test]
-    fn delta_save_writes_snapshot_without_echoing_document() {
+    fn delta_save_writes_snapshot_and_disk_bytes() {
         let vault = test_vault();
-        let created = vault
-            .create_note(CreateNoteRequest {
-                path: "A.md".to_string(),
-                content: "# A\n\nbase\n".to_string(),
-                source: None,
-            })
-            .unwrap();
-        let next = "# A\n\nchanged\n";
+        let created = v2_create(&vault, "A.md", "# A\n\nbase\n");
         let response = vault
-            .save_note_delta(
-                &created.meta.note_id,
-                SaveNoteDeltaRequest {
-                    base_seq: created.meta.seq,
-                    base_hash: created.meta.content_hash.clone(),
-                    content_hash: history::content_hash(next),
-                    edits: vec![TextEdit {
-                        start: TextPosition {
-                            line: 2,
-                            character: 0,
-                        },
-                        end: TextPosition {
-                            line: 2,
-                            character: 4,
-                        },
-                        text: "changed".to_string(),
-                    }],
-                    checkpoint: None,
-                },
-            )
+            .v2_save_note_delta(&created.note_id, v2_delta(&created, "delta-1", "changed", "# A\n\nchanged\n"))
             .unwrap();
 
-        assert!(response.document.is_none());
+        let V2MutationOutcome::Accepted { result: Some(meta) } = response.outcome else {
+            panic!("expected accepted delta save");
+        };
         assert_eq!(
-            history::read_snapshot(
-                &vault.state_root,
-                &created.meta.note_id,
-                &response.meta.content_hash
-            )
-            .unwrap(),
+            history::read_snapshot(&vault.state_root, &created.note_id, &meta.source_hash).unwrap(),
             "# A\n\nchanged\n"
         );
         assert_eq!(
-            fs::read_to_string(visible_path(&vault.root, &response.meta.path)).unwrap(),
+            fs::read_to_string(vault.root.join("A.md")).unwrap(),
             "# A\n\nchanged\n"
         );
     }
@@ -5555,108 +4631,36 @@ mod tests {
     #[test]
     fn stale_delta_save_creates_conflict_draft_from_reconstructed_content() {
         let vault = test_vault();
-        let created = vault
-            .create_note(CreateNoteRequest {
-                path: "A.md".to_string(),
-                content: "# A\n\nbase\n".to_string(),
-                source: None,
-            })
+        let created = v2_create(&vault, "A.md", "# A\n\nbase\n");
+        v2_save(&vault, &created, "save-accepted", "# A\n\naccepted\n").unwrap();
+        let response = vault
+            .v2_save_note_delta(&created.note_id, v2_delta(&created, "delta-stale", "stale", "# A\n\nstale\n"))
             .unwrap();
-        vault
-            .save_note(
-                &created.meta.note_id,
-                SaveNoteRequest {
-                    content: "# A\n\naccepted\n".to_string(),
-                    base_seq: created.meta.seq,
-                    base_hash: created.meta.content_hash.clone(),
-                    checkpoint: None,
-                },
-            )
-            .unwrap();
-        let stale = "# A\n\nstale\n";
-        let error = vault
-            .save_note_delta(
-                &created.meta.note_id,
-                SaveNoteDeltaRequest {
-                    base_seq: created.meta.seq,
-                    base_hash: created.meta.content_hash,
-                    content_hash: history::content_hash(stale),
-                    edits: vec![TextEdit {
-                        start: TextPosition {
-                            line: 2,
-                            character: 0,
-                        },
-                        end: TextPosition {
-                            line: 2,
-                            character: 4,
-                        },
-                        text: "stale".to_string(),
-                    }],
-                    checkpoint: None,
-                },
-            )
-            .unwrap_err();
 
-        let Error::Api(error) = error else {
+        let V2MutationOutcome::Conflict { draft, .. } = response.outcome else {
             panic!("expected save conflict");
         };
-        let ApiErrorKind::SaveConflict { draft, .. } = *error else {
-            panic!("expected save conflict");
-        };
-        let draft = vault
-            .conflict_draft(&created.meta.note_id, draft.draft_id)
-            .unwrap();
+        let draft = vault.v2_open_conflict_draft(&created.note_id, draft.draft_id).unwrap();
         assert_eq!(draft.content, "# A\n\nstale\n");
     }
 
     #[test]
     fn delta_hash_mismatch_mutates_nothing() {
         let vault = test_vault();
-        let created = vault
-            .create_note(CreateNoteRequest {
-                path: "A.md".to_string(),
-                content: "# A\n\nbase\n".to_string(),
-                source: None,
-            })
-            .unwrap();
-        let error = vault
-            .save_note_delta(
-                &created.meta.note_id,
-                SaveNoteDeltaRequest {
-                    base_seq: created.meta.seq,
-                    base_hash: created.meta.content_hash.clone(),
-                    content_hash: history::content_hash("# wrong\n"),
-                    edits: vec![TextEdit {
-                        start: TextPosition {
-                            line: 2,
-                            character: 0,
-                        },
-                        end: TextPosition {
-                            line: 2,
-                            character: 4,
-                        },
-                        text: "changed".to_string(),
-                    }],
-                    checkpoint: None,
-                },
-            )
-            .unwrap_err();
+        let created = v2_create(&vault, "A.md", "# A\n\nbase\n");
+        assert!(vault
+            .v2_save_note_delta(&created.note_id, v2_delta(&created, "delta-bad", "changed", "# wrong\n"))
+            .is_err());
 
-        assert!(matches!(error, Error::BadRequest(_)));
-        assert_eq!(
-            vault.open_note(&created.meta.note_id).unwrap().content,
-            "# A\n\nbase\n"
-        );
-        assert_eq!(
-            vault.open_note(&created.meta.note_id).unwrap().meta.seq,
-            created.meta.seq
-        );
+        let opened = vault.v2_open_note(&created.note_id).unwrap();
+        assert_eq!(opened.content, "# A\n\nbase\n");
+        assert_eq!(opened.meta.revision, created.revision);
     }
 
     #[test]
     fn uploaded_images_are_vault_scoped_assets() {
         let vault = test_vault();
-        let uploaded = vault.upload_image(b"webp").unwrap();
+        let uploaded = vault.v2_upload_image("upload-1", b"webp").unwrap();
 
         assert!(uploaded.name.starts_with("z-images/"));
         assert_eq!(vault.read_asset(&uploaded.name).unwrap(), b"webp");
@@ -5753,7 +4757,6 @@ mod tests {
         );
     }
 
-    #[cfg(unix)]
     #[test]
     fn legacy_state_migration_rejects_symlinked_children() {
         use std::os::unix::fs::symlink;
@@ -5805,7 +4808,6 @@ mod tests {
         assert!(!state_path.join("vault.db").exists());
     }
 
-    #[cfg(unix)]
     #[test]
     fn legacy_state_migration_rejects_symlinked_root() {
         use std::os::unix::fs::symlink;
@@ -5979,7 +4981,6 @@ mod tests {
         VaultRuntime::open(0, &config_for(&root, state.path().join("second")), logs()).unwrap();
     }
 
-    #[cfg(unix)]
     #[test]
     fn second_open_through_a_symlinked_root_is_rejected() {
         let dir = tempfile::tempdir().unwrap();
@@ -6005,19 +5006,28 @@ mod tests {
         ]);
         let order = |vault: &VaultRuntime| {
             vault
-                .search("needle", 10)
+                .v2_search(V2SearchRequest {
+                    query: "needle".to_string(),
+                    mode: V2SearchMode::Default,
+                    limit: 10,
+                    overlays: Vec::new(),
+                })
                 .unwrap()
+                .hits
                 .into_iter()
-                .map(|hit| hit.note.path)
+                .map(|hit| hit.path)
                 .collect::<Vec<_>>()
         };
         assert_eq!(order(&vault), ["title.md", "body.md"]);
         vault
-            .save_settings(Settings {
-                search_title_weight: 0.0,
-                search_heading_weight: 0.0,
-                search_content_weight: 50.0,
-                ..Settings::default()
+            .v2_save_settings(V2SettingsRequest {
+                mutation_id: "weights".to_string(),
+                settings: Settings {
+                    search_title_weight: 0.0,
+                    search_heading_weight: 0.0,
+                    search_content_weight: 50.0,
+                    ..Settings::default()
+                },
             })
             .unwrap();
         assert_eq!(order(&vault), ["body.md", "title.md"]);
@@ -6043,6 +5053,74 @@ mod tests {
             LogHub::new(crate::logging::LogMode::Off),
         )
         .unwrap()
+    }
+
+    fn test_vault_with_bytes(path: &str, bytes: &[u8]) -> VaultRuntime {
+        let dir = tempfile::tempdir().unwrap().keep();
+        fs::write(dir.join(path), bytes).unwrap();
+        VaultRuntime::open(
+            0,
+            &VaultConfig {
+                name: "Test".to_string(),
+                path: dir.clone(),
+                state_path: dir.join("state"),
+            },
+            LogHub::new(crate::logging::LogMode::Off),
+        )
+        .unwrap()
+    }
+
+    fn v2_create(vault: &VaultRuntime, path: &str, content: &str) -> V2NoteMeta {
+        let response = vault
+            .v2_create_note(V2CreateNoteRequest {
+                mutation_id: format!("create-{path}"),
+                path: path.to_string(),
+                content: content.to_string(),
+                source_hash: history::source_hash(content),
+            })
+            .unwrap();
+        let V2MutationOutcome::Accepted { result: Some(meta) } = response.outcome else {
+            panic!("expected accepted create");
+        };
+        meta
+    }
+
+    fn v2_precondition(meta: &V2NoteMeta) -> V2NotePrecondition {
+        V2NotePrecondition {
+            base_revision: meta.revision,
+            base_source_hash: meta.source_hash.clone(),
+            base_disk_hash: meta.disk_hash.clone(),
+        }
+    }
+
+    fn v2_save(
+        vault: &VaultRuntime,
+        base: &V2NoteMeta,
+        mutation_id: &str,
+        content: &str,
+    ) -> V2Result<V2MutationResponse> {
+        vault.v2_save_note(
+            &base.note_id,
+            V2SaveNoteRequest {
+                mutation_id: mutation_id.to_string(),
+                precondition: v2_precondition(base),
+                content: content.to_string(),
+                source_hash: history::source_hash(content),
+            },
+        )
+    }
+
+    fn v2_delta(base: &V2NoteMeta, mutation_id: &str, text: &str, result: &str) -> V2SaveNoteDeltaRequest {
+        V2SaveNoteDeltaRequest {
+            mutation_id: mutation_id.to_string(),
+            precondition: v2_precondition(base),
+            source_hash: history::source_hash(result),
+            edits: vec![TextEdit {
+                start: TextPosition { line: 2, character: 0 },
+                end: TextPosition { line: 2, character: 4 },
+                text: text.to_string(),
+            }],
+        }
     }
 
     fn test_vault() -> VaultRuntime {

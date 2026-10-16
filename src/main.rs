@@ -315,7 +315,6 @@ mod tests {
 
     #[test]
     fn rejects_non_utf8_port_but_preserves_non_utf8_backup_path() {
-        #[cfg(unix)]
         {
             use std::os::unix::ffi::OsStringExt;
             let non_utf8 = OsString::from_vec(vec![0xff]);

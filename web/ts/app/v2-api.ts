@@ -10,11 +10,8 @@ import type {
   V2MutationResponse,
   V2NoteDocument,
   V2NoteMeta,
-  V2QuickOpenRequest,
-  V2QuickOpenResponse,
   V2RevisionDocument,
   V2RevisionMeta,
-  V2SaveNoteDeltaRequest,
   V2SaveNoteRequest,
   V2RenameNoteRequest,
   V2RestoreConflictRequest,
@@ -32,7 +29,6 @@ import {
   serverInstanceId as toServerInstanceId,
   vaultId as toVaultId,
   type ServerIdentity,
-  type VaultId,
 } from "./identity.ts";
 
 export class V2ApiError extends Error {
@@ -44,10 +40,6 @@ export class V2ApiError extends Error {
     this.name = "V2ApiError";
     this.status = status;
     this.kind = kind;
-  }
-
-  get retryAfterMs(): number | null {
-    return this.kind?.code === "rate_limited" ? this.kind.retryAfterMs : null;
   }
 }
 
@@ -77,18 +69,10 @@ export type V2EventSubscription = {
 };
 
 export type V2VaultClient = {
-  readonly identity: ServerIdentity;
-  readonly vaultId: VaultId;
   bootstrap: (signal?: AbortSignal) => Promise<V2VaultBootstrap>;
-  listNotes: (signal?: AbortSignal) => Promise<V2NoteMeta[]>;
   openNote: (id: string, signal?: AbortSignal) => Promise<V2NoteDocument>;
   createNote: (request: V2CreateNoteRequest, signal?: AbortSignal) => Promise<V2MutationResponse>;
   saveNote: (id: string, request: V2SaveNoteRequest, signal?: AbortSignal) => Promise<V2MutationResponse>;
-  saveNoteDelta: (
-    id: string,
-    request: V2SaveNoteDeltaRequest,
-    signal?: AbortSignal,
-  ) => Promise<V2MutationResponse>;
   renameNote: (
     id: string,
     request: V2RenameNoteRequest,
@@ -114,17 +98,11 @@ export type V2VaultClient = {
     request: V2RestoreConflictRequest,
     signal?: AbortSignal,
   ) => Promise<V2MutationResponse>;
-  settings: (signal?: AbortSignal) => Promise<Settings>;
   saveSettings: (request: V2SettingsRequest, signal?: AbortSignal) => Promise<V2SettingsResponse>;
   search: (request: V2SearchRequest, signal?: AbortSignal) => Promise<V2SearchResponse>;
-  quickOpen: (request: V2QuickOpenRequest, signal?: AbortSignal) => Promise<V2QuickOpenResponse>;
   uploadImage: (mutationId: string, image: Blob, signal?: AbortSignal) => Promise<V2ImageUploadResponse>;
   loadAsset: (name: string, signal?: AbortSignal) => Promise<Blob>;
-  connectEvents: (
-    afterEventVersion: number,
-    handlers: V2EventHandlers,
-    signal?: AbortSignal,
-  ) => V2EventSubscription;
+  connectEvents: (afterEventVersion: number, handlers: V2EventHandlers) => V2EventSubscription;
 };
 
 export type V2ApiClient = {
@@ -275,8 +253,6 @@ export function createV2ApiClient(transport: Partial<V2Transport> = {}): V2ApiCl
       const notePath = (id: string) => `/notes/${encodeURIComponent(toNoteId(id))}`;
 
       return {
-        identity,
-        vaultId: identity.vaultId,
         bootstrap: async (signal) => {
           const value = await get("/bootstrap", decodeV2VaultBootstrap, signal);
           if (value.vault.vaultId !== identity.vaultId) {
@@ -284,7 +260,6 @@ export function createV2ApiClient(transport: Partial<V2Transport> = {}): V2ApiCl
           }
           return value;
         },
-        listNotes: (signal) => get("/notes", decodeV2NoteMetaArray, signal),
         openNote: async (id, signal) => {
           const note = await get(notePath(id), decodeV2NoteDocument, signal);
           assertNoteId(note.meta, id);
@@ -297,12 +272,6 @@ export function createV2ApiClient(transport: Partial<V2Transport> = {}): V2ApiCl
         },
         saveNote: async (id, body, signal) => {
           const result = await send(notePath(id), "PUT", body, decodeV2MutationResponse, signal);
-          assertMutationId(result, body.mutationId);
-          assertMutationIdentity(result, id);
-          return result;
-        },
-        saveNoteDelta: async (id, body, signal) => {
-          const result = await send(notePath(id), "PATCH", body, decodeV2MutationResponse, signal);
           assertMutationId(result, body.mutationId);
           assertMutationIdentity(result, id);
           return result;
@@ -352,7 +321,6 @@ export function createV2ApiClient(transport: Partial<V2Transport> = {}): V2ApiCl
           assertMutationIdentity(result, id);
           return result;
         },
-        settings: (signal) => get("/settings", decodeSettings, signal),
         saveSettings: async (body, signal) => {
           const result = await send("/settings", "PUT", body, decodeV2SettingsResponse, signal);
           if (result.mutationId !== body.mutationId) {
@@ -361,7 +329,6 @@ export function createV2ApiClient(transport: Partial<V2Transport> = {}): V2ApiCl
           return result;
         },
         search: (body, signal) => send("/search", "POST", body, decodeV2SearchResponse, signal, undefined, false),
-        quickOpen: (body, signal) => send("/quick-open", "POST", body, decodeV2QuickOpenResponse, signal, undefined, false),
         uploadImage: async (mutationId, image, signal) => {
           assertMutationIdValue(mutationId);
           const csrf = readCsrfCookie();
@@ -400,8 +367,8 @@ export function createV2ApiClient(transport: Partial<V2Transport> = {}): V2ApiCl
           }
           return response.blob();
         },
-        connectEvents: (after, handlers, signal) =>
-          connectEvents(request, wait, vaultPath, headers(), identity.vaultId, after, handlers, signal),
+        connectEvents: (after, handlers) =>
+          connectEvents(request, wait, vaultPath, headers(), identity.vaultId, after, handlers),
       } satisfies V2VaultClient;
     },
   };
@@ -855,22 +822,6 @@ function decodeRange(value: unknown, name: string, max?: number) {
   return { startUtf16, endUtf16 };
 }
 
-function decodeV2QuickOpenResponse(value: unknown): V2QuickOpenResponse {
-  const body = record(value, "quick-open response");
-  return {
-    hits: array(field(body, "hits"), "hits").map((item) => {
-      const hit = record(item, "quick-open hit");
-      return {
-        noteId: nonEmptyString(field(hit, "noteId"), "noteId"),
-        sourceHash: hash(field(hit, "sourceHash"), "sourceHash", "source"),
-        title: string(field(hit, "title"), "title"),
-        path: string(field(hit, "path"), "path"),
-        score: finiteNumber(field(hit, "score"), "score"),
-      };
-    }),
-  };
-}
-
 function decodeV2ImageUploadResponse(value: unknown): V2ImageUploadResponse {
   const body = record(value, "image response");
   return {
@@ -898,7 +849,6 @@ function connectEvents(
   expectedVaultId: string,
   startingVersion: number,
   handlers: V2EventHandlers,
-  externalSignal?: AbortSignal,
 ): V2EventSubscription {
   let cursor = integer(startingVersion, "after event version");
   let closed = false;
@@ -910,11 +860,6 @@ function connectEvents(
       controller.abort();
     }
   };
-  if (externalSignal?.aborted) {
-    stop();
-  } else {
-    externalSignal?.addEventListener("abort", stop, { once: true });
-  }
   void (async () => {
     while (!closed) {
       try {
@@ -983,7 +928,6 @@ function connectEvents(
         }
       }
     }
-    externalSignal?.removeEventListener("abort", stop);
   })();
   return { close: stop };
 }

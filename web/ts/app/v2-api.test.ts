@@ -104,7 +104,6 @@ describe("v2 API client", () => {
       jsonResponse({ meta: note, content: "# Note\n" }),
       jsonResponse(mutationResponse("create-1")),
       jsonResponse(mutationResponse("save-1")),
-      jsonResponse(mutationResponse("delta-1")),
       jsonResponse(mutationResponse("rename-1")),
       jsonResponse(mutationResponse("delete-1")),
       jsonResponse([]),
@@ -112,10 +111,8 @@ describe("v2 API client", () => {
       jsonResponse(mutationResponse("restore-1")),
       jsonResponse({ draft: conflictMeta("note/id"), content: "# Draft\n" }),
       jsonResponse(mutationResponse("restore-draft-1")),
-      jsonResponse(settings()),
       jsonResponse({ mutationId: "settings-1", settings: settings() }),
       jsonResponse({ hits: [], overlayCoverage: { status: "complete" } }),
-      jsonResponse({ hits: [] }),
       jsonResponse({ mutationId: "image-1", name: "z-images/a.webp", markdown: "![[a.webp]]" }),
       new Response("image", { headers: responseHeaders("image/webp") }),
     ];
@@ -135,7 +132,6 @@ describe("v2 API client", () => {
     await vault.openNote("note/id");
     await vault.createNote({ mutationId: "create-1", path: "New.md", content: "# New\n", sourceHash });
     await vault.saveNote("note/id", { mutationId: "save-1", precondition: precondition(), content: "# Saved\n", sourceHash });
-    await vault.saveNoteDelta("note/id", { mutationId: "delta-1", precondition: precondition(), sourceHash, edits: [] });
     await vault.renameNote("note/id", { mutationId: "rename-1", precondition: precondition(), path: "Renamed.md" });
     await vault.deleteNote("note/id", { mutationId: "delete-1", precondition: precondition() });
     await vault.listRevisions("note/id");
@@ -143,10 +139,8 @@ describe("v2 API client", () => {
     await vault.restoreRevision("note/id", 1, { mutationId: "restore-1", precondition: precondition() });
     await vault.openConflictDraft("note/id", 7);
     await vault.restoreConflictDraft("note/id", 7, { mutationId: "restore-draft-1", precondition: precondition() });
-    await vault.settings();
     await vault.saveSettings({ mutationId: "settings-1", settings: settings() });
     await vault.search({ query: "needle", mode: "default", limit: 20, overlays: [] });
-    await vault.quickOpen({ query: "", pinnedNoteIds: ["note/id"], recentNoteIds: [], limit: 20 });
     await vault.uploadImage("image-1", new Blob(["webp"], { type: "image/webp" }));
     await vault.loadAsset("z-images/a b.webp");
 
@@ -154,7 +148,6 @@ describe("v2 API client", () => {
       "/api/v2/bootstrap",
       "/api/v2/vaults/vault%20space/notes/note%2Fid",
       "/api/v2/vaults/vault%20space/notes",
-      "/api/v2/vaults/vault%20space/notes/note%2Fid",
       "/api/v2/vaults/vault%20space/notes/note%2Fid",
       "/api/v2/vaults/vault%20space/notes/note%2Fid/rename",
       "/api/v2/vaults/vault%20space/notes/note%2Fid",
@@ -164,9 +157,7 @@ describe("v2 API client", () => {
       "/api/v2/vaults/vault%20space/notes/note%2Fid/conflicts/7",
       "/api/v2/vaults/vault%20space/notes/note%2Fid/conflicts/7/restore",
       "/api/v2/vaults/vault%20space/settings",
-      "/api/v2/vaults/vault%20space/settings",
       "/api/v2/vaults/vault%20space/search",
-      "/api/v2/vaults/vault%20space/quick-open",
       "/api/v2/vaults/vault%20space/images",
       "/api/v2/vaults/vault%20space/assets?name=z-images%2Fa%20b.webp",
     ]);
@@ -174,11 +165,9 @@ describe("v2 API client", () => {
     for (const { init } of fetchCalls.slice(1)) {
       expect(new Headers(init.headers).get("X-Tansu-Server-Instance")).toBe("server-1");
     }
-    expect(at(fetchCalls, 4).init.method).toBe("PATCH");
-    expect(JSON.parse(String(at(fetchCalls, 4).init.body))).toMatchObject({ mutationId: "delta-1", sourceHash });
-    expect(new Headers(at(fetchCalls, 16).init.headers).get("X-Tansu-Mutation-Id")).toBe("image-1");
-    expect(new Headers(at(fetchCalls, 16).init.headers).get("Content-Type")).toBe("image/webp");
-    expect(new Headers(at(fetchCalls, 17).init.headers).get("X-Tansu-Server-Instance")).toBe("server-1");
+    expect(new Headers(at(fetchCalls, 13).init.headers).get("X-Tansu-Mutation-Id")).toBe("image-1");
+    expect(new Headers(at(fetchCalls, 13).init.headers).get("Content-Type")).toBe("image/webp");
+    expect(new Headers(at(fetchCalls, 14).init.headers).get("X-Tansu-Server-Instance")).toBe("server-1");
   });
 
   it("decodes bounded v2 data and rejects incompatible hashes and event flags", () => {
@@ -227,13 +216,13 @@ describe("v2 API client", () => {
 
     let thrown: unknown;
     try {
-      await vault.listNotes();
+      await vault.openNote("note-1");
     } catch (error) {
       thrown = error;
     }
 
     expect(thrown).toBeInstanceOf(V2ApiError);
-    expect(thrown).toMatchObject({ status: 429, retryAfterMs: 25 });
+    expect(thrown).toMatchObject({ status: 429, kind: { code: "rate_limited", retryAfterMs: 25 } });
     expect(isRetryableV2Error(thrown)).toBeTruthy();
     expect(isRetryableV2Error(new V2ProtocolError("bad shape"))).toBeFalsy();
   });
@@ -389,12 +378,12 @@ describe("v2 API client", () => {
     const malformed = createV2ApiClient({
       fetch: (async () => jsonResponse({}, 409)) as typeof fetch,
     });
-    await expect(malformed.forVault("server-1", "vault-1").listNotes()).rejects.toBeInstanceOf(V2ProtocolError);
+    await expect(malformed.forVault("server-1", "vault-1").openNote("note-1")).rejects.toBeInstanceOf(V2ProtocolError);
 
     const nonJson = createV2ApiClient({
       fetch: (async () => new Response("offline", { status: 500, headers })) as typeof fetch,
     });
-    await expect(nonJson.forVault("server-1", "vault-1").listNotes()).rejects.toBeInstanceOf(V2ProtocolError);
+    await expect(nonJson.forVault("server-1", "vault-1").openNote("note-1")).rejects.toBeInstanceOf(V2ProtocolError);
   });
 
   it("rejects response identities and mutation ids that do not match the request", async () => {

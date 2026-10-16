@@ -6,7 +6,6 @@ import {
   DocumentSession,
   InvalidSessionTransitionError,
   type DocumentSessionServices,
-  type SaveEnvelope,
 } from "./document-session.ts";
 import { noteId, serverInstanceId, vaultId, workspaceId } from "./identity.ts";
 import type { DraftJournalRecord } from "./workspace-store.ts";
@@ -37,7 +36,7 @@ describe("document sessions", () => {
       .toThrow("Recovery identity does not match the document session");
   });
 
-  it("keeps clean and dirty edits distinct through auth lock transitions", () => {
+  it("keeps clean and dirty edits distinct", () => {
     const session = new DocumentSession(identity, 1, workspace, sessionServices());
     session.loaded(document(1, "# One\n", 1), { anchor: 1, head: 1 });
     session.edit("# One\n", { anchor: 2, head: 2 });
@@ -45,14 +44,7 @@ describe("document sessions", () => {
     expect(session.state.status).toBe("clean");
     if (session.state.status === "clean") expect(session.state.draft.selection).toStrictEqual({ anchor: 2, head: 2 });
 
-    session.lock();
-    expect(() => session.edit("# Locked\n", null)).toThrow(InvalidSessionTransitionError);
-    session.unlock();
-    expect(session.state.status).toBe("clean");
-
     session.edit("# Draft\n", { anchor: 3, head: 3 });
-    session.lock();
-    session.unlock();
     expect(session.state.status).toBe("dirty");
     expect(() => session.loaded(document(2, "# Later\n", 2))).toThrow(InvalidSessionTransitionError);
   });
@@ -81,14 +73,14 @@ describe("document sessions", () => {
 
   it("serializes saves and coalesces edits against the acknowledged base", async () => {
     const requests: Array<{
-      envelope: SaveEnvelope;
-      resolve: (envelope: SaveEnvelope) => void;
+      response: V2MutationResponse;
+      resolve: (response: V2MutationResponse) => void;
     }> = [];
     const services = sessionServices({
-      save: vi.fn((documentIdentity, generation, request) =>
-        new Promise<SaveEnvelope>((resolve) => {
+      save: vi.fn((_documentIdentity, request) =>
+        new Promise<V2MutationResponse>((resolve) => {
           requests.push({
-            envelope: { identity: documentIdentity, generation, response: accepted(request.mutationId, null) },
+            response: accepted(request.mutationId, null),
             resolve,
           });
         })),
@@ -101,22 +93,16 @@ describe("document sessions", () => {
     await until(() => requests.length === 1);
     session.edit("# Second\n", { anchor: 2, head: 2 });
     const first = at(requests, 0);
-    first.resolve({
-      ...first.envelope,
-      response: accepted(first.envelope.response.mutationId, metadata(2, "# First\n", 2)),
-    });
+    first.resolve(accepted(first.response.mutationId, metadata(2, "# First\n", 2)));
     await until(() => requests.length === 2);
 
     const second = at(requests, 1);
-    expect(second.envelope.response.outcome.state).toBe("accepted");
+    expect(second.response.outcome.state).toBe("accepted");
     expect(services.save).toHaveBeenCalledTimes(2);
-    const secondRequest = at(vi.mocked(services.save).mock.calls, 1)[2];
+    const secondRequest = at(vi.mocked(services.save).mock.calls, 1)[1];
     expect(secondRequest.content).toBe("# Second\n");
     expect(secondRequest.precondition).toMatchObject({ baseRevision: 2 });
-    second.resolve({
-      ...second.envelope,
-      response: accepted(second.envelope.response.mutationId, metadata(3, "# Second\n", 3)),
-    });
+    second.resolve(accepted(second.response.mutationId, metadata(3, "# Second\n", 3)));
     await saving;
 
     expect(session.state.status).toBe("clean");
@@ -132,16 +118,12 @@ describe("document sessions", () => {
     const requests: string[] = [];
     const waits: number[] = [];
     const services = sessionServices({
-      save: vi.fn(async (documentIdentity, generation, request) => {
+      save: vi.fn(async (_documentIdentity, request) => {
         requests.push(request.mutationId);
         if (requests.length === 1) {
           throw new V2ApiError("temporary failure", 503, null);
         }
-        return {
-          identity: documentIdentity,
-          generation,
-          response: accepted(request.mutationId, metadata(2, "# Draft\n", 2)),
-        };
+        return accepted(request.mutationId, metadata(2, "# Draft\n", 2));
       }),
       wait: vi.fn(async (milliseconds) => {
         waits.push(milliseconds);
@@ -159,7 +141,7 @@ describe("document sessions", () => {
     expect(session.state.status).toBe("clean");
   });
 
-  it("locks on an authentication error and unlocks back to the dirty state", async () => {
+  it("locks on an authentication error", async () => {
     const services = sessionServices({
       save: vi.fn(async () => {
         throw new V2ApiError("Authentication required", 401, { code: "auth_required" });
@@ -171,8 +153,6 @@ describe("document sessions", () => {
 
     await session.save();
     expect(session.state.status).toBe("auth-locked");
-    session.unlock();
-    expect(session.state.status).toBe("dirty");
   });
 
   it("preserves canonical content and conflict metadata when a save conflicts", async () => {
@@ -251,12 +231,8 @@ describe("document sessions", () => {
   it("uses a reconciled canonical base when a save is already in flight", async () => {
     let finishSave: (() => void) | undefined;
     const services = sessionServices({
-      save: vi.fn((documentIdentity, generation, request) => new Promise<SaveEnvelope>((resolve) => {
-        finishSave = () => resolve({
-          identity: documentIdentity,
-          generation,
-          response: accepted(request.mutationId, metadata(2, request.content, 2)),
-        });
+      save: vi.fn((_documentIdentity, request) => new Promise<V2MutationResponse>((resolve) => {
+        finishSave = () => resolve(accepted(request.mutationId, metadata(2, request.content, 2)));
       })),
     });
     const session = new DocumentSession(identity, 1, workspace, services);
@@ -324,7 +300,7 @@ describe("document sessions", () => {
     await saving;
 
     expect(services.save).toHaveBeenCalledTimes(1);
-    expect(at(vi.mocked(services.save).mock.calls, 0)[2].content).toBe("# Latest\n");
+    expect(at(vi.mocked(services.save).mock.calls, 0)[1].content).toBe("# Latest\n");
     expect(session.state.status).toBe("clean");
   });
 
@@ -481,13 +457,9 @@ describe("document sessions", () => {
 
   it("resolves pending materialization after the canonical event arrives", async () => {
     const services = sessionServices({
-      save: vi.fn(async (documentIdentity, generation, request) => ({
-        identity: documentIdentity,
-        generation,
-        response: {
-          mutationId: request.mutationId,
-          outcome: { state: "pendingMaterialization" as const, operationId: "operation-1" },
-        },
+      save: vi.fn(async (_documentIdentity, request) => ({
+        mutationId: request.mutationId,
+        outcome: { state: "pendingMaterialization" as const, operationId: "operation-1" },
       })),
     });
     const session = new DocumentSession(identity, 1, workspace, services);
@@ -510,15 +482,11 @@ describe("document sessions", () => {
   it("saves edits made while materialization is pending", async () => {
     let calls = 0;
     const services = sessionServices({
-      save: vi.fn(async (documentIdentity, generation, request) => {
+      save: vi.fn(async (_documentIdentity, request) => {
         calls += 1;
-        return {
-          identity: documentIdentity,
-          generation,
-          response: calls === 1
-            ? { mutationId: request.mutationId, outcome: { state: "pendingMaterialization" as const, operationId: "operation-1" } }
-            : accepted(request.mutationId, metadata(3, request.content, 3)),
-        };
+        return calls === 1
+          ? { mutationId: request.mutationId, outcome: { state: "pendingMaterialization" as const, operationId: "operation-1" } }
+          : accepted(request.mutationId, metadata(3, request.content, 3));
       }),
     });
     const session = new DocumentSession(identity, 1, workspace, services);
@@ -533,24 +501,17 @@ describe("document sessions", () => {
     expect(session.exportSource()).toBe("# Newer draft\n");
   });
 
-  it("represents load failure and auth lock as explicit states", () => {
+  it("represents load failure as an explicit state", () => {
     const unavailable = new DocumentSession(identity, 1, workspace, sessionServices());
     unavailable.markUnavailable(new Error("server offline"));
     expect(unavailable.state.status).toBe("unavailable");
     expect(() => unavailable.exportSource()).toThrow(InvalidSessionTransitionError);
-
-    const locked = new DocumentSession(identity, 1, workspace, sessionServices());
-    locked.loaded(document(1, "# One\n", 1));
-    locked.lock();
-    expect(locked.state.status).toBe("auth-locked");
-    locked.unlock();
-    expect(locked.state.status).toBe("clean");
   });
 
   it("ignores a response from a closed session generation", async () => {
-    let resolveSave: ((envelope: SaveEnvelope) => void) | undefined;
+    let resolveSave: ((response: V2MutationResponse) => void) | undefined;
     const services = sessionServices({
-      save: vi.fn((_documentIdentity, _generation, _request) => new Promise<SaveEnvelope>((resolve) => {
+      save: vi.fn(() => new Promise<V2MutationResponse>((resolve) => {
         resolveSave = resolve;
       })),
     });
@@ -560,11 +521,7 @@ describe("document sessions", () => {
     const saving = session.save();
     await until(() => resolveSave !== undefined);
     session.close();
-    resolveSave?.({
-      identity,
-      generation: 1,
-      response: accepted("mutation-1", metadata(2, "# Draft\n", 2)),
-    });
+    resolveSave?.(accepted("mutation-1", metadata(2, "# Draft\n", 2)));
     await saving;
 
     expect(session.state.status).toBe("saving");
@@ -577,11 +534,7 @@ function sessionServices(overrides: Partial<DocumentSessionServices> = {}): Docu
   return {
     createMutationId: () => `mutation-${nextMutation++}`,
     sourceHash: async (source) => hash(source.length),
-    save: vi.fn(async (documentIdentity, generation, request) => ({
-      identity: documentIdentity,
-      generation,
-      response: accepted(request.mutationId, metadata(2, request.content, 2)),
-    })),
+    save: vi.fn(async (_documentIdentity, request) => accepted(request.mutationId, metadata(2, request.content, 2))),
     retryable: (error) => error instanceof V2ApiError && error.status >= 500,
     wait: async () => {},
     checkpointDraft: vi.fn((_record, _urgency, _onFailure) => undefined),

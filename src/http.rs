@@ -683,13 +683,7 @@ async fn handle_request_inner(request: Request<Incoming>, state: ServerState) ->
 
     let is_api = path.starts_with("/api/");
     if !is_api {
-        return serve_static(&parts.uri).unwrap_or_else(|error| {
-            if matches!(error, Error::NotFound(_)) {
-                HttpResponse::text(404, "not found")
-            } else {
-                HttpResponse::text(500, &error.to_string())
-            }
-        }).into_hyper();
+        return serve_static_response(&parts.uri.to_string()).into_hyper();
     }
 
     let Some(worker_slot) = state.blocking_requests.try_acquire_arc() else {
@@ -1421,13 +1415,7 @@ fn route(app: &App, request: &HttpRequest) -> HttpResponse {
         ).with_no_store();
     }
     let path = if app.setup_mode() && request.path == "/" { "/setup" } else { &request.path };
-    serve_static_path(path).unwrap_or_else(|error| {
-        if matches!(error, Error::NotFound(_)) {
-            HttpResponse::text(404, "not found")
-        } else {
-            HttpResponse::text(500, &error.to_string())
-        }
-    })
+    serve_static_response(path)
 }
 
 fn handle_app_settings(app: &App, request: &HttpRequest) -> HttpResponse {
@@ -1474,8 +1462,14 @@ fn handle_dev_logs(app: &App, request: &HttpRequest) -> HttpResponse {
     }
 }
 
-fn serve_static(uri: &hyper::Uri) -> Result<HttpResponse> {
-    serve_static_path(&uri.to_string())
+fn serve_static_response(path: &str) -> HttpResponse {
+    serve_static_path(path).unwrap_or_else(|error| {
+        if matches!(error, Error::NotFound(_)) {
+            HttpResponse::text(404, "not found")
+        } else {
+            HttpResponse::text(500, &error.to_string())
+        }
+    })
 }
 
 fn serve_static_path(path: &str) -> Result<HttpResponse> {

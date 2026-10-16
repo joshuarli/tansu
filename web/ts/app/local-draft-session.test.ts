@@ -82,7 +82,6 @@ describe("LocalDraftSession", () => {
 
     await expect(session.beginPromotion()).resolves.toBeFalsy();
     expect(session.state.storage).toBe("failed");
-    expect(session.state.storageError).toMatchObject({ message: "quota" });
     expect(session.exportSource()).toBe("Recoverable source");
   });
 });

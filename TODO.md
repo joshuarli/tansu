@@ -1,7 +1,7 @@
 # Tansu2 TODO
 
 Prefix: TNS
-Next: 71
+Next: 81
 
 ### TNS-050 · P3 · Move document state into a per-document controller
 
@@ -83,3 +83,93 @@ Next: 71
 - **Recommendation:** Check currency first, and update the test to assert no fetch.
 - **Fix with:** lifecycle-concurrency
 - **Effort:** S
+
+### TNS-071 · P3 · Drop legacy hash formats and one-time state migrations
+
+- **Area:** Dead code
+- **Where:** `src/history.rs:167-253`, `src/reconcile.rs:271-390`, `src/catalog.rs:196-240`, `src/catalog.rs:350-368`, `src/vault.rs:233-282`, `src/vault.rs` `.tansu` legacy state copy, `src/auth.rs:18,290-306`, `docs/api.md`, `docs/migration.md`
+- **Problem:** Three source-hash generations and two disk-hash generations are stored and compared, and idempotent retry hashes each payload twice. The `.tansu/` state copy, the search-weights migration, and the token-hash `user_version` migration each serve one past layout. The repo is months old at 0.1.0. Removing them breaks or resets any catalog written before blake3-v3, so it needs the owner to confirm no installed state predates the current formats.
+- **Recommendation:** After confirming, delete the legacy hash functions, `migrate_current_hashes`, the `.tansu` copy with its tests, and both migrations.
+- **Fix with:** dead-code-archaeology
+- **Effort:** M
+
+### TNS-072 · P3 · Remove quick-open end to end
+
+- **Area:** Dead code
+- **Where:** `crates/tansu-search/src/quick_open.rs`, `src/search.rs`, `src/vault.rs` `v2_quick_open`, `src/api.rs`, `docs/api.md`, `Cargo.toml` `nucleo-matcher`
+- **Problem:** The web client no longer decodes or calls the endpoint and no UI opens a quick-open palette. About 500 lines, one dependency, and one API route remain.
+- **Recommendation:** Delete the route, the vault and search plumbing, the crate module, the `nucleo-matcher` dependency, and the API doc section, unless a quick-open UI is planned.
+- **Fix with:** dead-code-archaeology
+- **Effort:** M
+
+### TNS-073 · P3 · Drop runtime decoders for same-origin API and IndexedDB records
+
+- **Area:** Types
+- **Where:** `web/ts/app/v2-api.ts` response decoders, `web/ts/app/workspace-store.ts` record decoders and `ClientStorageFailureError`, `docs/architecture.md`
+- **Problem:** About 580 lines re-validate JSON from the server that ships this bundle, and about 250 lines re-validate records this code wrote. The generated types and the Rust tests already pin the shapes. Nothing reads `ClientStorageFailureError.kind`. The cost is a named protocol error for a stale tab after a server upgrade.
+- **Recommendation:** Keep header checks, echo assertions, error-code parsing, and the `formatVersion` gate; cast the rest to the generated types.
+- **Fix with:** api-surface-and-module-boundaries
+- **Effort:** M
+
+### TNS-074 · P3 · Remove the search service thread and the crash-safe index swap
+
+- **Area:** Architecture
+- **Where:** `crates/tansu-search/src/service.rs`, `src/search.rs`, `docs/performance.md`
+- **Problem:** The host mutex serializes every call, so at most one message is ever in flight and coalescing, queue-full overflow, and the 4 ms coalesce wait never help. The rebuild's rename, backup, and fsync recovery protects a derived index. The 743 ms to 45 ms result may depend on the thread, which is unproven.
+- **Recommendation:** Measure with the idle-host `make bench` first. If the target holds, call the index directly under the host mutex and rebuild by discarding on a crash.
+- **Fix with:** lifecycle-concurrency
+- **Effort:** M
+
+### TNS-075 · P3 · Remove the API version and build-id scheme
+
+- **Area:** Architecture
+- **Where:** `src/api.rs:12`, `src/http.rs:598-647`, `src/http.rs:1414-1422`, `web/ts/app/v2-api.ts`, `docs/api.md`
+- **Problem:** No V1 client exists, yet three places still return `api_version_unsupported`, the version is stated four times, and the build id is checked only for being non-empty. Server and client ship as one embedded build.
+- **Recommendation:** Delete the dead `API_VERSION`, the unreachable branch at `http.rs:1414`, and then the headers, the typed error, and the client check.
+- **Fix with:** api-surface-and-module-boundaries
+- **Effort:** S
+
+### TNS-076 · P3 · Remove tooling nothing names
+
+- **Area:** Build
+- **Where:** `scripts/test-package.py`, `Makefile` `test-package` and `coverage*`, `deno.json` coverage tasks, `package.json` `@vitest/coverage-v8`, `vitest.config.ts` coverage block, `scripts/artifact-hash.mjs`, `Makefile` `test-acceptance`, `web/ts/e2e/server.test.ts`, `docs/development.md`
+- **Problem:** A 242-line Python smoke script, three coverage targets with thresholds nothing enforces, and a recorded artifact hash with no release workflow to consume it. The empty-PATH release run is the only behavior lost.
+- **Recommendation:** Delete them and the doc lines. Keep `ACCEPTANCE_SERVER_BINARY`.
+- **Fix with:** dead-code-archaeology
+- **Effort:** S
+
+### TNS-077 · P3 · Retire or delete the stale visual review script
+
+- **Area:** Tests
+- **Where:** `bench/visual-review.mjs`, `docs/browser-support.md:15-17`
+- **Problem:** The 582-line script waits on `.quick-open-panel` and `.sidebar .note-row`, which no longer exist in `web/ts/view.ts`. It has no target and no assertion.
+- **Recommendation:** Delete it and the doc paragraph.
+- **Fix with:** dead-code-archaeology
+- **Effort:** S
+
+### TNS-078 · P4 · Remove the Json log mode and colorized pretty formatter
+
+- **Area:** Operability
+- **Where:** `src/logging.rs:15-35,329-636`, `docs/logging.md`
+- **Problem:** `json` is used by no script, and the pretty summary hand-lists about 20 event kinds that must track emitters and duplicates the payload dump. About 300 lines plus 110 lines of tests.
+- **Recommendation:** Delete `Json` and the summary, and print the raw fields.
+- **Fix with:** none
+- **Effort:** S
+
+### TNS-079 · P4 · Collapse speculative editor seams
+
+- **Area:** Architecture
+- **Where:** `web/ts/editor/tansu-extensions.ts`, `web/ts/editor/codemirror-adapter.ts:411-525`, `web/ts/editor/harness/`, `web/ts/editor/tests/large-note-bench.test.ts`, `docs/editor.md:174-181`
+- **Problem:** The `EditorExtension` union has one configuration and the adapter filters and diffs it on every render. The harness is not wired to any target. The jsdom large-note timing is cited nowhere.
+- **Recommendation:** Replace the union with plain config fields and delete the harness and the bench test.
+- **Fix with:** api-surface-and-module-boundaries
+- **Effort:** S
+
+### TNS-080 · P3 · Remove the test-only service seam and the hand-written store fake
+
+- **Area:** Tests
+- **Where:** `web/ts/app/services.ts`, `web/ts/app/workspace-store.ts:331-390`, `web/ts/app.test.ts:2363-2465`
+- **Problem:** Three type declarations and four curried factories carry one decision, and only tests pass non-default values. `app.test.ts` keeps a 100-line copy of store semantics although `fake-indexeddb` is already a dev dependency.
+- **Recommendation:** Run the app tests against `fake-indexeddb` and delete the seam and the fake.
+- **Fix with:** renovate-tests
+- **Effort:** M

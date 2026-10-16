@@ -216,7 +216,7 @@ export default defineConfig({
   },
   overrides: [
     {
-      files: ["**/*.test.ts", "**/e2e/**/*.ts", "**/test-helper.ts", "**/search-cli.ts"],
+      files: ["**/*.test.ts", "**/e2e/**/*.ts"],
       rules: {
         "no-empty-function": "off",
       },
@@ -234,25 +234,7 @@ export default defineConfig({
       },
     },
     {
-      files: ["vitest.config.ts", "vitest.*.config.ts", "vite.config.ts", "vite.*.config.ts"],
-      rules: {
-        "import/no-default-export": "off",
-      },
-    },
-    {
-      files: ["web/ts/e2e/global-setup.ts"],
-      rules: {
-        "import/no-default-export": "off",
-      },
-    },
-    {
-      files: ["**/*.tsx"],
-      rules: {
-        "no-unassigned-vars": "off",
-      },
-    },
-    {
-      files: ["**/*.test.ts", "**/*.test.tsx"],
+      files: ["**/*.test.ts"],
       rules: {
         "vitest/prefer-called-once": "off",
         "vitest/prefer-called-with": "off",

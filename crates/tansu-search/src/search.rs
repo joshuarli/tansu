@@ -16,7 +16,7 @@ use crate::index::IndexManager;
 use crate::schema::doc_text;
 use crate::tokenizer::{DiacriticFilter, FerrisearchTokenizer};
 use crate::types::{
-    ExcerptRange, FieldScoreBreakdown, Fuzziness, NoteRange, SearchMode,
+    ExcerptRange, Fuzziness, NoteRange, SearchMode,
     SearchOptions, SearchResult, SearchWeights,
 };
 
@@ -158,15 +158,13 @@ fn build_search_query(
                                 boost,
                             )),
                         ));
-                        if term.len() >= options.prefix_length.get() {
-                            queries.push((
-                                Occur::Should,
-                                Box::new(BoostQuery::new(
-                                    Box::new(PhrasePrefixQuery::new(vec![exact_term.clone()])),
-                                    boost * 0.8,
-                                )),
-                            ));
-                        }
+                        queries.push((
+                            Occur::Should,
+                            Box::new(BoostQuery::new(
+                                Box::new(PhrasePrefixQuery::new(vec![exact_term.clone()])),
+                                boost * 0.8,
+                            )),
+                        ));
                         if name == &"content" && fuzziness != Fuzziness::Disabled {
                             let distance = fuzziness.distance_for(term);
                             if distance > 0 {
@@ -272,16 +270,6 @@ fn make_result(
         .first()
         .map(|matched| utf16_range(&content, matched.range.clone()))
         .transpose()?;
-    let field_scores = options.score_breakdown.then(|| {
-        field_scores(
-            index,
-            &document,
-            terms,
-            fuzziness,
-            options.mode == SearchMode::TypoOnly,
-            &options.weights,
-        )
-    });
     Ok(Some(SearchResult {
         note_id,
         revision,
@@ -289,7 +277,6 @@ fn make_result(
         title,
         path,
         score,
-        field_scores,
         matched_terms: terms.to_vec(),
         excerpt,
         excerpt_ranges,
@@ -315,50 +302,6 @@ fn has_fuzzy_field_match(
                 .collect::<Vec<_>>()
         })
         .any(|text| !find_fuzzy_matches(text, terms, fuzziness).is_empty())
-}
-
-fn field_scores(
-    index: &IndexManager,
-    doc: &TantivyDocument,
-    terms: &[String],
-    fuzziness: Fuzziness,
-    fuzzy_only: bool,
-    weights: &SearchWeights,
-) -> FieldScoreBreakdown {
-    let mut scores = FieldScoreBreakdown::default();
-    for (name, field) in index.fields().text_fields() {
-        let text = doc_text(doc, field);
-        let field_terms = tokenize_query_text(&text)
-            .into_iter()
-            .map(|(_, term)| term)
-            .collect::<Vec<_>>();
-        let matched = terms
-            .iter()
-            .filter(|term| {
-                let term: &String = term;
-                let exact = field_terms.iter().any(|word| word == term);
-                if fuzzy_only {
-                    exact
-                        || !find_fuzzy_matches(&text, std::slice::from_ref(term), fuzziness)
-                            .is_empty()
-                } else {
-                    exact || field_terms
-                        .iter()
-                        .any(|word| word.starts_with(&term[..]))
-                }
-            })
-            .count() as f32;
-        let score = matched * field_weight(name, weights);
-        match name {
-            "title" => scores.title = score,
-            "path" => scores.path = score,
-            "headings" => scores.headings = score,
-            "tags" => scores.tags = score,
-            "content" => scores.content = score,
-            _ => unreachable!(),
-        }
-    }
-    scores
 }
 
 fn field_weight(name: &str, weights: &SearchWeights) -> f32 {
@@ -1384,63 +1327,6 @@ mod tests {
         let index = setup_index(vec![doc("a", "Hello world, this is a test document")]);
         let hits = results(&index, "hello test", options());
         assert_eq!(hits[0].excerpt_ranges.len(), 2);
-    }
-
-    #[test]
-    fn score_breakdown_disabled_by_default() {
-        let index = setup_index(vec![doc("a", "hello world")]);
-        assert!(results(&index, "hello", options())[0].field_scores.is_none());
-    }
-
-    #[test]
-    fn score_breakdown_returns_field_scores() {
-        let index = setup_index(vec![make_doc(
-            "a",
-            "notes/hello.md",
-            "hello",
-            "hello body",
-            "",
-            &[],
-            1,
-        )]);
-        let hits = results(
-            &index,
-            "hello",
-            SearchOptions {
-                score_breakdown: true,
-                ..options()
-            },
-        );
-        let fields = hits[0].field_scores.as_ref().unwrap();
-        assert!(fields.title > 0.0);
-        assert!(fields.path > 0.0);
-        assert!(fields.content > 0.0);
-    }
-
-    #[test]
-    fn score_breakdown_headings_field() {
-        let index = setup_index(vec![make_doc("a", "a.md", "a", "body", "Important Topic", &[], 1)]);
-        let fields = results(
-            &index,
-            "important",
-            SearchOptions {
-                score_breakdown: true,
-                ..options()
-            },
-        )[0]
-            .field_scores
-            .as_ref()
-            .unwrap()
-            .clone();
-        assert!(fields.headings > 0.0);
-        assert_eq!(fields.title, 0.0);
-    }
-
-    #[test]
-    fn score_breakdown_directory_field() {
-        let index = setup_index(vec![doc("a", "body")]);
-        assert_eq!(field_weight("path", &SearchWeights::default()), 7.0);
-        assert_eq!(index.document_count(), 1);
     }
 
     #[test]

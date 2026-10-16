@@ -6,7 +6,7 @@ import { startApp, TansuApp } from "./app.ts";
 import { defaultServices, type AppServices } from "./app/services.ts";
 import { canonicalSourceHash } from "./source-hash.ts";
 import { V2ApiError, type V2VaultBootstrap, type V2VaultClient, type V2VaultSnapshot } from "./app/v2-api.ts";
-import { serverInstanceId, vaultId, workspaceId } from "./app/identity.ts";
+import { workspaceId } from "./app/identity.ts";
 import type { EditorConfig } from "./editor/tansu-extensions.ts";
 import { createCodeMirrorEditor, type EditorHandle, type EditorSession, type EditorSnapshot } from "./editor/codemirror-adapter.ts";
 import type {
@@ -17,7 +17,6 @@ import type {
   V2MutationResponse,
   V2NoteDocument,
   V2NoteMeta,
-  V2QuickOpenResponse,
   V2RevisionDocument,
   V2RevisionMeta,
   V2SaveNoteRequest,
@@ -2298,16 +2297,12 @@ describe("v2 desktop shell", () => {
   });
 });
 
-function createTestClient(id: string) {
+function createTestClient() {
   const client = {
-    identity: { serverInstanceId: serverInstanceId("server-1"), vaultId: vaultId(id) },
-    vaultId: vaultId(id),
     bootstrap: vi.fn(async (): Promise<V2VaultBootstrap> => vaultBootstrap([])),
-    listNotes: vi.fn(async () => [] as V2NoteMeta[]),
     openNote: vi.fn(async (note: string) => documentFor(noteMeta(note, `${note}.md`, note), `# ${note}\n`)),
     createNote: vi.fn(async (request: V2CreateNoteRequest) => accepted(request.mutationId, noteMeta("created", request.path, request.path.replace(/\.md$/i, "")))),
     saveNote: vi.fn(async (note: string, request: V2SaveNoteRequest) => accepted(request.mutationId, noteMeta(note, `${note}.md`, note, [], request.precondition.baseRevision + 1, request.sourceHash))),
-    saveNoteDelta: vi.fn(async (note: string, request: V2SaveNoteRequest) => accepted(request.mutationId, noteMeta(note, `${note}.md`, note, [], request.precondition.baseRevision + 1, request.sourceHash))),
     renameNote: vi.fn(async (note: string, request: Parameters<V2VaultClient["renameNote"]>[1]) => accepted(request.mutationId, noteMeta(note, request.path, request.path.replace(/\.md$/i, ""), [], request.precondition.baseRevision + 1, HASH_B))),
     deleteNote: vi.fn(async (_note: string, request: Parameters<V2VaultClient["deleteNote"]>[1]) => ({ mutationId: request.mutationId, outcome: { state: "accepted", result: null } } as V2MutationResponse)),
     listRevisions: vi.fn(async () => [] as V2RevisionMeta[]),
@@ -2315,10 +2310,8 @@ function createTestClient(id: string) {
     openConflictDraft: vi.fn(async (note: string): Promise<V2ConflictDraftDocument> => ({ draft: conflictDraft(note), content: "# Draft\n" })),
     restoreRevision: vi.fn(async (_note: string, _revision: number, request: Parameters<V2VaultClient["restoreRevision"]>[2]) => accepted(request.mutationId, null)),
     restoreConflictDraft: vi.fn(async (_note: string, _draft: number, request: Parameters<V2VaultClient["restoreConflictDraft"]>[2]) => accepted(request.mutationId, null)),
-    settings: vi.fn(async () => settings()),
     saveSettings: vi.fn(async (request: V2SettingsRequest) => ({ mutationId: request.mutationId, settings: request.settings })),
     search: vi.fn(async (_request: V2SearchRequest) => searchResponse([])),
-    quickOpen: vi.fn(async (_request: Parameters<V2VaultClient["quickOpen"]>[0]): Promise<V2QuickOpenResponse> => ({ hits: [] })),
     uploadImage: vi.fn(async (mutationId: string) => ({ mutationId, name: "z-images/a.webp", markdown: "![[a.webp]]" })),
     loadAsset: vi.fn(async () => new Blob(["image"], { type: "image/webp" })),
     eventHandlers: null as Parameters<V2VaultClient["connectEvents"]>[1] | null,
@@ -2336,7 +2329,7 @@ type WorkspaceSeed = Pick<WorkspaceState, "tabs" | "activeTab" | "closedTabs">;
 function testClient(id = DEFAULT_VAULT): TestClient {
   let client = clients.get(id);
   if (client === undefined) {
-    client = createTestClient(id);
+    client = createTestClient();
     clients.set(id, client);
   }
   return client;
@@ -2457,7 +2450,6 @@ function createServices(): AppServices {
       memory.localDrafts.set(record.localDraftId, record);
       return Promise.resolve(true);
     },
-    serverIdentity: (server: string, vault: string) => ({ serverInstanceId: serverInstanceId(server), vaultId: vaultId(vault) }),
   };
   return {
     api: api as unknown as AppServices["api"],
@@ -2465,7 +2457,6 @@ function createServices(): AppServices {
     editor: { createEditor: (_container: HTMLElement, config?: EditorConfig) => createFakeEditor(config) },
     htmlImport,
     workspace,
-    performance: { markNextPaint: () => {}, markPerformance: () => {} },
     storage: { requestPersistent: vi.fn(async () => false) },
   } as unknown as AppServices;
 }
