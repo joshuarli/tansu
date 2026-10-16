@@ -3,15 +3,6 @@
 Prefix: TNS
 Next: 54
 
-### TNS-040 · P2 · Guard benchmark runs against host load
-
-- **Area:** Performance
-- **Where:** `Makefile:103-117`, `docs/performance.md:15-17`
-- **Problem:** The documented benchmark targets collect and record timing results without checking host readiness before and after measurement. Results can be recorded while unrelated load distorts them.
-- **Recommendation:** Gate benchmark runs with `perf-gate-ready` before and after measurement, and discard results when either check reports host load.
-- **Fix with:** benchmark-checklist
-- **Effort:** S
-
 ### TNS-041 · P2 · Bound filesystem watcher trigger backlog
 
 - **Area:** Concurrency

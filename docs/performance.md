@@ -27,6 +27,12 @@ server RSS, queue capacities, and overflow count at idle checkpoints under
 `.work/tmp/bench-results`. Search queue occupancy is not exposed; the runner
 checks the public dirty/degraded state and recorded overflow events.
 
+All three benchmark targets run `perf-gate-ready` before measuring and
+`perf-gate-ready -1` right after. If either check reports a busy host, the
+target deletes the result files written during the run, prints `perf gate
+deferred: host busy`, and exits 75. A deferred run is not a pass. The shared
+recipe is `scripts/perf-gate.sh`.
+
 ## Recorded results
 
 On 2026-10-14, the corrected search-to-painted benchmark measured the original
