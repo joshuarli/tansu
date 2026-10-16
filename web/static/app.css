@@ -1910,6 +1910,7 @@ button.tag-pill:not(:disabled):hover::after {
 }
 
 .search-panel .search-result-row {
+  flex: 0 0 auto;
   overflow: visible;
   gap: 6px;
   min-height: 0;

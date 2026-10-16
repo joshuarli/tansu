@@ -659,6 +659,20 @@ describe("real server harness", () => {
         "#pantry",
       ]);
       await expect(recentRow.locator(".search-result-tags-overflow").textContent()).resolves.toBe("+3");
+      const recentBoxes = await panel.locator(".recent-search-result").evaluateAll((nodes) =>
+        nodes.map((node) => {
+          const row = node.getBoundingClientRect();
+          const content = [...node.children].map((child) => child.getBoundingClientRect());
+          return { top: row.top, bottom: row.bottom, contentBottom: Math.max(...content.map((box) => box.bottom)) };
+        })
+      );
+      expect(recentBoxes.length).toBeGreaterThan(5);
+      for (const [index, box] of recentBoxes.entries()) {
+        expect(box.contentBottom, `recent row ${index} content stays inside its row`).toBeLessThanOrEqual(box.bottom + 0.5);
+        if (index > 0) {
+          expect(box.top, `recent row ${index} starts below the previous row`).toBeGreaterThanOrEqual(recentBoxes[index - 1]!.bottom - 0.5);
+        }
+      }
 
       await panel.locator(".command-input").fill("zephyr");
       const rows = panel.locator(".search-result-row");
