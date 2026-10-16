@@ -3,15 +3,6 @@
 Prefix: TNS
 Next: 54
 
-### TNS-042 · P2 · Validate settings at the backend boundary
-
-- **Area:** Data
-- **Where:** `src/vault.rs:1012-1041`, `src/vault.rs:2717-2723`, `src/api_types.rs:102-114`
-- **Problem:** V2 and Rust callers can persist settings outside the ranges enforced by the browser form. Extreme autosave delays, undo depths, image qualities, or non-finite search weights can then reach application consumers and persist across restarts.
-- **Recommendation:** Define valid settings once and reject invalid values before persisting them, while keeping the existing serialized representation. Whether `undoStackMax` and `imageWebpQuality` reach consumers is TNS-047.
-- **Fix with:** make-invalid-states-unrepresentable
-- **Effort:** S
-
 ### TNS-043 · P2 · Use the platform current-directory value for relative roots
 
 - **Area:** Portability

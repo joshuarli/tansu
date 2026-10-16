@@ -4,7 +4,7 @@ use rusqlite::{Connection, OptionalExtension, Transaction, params};
 
 use crate::api_types::{
     ConflictDraftMeta, NoteEventKind, NoteEventSource, NoteMeta, RevisionMeta,
-    SearchStatus, Settings, UnresolvedReason,
+    SearchStatus, Settings, UnresolvedReason, ValidatedSettings,
 };
 use crate::{Error, Result};
 
@@ -961,10 +961,10 @@ impl Catalog {
         }
     }
 
-    pub fn save_settings(&mut self, settings: &Settings) -> Result<()> {
+    pub fn save_settings(&mut self, settings: &ValidatedSettings) -> Result<()> {
         self.conn.execute(
             "INSERT INTO settings(key, value) VALUES('settings', ?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-            params![serde_json::to_string(settings)?],
+            params![serde_json::to_string(settings.as_settings())?],
         )?;
         self.set_search_dirty(true, false)?;
         self.advance_sync()
@@ -1289,7 +1289,7 @@ mod tests {
             excluded_folders: vec!["Archive".to_string()],
             ..Settings::default()
         };
-        catalog.save_settings(&settings).unwrap();
+        catalog.save_settings(&ValidatedSettings::try_from(settings).unwrap()).unwrap();
         assert_eq!(
             catalog.settings().unwrap().excluded_folders,
             vec!["Archive"]
@@ -1332,6 +1332,23 @@ mod tests {
     }
 
     #[test]
+    fn previously_saved_out_of_range_settings_still_load() {
+        let dir = tempfile::tempdir().unwrap();
+        let catalog = Catalog::open(&dir.path().join("vault.db")).unwrap();
+        catalog
+            .conn
+            .execute(
+                "INSERT INTO settings(key, value) VALUES('settings', ?1)",
+                params![r#"{"autosaveDelayMs":5,"undoStackMax":3,"imageWebpQuality":0.01,"excludedFolders":["a/b"]}"#],
+            )
+            .unwrap();
+        let settings = catalog.settings().unwrap();
+        assert_eq!(settings.autosave_delay_ms, 5);
+        assert_eq!(settings.undo_stack_max, 3);
+        assert_eq!(settings.excluded_folders, vec!["a/b"]);
+    }
+
+    #[test]
     fn malformed_settings_json_is_an_error() {
         let dir = tempfile::tempdir().unwrap();
         let catalog = Catalog::open(&dir.path().join("vault.db")).unwrap();
@@ -1361,7 +1378,7 @@ mod tests {
         for value in ["", "abc", "-1", "1.5"] {
             set_meta(&catalog, "sync_version", value);
             assert!(catalog.sync_version().is_err(), "{value:?}");
-            assert!(catalog.save_settings(&Settings::default()).is_err(), "{value:?}");
+            assert!(catalog.save_settings(&ValidatedSettings::try_from(Settings::default()).unwrap()).is_err(), "{value:?}");
             let stored: String = catalog
                 .conn
                 .query_row("SELECT value FROM vault_meta WHERE key='sync_version'", [], |row| row.get(0))
@@ -1374,7 +1391,7 @@ mod tests {
     fn exhausted_sync_version_is_an_error() {
         let (_dir, mut catalog, _) = open_catalog_with_note();
         set_meta(&catalog, "sync_version", &i64::MAX.to_string());
-        assert!(catalog.save_settings(&Settings::default()).is_err());
+        assert!(catalog.save_settings(&ValidatedSettings::try_from(Settings::default()).unwrap()).is_err());
     }
 
     #[test]

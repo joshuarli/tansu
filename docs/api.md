@@ -152,7 +152,10 @@ Note create, save, delta, rename, delete, and restore responses use
 `accepted` includes the resulting note metadata when applicable;
 `pendingMaterialization` includes an operation ID; `conflict` includes the
 canonical document and the preserved draft metadata.
-Settings writes return `V2SettingsResponse`. Image uploads send raw WebP bytes
+Settings writes return `V2SettingsResponse`. A settings write with a value outside the
+limits in [Configuration](configuration.md#vault-settings-limits) fails with
+`400 bad_request` before anything is persisted or a mutation ID is consumed.
+Image uploads send raw WebP bytes
 with `Content-Type: image/webp` and `X-Tansu-Mutation-Id`. The server stores the
 asset under `z-images/`; `V2ImageUploadResponse` returns its vault-relative name
 and wiki-image Markdown after the asset write completes. Asset reads pass that

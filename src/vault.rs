@@ -16,7 +16,7 @@ use crate::api_types::{
     ApiErrorKind, CreateNoteRequest, NoteDocument, NoteEventKind,
     NoteEventSource, NoteMeta, NoteMutationResponse, RenameNoteRequest, RevisionDocument,
     RevisionMeta, SaveNoteDeltaRequest, SaveNoteRequest, SearchHit, SearchStatus, ServerEvent,
-    ServerEventKind, Settings, TextEdit, TextPosition, V2ApiErrorKind,
+    ServerEventKind, Settings, TextEdit, TextPosition, V2ApiErrorKind, ValidatedSettings,
     V2CreateNoteRequest, V2DeleteNoteRequest, V2MutationOutcome,
     V2MutationResponse, V2NoteDocument, V2NoteMeta, V2NotePrecondition, V2QuickOpenHit,
     V2QuickOpenRequest, V2QuickOpenResponse, V2RenameNoteRequest, V2SearchHit,
@@ -1267,6 +1267,11 @@ impl VaultRuntime {
 
     pub fn v2_save_settings(&self, request: V2SettingsRequest) -> V2Result<V2SettingsResponse> {
         validate_mutation_id(&request.mutation_id)?;
+        let settings = ValidatedSettings::try_from(request.settings.clone()).map_err(|error| {
+            V2VaultError::Api(V2ApiErrorKind::BadRequest {
+                message: error.into_message(),
+            })
+        })?;
         let payload_hash = v2_request_hash("settings", None, &request)?;
         let _op = self.lock_op();
         let mut catalog = self.lock_catalog();
@@ -1286,10 +1291,10 @@ impl VaultRuntime {
             source_hash: None,
             disk_hash: None,
         })?;
-        catalog.save_settings(&request.settings)?;
+        catalog.save_settings(&settings)?;
         let response = V2SettingsResponse {
             mutation_id: request.mutation_id.clone(),
-            settings: request.settings,
+            settings: settings.into_settings(),
         };
         catalog.complete_noop_mutation(
             &request.mutation_id,
@@ -2921,6 +2926,8 @@ impl VaultRuntime {
     }
 
     pub fn save_settings(&self, settings: Settings) -> Result<Settings> {
+        let settings = ValidatedSettings::try_from(settings)
+            .map_err(|error| Error::BadRequest(error.into_message()))?;
         let _op = self.lock_op();
         let mut catalog = self.lock_catalog();
         catalog.save_settings(&settings)?;
@@ -2936,17 +2943,17 @@ impl VaultRuntime {
                     (
                         "settings",
                         serde_json::json!({
-                            "excludedFolders": settings.excluded_folders.len(),
-                            "autosaveDelayMs": settings.autosave_delay_ms,
-                            "undoStackMax": settings.undo_stack_max,
-                            "imageWebpQuality": settings.image_webp_quality,
+                            "excludedFolders": settings.as_settings().excluded_folders.len(),
+                            "autosaveDelayMs": settings.as_settings().autosave_delay_ms,
+                            "undoStackMax": settings.as_settings().undo_stack_max,
+                            "imageWebpQuality": settings.as_settings().image_webp_quality,
                         }),
                     ),
                     ("vault", serde_json::json!(self.index)),
                 ]),
             );
         }
-        Ok(settings)
+        Ok(settings.into_settings())
     }
 
     pub fn search_status(&self) -> Result<SearchStatus> {
@@ -3800,6 +3807,60 @@ mod tests {
             vault.v2_save_settings(changed),
             Err(V2VaultError::Api(V2ApiErrorKind::MutationIdReuse { .. }))
         ));
+    }
+
+    fn invalid_settings_variants() -> Vec<(&'static str, Settings)> {
+        let valid = Settings::default();
+        vec![
+            ("autosave below minimum", Settings { autosave_delay_ms: 149, ..valid.clone() }),
+            ("autosave above maximum", Settings { autosave_delay_ms: u64::MAX, ..valid.clone() }),
+            ("undo below minimum", Settings { undo_stack_max: 19, ..valid.clone() }),
+            ("undo above maximum", Settings { undo_stack_max: usize::MAX, ..valid.clone() }),
+            ("quality below minimum", Settings { image_webp_quality: 0.05, ..valid.clone() }),
+            ("quality above maximum", Settings { image_webp_quality: 1.5, ..valid.clone() }),
+            ("quality nan", Settings { image_webp_quality: f32::NAN, ..valid.clone() }),
+            ("title weight nan", Settings { search_title_weight: f32::NAN, ..valid.clone() }),
+            ("heading weight infinite", Settings { search_heading_weight: f32::INFINITY, ..valid.clone() }),
+            ("tag weight negative", Settings { search_tag_weight: -1.0, ..valid.clone() }),
+            ("content weight huge", Settings { search_content_weight: 1.0e9, ..valid.clone() }),
+            ("recency boost nan", Settings { recency_boost: f32::NAN, ..valid.clone() }),
+            ("empty excluded folder", Settings { excluded_folders: vec![String::new()], ..valid.clone() }),
+            ("nested excluded folder", Settings { excluded_folders: vec!["a/b".to_string()], ..valid.clone() }),
+            ("dot excluded folder", Settings { excluded_folders: vec!["..".to_string()], ..valid }),
+        ]
+    }
+
+    #[test]
+    fn v2_save_settings_rejects_invalid_values_without_persisting() {
+        let vault = test_vault();
+        let before = serde_json::to_value(vault.settings().unwrap()).unwrap();
+        for (label, settings) in invalid_settings_variants() {
+            let result = vault.v2_save_settings(V2SettingsRequest {
+                mutation_id: "settings-invalid".to_string(),
+                settings,
+            });
+            assert!(
+                matches!(result, Err(V2VaultError::Api(V2ApiErrorKind::BadRequest { .. }))),
+                "{label}"
+            );
+            assert_eq!(serde_json::to_value(vault.settings().unwrap()).unwrap(), before, "{label}");
+        }
+        vault
+            .v2_save_settings(V2SettingsRequest {
+                mutation_id: "settings-invalid".to_string(),
+                settings: Settings { autosave_delay_ms: 150, undo_stack_max: 20, image_webp_quality: 0.1, ..Settings::default() },
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn save_settings_rejects_invalid_values_for_rust_callers() {
+        let vault = test_vault();
+        let before = serde_json::to_value(vault.settings().unwrap()).unwrap();
+        for (label, settings) in invalid_settings_variants() {
+            assert!(matches!(vault.save_settings(settings), Err(Error::BadRequest(_))), "{label}");
+            assert_eq!(serde_json::to_value(vault.settings().unwrap()).unwrap(), before, "{label}");
+        }
     }
 
     #[test]

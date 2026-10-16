@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::ops::RangeInclusive;
 use ts_rs::TS;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -111,6 +112,103 @@ pub struct Settings {
     #[ts(type = "number")]
     pub undo_stack_max: usize,
     pub image_webp_quality: f32,
+}
+
+pub const AUTOSAVE_DELAY_MS_RANGE: RangeInclusive<u64> = 150..=3_600_000;
+pub const UNDO_STACK_MAX_RANGE: RangeInclusive<usize> = 20..=10_000;
+pub const IMAGE_WEBP_QUALITY_RANGE: RangeInclusive<f32> = 0.1..=1.0;
+pub const SEARCH_WEIGHT_RANGE: RangeInclusive<f32> = 0.0..=1000.0;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InvalidSettings(String);
+
+impl InvalidSettings {
+    pub fn message(&self) -> &str {
+        &self.0
+    }
+
+    pub fn into_message(self) -> String {
+        self.0
+    }
+}
+
+impl std::fmt::Display for InvalidSettings {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for InvalidSettings {}
+
+#[derive(Debug, Clone)]
+pub struct ValidatedSettings(Settings);
+
+impl ValidatedSettings {
+    pub fn as_settings(&self) -> &Settings {
+        &self.0
+    }
+
+    pub fn into_settings(self) -> Settings {
+        self.0
+    }
+}
+
+impl TryFrom<Settings> for ValidatedSettings {
+    type Error = InvalidSettings;
+
+    fn try_from(settings: Settings) -> Result<Self, Self::Error> {
+        for folder in &settings.excluded_folders {
+            if folder.is_empty()
+                || folder == "."
+                || folder == ".."
+                || folder.contains(['/', '\\', '\0'])
+            {
+                return Err(InvalidSettings(format!(
+                    "excludedFolders entries must be single folder names, got {folder:?}"
+                )));
+            }
+        }
+        check_range(
+            "autosaveDelayMs",
+            settings.autosave_delay_ms,
+            &AUTOSAVE_DELAY_MS_RANGE,
+        )?;
+        check_range("undoStackMax", settings.undo_stack_max, &UNDO_STACK_MAX_RANGE)?;
+        check_range(
+            "imageWebpQuality",
+            settings.image_webp_quality,
+            &IMAGE_WEBP_QUALITY_RANGE,
+        )?;
+        check_range("searchTitleWeight", settings.search_title_weight, &SEARCH_WEIGHT_RANGE)?;
+        check_range(
+            "searchHeadingWeight",
+            settings.search_heading_weight,
+            &SEARCH_WEIGHT_RANGE,
+        )?;
+        check_range("searchTagWeight", settings.search_tag_weight, &SEARCH_WEIGHT_RANGE)?;
+        check_range(
+            "searchContentWeight",
+            settings.search_content_weight,
+            &SEARCH_WEIGHT_RANGE,
+        )?;
+        check_range("recencyBoost", settings.recency_boost, &SEARCH_WEIGHT_RANGE)?;
+        Ok(Self(settings))
+    }
+}
+
+fn check_range<T>(field: &str, value: T, range: &RangeInclusive<T>) -> Result<(), InvalidSettings>
+where
+    T: PartialOrd + std::fmt::Display,
+{
+    if range.contains(&value) {
+        Ok(())
+    } else {
+        Err(InvalidSettings(format!(
+            "{field} must be a finite value between {} and {}, got {value}",
+            range.start(),
+            range.end()
+        )))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -830,5 +928,50 @@ mod v2_tests {
                 "update": {"kind": "resyncRequired"}
             })
         );
+    }
+}
+
+#[cfg(test)]
+mod settings_tests {
+    use super::*;
+
+    #[test]
+    fn defaults_and_range_boundaries_are_valid() {
+        assert!(ValidatedSettings::try_from(Settings::default()).is_ok());
+        let low = Settings {
+            autosave_delay_ms: *AUTOSAVE_DELAY_MS_RANGE.start(),
+            undo_stack_max: *UNDO_STACK_MAX_RANGE.start(),
+            image_webp_quality: *IMAGE_WEBP_QUALITY_RANGE.start(),
+            search_title_weight: *SEARCH_WEIGHT_RANGE.start(),
+            ..Settings::default()
+        };
+        assert!(ValidatedSettings::try_from(low).is_ok());
+        let high = Settings {
+            autosave_delay_ms: *AUTOSAVE_DELAY_MS_RANGE.end(),
+            undo_stack_max: *UNDO_STACK_MAX_RANGE.end(),
+            image_webp_quality: *IMAGE_WEBP_QUALITY_RANGE.end(),
+            recency_boost: *SEARCH_WEIGHT_RANGE.end(),
+            ..Settings::default()
+        };
+        assert!(ValidatedSettings::try_from(high).is_ok());
+    }
+
+    #[test]
+    fn serialized_representation_is_unchanged() {
+        let value = serde_json::to_value(Settings::default()).unwrap();
+        assert_eq!(value["autosaveDelayMs"], 900);
+        assert_eq!(value["undoStackMax"], 200);
+        assert_eq!(value["excludedFolders"], serde_json::json!([]));
+        assert!(value["imageWebpQuality"].is_number());
+    }
+
+    #[test]
+    fn rejection_names_the_offending_field() {
+        let error = ValidatedSettings::try_from(Settings {
+            search_tag_weight: f32::NAN,
+            ..Settings::default()
+        })
+        .unwrap_err();
+        assert!(error.message().contains("searchTagWeight"), "{error}");
     }
 }

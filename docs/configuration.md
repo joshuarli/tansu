@@ -29,6 +29,25 @@ history size, and image quality. App-wide settings live under the config home;
 vault catalogs and other durable state live under `tansu/` in `XDG_DATA_HOME`
 or `~/.local/share/tansu/` when unset.
 
+### Vault settings limits
+
+The server validates vault settings once, before saving, for both the HTTP API
+and Rust callers. A value outside these limits is rejected and nothing is
+persisted:
+
+| Field | Valid values |
+| --- | --- |
+| `autosaveDelayMs` | integer, 150 to 3,600,000 (one hour) |
+| `undoStackMax` | integer, 20 to 10,000 |
+| `imageWebpQuality` | finite, 0.1 to 1 |
+| `searchTitleWeight`, `searchHeadingWeight`, `searchTagWeight`, `searchContentWeight`, `recencyBoost` | finite, 0 to 1,000 |
+| `excludedFolders` | each entry is a single folder name: nonempty, not `.` or `..`, no `/`, `\`, or NUL |
+
+The lower bounds match the settings form. The upper bounds and the weight
+range exist only on the server. Settings saved by an earlier version are not
+revalidated on load, so an out-of-range stored value is served unchanged until
+the next save, which must bring it into range.
+
 The app data directory contains stable server and vault identities, catalogs,
 revision snapshots, conflict drafts, and derived search indexes. Vault IDs
 follow the canonical vault root, so renaming a vault does not move its state.
