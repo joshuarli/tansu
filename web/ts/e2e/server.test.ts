@@ -1209,6 +1209,38 @@ describe("real server harness", () => {
     await page.close();
   });
 
+  it("acceptance: the note view and command palette match the canonical light and dark baselines", async () => {
+    for (const theme of ["light", "dark"] as const) {
+      const context = await browser!.newContext({
+        viewport: { width: 1280, height: 800 },
+        deviceScaleFactor: 1,
+        locale: "en-US",
+        timezoneId: "UTC",
+        reducedMotion: "reduce",
+        colorScheme: theme,
+      });
+      await context.addInitScript((value) => window.localStorage.setItem("tansu2.theme.v1", value), theme);
+      const page = await context.newPage();
+      await page.goto(baseUrl);
+      await page.waitForSelector(".main");
+      await openSearchNote(page, "visual");
+      await page.waitForFunction(() => {
+        const image = document.querySelector<HTMLImageElement>("#editor-mount .cm-atomic-image img");
+        return image?.complete === true && image.naturalWidth > 0;
+      });
+      await page.keyboard.press(process.platform === "darwin" ? "Meta+ArrowUp" : "Control+Home");
+      await page.mouse.move(1279, 0);
+      await page.evaluate(() => document.fonts.ready);
+      await expectMatchesBaseline(page, `${theme}-note`);
+
+      await page.keyboard.press(`${shortcutModifier()}+k`);
+      await page.locator(".command-panel .command-input").waitFor({ state: "visible" });
+      await page.evaluate(() => document.fonts.ready);
+      await expectMatchesBaseline(page, `${theme}-command-palette`);
+      await context.close();
+    }
+  }, 120_000);
+
   it("acceptance: a long session of opening, closing, and pasting leaks no workers, blob URLs, or editors", async () => {
     const page = await newLoggedPage();
     await page.addInitScript(() => {
@@ -1773,4 +1805,84 @@ async function pasteImage(page: Page): Promise<void> {
     Object.defineProperty(paste, "clipboardData", { value: clipboard });
     content.dispatchEvent(paste);
   });
+}
+
+const BASELINE_MAX_DIFFERING_PIXEL_RATIO = 0.002;
+const BASELINE_CHANNEL_TOLERANCE = 8;
+
+async function expectMatchesBaseline(page: Page, name: string): Promise<void> {
+  const directory = join(
+    process.cwd(),
+    "web",
+    "ts",
+    "e2e",
+    "baselines",
+    `${process.env["TANSU2_E2E_BROWSER"] ?? "chromium"}-${process.platform}`,
+  );
+  const baselinePath = join(directory, `${name}.png`);
+  const actual = await page.screenshot({ animations: "disabled", caret: "hide" });
+  if (process.env["TANSU2_UPDATE_BASELINES"] === "1") {
+    await mkdir(directory, { recursive: true });
+    await writeFile(baselinePath, actual);
+    return;
+  }
+  const expected = await readFile(baselinePath).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === "ENOENT") {
+      throw new Error(`missing baseline ${baselinePath}; create it with TANSU2_UPDATE_BASELINES=1`);
+    }
+    throw error;
+  });
+  const comparison = await comparePngs(expected, actual);
+  if (comparison.size === "different" || comparison.differingRatio > BASELINE_MAX_DIFFERING_PIXEL_RATIO) {
+    const actualPath = join(process.cwd(), ".work", "tmp", `baseline-actual-${name}.png`);
+    await mkdir(join(process.cwd(), ".work", "tmp"), { recursive: true });
+    await writeFile(actualPath, actual);
+    throw new Error(
+      `${name} differs from ${baselinePath}: ${JSON.stringify(comparison)}; actual written to ${actualPath}`,
+    );
+  }
+}
+
+async function comparePngs(
+  expected: Buffer,
+  actual: Buffer,
+): Promise<{ size: "same" | "different"; differingRatio: number }> {
+  const page = await browser!.newPage();
+  try {
+    return await page.evaluate(async ({ left, right, tolerance }) => {
+      const pixels = async (base64: string) => {
+        const image = new Image();
+        image.src = `data:image/png;base64,${base64}`;
+        await image.decode();
+        const canvas = document.createElement("canvas");
+        canvas.width = image.naturalWidth;
+        canvas.height = image.naturalHeight;
+        const context = canvas.getContext("2d");
+        if (context === null) throw new Error("2D canvas is unavailable");
+        context.drawImage(image, 0, 0);
+        return context.getImageData(0, 0, canvas.width, canvas.height);
+      };
+      const a = await pixels(left);
+      const b = await pixels(right);
+      if (a.width !== b.width || a.height !== b.height) {
+        return { size: "different" as const, differingRatio: 1 };
+      }
+      let differing = 0;
+      for (let index = 0; index < a.data.length; index += 4) {
+        const delta = Math.max(
+          Math.abs(a.data[index]! - b.data[index]!),
+          Math.abs(a.data[index + 1]! - b.data[index + 1]!),
+          Math.abs(a.data[index + 2]! - b.data[index + 2]!),
+        );
+        if (delta > tolerance) differing += 1;
+      }
+      return { size: "same" as const, differingRatio: differing / (a.width * a.height) };
+    }, {
+      left: expected.toString("base64"),
+      right: actual.toString("base64"),
+      tolerance: BASELINE_CHANNEL_TOLERANCE,
+    });
+  } finally {
+    await page.close();
+  }
 }
