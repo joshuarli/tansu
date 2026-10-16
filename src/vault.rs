@@ -1,5 +1,6 @@
 use std::fs::{self, File};
 use std::collections::{HashMap, VecDeque};
+use std::ops::ControlFlow;
 use std::path::{Component, Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, Sender, SyncSender, TryRecvError, TrySendError};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -137,7 +138,7 @@ struct SearchWorker {
 struct WatcherWorker {
     stop: Arc<StopSignal>,
     watcher: RecommendedWatcher,
-    wake: Sender<()>,
+    wake: WatcherTrigger,
     handle: thread::JoinHandle<()>,
 }
 
@@ -855,7 +856,37 @@ fn run_search_worker(
     }
 }
 
+#[derive(Clone)]
+struct WatcherTrigger(SyncSender<()>);
+
+impl WatcherTrigger {
+    fn notify(&self) {
+        match self.0.try_send(()) {
+            Ok(()) | Err(TrySendError::Full(())) | Err(TrySendError::Disconnected(())) => {}
+        }
+    }
+}
+
+fn watcher_trigger() -> (WatcherTrigger, Receiver<()>) {
+    let (tx, rx) = mpsc::sync_channel(1);
+    (WatcherTrigger(tx), rx)
+}
+
 fn run_watcher_worker(runtime: Weak<VaultRuntime>, events: Receiver<()>, stop: Arc<StopSignal>) {
+    drain_watcher_triggers(&events, &stop, || match runtime.upgrade() {
+        Some(runtime) => {
+            let _ = runtime.reconcile_from_watcher();
+            ControlFlow::Continue(())
+        }
+        None => ControlFlow::Break(()),
+    });
+}
+
+fn drain_watcher_triggers(
+    events: &Receiver<()>,
+    stop: &StopSignal,
+    mut reconcile: impl FnMut() -> ControlFlow<()>,
+) {
     while events.recv().is_ok() {
         while events.recv_timeout(Duration::from_millis(150)).is_ok() {
             if stop.is_stopped() {
@@ -865,10 +896,9 @@ fn run_watcher_worker(runtime: Weak<VaultRuntime>, events: Receiver<()>, stop: A
         if stop.is_stopped() {
             return;
         }
-        let Some(runtime) = runtime.upgrade() else {
+        if reconcile().is_break() {
             return;
-        };
-        let _ = runtime.reconcile_from_watcher();
+        }
     }
 }
 
@@ -992,8 +1022,8 @@ impl VaultRuntime {
         }
         let root = self.root.clone();
         let state_root = self.state_root.clone();
-        let (tx, rx) = mpsc::channel::<()>();
-        let wake = tx.clone();
+        let (trigger, rx) = watcher_trigger();
+        let wake = trigger.clone();
         let mut watcher =
             notify::recommended_watcher(move |result: notify::Result<notify::Event>| {
                 if let Ok(event) = result {
@@ -1003,7 +1033,7 @@ impl VaultRuntime {
                     }) {
                         return;
                     }
-                    let _ = tx.send(());
+                    trigger.notify();
                 }
             })?;
         watcher.watch(&root, RecursiveMode::Recursive)?;
@@ -1039,7 +1069,7 @@ impl VaultRuntime {
             } = worker;
             stop.stop();
             drop(watcher);
-            let _ = wake.send(());
+            wake.notify();
             join_worker(self, "watcher", handle);
         }
         if let SearchWorkerSlot::Running(worker) = search {
@@ -5712,6 +5742,51 @@ mod tests {
         drop(runtime);
 
         VaultRuntime::open(0, &config_for(&root, state.path().join("second")), logs()).unwrap();
+    }
+
+    #[test]
+    fn watcher_trigger_burst_leaves_one_pending_notification() {
+        let (trigger, events) = watcher_trigger();
+        for _ in 0..10_000 {
+            trigger.notify();
+        }
+
+        assert!(events.try_recv().is_ok());
+        assert!(matches!(events.try_recv(), Err(TryRecvError::Empty)));
+    }
+
+    #[test]
+    fn watcher_trigger_burst_during_reconcile_causes_exactly_one_follow_up() {
+        let (trigger, events) = watcher_trigger();
+        let stop = StopSignal::new();
+        let (started_tx, started_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel::<()>();
+        let reconciles = Arc::new(AtomicU64::new(0));
+        let worker_reconciles = Arc::clone(&reconciles);
+        let worker_stop = Arc::clone(&stop);
+        let worker = thread::spawn(move || {
+            drain_watcher_triggers(&events, &worker_stop, || {
+                if worker_reconciles.fetch_add(1, Ordering::SeqCst) == 0 {
+                    started_tx.send(()).unwrap();
+                    release_rx.recv().unwrap();
+                } else {
+                    started_tx.send(()).unwrap();
+                }
+                ControlFlow::Continue(())
+            });
+        });
+
+        trigger.notify();
+        started_rx.recv().unwrap();
+        for _ in 0..10_000 {
+            trigger.notify();
+        }
+        release_tx.send(()).unwrap();
+        started_rx.recv().unwrap();
+        drop(trigger);
+        worker.join().unwrap();
+
+        assert_eq!(reconciles.load(Ordering::SeqCst), 2);
     }
 
     #[test]

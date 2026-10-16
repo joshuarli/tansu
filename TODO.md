@@ -3,15 +3,6 @@
 Prefix: TNS
 Next: 54
 
-### TNS-041 · P2 · Bound filesystem watcher trigger backlog
-
-- **Area:** Concurrency
-- **Where:** `src/vault.rs:832-842`
-- **Problem:** Filesystem notifications are sent into an unbounded channel while the watcher worker may be busy reconciling. A burst of events during a slow reconciliation can accumulate without limit even though each notification only requests another full reconciliation.
-- **Recommendation:** Use a bounded coalescing trigger and a nonblocking full-queue policy so pending notifications cannot grow with the event burst. The worker that drains it is owned per TNS-027.
-- **Fix with:** lifecycle-concurrency
-- **Effort:** S
-
 ### TNS-042 · P2 · Validate settings at the backend boundary
 
 - **Area:** Data
