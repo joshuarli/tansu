@@ -2733,3 +2733,77 @@ describe("html import picker", () => {
     expect(root.querySelector('.tab[title="imported"]')).toBeNull();
   });
 });
+
+describe("asset url cache", () => {
+  useShellFixtures();
+  const noteA = noteMeta("note-a", "a.md", "A");
+  const noteB = noteMeta("note-b", "b.md", "B");
+
+  async function mountTwoTabs(contentA: string, contentB: string) {
+    const client = configureVault([noteA, noteB], workspaceSeed([
+      { noteId: noteA.noteId, title: noteA.title, path: noteA.path, cursorOffset: null, sourceMode: false },
+      { noteId: noteB.noteId, title: noteB.title, path: noteB.path, cursorOffset: null, sourceMode: false },
+    ], noteA.noteId));
+    client.openNote.mockImplementation(async (id) =>
+      id === noteA.noteId ? documentFor(noteA, contentA) : documentFor(noteB, contentB));
+    const created: string[] = [];
+    const revoked: string[] = [];
+    vi.spyOn(URL, "createObjectURL").mockImplementation(() => {
+      const url = `blob:image-${created.length}`;
+      created.push(url);
+      return url;
+    });
+    vi.spyOn(URL, "revokeObjectURL").mockImplementation((url) => { revoked.push(url); });
+    const mounted = mountApp();
+    await mounted.app.boot();
+    const resolveUrl = (name: string): string | null => {
+      const editor = editorMock.instances[0]!;
+      const configs = [editor.config, ...vi.mocked(editor.updateConfiguration).mock.calls.map((call) => call[0] as Record<string, unknown>)];
+      const extensions = configs.reverse().find((config) => Array.isArray(config["extensions"]))!["extensions"] as
+        { kind: string; resolveUrl?: (name: string) => string | null }[];
+      return extensions.find((extension) => extension.kind === "wiki-images")!.resolveUrl!(name);
+    };
+    const switchTo = async (title: string) => {
+      mounted.root.querySelector<HTMLButtonElement>(`.tab[title="${title}"]`)!.click();
+      await flushAsync();
+    };
+    return { client, created, revoked, resolveUrl, switchTo, ...mounted };
+  }
+
+  it("keeps the same object URL for an image across tab switches", async () => {
+    const { client, created, revoked, resolveUrl, switchTo } = await mountTwoTabs("![[z-images/a.webp]]\n", "![[z-images/b.webp]]\n");
+    await until(() => resolveUrl("z-images/a.webp") !== null);
+    const first = resolveUrl("z-images/a.webp");
+
+    await switchTo("B");
+    await until(() => resolveUrl("z-images/b.webp") !== null);
+    await switchTo("A");
+    await flushAsync();
+
+    expect(resolveUrl("z-images/a.webp")).toBe(first);
+    expect(client.loadAsset.mock.calls.filter((call) => (call as unknown[])[0] === "z-images/a.webp")).toHaveLength(1);
+    expect(created).toHaveLength(2);
+    expect(revoked).toHaveLength(0);
+  });
+
+  it("evicts past 64 entries without leaving a revoked url resolvable", async () => {
+    const many = Array.from({ length: 70 }, (_, index) => `![[z-images/p${index}.webp]]`).join("\n") + "\n";
+    const { created, revoked, resolveUrl, switchTo } = await mountTwoTabs("![[z-images/a.webp]]\n", many);
+    await until(() => resolveUrl("z-images/a.webp") !== null);
+
+    await switchTo("B");
+    await until(() => created.length === 71);
+    await flushAsync();
+    await switchTo("A");
+    await until(() => resolveUrl("z-images/a.webp") !== null);
+    await flushAsync();
+
+    const live = resolveUrl("z-images/a.webp");
+    expect(revoked).not.toContain(live);
+    for (let index = 0; index < 70; index += 1) {
+      const url = resolveUrl(`z-images/p${index}.webp`);
+      if (url !== null) expect(revoked).not.toContain(url);
+    }
+    expect(revoked.length).toBeGreaterThan(0);
+  });
+});
