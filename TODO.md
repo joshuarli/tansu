@@ -1,14 +1,14 @@
 # Tansu2 TODO
 
 Prefix: TNS
-Next: 44
+Next: 51
 
 ### TNS-024 · P1 · Serialize vault mutations across server processes
 
 - **Area:** Concurrency
 - **Where:** `src/vault.rs:72`, `src/vault.rs:1380`, `src/catalog.rs:373`
 - **Problem:** Mutation serialization uses a `Mutex` owned by one `VaultRuntime`. Two server processes opening the same vault have separate mutexes, so both can validate the same base revision before either materializes its content. Both writes can be accepted and the later materialization can overwrite the earlier one without a conflict draft.
-- **Recommendation:** Hold a per-vault process lock across mutation acceptance and file materialization, or use an equivalent cross-process compare-and-set.
+- **Recommendation:** Hold an exclusive OS lifetime lock per vault, keyed by the canonical root so two configs naming the same root still collide, from startup reconciliation through shutdown. Reject a second server owner at startup. Do not rely on the auth database or search index locks, which do not cover vault files. Test with two processes and two configs naming one root.
 - **Fix with:** durable-state
 - **Effort:** M
 
@@ -17,7 +17,8 @@ Next: 44
 - **Area:** Data
 - **Where:** `scripts/build-sqlite-static.sh:89`, `src/auth.rs:857-865`
 - **Problem:** The release SQLite build defines `SQLITE_OMIT_INTEGRITY_CHECK`, which also removes `PRAGMA quick_check`. Auth backup and restore call `verify_database`, which expects that pragma to return a row. Against the release SQLite build, those operations fail even for a valid database.
-- **Recommendation:** Keep the pragma enabled or validate the database using an operation supported by the release build, then cover backup and restore against that build.
+- **Status:** Commit 46a7805 removed the `SQLITE_OMIT_INTEGRITY_CHECK` define from `scripts/build-sqlite-static.sh`, which now has no match for it. Still open: no test runs auth recovery against the exact shipped static SQLite build.
+- **Recommendation:** Add a test that runs `verify_database` through backup and restore against the static SQLite build, plus a backup and restore drill with the release binary. Close the ticket when that exists.
 - **Fix with:** error-model
 - **Effort:** S
 
@@ -26,7 +27,7 @@ Next: 44
 - **Area:** Data
 - **Where:** `src/catalog.rs:1025`, `src/catalog.rs:1082`, `src/catalog.rs:1144`, `src/catalog.rs:1212`
 - **Problem:** Invalid session JSON becomes an empty session, invalid tag JSON becomes empty tags, invalid sync versions become zero, and malformed persisted booleans become false. The app silently discards persisted state or resets values instead of surfacing catalog corruption.
-- **Recommendation:** Return a corruption error for malformed persisted JSON and sync versions.
+- **Recommendation:** Return a corruption error for malformed persisted JSON, booleans, and sync versions, so the server fails closed on malformed persisted data.
 - **Fix with:** durable-state
 - **Effort:** S
 
@@ -44,7 +45,7 @@ Next: 44
 - **Area:** Concurrency
 - **Where:** `src/vault.rs:814`, `src/vault.rs:829`, `src/http.rs:301`
 - **Problem:** Search and watcher workers are detached and each captures an `Arc<VaultRuntime>`. The search worker also owns a receiver while the runtime owns its sender, so dropping the app does not stop the worker or release its runtime, watcher, and channels.
-- **Recommendation:** Retain worker handles, add cancellation, and join workers during server shutdown and partial startup failure.
+- **Recommendation:** Retain worker handles, add cancellation, and join workers during server shutdown and partial startup failure. Each worker has one named owner that stops and joins it; the watcher trigger bound is TNS-041.
 - **Fix with:** lifecycle-concurrency
 - **Effort:** M
 
@@ -98,7 +99,7 @@ Next: 44
 - **Area:** Concurrency
 - **Where:** `src/vault.rs:832-842`
 - **Problem:** Filesystem notifications are sent into an unbounded channel while the watcher worker may be busy reconciling. A burst of events during a slow reconciliation can accumulate without limit even though each notification only requests another full reconciliation.
-- **Recommendation:** Use a bounded coalescing trigger and a nonblocking full-queue policy so pending notifications cannot grow with the event burst.
+- **Recommendation:** Use a bounded coalescing trigger and a nonblocking full-queue policy so pending notifications cannot grow with the event burst. The worker that drains it is owned per TNS-027.
 - **Fix with:** lifecycle-concurrency
 - **Effort:** S
 
@@ -107,7 +108,7 @@ Next: 44
 - **Area:** Data
 - **Where:** `src/vault.rs:1012-1041`, `src/vault.rs:2717-2723`, `src/api_types.rs:102-114`
 - **Problem:** V2 and Rust callers can persist settings outside the ranges enforced by the browser form. Extreme autosave delays, undo depths, image qualities, or non-finite search weights can then reach application consumers and persist across restarts.
-- **Recommendation:** Define valid settings once and reject invalid values before persisting them, while keeping the existing serialized representation.
+- **Recommendation:** Define valid settings once and reject invalid values before persisting them, while keeping the existing serialized representation. Whether `undoStackMax` and `imageWebpQuality` reach consumers is TNS-047.
 - **Fix with:** make-invalid-states-unrepresentable
 - **Effort:** S
 
@@ -120,3 +121,66 @@ Next: 44
 - **Fix with:** os-boundaries
 - **Effort:** S
 
+### TNS-044 · P2 · Cache editor layout metadata between document changes
+
+- **Area:** Performance
+- **Where:** `web/ts/editor/tufte-notes.ts:219`, `web/ts/editor/source-navigation.ts:35`, `web/ts/editor/codemirror-adapter.ts:998`
+- **Problem:** `tufteNotes()` rebuilds the full layout, including a full-document `ensureSyntaxTree` and a line scan, on document, selection, and viewport changes. `outlineFromSyntaxTree()` walks the whole document on scroll. Cost grows with note length during cursor movement and scrolling. Unmeasured.
+- **Recommendation:** Cache heading and footnote metadata keyed to document changes, so selection and viewport changes reuse it. Measure sustained cursor movement and scroll on long prose, many headings, many footnotes, and image-heavy notes before and after, following `benchmark-checklist`.
+- **Fix with:** make-it-fast
+- **Effort:** M
+
+### TNS-046 · P2 · Wire wiki-link navigation into the app editor
+
+- **Area:** Tests
+- **Where:** `web/ts/app.ts:11`, `web/ts/editor/tansu-extensions.ts:102`, `web/ts/editor/codemirror-adapter.ts:463`
+- **Problem:** `app.ts` imports `createCalloutExtension` and `createWikiImageExtension` but not `createWikiLinkExtension`, and the adapter installs `wikiLinks` only when that extension is configured. Wiki-link navigation therefore appears unwired in production. Source-read only; not yet confirmed in the running app.
+- **Recommendation:** Confirm in the running app, then wire the extension and add app-boundary tests for a resolved link, an ambiguous basename, a relative path, a missing target, and a rename. If links are intentionally off, delete the extension and its docs.
+- **Fix with:** none
+- **Effort:** M
+
+### TNS-047 · P2 · Propagate or remove settings that have no effect
+
+- **Area:** Architecture
+- **Where:** `web/ts/view.ts:827`, `web/ts/app.ts:1476`, `web/ts/app/v2-api.ts:768`
+- **Problem:** `undoStackMax` and `imageWebpQuality` are editable and persisted, but the editor uses bare `history()` and the WebP encoder takes only `ImageData`. The controls appear to do nothing. Source-read only.
+- **Recommendation:** Wire each setting to its consumer or remove it from the form, type, and storage. Then audit every visible control for an observable effect, a failure state, and an app-boundary test.
+- **Fix with:** single-source-of-truth
+- **Effort:** M
+
+### TNS-048 · P2 · Replace campaign verification with a permanent acceptance suite
+
+- **Area:** Tests
+- **Where:** `web/ts/e2e/server.test.ts`, `Makefile`, `docs/development.md`
+- **Problem:** Verification of save and recovery behavior has come from one-off campaign runs, so regressions in persistence and lifecycle do not fail a standing check. Releases are not tied to the exact revision and artifact that was tested.
+- **Recommendation:** Add a small suite covering persistence (immediate close, delayed saves, retries, two browser contexts, server restart), conflict recovery, editor continuity, canonical light and dark UI baselines, and long-session leak checks (workers, asset URLs, editor instances). Add a deterministic interleaving suite on the existing service injection: delay a response, switch tabs, expire auth, complete an upload, close a document, replay an event. Tie the release process to the exact revision and artifact the suite ran against.
+- **Fix with:** renovate-tests
+- **Effort:** L
+
+### TNS-049 · P2 · Bind async mutations to captured identity, not current selection
+
+- **Area:** Concurrency
+- **Where:** `web/ts/app.ts:1411`, `web/ts/app.ts:1450`, `web/ts/app.ts:1857`
+- **Problem:** `restoreSelectedRevision()` captures the client and identity, but `handleMutation()` reads the mutable `this.vaultClient` and runs before any current-vault check. Restore, import, rename, asset loading, and delayed API responses can apply to a different vault or tab than the one that issued them. Source-level race, not reproduced.
+- **Recommendation:** Apply one rule: an async operation captures the vault identity, client, and tab identity at start, passes them to its completion, and discards or reroutes the result when they no longer match. Cover each operation with an interleaving test from TNS-048.
+- **Fix with:** lifecycle-concurrency
+- **Effort:** M
+
+### TNS-045 · P3 · Bound and stabilize asset prefetch
+
+- **Area:** Performance
+- **Where:** `web/ts/app.ts:1857`
+- **Problem:** `prefetchAssets()` loads assets one at a time and reconfigures the editor after each, and the cache is cleared on every tab switch. Image-heavy notes load slowly and reconfigure the editor repeatedly. Unmeasured.
+- **Recommendation:** Load with bounded concurrency, visible images first, batch the editor reconfiguration, and keep a cache stable across tab switches. Keep the abort and object-URL cleanup discipline, with a leak check from TNS-048.
+- **Fix with:** make-it-fast
+- **Effort:** M
+
+### TNS-050 · P3 · Move document state into a per-document controller
+
+- **Area:** Architecture
+- **Where:** `web/ts/app.ts`
+- **Problem:** Editor state, the dirty snapshot, the journal, and in-flight mutations live in the app and follow the active tab. Lifecycle bugs (tab close, tab switch, delayed responses) recur because nothing owns a document's state independent of tab activity.
+- **Recommendation:** Write the RFC, then extract a document controller one boundary at a time while fixing lifecycle bugs. No sweeping file split.
+- **Fix with:** api-surface-and-module-boundaries
+- **Design:** `docs/rfcs/TNS-050-document-controller.md`
+- **Effort:** L

@@ -76,12 +76,12 @@
   display: none;
 }
 
-@media (min-width: 1440px) {
+@media (min-width: 1280px) {
   .cm-editor.tansu-has-sidenotes .tansu-sidenote-card {
     position: absolute;
     top: 0;
-    left: calc(100% + 28px);
-    width: 212px;
+    left: calc(100% + 20px);
+    width: 160px;
     margin: 0;
     border-left: 0;
     border-top: 1px solid color-mix(in srgb, var(--atomic-editor-accent) 35%, transparent);
@@ -90,6 +90,13 @@
 }
 
 @media (min-width: 1440px) {
+  .cm-editor.tansu-has-sidenotes .tansu-sidenote-card {
+    left: calc(100% + 28px);
+    width: 212px;
+  }
+}
+
+@media (min-width: 1280px) {
   .cm-editor.tansu-has-sidenotes .cm-content {
     margin-left: 0;
     margin-right: 0;

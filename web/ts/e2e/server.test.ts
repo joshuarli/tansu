@@ -379,7 +379,20 @@ describe("real server harness", () => {
     expect(railGeometry.articleWidth).toBe(articleWidthWithoutNotes);
     expect(railGeometry.sidenoteRight).toBeLessThan(railGeometry.workspaceRight);
 
-    await page.setViewportSize({ width: 1280, height: 900 });
+    for (const width of [1280, 1366]) {
+      await page.setViewportSize({ width, height: 900 });
+      await expect.poll(() => marginNote.evaluate((element) => getComputedStyle(element).position)).toBe("absolute");
+      const narrow = await page.evaluate(() => {
+        const box = (selector: string) => document.querySelector<HTMLElement>(selector)!.getBoundingClientRect();
+        return { outline: box(".note-outline"), article: box(".editor-mount .cm-content"), note: box(".tansu-sidenote-card"), workspace: box(".workspace") };
+      });
+      expect(narrow.outline.left).toBeGreaterThanOrEqual(0);
+      expect(narrow.outline.right).toBeLessThan(narrow.article.left);
+      expect(narrow.note.left).toBeGreaterThan(narrow.article.right);
+      expect(narrow.note.right).toBeLessThan(narrow.workspace.right);
+      expect(narrow.note.right).toBeLessThanOrEqual(width);
+    }
+    await page.setViewportSize({ width: 1100, height: 900 });
     await expect.poll(() => marginNote.evaluate((element) => getComputedStyle(element).position))
       .toBe("static");
     await page.close();

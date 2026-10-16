@@ -1246,7 +1246,12 @@ button {
   .note-outline { transform: translateX(-100px); }
 }
 
-@media (min-width: 1440px) {
+@media (min-width: 1280px) and (max-width: 1439.98px) {
+  .main.has-note-outline:has(.cm-editor.tansu-has-sidenotes) > .workspace { transform: translate(0, 50px); }
+  .main.has-note-outline:has(.cm-editor.tansu-has-sidenotes) > .note-outline { transform: none; }
+}
+
+@media (min-width: 1280px) {
   .main.has-note-outline:has(.cm-editor.tansu-has-sidenotes) {
     grid-template-columns: minmax(0, 1fr) 190px minmax(0, min(1018px, calc(100% - 300px))) minmax(0, 1fr);
   }

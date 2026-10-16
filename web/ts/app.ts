@@ -39,6 +39,8 @@ const EDITOR_CAPTURE_DELAY_MS = 150;
 const MIN_SEARCH_QUERY_CHARS = 1;
 const THEME_STORAGE_KEY = "tansu2.theme.v1";
 
+type TabCloseReason = "user" | "deleted" | "materialized";
+
 function savedTheme(): State["theme"] {
   const value = window.localStorage.getItem(THEME_STORAGE_KEY);
   if (value === null || value === "light") return "light";
@@ -438,7 +440,7 @@ export class TansuApp {
       this.state.recent = this.state.recent.filter((item) => item !== deletedNoteId);
       this.evictNonRecentPreviews();
       await this.services.workspace.deleteCachedNoteBodies({ ...this.identity!, noteId: noteId(deletedNoteId) });
-      await this.closeTab({ kind: "saved", noteId: toNoteId(deletedNoteId) }, false);
+      await this.closeTab({ kind: "saved", noteId: toNoteId(deletedNoteId) }, "deleted");
     } else if (event.update.kind === "searchChanged" && this.state.boot !== null) {
       this.state.boot.searchStatus = { dirty: event.update.dirty, degraded: event.update.degraded };
     }
@@ -947,7 +949,7 @@ export class TansuApp {
     if (tab !== undefined) await this.activateTab({ kind: "local-draft", localDraftId: id });
   }
 
-  private async closeTab(identity: TabIdentity, remember = true): Promise<void> {
+  private async closeTab(identity: TabIdentity, reason: TabCloseReason = "user"): Promise<void> {
     this.captureActiveEditor();
     const index = this.state.tabs.findIndex((tab) => sameTabIdentity(tabIdentity(tab), identity));
     if (index === -1) return;
@@ -973,15 +975,17 @@ export class TansuApp {
     if (closed.kind === "saved") {
       this.noteLoads.delete(`${this.state.serverInstanceId}:${this.state.vault}:${closed.noteId}`);
     }
-    if (closed.session !== null) {
-      if (closed.kind === "saved") closed.session.close();
+    if (closed.kind === "saved" && closed.session !== null) {
+      const session = closed.session;
+      if (reason === "user") this.runAsync(session.save().finally(() => session.close()), "Save failed");
+      else session.close();
     }
     const autoSave = this.autoSaveTimers.get(closed.key);
     if (autoSave !== undefined) {
       window.clearTimeout(autoSave);
       this.autoSaveTimers.delete(closed.key);
     }
-    if (remember) this.state.closedTabs = [workspaceTabFromTab(closed), ...this.state.closedTabs.filter((item) => !sameTabIdentity(identityOfWorkspace(item), identity))].slice(0, 50);
+    if (reason === "user") this.state.closedTabs = [workspaceTabFromTab(closed), ...this.state.closedTabs.filter((item) => !sameTabIdentity(identityOfWorkspace(item), identity))].slice(0, 50);
     if (sameTabIdentity(this.state.activeTab, identity)) {
       this.state.activeTab = this.state.tabs[Math.max(0, index - 1)] === undefined
         ? this.state.tabs[0] === undefined ? null : tabIdentity(this.state.tabs[0])
@@ -997,6 +1001,7 @@ export class TansuApp {
       this.trackAction(deletion);
     }
     this.render();
+    if (wasActive) this.render();
     this.persistWorkspace();
   }
 
@@ -1363,7 +1368,7 @@ export class TansuApp {
     this.state.noteDialog = null;
     this.render();
     await this.services.workspace.deleteCachedNoteBodies({ ...this.identity!, noteId: id });
-    await this.closeTab({ kind: "saved", noteId: id }, false);
+    await this.closeTab({ kind: "saved", noteId: id }, "deleted");
   }
 
   private async renameDialog(id: ReturnType<typeof toNoteId>): Promise<void> {
@@ -1438,11 +1443,23 @@ export class TansuApp {
   private async restoreConflictDraft(): Promise<void> {
     const tab = activeTab(this.state);
     const status = tab?.kind === "saved" ? tab.session?.state : undefined;
-    if (tab?.kind !== "saved" || status?.status !== "conflict" || status.conflictDraft === null || this.state.conflictDraft === null) return;
-    const response = await this.vaultClient!.restoreConflictDraft(tab.noteId, status.conflictDraft.draftId, {
-      mutationId: mutationId(),
-      precondition: { baseRevision: status.base.revision, baseSourceHash: status.base.sourceHash, baseDiskHash: status.base.diskHash },
-    });
+    if (tab?.kind !== "saved" || status?.status !== "conflict" || this.vaultClient === null) return;
+    const client = this.vaultClient;
+    const { meta } = status.canonical;
+    const precondition = { baseRevision: meta.revision, baseSourceHash: meta.sourceHash, baseDiskHash: meta.diskHash };
+    let response: V2MutationResponse;
+    if (status.conflictDraft === null) {
+      const content = status.draft.source;
+      response = await client.saveNote(tab.noteId, {
+        mutationId: mutationId(),
+        precondition,
+        content,
+        sourceHash: await canonicalSourceHash(content),
+      });
+    } else {
+      if (this.state.conflictDraft === null) return;
+      response = await client.restoreConflictDraft(tab.noteId, status.conflictDraft.draftId, { mutationId: mutationId(), precondition });
+    }
     await this.handleMutation(response, tab, status.draft.localRevision);
     this.state.conflictDraft = null;
   }
@@ -2054,7 +2071,7 @@ export class TansuApp {
     this.render();
     this.restoreOverlayReturn();
     if (dialog?.kind === "rename") await this.journal?.flushAll();
-    if (dialog?.kind === "create") await this.closeTab({ kind: "local-draft", localDraftId: dialog.localDraftId }, false);
+    if (dialog?.kind === "create") await this.closeTab({ kind: "local-draft", localDraftId: dialog.localDraftId }, "materialized");
   }
 
   private hasOverlay(): boolean {

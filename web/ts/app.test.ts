@@ -897,6 +897,25 @@ describe("v2 desktop shell", () => {
     expect(memory.cached.get(note.noteId)).toStrictEqual({ sourceHash: request.sourceHash, content: "# Saved\n" });
   });
 
+  it("keeps the outline of the note beneath a new-note draft after the draft is cancelled", async () => {
+    const note = noteMeta("note-1", "one.md", "One");
+    const client = configureVault([note], workspaceSeed([
+      { noteId: note.noteId, title: note.title, path: note.path, cursorOffset: null, sourceMode: false },
+    ], note.noteId));
+    client.openNote.mockResolvedValue(documentFor(note, "# One\n"));
+    const { app, root } = mountApp();
+    await app.boot();
+    expect(root.querySelector(".outline-row")).not.toBeNull();
+
+    root.querySelector<HTMLButtonElement>('[title="New note"]')?.click();
+    await until(() => root.querySelector(".note-dialog-panel input") !== null);
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", cancelable: true }));
+    await until(() => root.querySelector(".note-dialog-panel") === null);
+    await flushAsync();
+
+    expect(root.querySelector(".outline-row")?.textContent).toBe("One");
+  });
+
   it("keeps a local draft identity and mutation stable until V2 create is accepted", async () => {
     const client = configureVault([]);
     const created = noteMeta("created", "meeting-notes.md", "Meeting Notes");
@@ -1151,6 +1170,10 @@ describe("v2 desktop shell", () => {
       { noteId: note.noteId, title: note.title, path: note.path, cursorOffset: null, sourceMode: false },
     ], note.noteId));
     client.openNote.mockResolvedValue(documentFor(note, "# One\n"));
+    client.saveNote.mockImplementation(async (_id, request) => ({
+      mutationId: request.mutationId,
+      outcome: { state: "conflict", current: documentFor(noteMeta(note.noteId, note.path, note.title, [], 2, HASH_B), "# Remote\n"), draft: conflictDraft(note.noteId) },
+    }));
     const services = createServices();
     const journal = { flushAll: vi.fn(async () => {}) } as unknown as ReturnType<AppServices["workspace"]["createJournal"]>;
     vi.spyOn(services.workspace, "createJournal").mockReturnValue(journal);
@@ -1260,6 +1283,58 @@ describe("v2 desktop shell", () => {
     expect(client.restoreRevision).not.toHaveBeenCalled();
   });
 
+  it("saves a dirty note to the server when its tab is closed", async () => {
+    vi.useFakeTimers();
+    const note = noteMeta("note-1", "one.md", "One");
+    const client = configureVault([note], workspaceSeed([
+      { noteId: note.noteId, title: note.title, path: note.path, cursorOffset: null, sourceMode: false },
+    ], note.noteId));
+    client.openNote.mockResolvedValue(documentFor(note, "# One\n"));
+    const { app, root } = mountApp();
+    await app.boot();
+    editorMock.instances[0]!.simulateEdit("# Closed early\n");
+    await vi.advanceTimersByTimeAsync(150);
+    await flushAsync();
+
+    root.querySelector<HTMLButtonElement>(".tab.active .tab-close")?.click();
+    await vi.advanceTimersByTimeAsync(1000);
+    await flushAsync();
+
+    expect(root.querySelector(".tab")).toBeNull();
+    expect(client.saveNote).toHaveBeenCalledWith(note.noteId, expect.objectContaining({ content: "# Closed early\n" }));
+  });
+
+  it("restores a locally detected conflict against the canonical revision", async () => {
+    const note = noteMeta("note-1", "one.md", "One");
+    const restored = noteMeta(note.noteId, note.path, note.title, [], 3, HASH_B);
+    const client = configureVault([note], workspaceSeed([
+      { noteId: note.noteId, title: note.title, path: note.path, cursorOffset: 1, sourceMode: false },
+    ], note.noteId));
+    memory.cached.set(note.noteId, { sourceHash: note.sourceHash, content: "# Cached\n" });
+    const load = deferred<V2NoteDocument>();
+    client.openNote.mockReturnValueOnce(load.promise).mockResolvedValue(documentFor(restored, "# Local edit\n"));
+    client.saveNote.mockImplementation(async (_id, request) => accepted(request.mutationId, restored));
+    const { app, root } = mountApp();
+    const boot = app.boot();
+    await until(() => editorMock.instances[0]?.getSnapshot()?.source === "# Cached\n");
+    editorMock.instances[0]!.simulateEdit("# Local edit\n");
+    await flushEditorCapture();
+    const newer = noteMeta(note.noteId, note.path, note.title, [], 2, HASH_B);
+    load.resolve(documentFor(newer, "# Canonical\n"));
+    await boot;
+    expect(root.textContent).toContain("Save conflict");
+
+    root.querySelector<HTMLButtonElement>('[title="Restore conflict draft"]')?.click();
+    await flushAsync();
+
+    expect(client.restoreConflictDraft).not.toHaveBeenCalled();
+    expect(client.saveNote).toHaveBeenCalledWith(note.noteId, expect.objectContaining({
+      content: "# Local edit\n",
+      precondition: { baseRevision: 2, baseSourceHash: HASH_B, baseDiskHash: DISK_HASH },
+    }));
+    expect(root.textContent).not.toContain("Save conflict");
+  });
+
   it("clears the exact checkpoint and replaces the editor after restoring a conflict draft", async () => {
     const note = noteMeta("note-1", "one.md", "One");
     const remote = noteMeta(note.noteId, note.path, note.title, [], 2, HASH_B);
@@ -1285,7 +1360,7 @@ describe("v2 desktop shell", () => {
     root.querySelector<HTMLButtonElement>('[title="Restore conflict draft"]')?.click();
     await flushAsync();
     expect(client.restoreConflictDraft).toHaveBeenCalledWith(note.noteId, 9, expect.objectContaining({
-      precondition: { baseRevision: 1, baseSourceHash: HASH_A, baseDiskHash: DISK_HASH },
+      precondition: { baseRevision: 2, baseSourceHash: HASH_B, baseDiskHash: DISK_HASH },
     }));
     expect(editorMock.instances[0]?.getSnapshot()?.source).toBe("# Draft\n");
     expect(root.textContent).not.toContain("Save conflict");
@@ -1882,7 +1957,12 @@ function createFakeEditor(initialConfig?: EditorConfig): FakeEditor {
     find: vi.fn(() => []),
     setFindHighlights: vi.fn(),
     revealFindMatch: vi.fn(() => true),
-    outline: vi.fn(() => ({ complete: true, headings: [] })),
+    outline: vi.fn(() => ({
+      complete: true,
+      headings: (active === null ? "" : snapshots.get(active)!.source).split("\n").flatMap((text, line) =>
+        text.startsWith("# ") ? [{ level: 1, line, text: text.slice(2), from: 0, to: text.length }] : []
+      ),
+    })),
     formatSelection: vi.fn(),
     updateTags: vi.fn(() => true),
     undo: vi.fn(() => true),
