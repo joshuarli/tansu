@@ -5,6 +5,7 @@ export default defineConfig({
     "web/dist/**",
     "web/ts/api.generated.ts",
     "web/ts/editor/vendor/atomic/**",
+    "web/ts/editor/vendor/jsquash-webp/codec/enc/webp_enc.js",
     "oxlint.config.mjs",
     "vitest*.config.ts",
   ],
