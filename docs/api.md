@@ -185,11 +185,18 @@ prefix matches are tried first. Fuzzy expansion is used only when fewer than
 five results match exactly or by prefix; terms of three or fewer UTF-8 bytes
 are never expanded. Fuzzy matches rank below exact and prefix matches. Phrases
 are never fuzzy. `typo_only` returns fuzzy matches only. A term may match the
-title, path, headings, tags, or content; each field contributes a fixed weight
-(title 10, path 7, headings 5, tags 2, content 1), so a tag match scores above a
-single body mention of the same term, and an exact tag match scores above a tag
-that only shares the prefix. The `search*Weight` and
-`recencyBoost` settings are stored and validated but do not change ranking.
+title, path, headings, tags, or content; each field contributes a weight. The
+title, heading, tag, and content weights come from the vault settings
+`searchTitleWeight`, `searchHeadingWeight`, `searchTagWeight`, and
+`searchContentWeight`; the path weight is fixed at 7. The defaults are title 10,
+headings 5, tags 2, content 1, so a tag match scores above a single body mention
+of the same term, and an exact tag match scores above a tag that only shares the
+prefix. `recencyBoost` multiplies a hit's score by
+`1 + recencyBoost * 0.5^(age / 30 days)`, where age is the time since the note's
+`updatedAtMs`; the default 0 disables it. Weights are read at query time from
+the saved settings, so a settings change applies to the next search without
+reindexing. Recency reorders only the hits already selected by field score, up
+to the request limit.
 Search results do not include note bodies: each hit includes identity, revision/hash, title, path,
 score, a maximum 512-byte excerpt, excerpt-local half-open UTF-16 highlight
 ranges, and an optional half-open UTF-16 source range into the declared

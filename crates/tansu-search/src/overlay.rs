@@ -52,6 +52,7 @@ pub(crate) fn search(
         .collect::<Result<Vec<_>, _>>()?;
     index.upsert_batch(&documents)?;
     let mut hits = execute(&index, query, options)?;
+    crate::search::rank_hits(&mut hits, |_| options.now_ms, &options);
     for hit in &mut hits {
         if let Some(snapshot) = included
             .iter()

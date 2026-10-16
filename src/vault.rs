@@ -2668,13 +2668,13 @@ impl VaultRuntime {
 
     pub fn search(&self, query: &str, limit: usize) -> Result<Vec<SearchHit>> {
         let _op = self.lock_op();
-        let notes = {
+        let (notes, settings) = {
             let catalog = self.lock_catalog();
-            catalog.live_notes()?
+            (catalog.live_notes()?, catalog.settings()?)
         };
         let hits = {
             let mut search = self.search.lock().expect("search mutex poisoned");
-            search.try_search(query, &notes, limit)
+            search.try_search(query, &notes, limit, &settings)
         };
         self.persist_search_status();
         let hits = hits?;
@@ -2703,7 +2703,10 @@ impl VaultRuntime {
     pub fn v2_search(&self, request: V2SearchRequest) -> V2Result<V2SearchResponse> {
         let _op = self.lock_op();
         validate_v2_search_limit(request.limit)?;
-        let notes = self.lock_catalog().live_notes()?;
+        let (notes, settings) = {
+            let catalog = self.lock_catalog();
+            (catalog.live_notes()?, catalog.settings()?)
+        };
         let mut snapshots = Vec::new();
         let mut overlay_kinds = HashMap::new();
         let mut search_ids = notes
@@ -2810,6 +2813,7 @@ impl VaultRuntime {
                 usize::from(request.limit),
                 mode,
                 &snapshots,
+                &settings,
             )
         };
         self.persist_search_status();
@@ -5991,6 +5995,32 @@ mod tests {
         let rejected =
             VaultRuntime::open(1, &config_for(&alias, state.path().join("second")), logs());
         assert!(matches!(rejected, Err(Error::VaultAlreadyOwned { .. })));
+    }
+
+    #[test]
+    fn saved_search_weights_change_the_next_search_ranking() {
+        let vault = test_vault_with_notes(&[
+            ("title.md", "# needle\nplain\n"),
+            ("body.md", "# other\nneedle needle needle\n"),
+        ]);
+        let order = |vault: &VaultRuntime| {
+            vault
+                .search("needle", 10)
+                .unwrap()
+                .into_iter()
+                .map(|hit| hit.note.path)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(order(&vault), ["title.md", "body.md"]);
+        vault
+            .save_settings(Settings {
+                search_title_weight: 0.0,
+                search_heading_weight: 0.0,
+                search_content_weight: 50.0,
+                ..Settings::default()
+            })
+            .unwrap();
+        assert_eq!(order(&vault), ["body.md", "title.md"]);
     }
 
     fn test_vault_with_note(path: &str, content: &str) -> VaultRuntime {

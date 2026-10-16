@@ -276,7 +276,7 @@ impl IndexManager {
         Ok(indexed.iter().all(|indexed| {
             current
                 .get(indexed.note_id())
-                .is_some_and(|identity| *identity == indexed)
+                .is_some_and(|identity| identity.same_indexed_state(indexed))
         }))
     }
 

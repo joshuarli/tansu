@@ -15,5 +15,5 @@ pub use types::{
     DirtyNoteSnapshot, DocumentInput, ExcerptRange, FieldScoreBreakdown, Fuzziness, MatchInfo,
     NoteIdentity, NoteRange, OverlaySearchResult, QuickOpenField, QuickOpenHit,
     QuickOpenPriority, QuickOpenRange, QuickOpenResponse, SearchLimit, SearchMode,
-    SearchOptions, SearchResult, SearchStatus, UpdateOutcome,
+    SearchOptions, SearchResult, SearchStatus, SearchWeights, UpdateOutcome,
 };

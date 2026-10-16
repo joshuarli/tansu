@@ -17,7 +17,7 @@ use crate::schema::doc_text;
 use crate::tokenizer::{DiacriticFilter, FerrisearchTokenizer};
 use crate::types::{
     ExcerptRange, FieldScoreBreakdown, Fuzziness, NoteRange, SearchMode,
-    SearchOptions, SearchResult,
+    SearchOptions, SearchResult, SearchWeights,
 };
 
 const MAX_QUERY_BYTES: usize = 1024;
@@ -133,7 +133,7 @@ fn build_search_query(
                 .text_fields()
                 .iter()
                 .flat_map(|(name, field)| {
-                    let boost = field_weight(name);
+                    let boost = field_weight(name, &options.weights);
                     let exact_term = Term::from_field_text(*field, term);
                     let mut queries: Vec<(Occur, Box<dyn Query>)> = Vec::new();
                     if fuzzy_only {
@@ -195,7 +195,7 @@ fn build_search_query(
             .text_fields()
             .iter()
             .map(|(name, field)| {
-                let boost = field_weight(name);
+                let boost = field_weight(name, &options.weights);
                 let terms = phrase
                     .iter()
                     .map(|term| Term::from_field_text(*field, term))
@@ -279,6 +279,7 @@ fn make_result(
             terms,
             fuzziness,
             options.mode == SearchMode::TypoOnly,
+            &options.weights,
         )
     });
     Ok(Some(SearchResult {
@@ -322,6 +323,7 @@ fn field_scores(
     terms: &[String],
     fuzziness: Fuzziness,
     fuzzy_only: bool,
+    weights: &SearchWeights,
 ) -> FieldScoreBreakdown {
     let mut scores = FieldScoreBreakdown::default();
     for (name, field) in index.fields().text_fields() {
@@ -346,7 +348,7 @@ fn field_scores(
                 }
             })
             .count() as f32;
-        let score = matched * field_weight(name);
+        let score = matched * field_weight(name, weights);
         match name {
             "title" => scores.title = score,
             "path" => scores.path = score,
@@ -359,15 +361,37 @@ fn field_scores(
     scores
 }
 
-fn field_weight(name: &str) -> f32 {
+fn field_weight(name: &str, weights: &SearchWeights) -> f32 {
     match name {
-        "title" => 10.0,
-        "path" => 7.0,
-        "headings" => 5.0,
-        "tags" => 2.0,
-        "content" => 1.0,
+        "title" => weights.title,
+        "path" => SearchWeights::PATH,
+        "headings" => weights.headings,
+        "tags" => weights.tags,
+        "content" => weights.content,
         _ => 0.0,
     }
+}
+
+const RECENCY_HALF_LIFE_MS: f64 = 30.0 * 24.0 * 3_600_000.0;
+
+pub(crate) fn rank_hits(
+    hits: &mut [SearchResult],
+    updated_at_ms: impl Fn(&SearchResult) -> i64,
+    options: &SearchOptions,
+) {
+    for hit in hits.iter_mut().filter(|_| options.weights.recency_boost != 0.0) {
+        let age_ms = options.now_ms.saturating_sub(updated_at_ms(hit)).max(0) as f64;
+        let decay = 0.5_f64.powf(age_ms / RECENCY_HALF_LIFE_MS);
+        hit.score *= 1.0 + options.weights.recency_boost * decay as f32;
+    }
+    hits.sort_by(|left, right| {
+        right
+            .score
+            .partial_cmp(&left.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| left.path.cmp(&right.path))
+            .then_with(|| left.note_id.cmp(&right.note_id))
+    });
 }
 
 fn parse_query(input: &str) -> ParsedQuery {
@@ -1011,7 +1035,41 @@ mod tests {
             ("tags", 2.0),
             ("content", 1.0),
         ] {
-            assert_eq!(field_weight(field), weight);
+            assert_eq!(field_weight(field, &SearchWeights::default()), weight);
+        }
+    }
+
+    #[test]
+    fn changed_field_weight_changes_ranking() {
+        let index = setup_index(vec![
+            make_doc("t", "t.md", "needle", "plain", "", &[], 1),
+            make_doc("c", "c.md", "other", "needle", "", &[], 1),
+        ]);
+        let order = |weights: SearchWeights| {
+            results(&index, "needle", options().with_weights(weights))
+                .into_iter()
+                .map(|hit| hit.note_id)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(order(SearchWeights::default()), ["t", "c"]);
+        let content_heavy = SearchWeights::new(1.0, 5.0, 2.0, 50.0, 0.0).unwrap();
+        assert_eq!(order(content_heavy), ["c", "t"]);
+    }
+
+    #[test]
+    fn default_weights_keep_fixed_scoring() {
+        let index = setup_index(vec![make_doc("t", "t.md", "needle", "plain", "", &[], 1)]);
+        let explicit = SearchWeights::new(10.0, 5.0, 2.0, 1.0, 0.0).unwrap();
+        let default_hit = &results(&index, "needle", options())[0];
+        let explicit_hit = &results(&index, "needle", options().with_weights(explicit))[0];
+        assert_eq!(default_hit.score, explicit_hit.score);
+    }
+
+    #[test]
+    fn invalid_weights_are_rejected() {
+        for bad in [f32::NAN, -1.0, f32::INFINITY, SearchWeights::MAX + 1.0] {
+            assert!(SearchWeights::new(bad, 1.0, 1.0, 1.0, 0.0).is_err());
+            assert!(SearchWeights::new(1.0, 1.0, 1.0, 1.0, bad).is_err());
         }
     }
 
@@ -1381,7 +1439,7 @@ mod tests {
     #[test]
     fn score_breakdown_directory_field() {
         let index = setup_index(vec![doc("a", "body")]);
-        assert_eq!(field_weight("path"), 7.0);
+        assert_eq!(field_weight("path", &SearchWeights::default()), 7.0);
         assert_eq!(index.document_count(), 1);
     }
 

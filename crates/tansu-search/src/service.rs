@@ -343,6 +343,11 @@ fn worker_loop(
                                 && hit.title == identity.title()
                         })
                     });
+                    search::rank_hits(
+                        &mut hits,
+                        |hit| canonical.get(hit.note_id.as_str()).map_or(0, |identity| identity.updated_at_ms()),
+                        &options,
+                    );
                     hits
                 });
                 if let Err(error) = &result {
@@ -872,6 +877,33 @@ mod tests {
             vec![document("a", 1, "accepted content").identity().clone()],
         );
         assert_eq!(result.unwrap().len(), 1);
+    }
+
+    #[test]
+    fn recency_boost_reorders_equal_matches_at_query_time() {
+        let temp = tempfile::tempdir().unwrap();
+        let service = SearchService::open(&temp.path().join("search")).unwrap();
+        let day_ms = 24 * 3_600_000;
+        let now_ms = 365 * day_ms;
+        let old = document("a", 1, "needle").identity().clone().with_updated_at_ms(now_ms - 200 * day_ms);
+        let fresh = document("b", 1, "needle").identity().clone().with_updated_at_ms(now_ms);
+        service.upsert(document("a", 1, "needle")).unwrap();
+        service.upsert(document("b", 1, "needle")).unwrap();
+        let order = |boost: f32| {
+            let weights = crate::types::SearchWeights::new(10.0, 5.0, 2.0, 1.0, boost).unwrap();
+            service
+                .search(
+                    "needle".into(),
+                    options().with_weights(weights).with_now_ms(now_ms),
+                    vec![old.clone(), fresh.clone()],
+                )
+                .unwrap()
+                .into_iter()
+                .map(|hit| hit.note_id)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(order(0.0), ["a", "b"]);
+        assert_eq!(order(5.0), ["b", "a"]);
     }
 
     #[test]

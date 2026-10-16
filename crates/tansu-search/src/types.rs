@@ -10,6 +10,7 @@ pub struct NoteIdentity {
     tags: Vec<String>,
     revision: i64,
     source_hash: String,
+    updated_at_ms: i64,
 }
 
 impl NoteIdentity {
@@ -40,7 +41,26 @@ impl NoteIdentity {
             tags,
             revision,
             source_hash,
+            updated_at_ms: 0,
         })
+    }
+
+    pub fn with_updated_at_ms(mut self, updated_at_ms: i64) -> Self {
+        self.updated_at_ms = updated_at_ms;
+        self
+    }
+
+    pub fn updated_at_ms(&self) -> i64 {
+        self.updated_at_ms
+    }
+
+    pub(crate) fn same_indexed_state(&self, other: &Self) -> bool {
+        self.note_id == other.note_id
+            && self.path == other.path
+            && self.title == other.title
+            && self.tags == other.tags
+            && self.revision == other.revision
+            && self.source_hash == other.source_hash
     }
 
     pub fn note_id(&self) -> &str {
@@ -177,13 +197,88 @@ impl TryFrom<usize> for SearchLimit {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SearchWeights {
+    pub(crate) title: f32,
+    pub(crate) headings: f32,
+    pub(crate) tags: f32,
+    pub(crate) content: f32,
+    pub(crate) recency_boost: f32,
+}
+
+impl SearchWeights {
+    pub const MAX: f32 = 1000.0;
+    pub(crate) const PATH: f32 = 7.0;
+
+    pub fn new(
+        title: f32,
+        headings: f32,
+        tags: f32,
+        content: f32,
+        recency_boost: f32,
+    ) -> Result<Self, SearchError> {
+        for (field, value) in [
+            ("titleWeight", title),
+            ("headingWeight", headings),
+            ("tagWeight", tags),
+            ("contentWeight", content),
+            ("recencyBoost", recency_boost),
+        ] {
+            if !(0.0..=Self::MAX).contains(&value) {
+                return Err(SearchError::InvalidInput { field });
+            }
+        }
+        Ok(Self {
+            title,
+            headings,
+            tags,
+            content,
+            recency_boost,
+        })
+    }
+
+    pub fn title(&self) -> f32 {
+        self.title
+    }
+
+    pub fn headings(&self) -> f32 {
+        self.headings
+    }
+
+    pub fn tags(&self) -> f32 {
+        self.tags
+    }
+
+    pub fn content(&self) -> f32 {
+        self.content
+    }
+
+    pub fn recency_boost(&self) -> f32 {
+        self.recency_boost
+    }
+}
+
+impl Default for SearchWeights {
+    fn default() -> Self {
+        Self {
+            title: 10.0,
+            headings: 5.0,
+            tags: 2.0,
+            content: 1.0,
+            recency_boost: 0.0,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SearchOptions {
     pub(crate) mode: SearchMode,
     pub(crate) fuzziness: Fuzziness,
     pub(crate) limit: SearchLimit,
     pub(crate) prefix_length: NonZeroUsize,
     pub(crate) score_breakdown: bool,
+    pub(crate) weights: SearchWeights,
+    pub(crate) now_ms: i64,
 }
 
 impl SearchOptions {
@@ -212,6 +307,16 @@ impl SearchOptions {
         self.score_breakdown = enabled;
         self
     }
+
+    pub fn with_weights(mut self, weights: SearchWeights) -> Self {
+        self.weights = weights;
+        self
+    }
+
+    pub fn with_now_ms(mut self, now_ms: i64) -> Self {
+        self.now_ms = now_ms;
+        self
+    }
 }
 
 impl Default for SearchOptions {
@@ -222,6 +327,8 @@ impl Default for SearchOptions {
             limit: SearchLimit::DEFAULT,
             prefix_length: NonZeroUsize::new(1).unwrap(),
             score_breakdown: false,
+            weights: SearchWeights::default(),
+            now_ms: 0,
         }
     }
 }

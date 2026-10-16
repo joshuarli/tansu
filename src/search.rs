@@ -4,11 +4,12 @@ use std::path::{Path, PathBuf};
 use pulldown_cmark::{Event, Parser, Tag, TagEnd};
 use tansu_search::{
     DirtyNoteSnapshot, DocumentInput, Fuzziness, NoteIdentity, OverlaySearchResult,
-    QuickOpenResponse, SearchLimit, SearchMode, SearchOptions, SearchResult, SearchService, MAX_REBUILD_NOTES,
+    QuickOpenResponse, SearchLimit, SearchMode, SearchOptions, SearchResult, SearchService, SearchWeights, MAX_REBUILD_NOTES,
     MAX_REBUILD_SOURCE_BYTES,
 };
 
-use crate::api_types::{NoteMeta, SearchFieldScores, SearchHit};
+use crate::api_types::{NoteMeta, SearchFieldScores, SearchHit, Settings};
+use crate::catalog::now_ms;
 use crate::history;
 use crate::paths::visible_path;
 use crate::tags::parse_markdown;
@@ -29,6 +30,18 @@ pub(crate) fn dirty_note_snapshot(
     let headings = extract_headings(&source);
     let identity = NoteIdentity::new(note_id, path, title, tags, revision, source_hash.clone())?;
     DirtyNoteSnapshot::new(identity, revision, source_hash, local_revision, source, headings)
+}
+
+fn search_weights(
+    settings: &Settings,
+) -> std::result::Result<SearchWeights, tansu_search::SearchError> {
+    SearchWeights::new(
+        settings.search_title_weight,
+        settings.search_heading_weight,
+        settings.search_tag_weight,
+        settings.search_content_weight,
+        settings.recency_boost,
+    )
 }
 
 pub struct SearchIndex {
@@ -125,13 +138,16 @@ impl SearchIndex {
         query: &str,
         current: &[NoteMeta],
         limit: usize,
+        settings: &Settings,
     ) -> Result<Vec<SearchHit>> {
         let options = SearchOptions::new(
             SearchMode::ExactPrefix,
             Fuzziness::OneEdit,
             SearchLimit::try_from(limit).map_err(search_error)?,
         )
-        .map_err(search_error)?;
+        .map_err(search_error)?
+        .with_weights(search_weights(settings).map_err(search_error)?)
+        .with_now_ms(now_ms());
         let identities = current
             .iter()
             .map(note_identity)
@@ -162,12 +178,15 @@ impl SearchIndex {
         limit: usize,
         mode: SearchMode,
         snapshots: &[DirtyNoteSnapshot],
+        settings: &Settings,
     ) -> std::result::Result<OverlaySearchResult, tansu_search::SearchError> {
         let options = SearchOptions::new(
             mode,
             Fuzziness::OneEdit,
             SearchLimit::try_from(limit)?,
-        )?;
+        )?
+        .with_weights(search_weights(settings)?)
+        .with_now_ms(now_ms());
         let identities = current
             .iter()
             .map(note_identity)
@@ -307,6 +326,7 @@ fn note_identity(
         note.seq,
         note.content_hash.clone(),
     )
+    .map(|identity| identity.with_updated_at_ms(note.updated_at_ms))
 }
 
 fn read_documents(

@@ -43,7 +43,7 @@ persisted:
 | `autosaveDelayMs` | integer, 150 to 3,600,000 (one hour) |
 | `undoStackMax` | integer, 20 to 10,000 |
 | `imageWebpQuality` | finite, 0.1 to 1 |
-| `searchTitleWeight`, `searchHeadingWeight`, `searchTagWeight`, `searchContentWeight`, `recencyBoost` | finite, 0 to 1,000 |
+| `searchTitleWeight`, `searchHeadingWeight`, `searchTagWeight`, `searchContentWeight`, `recencyBoost` | finite, 0 to 1,000; defaults 10, 5, 2, 1, 0 |
 | `excludedFolders` | each entry is a single folder name: nonempty, not `.` or `..`, no `/`, `\`, or NUL |
 
 An `excludedFolders` entry matches by exact, case-sensitive name against every
