@@ -1,4 +1,4 @@
-import { canonicalSourceHash } from "../save-delta.ts";
+import { canonicalSourceHash } from "../source-hash.ts";
 import type { V2ApiErrorKind, V2ConflictDraftMeta, V2MutationResponse, V2NoteDocument, V2NoteMeta, V2NotePrecondition, V2SaveNoteRequest } from "../types.generated.ts";
 import { isRetryableV2Error } from "./v2-api.ts";
 import { type DocumentIdentity, type WorkspaceId, documentIdentityKey } from "./identity.ts";

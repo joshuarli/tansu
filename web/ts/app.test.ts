@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { startApp, TansuApp } from "./app.ts";
 import { defaultServices, type AppServices } from "./app/services.ts";
-import { canonicalSourceHash } from "./save-delta.ts";
+import { canonicalSourceHash } from "./source-hash.ts";
 import { V2ApiError, type V2VaultBootstrap, type V2VaultClient, type V2VaultSnapshot } from "./app/v2-api.ts";
 import { serverInstanceId, vaultId, workspaceId } from "./app/identity.ts";
 import type { EditorConfig } from "./editor/tansu-extensions.ts";

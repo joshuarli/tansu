@@ -48,7 +48,7 @@ const pageAssets = [];
 for (const [url, file] of pages) {
   const html = await readFile(resolve(dist, file), "utf8");
   pageAssets.push({ url, file, contentType: "text/html; charset=utf-8", immutable: false });
-  for (const [, assetUrl] of html.matchAll(/(?:src|href)="(\/assets\/[^\"]+)"/g)) {
+  for (const [, assetUrl] of html.matchAll(/(?:src|href)="(\/assets\/[^"]+)"/g)) {
     if (!/\.(?:js|css)$/.test(assetUrl)) continue;
     pageAssets.push({
       url: assetUrl,

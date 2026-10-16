@@ -5,6 +5,7 @@ import type {
   V2BootstrapResponse,
   V2ConflictDraftDocument,
   V2CreateNoteRequest,
+  V2DeleteNoteRequest,
   V2ImageUploadResponse,
   V2MutationResponse,
   V2NoteDocument,
@@ -15,6 +16,9 @@ import type {
   V2RevisionMeta,
   V2SaveNoteDeltaRequest,
   V2SaveNoteRequest,
+  V2RenameNoteRequest,
+  V2RestoreConflictRequest,
+  V2RestoreRevisionRequest,
   V2SearchRequest,
   V2SearchResponse,
   V2ServerEvent,
@@ -87,12 +91,12 @@ export type V2VaultClient = {
   ) => Promise<V2MutationResponse>;
   renameNote: (
     id: string,
-    request: { mutationId: string; precondition: V2SaveNoteRequest["precondition"]; path: string },
+    request: V2RenameNoteRequest,
     signal?: AbortSignal,
   ) => Promise<V2MutationResponse>;
   deleteNote: (
     id: string,
-    request: { mutationId: string; precondition: V2SaveNoteRequest["precondition"] },
+    request: V2DeleteNoteRequest,
     signal?: AbortSignal,
   ) => Promise<V2MutationResponse>;
   listRevisions: (id: string, signal?: AbortSignal) => Promise<V2RevisionMeta[]>;
@@ -101,13 +105,13 @@ export type V2VaultClient = {
   restoreRevision: (
     id: string,
     revision: number,
-    request: { mutationId: string; precondition: V2SaveNoteRequest["precondition"] },
+    request: V2RestoreRevisionRequest,
     signal?: AbortSignal,
   ) => Promise<V2MutationResponse>;
   restoreConflictDraft: (
     id: string,
     draftId: number,
-    request: { mutationId: string; precondition: V2SaveNoteRequest["precondition"] },
+    request: V2RestoreConflictRequest,
     signal?: AbortSignal,
   ) => Promise<V2MutationResponse>;
   settings: (signal?: AbortSignal) => Promise<Settings>;

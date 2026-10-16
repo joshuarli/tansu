@@ -1,7 +1,5 @@
 import { beforeEach, vi, describe, expect, it } from "vitest";
 
-import type { NoteMeta } from "./types.generated.ts";
-
 const { pickHtmlImport } = await import("./html-import.ts");
 
 describe("HTML import", () => {
@@ -84,14 +82,6 @@ function mockPickerInput(file: File | null): HTMLInputElement {
   return input;
 }
 
-function note(path: string): NoteMeta {
-  return {
-    noteId: path,
-    path,
-    title: path,
-    tags: [],
-    seq: 1,
-    contentHash: "hash",
-    updatedAtMs: 1,
-  };
+function note(path: string): { path: string } {
+  return { path };
 }

@@ -1,4 +1,4 @@
-import type { AppSettings, AppVaultSettings } from "./types.generated.ts";
+import type { AppSettings, AppVaultSettings, V2AppSettingsResponse } from "./types.generated.ts";
 
 const form = document.querySelector<HTMLFormElement>("#settings-form");
 const vaults = document.querySelector<HTMLElement>("#vaults");
@@ -19,7 +19,7 @@ document.querySelector("#add-vault")!.addEventListener("click", () => addVault()
 
 const initial = await fetch("/api/v2/app/settings").then(async (response) => {
   if (!response.ok) throw new Error(await response.text());
-  return response.json() as Promise<{ settings: AppSettings | null }>;
+  return response.json() as Promise<V2AppSettingsResponse>;
 });
 for (const vault of initial.settings?.vaults ?? []) addVault(vault);
 if (vaults.childElementCount === 0) addVault();

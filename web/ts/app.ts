@@ -10,7 +10,7 @@ import { V2ApiError } from "./app/v2-api.ts";
 import type { EditorHandle, EditorSession } from "./editor/codemirror-adapter.ts";
 import { createCalloutExtension, createWikiImageExtension, type EditorConfig } from "./editor/tansu-extensions.ts";
 import { frontmatterSupportsTags, normalizeTag } from "./markdown-tags.ts";
-import { canonicalSourceHash } from "./save-delta.ts";
+import { canonicalSourceHash } from "./source-hash.ts";
 import {
   activeTab,
   createState,
