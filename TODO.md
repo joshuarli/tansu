@@ -22,15 +22,6 @@ Next: 54
 - **Design:** `docs/rfcs/TNS-050-document-controller.md`
 - **Effort:** L
 
-### TNS-052 · P2 · Show tags on search and recent-note entries and weigh them in search
-
-- **Area:** Search
-- **Where:** `web/ts/view.ts`, `src/search.rs:349`, `src/api_types.rs:366`, `web/ts/app/v2-api.ts`
-- **Problem:** Search results and recent-note rows do not show a note's tags, and it is unconfirmed that a tag match raises a note's rank.
-- **Recommendation:** Show the tag pills from TNS-051 on search result rows and recent-note rows (add tags to the response or preview data if missing). Confirm with a failing test whether an exact tag match outranks a body-only match; make tags a weighted search field with a tested default if not. Keep search derived state: indexing never rejects writes.
-- **Fix with:** none
-- **Effort:** M
-
 ### TNS-053 · P2 · Exercise tags in the fixture vault
 
 - **Area:** Fixtures

@@ -184,12 +184,20 @@ empty quotes are ignored, and an unclosed quote is treated as terms. Exact and
 prefix matches are tried first. Fuzzy expansion is used only when fewer than
 five results match exactly or by prefix; terms of three or fewer UTF-8 bytes
 are never expanded. Fuzzy matches rank below exact and prefix matches. Phrases
-are never fuzzy. `typo_only` returns fuzzy matches only. Search results do not
-include note bodies: each hit includes identity, revision/hash, title, path,
+are never fuzzy. `typo_only` returns fuzzy matches only. A term may match the
+title, path, headings, tags, or content; each field contributes a fixed weight
+(title 10, path 7, headings 5, tags 2, content 1), so a tag match scores above a
+single body mention of the same term, and an exact tag match scores above a tag
+that only shares the prefix. The `search*Weight` and
+`recencyBoost` settings are stored and validated but do not change ranking.
+Search results do not include note bodies: each hit includes identity, revision/hash, title, path,
 score, a maximum 512-byte excerpt, excerpt-local half-open UTF-16 highlight
 ranges, and an optional half-open UTF-16 source range into the declared
 revision. Filename-only matches have no source range. These ranges are distinct
 types and coordinate spaces.
+
+Hits carry no tags; the client shows tag pills from the note metadata it already
+holds for the hit's `noteId`, so a new-note overlay hit shows none.
 
 Quick-open accepts a query of at most 1,024 UTF-8 bytes and a limit from 1
 through 100. It matches title, filename, and path with exact, then prefix, then

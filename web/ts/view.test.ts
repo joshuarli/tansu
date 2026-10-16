@@ -240,6 +240,41 @@ describe("view rendering", () => {
     }
   });
 
+  it("shows tag pills on recent-note and search-result rows with a capped overflow", () => {
+    const state = baseState();
+    const tagged = note("n1", "one.md", "One", ["alpha", "beta", "gamma", "delta", "epsilon"]);
+    const untagged = note("n2", "two.md", "Two");
+    state.notes.set("n1", tagged);
+    state.notes.set("n2", untagged);
+    state.recent = [toNoteId("n1"), toNoteId("n2")];
+    state.searchOpen = true;
+
+    const recentRows = render(state).querySelectorAll<HTMLElement>(".recent-search-result");
+    const recentTags = recentRows[0]!.querySelector(".search-result-tags")!;
+    expect([...recentTags.querySelectorAll(".tag-pill")].map((pill) => pill.textContent)).toEqual(["#alpha", "#beta", "#gamma"]);
+    expect(recentTags.querySelector(".tag-pill")!.tagName).toBe("SPAN");
+    expect(recentTags.querySelector(".search-result-tags-overflow")!.textContent).toBe("+2");
+    expect(recentTags.querySelector<HTMLElement>(".search-result-tags-overflow")!.title).toBe("#delta #epsilon");
+    expect(recentRows[1]!.querySelector(".search-result-tags")).toBeNull();
+
+    state.searchOverlayQuery = "alpha";
+    state.searchOverlayHits = [searchHit(tagged), searchHit(untagged)];
+    const hitRows = render(state).querySelectorAll<HTMLElement>(".search-result-row");
+    expect(hitRows[0]!.querySelectorAll(".tag-pill")).toHaveLength(3);
+    expect(hitRows[0]!.querySelector(".search-result-tags-overflow")!.textContent).toBe("+2");
+    expect(hitRows[1]!.querySelector(".search-result-tags")).toBeNull();
+  });
+
+  it("omits the overflow marker when every tag fits", () => {
+    const state = baseState();
+    state.notes.set("n1", note("n1", "one.md", "One", ["alpha", "beta", "gamma"]));
+    state.recent = [toNoteId("n1")];
+    state.searchOpen = true;
+    const tags = render(state).querySelector(".recent-search-result .search-result-tags")!;
+    expect(tags.querySelectorAll(".tag-pill")).toHaveLength(3);
+    expect(tags.querySelector(".search-result-tags-overflow")).toBeNull();
+  });
+
   it("renders command, search, revision, settings, conflict, dialog, and notice overlays", () => {
     const state = baseState();
     const revision = revisionMeta(7);

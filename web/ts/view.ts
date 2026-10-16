@@ -13,8 +13,11 @@ import {
 import { vaultId } from "./app/identity.ts";
 import { excludedFoldersProblem, normalizeSettings, SETTINGS_LIMITS } from "./app/settings-policy.ts";
 import { sameTabIdentity, type TabIdentity } from "./app/tab-identity.ts";
+import { createTagPill } from "./tag-pill.ts";
 import type { V2OverlayCoverage, V2SearchHit } from "./types.generated.ts";
 import type { FindMatch, Outline } from "./editor/source-navigation.js";
+
+const MAX_RESULT_TAGS = 3;
 
 export type ViewActions = {
   dispatch: (event: ViewEvent) => void;
@@ -670,6 +673,7 @@ function renderOverlays(state: State, actions: ViewActions): HTMLElement {
         });
         row.append(searchResultHeading(note.title, note.updatedAtMs));
         row.append(span(actions.recentPreview(note.noteId) ?? note.path, "recent-note-detail"));
+        appendResultTags(row, note.tags);
         list.append(row);
       }
       if (recentNotes.length === 0) list.append(span("No notes in this vault yet.", "search-status"));
@@ -1072,7 +1076,26 @@ function searchHitRow(hit: V2SearchHit, actions: ViewActions, state: State): HTM
   row.dataset["key"] = `search:${identity.kind}:${identity.noteId}`;
   row.append(searchResultHeading(hit.title, updatedAtMs), span(hit.path, "search-result-path"));
   row.append(renderScore(hit), renderSnippet(hit));
+  appendResultTags(row, searchHitTags(identity, state));
   return row;
+}
+
+function searchHitTags(identity: Exclude<V2SearchHit["identity"], { kind: "newLocalDraft" }>, state: State): readonly string[] {
+  const tab = state.tabs.find((candidate) => candidate.kind === "saved" && candidate.noteId === identity.noteId);
+  return state.notes.get(identity.noteId)?.tags ?? tab?.doc?.meta.tags ?? [];
+}
+
+function appendResultTags(row: HTMLElement, tags: readonly string[]): void {
+  if (tags.length === 0) return;
+  const list = el("span", "search-result-tags");
+  for (const tag of tags.slice(0, MAX_RESULT_TAGS)) list.append(createTagPill(tag, "span"));
+  const hidden = tags.length - MAX_RESULT_TAGS;
+  if (hidden > 0) {
+    const overflow = el("span", "search-result-tags-overflow", `+${hidden}`);
+    overflow.title = tags.slice(MAX_RESULT_TAGS).map((tag) => `#${tag}`).join(" ");
+    list.append(overflow);
+  }
+  row.append(list);
 }
 
 function searchHitUpdatedAtMs(identity: V2SearchHit["identity"], state: State): number {

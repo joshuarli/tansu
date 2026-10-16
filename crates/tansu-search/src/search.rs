@@ -786,6 +786,29 @@ mod tests {
     }
 
     #[test]
+    fn tag_match_outranks_single_body_mention() {
+        let filler = "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu";
+        let index = setup_index(vec![
+            make_doc("body", "n1.md", "first", &format!("{filler} gardening {filler}"), "", &[], 1),
+            make_doc("tagged", "n2.md", "second", filler, "", &["gardening"], 1),
+        ]);
+        let hits = results(&index, "gardening", options());
+        assert_eq!(hits.len(), 2);
+        assert_eq!(hits[0].note_id, "tagged");
+    }
+
+    #[test]
+    fn exact_tag_match_outranks_partial_tag_match() {
+        let index = setup_index(vec![
+            make_doc("partial", "n1.md", "first", "body", "", &["gardening"], 1),
+            make_doc("exact", "n2.md", "second", "body", "", &["garden"], 1),
+        ]);
+        let hits = results(&index, "garden", options());
+        assert_eq!(hits.len(), 2);
+        assert_eq!(hits[0].note_id, "exact");
+    }
+
+    #[test]
     fn search_returns_stored_fields() {
         let index = setup_index(vec![make_doc(
             "note-id",

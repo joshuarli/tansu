@@ -4053,6 +4053,31 @@ mod tests {
     }
 
     #[test]
+    fn v2_search_ranks_a_frontmatter_tag_match_above_a_body_mention() {
+        let vault = test_vault_with_notes(&[
+            (
+                "body.md",
+                "# Garden diary\n\nalpha beta gamma delta epsilon gardening zeta eta theta iota kappa\n",
+            ),
+            (
+                "tagged.md",
+                "---\ntags:\n  - gardening\n---\n\n# Weekend plans\n\nalpha beta gamma delta epsilon zeta eta theta iota kappa\n",
+            ),
+        ]);
+        let response = vault
+            .v2_search(V2SearchRequest {
+                query: "gardening".to_string(),
+                mode: V2SearchMode::Default,
+                limit: 10,
+                overlays: Vec::new(),
+            })
+            .unwrap();
+
+        let paths = response.hits.iter().map(|hit| hit.path.as_str()).collect::<Vec<_>>();
+        assert_eq!(paths, ["tagged.md", "body.md"]);
+    }
+
+    #[test]
     fn new_draft_identity_does_not_suppress_a_canonical_note() {
         let vault = test_vault_with_note("A.md", "# Moon\n\ncomet vintage\n");
         let meta = vault.lock_catalog().live_notes().unwrap().remove(0);
@@ -5919,8 +5944,14 @@ mod tests {
     }
 
     fn test_vault_with_note(path: &str, content: &str) -> VaultRuntime {
+        test_vault_with_notes(&[(path, content)])
+    }
+
+    fn test_vault_with_notes(notes: &[(&str, &str)]) -> VaultRuntime {
         let dir = tempfile::tempdir().unwrap().keep();
-        fs::write(dir.join(path), content).unwrap();
+        for (path, content) in notes {
+            fs::write(dir.join(path), content).unwrap();
+        }
         let state_path = dir.join("state");
         VaultRuntime::open(
             0,

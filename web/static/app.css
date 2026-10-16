@@ -1972,6 +1972,31 @@ button.tag-pill:not(:disabled):hover::after {
   display: none;
 }
 
+.search-panel .search-result-tags {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.search-panel .search-result-tags .tag-pill {
+  flex: 0 1 auto;
+  min-width: 0;
+  padding: 0 7px;
+  font-size: 11.5px;
+  line-height: 18px;
+}
+
+.search-result-tags-overflow {
+  flex: 0 0 auto;
+  color: var(--color-text-subtle);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  line-height: 18px;
+}
+
 .search-panel .search-snippet {
   display: -webkit-box;
   -webkit-box-orient: vertical;
