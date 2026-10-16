@@ -429,6 +429,34 @@ fn v2_unresolved_reason(reason: Option<&str>) -> UnresolvedReason {
     }
 }
 
+fn v2_note_error(note_id: &str, error: Error) -> V2VaultError {
+    match error {
+        Error::Api(error) => match *error {
+            ApiErrorKind::UnresolvedNote { reason, .. } => {
+                V2VaultError::Api(V2ApiErrorKind::UnresolvedNote {
+                    note_id: note_id.to_string(),
+                    reason,
+                })
+            }
+            error => V2VaultError::Internal(Error::Api(Box::new(error))),
+        },
+        Error::NotFound(_) => V2VaultError::Api(V2ApiErrorKind::NoteNotFound {
+            note_id: note_id.to_string(),
+        }),
+        error => V2VaultError::Internal(error),
+    }
+}
+
+fn v2_reconcile_note_before_write(
+    root: &Path,
+    state_root: &Path,
+    catalog: &mut Catalog,
+    note_id: &str,
+) -> V2Result<bool> {
+    reconcile_note_before_write(root, state_root, catalog, note_id)
+        .map_err(|error| v2_note_error(note_id, error))
+}
+
 fn v2_document(meta: &NoteMeta, disk_hash: &str, content: String) -> Result<V2NoteDocument> {
     Ok(V2NoteDocument {
         meta: v2_note_meta(meta, disk_hash)?,
@@ -1418,7 +1446,7 @@ impl VaultRuntime {
                 note_id: note_id.to_string(),
             }));
         }
-        reconcile_note_before_write(&self.root, &self.state_root, &mut catalog, note_id)?;
+        v2_reconcile_note_before_write(&self.root, &self.state_root, &mut catalog, note_id)?;
         let row = catalog.note_row_by_id(note_id)?.ok_or_else(|| {
             V2VaultError::Api(V2ApiErrorKind::NoteNotFound {
                 note_id: note_id.to_string(),
@@ -1435,23 +1463,8 @@ impl VaultRuntime {
                 reason: v2_unresolved_reason(row.unresolved_reason.as_deref()),
             }));
         }
-        let content = read_visible_or_snapshot(&self.root, &row.meta).map_err(|error| {
-            match error {
-                Error::Api(error) => match *error {
-                    ApiErrorKind::UnresolvedNote { reason, .. } => {
-                        V2VaultError::Api(V2ApiErrorKind::UnresolvedNote {
-                            note_id: note_id.to_string(),
-                            reason,
-                        })
-                    }
-                    _ => V2VaultError::Internal(Error::Api(error)),
-                },
-                Error::NotFound(_) => V2VaultError::Api(V2ApiErrorKind::NoteNotFound {
-                    note_id: note_id.to_string(),
-                }),
-                error => V2VaultError::Internal(error),
-            }
-        })?;
+        let content = read_visible_or_snapshot(&self.root, &row.meta)
+            .map_err(|error| v2_note_error(note_id, error))?;
         Ok(v2_document(&row.meta, &row.visible_hash, content)?)
     }
 
@@ -1517,7 +1530,6 @@ impl VaultRuntime {
                 message: error.to_string(),
             })
         })?;
-        let payload_hash = v2_request_hash_for_source("save_delta", Some(note_id), &request, &content)?;
         let submitted_hash = history::source_hash(&content);
         if submitted_hash != request.source_hash {
             return Err(V2VaultError::Api(V2ApiErrorKind::SourceHashMismatch {
@@ -1525,6 +1537,7 @@ impl VaultRuntime {
                 received: request.source_hash,
             }));
         }
+        let payload_hash = v2_request_hash_for_source("save_delta", Some(note_id), &request, &content)?;
         self.v2_save_source(
             note_id,
             &request.mutation_id,
@@ -1631,7 +1644,7 @@ impl VaultRuntime {
         if let Some(response) = v2_existing_mutation(self, &self.root, &self.state_root, &mut catalog, mutation_id, payload_hash)? {
             return Ok(response);
         }
-        reconcile_note_before_write(&self.root, &self.state_root, &mut catalog, note_id)?;
+        v2_reconcile_note_before_write(&self.root, &self.state_root, &mut catalog, note_id)?;
         let mut row = catalog.note_row_by_id(note_id)?.ok_or_else(|| {
             V2VaultError::Api(V2ApiErrorKind::NoteNotFound {
                 note_id: note_id.to_string(),
@@ -1657,7 +1670,7 @@ impl VaultRuntime {
         })?;
         let mut current_disk_hash = history::disk_hash(&current_bytes);
         if current_disk_hash != row.visible_hash {
-            reconcile_note_before_write(&self.root, &self.state_root, &mut catalog, note_id)?;
+            v2_reconcile_note_before_write(&self.root, &self.state_root, &mut catalog, note_id)?;
             row = catalog.note_row_by_id(note_id)?.ok_or_else(|| {
                 V2VaultError::Api(V2ApiErrorKind::NoteNotFound {
                     note_id: note_id.to_string(),
@@ -1733,7 +1746,7 @@ impl VaultRuntime {
         let current_check = read_visible_bytes(&self.root, &current.path)?;
         if history::disk_hash(&current_check) != row.visible_hash {
             catalog.clear_prepared_mutation(mutation_id)?;
-            reconcile_note_before_write(&self.root, &self.state_root, &mut catalog, note_id)?;
+            v2_reconcile_note_before_write(&self.root, &self.state_root, &mut catalog, note_id)?;
             let latest = catalog.note_row_by_id(note_id)?.ok_or_else(|| {
                 V2VaultError::Api(V2ApiErrorKind::NoteNotFound {
                     note_id: note_id.to_string(),
@@ -1928,7 +1941,7 @@ impl VaultRuntime {
         {
             return Ok(response);
         }
-        reconcile_note_before_write(&self.root, &self.state_root, &mut catalog, note_id)?;
+        v2_reconcile_note_before_write(&self.root, &self.state_root, &mut catalog, note_id)?;
         let row = catalog.note_row_by_id(note_id)?.ok_or_else(|| {
             V2VaultError::Api(V2ApiErrorKind::NoteNotFound {
                 note_id: note_id.to_string(),
@@ -1980,7 +1993,7 @@ impl VaultRuntime {
         }
         let source_bytes = read_visible_bytes(&self.root, &row.meta.path)?;
         if history::disk_hash(&source_bytes) != row.visible_hash {
-            reconcile_note_before_write(&self.root, &self.state_root, &mut catalog, note_id)?;
+            v2_reconcile_note_before_write(&self.root, &self.state_root, &mut catalog, note_id)?;
             return Err(V2VaultError::Api(V2ApiErrorKind::DiskHashMismatch {
                 expected: catalog
                     .note_row_by_id(note_id)?
@@ -2022,7 +2035,7 @@ impl VaultRuntime {
         let current_check = read_visible_bytes(&self.root, &row.meta.path)?;
         if history::disk_hash(&current_check) != row.visible_hash {
             catalog.clear_prepared_mutation(&request.mutation_id)?;
-            reconcile_note_before_write(&self.root, &self.state_root, &mut catalog, note_id)?;
+            v2_reconcile_note_before_write(&self.root, &self.state_root, &mut catalog, note_id)?;
             return Err(V2VaultError::Api(V2ApiErrorKind::DiskHashMismatch {
                 expected: catalog
                     .note_row_by_id(note_id)?
@@ -2092,7 +2105,7 @@ impl VaultRuntime {
         {
             return Ok(response);
         }
-        reconcile_note_before_write(&self.root, &self.state_root, &mut catalog, note_id)?;
+        v2_reconcile_note_before_write(&self.root, &self.state_root, &mut catalog, note_id)?;
         let row = catalog.note_row_by_id(note_id)?.ok_or_else(|| {
             V2VaultError::Api(V2ApiErrorKind::NoteNotFound {
                 note_id: note_id.to_string(),
@@ -2138,7 +2151,7 @@ impl VaultRuntime {
         let check = read_visible_bytes(&self.root, &row.meta.path)?;
         if history::disk_hash(&check) != disk_hash {
             catalog.clear_prepared_mutation(&request.mutation_id)?;
-            reconcile_note_before_write(&self.root, &self.state_root, &mut catalog, note_id)?;
+            v2_reconcile_note_before_write(&self.root, &self.state_root, &mut catalog, note_id)?;
             let current = catalog.note_row_by_id(note_id)?.ok_or_else(|| {
                 V2VaultError::Api(V2ApiErrorKind::NoteNotFound {
                     note_id: note_id.to_string(),
@@ -4515,9 +4528,18 @@ mod tests {
     #[test]
     fn invalid_utf8_is_unresolved_and_read_only() {
         let invalid_bytes = [0xff, 0xfe, 0x61];
-        let vault = test_vault_with_bytes("Bad.md", &invalid_bytes);
+        let vault = test_vault_with_bytes("Bad.md", b"# Bad\n");
+        let note_id = vault.lock_catalog().all_rows().unwrap().remove(0).meta.note_id;
+        fs::write(vault.root.join("Bad.md"), invalid_bytes).unwrap();
+        let error = vault.v2_open_note(&note_id).unwrap_err();
+        assert!(matches!(
+            &error,
+            V2VaultError::Api(V2ApiErrorKind::UnresolvedNote {
+                note_id: error_note_id,
+                reason: UnresolvedReason::InvalidUtf8,
+            }) if error_note_id == &note_id
+        ), "unexpected error: {error:?}");
         let row = vault.lock_catalog().all_rows().unwrap().remove(0);
-        assert!(vault.v2_open_note(&row.meta.note_id).is_err());
         assert_eq!(
             row.unresolved_reason.as_deref(),
             Some("invalid_utf8")
@@ -4648,9 +4670,18 @@ mod tests {
     fn delta_hash_mismatch_mutates_nothing() {
         let vault = test_vault();
         let created = v2_create(&vault, "A.md", "# A\n\nbase\n");
-        assert!(vault
-            .v2_save_note_delta(&created.note_id, v2_delta(&created, "delta-bad", "changed", "# wrong\n"))
-            .is_err());
+        let result = vault.v2_save_note_delta(
+            &created.note_id,
+            v2_delta(&created, "delta-bad", "changed", "# wrong\n"),
+        );
+        let error = result.unwrap_err();
+        match &error {
+            V2VaultError::Api(V2ApiErrorKind::SourceHashMismatch { expected, received }) => {
+                assert_eq!(expected, &history::source_hash("# A\n\nchanged\n"));
+                assert_eq!(received, &history::source_hash("# wrong\n"));
+            }
+            _ => panic!("expected source hash mismatch, got {error:?}"),
+        }
 
         let opened = vault.v2_open_note(&created.note_id).unwrap();
         assert_eq!(opened.content, "# A\n\nbase\n");

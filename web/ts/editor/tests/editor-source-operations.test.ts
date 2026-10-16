@@ -26,15 +26,17 @@ function mounted(source: string, config: Parameters<typeof createCodeMirrorEdito
 }
 
 describe("source-preserving Markdown operations", () => {
-  it("offers a movable link pill over links in read-only articles", () => {
+  it("offers a movable link pill over links while editing", () => {
     const opened: string[] = [];
     const { container, dispose } = mounted("[article link](https://example.test/article)", {
-      readOnly: true,
       onLinkOpen: (url) => opened.push(url),
     });
     try {
       const link = container.querySelector<HTMLElement>(".cm-atomic-link");
       expect(link).not.toBeNull();
+      Object.defineProperty(link, "getClientRects", {
+        value: () => [{ left: 0, right: 100, top: 0, bottom: 20 }],
+      });
       link!.dispatchEvent(new Event("pointerover", { bubbles: true }));
 
       const pill = document.querySelector<HTMLButtonElement>(".article-link-pill");
@@ -43,6 +45,23 @@ describe("source-preserving Markdown operations", () => {
       pill!.dispatchEvent(new Event("pointerenter"));
       expect(document.querySelector(".article-link-pill")).toBe(pill);
       pill!.click();
+      expect(opened).toStrictEqual(["https://example.test/article"]);
+      expect(document.querySelector(".article-link-pill")).toBeNull();
+    } finally {
+      dispose();
+    }
+  });
+
+  it("opens read-only links directly", () => {
+    const opened: string[] = [];
+    const { container, dispose } = mounted("[article link](https://example.test/article)", {
+      readOnly: true,
+      onLinkOpen: (url) => opened.push(url),
+    });
+    try {
+      const link = container.querySelector<HTMLElement>(".cm-atomic-link");
+      expect(link).not.toBeNull();
+      link!.dispatchEvent(new MouseEvent("click", { bubbles: true, button: 0 }));
       expect(opened).toStrictEqual(["https://example.test/article"]);
       expect(document.querySelector(".article-link-pill")).toBeNull();
     } finally {
