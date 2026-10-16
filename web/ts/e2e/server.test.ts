@@ -637,6 +637,11 @@ describe("real server harness", () => {
   it("reconciles external filesystem edits for the active vault", async () => {
     const page = await newLoggedPage();
     await page.goto(baseUrl);
+    let signalSubscribed: () => void = () => {};
+    const subscribed = new Promise<void>((resolve) => {
+      signalSubscribed = resolve;
+    });
+    await page.exposeFunction("tansuStreamSubscribed", () => signalSubscribed());
     const eventPromise = page.evaluate(async (args) => {
       let cursor = 0;
       while (true) {
@@ -644,6 +649,7 @@ describe("real server harness", () => {
           headers: { "X-Tansu-Server-Instance": args.serverInstanceId },
         });
         if (!response.ok || response.body === null) throw new Error(`event stream failed: ${response.status}`);
+        (window as unknown as { tansuStreamSubscribed: () => void }).tansuStreamSubscribed();
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
         let buffer = "";
@@ -681,7 +687,7 @@ describe("real server harness", () => {
         }
       }
     }, { vaultId: vaultOneId, serverInstanceId });
-    await new Promise((resolve) => setTimeout(resolve, 900));
+    await Promise.race([subscribed, eventPromise]);
     await writeFile(join(vaultOnePath, "outside.md"), "# Outside\n\nedit\n", "utf8");
     await expect(eventPromise).resolves.toBe("vaultChanged");
     await page.close();

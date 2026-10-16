@@ -3,15 +3,6 @@
 Prefix: TNS
 Next: 54
 
-### TNS-030 · P2 · Synchronize watcher e2e on stream readiness
-
-- **Area:** Tests
-- **Where:** `web/ts/e2e/server.test.ts:525-570`
-- **Problem:** The external-edit e2e starts reading the event stream and then waits a fixed 900 ms before changing a file. The delay does not prove the server subscribed before the write, so a slow or loaded runner can miss the event and fail intermittently.
-- **Recommendation:** Expose and await a deterministic stream-ready signal before writing the external file.
-- **Fix with:** renovate-tests
-- **Effort:** S
-
 ### TNS-039 · P2 · Version immutable WebP encoder asset URLs
 
 - **Area:** Build
