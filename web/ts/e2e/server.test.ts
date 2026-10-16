@@ -1209,6 +1209,91 @@ describe("real server harness", () => {
     await page.close();
   });
 
+  it("acceptance: a long session of opening, closing, and pasting leaks no workers, blob URLs, or editors", async () => {
+    const page = await newLoggedPage();
+    await page.addInitScript(() => {
+      const liveBlobUrls = new Set<string>();
+      const createObjectURL = URL.createObjectURL.bind(URL);
+      const revokeObjectURL = URL.revokeObjectURL.bind(URL);
+      URL.createObjectURL = (object) => {
+        const url = createObjectURL(object);
+        liveBlobUrls.add(url);
+        return url;
+      };
+      URL.revokeObjectURL = (url) => {
+        liveBlobUrls.delete(url);
+        revokeObjectURL(url);
+      };
+      let liveWorkers = 0;
+      const NativeWorker = window.Worker;
+      window.Worker = class extends NativeWorker {
+        private terminated = false;
+        constructor(url: string | URL, options?: WorkerOptions) {
+          super(url, options);
+          liveWorkers += 1;
+        }
+        override terminate(): void {
+          if (!this.terminated) {
+            this.terminated = true;
+            liveWorkers -= 1;
+          }
+          super.terminate();
+        }
+      };
+      Object.defineProperty(window, "__tansuLeaks", {
+        value: () => ({
+          blobUrls: liveBlobUrls.size,
+          workers: liveWorkers,
+          editors: document.querySelectorAll(".cm-editor").length,
+        }),
+      });
+    });
+    await page.goto(baseUrl);
+    await page.waitForSelector(".main");
+    const leaks = () => page.evaluate(() =>
+      (window as unknown as { __tansuLeaks: () => { blobUrls: number; workers: number; editors: number } })
+        .__tansuLeaks()
+    );
+    const cycle = async () => {
+      await openSearchNote(page, "visual");
+      await page.waitForSelector('.cm-content .cm-atomic-image[data-image-name="z-images/sample.webp"] img');
+      await page.waitForFunction(() => {
+        const image = document.querySelector<HTMLImageElement>("#editor-mount .cm-atomic-image img");
+        return image?.complete === true && image.naturalWidth > 0;
+      });
+      await openSearchNote(page, "search");
+      for (const _tab of [0, 1]) await page.locator(".tab.active .tab-close").click();
+      await page.waitForSelector(".tab", { state: "detached" });
+    };
+
+    await cycle();
+    await cycle();
+    await createCodeMirrorNote(page, "Acceptance Leak Paste");
+    await page.locator("#editor-mount .cm-content").fill("# Acceptance Leak Paste\n\n");
+    for (let pasted = 0; pasted < 3; pasted += 1) {
+      await page.keyboard.press("Control+End");
+      const uploaded = page.waitForResponse((response) =>
+        new URL(response.url()).pathname.endsWith("/images") && response.status() === 201
+      );
+      await pasteImage(page);
+      await uploaded;
+      await expect.poll(() => page.locator(".tansu-pasted-image-preview").count()).toBe(0);
+    }
+    await page.locator(".tab.active .tab-close").click();
+    await page.waitForSelector(".tab", { state: "detached" });
+    const warm = await leaks();
+    expect(warm.editors).toBeLessThanOrEqual(1);
+    expect(warm.workers).toBe(0);
+
+    for (let round = 0; round < 20; round += 1) await cycle();
+
+    const after = await leaks();
+    expect(after.editors).toBeLessThanOrEqual(warm.editors);
+    expect(after.workers).toBe(0);
+    expect(after.blobUrls).toBeLessThanOrEqual(warm.blobUrls);
+    await page.close();
+  }, 180_000);
+
   it("acceptance: auth expiring while an image upload is in flight locks the app without losing the note", async () => {
     const page = await newLoggedPage();
     await page.goto(baseUrl);
