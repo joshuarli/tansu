@@ -679,7 +679,7 @@ async function until(predicate: () => boolean): Promise<void> {
     if (predicate()) {
       return;
     }
-    await Promise.resolve();
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
   }
   throw new Error("Expected asynchronous work did not finish");
 }

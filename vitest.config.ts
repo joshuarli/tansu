@@ -4,6 +4,7 @@ export default defineConfig({
   test: {
     globals: true,
     environment: "happy-dom",
+    pool: "vmThreads",
     include: ["web/ts/**/*.test.ts", "bench/**/*.test.mjs", "scripts/*.test.mjs"],
     exclude: ["web/ts/e2e/**"],
     reporters: ["agent"],
