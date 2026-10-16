@@ -3,15 +3,6 @@
 Prefix: TNS
 Next: 54
 
-### TNS-046 · P2 · Wire wiki-link navigation into the app editor
-
-- **Area:** Tests
-- **Where:** `web/ts/app.ts:11`, `web/ts/editor/tansu-extensions.ts:102`, `web/ts/editor/codemirror-adapter.ts:463`
-- **Problem:** `app.ts` imports `createCalloutExtension` and `createWikiImageExtension` but not `createWikiLinkExtension`, and the adapter installs `wikiLinks` only when that extension is configured. Wiki-link navigation therefore appears unwired in production. Source-read only; not yet confirmed in the running app.
-- **Recommendation:** Confirm in the running app, then wire the extension and add app-boundary tests for a resolved link, an ambiguous basename, a relative path, a missing target, and a rename. If links are intentionally off, delete the extension and its docs.
-- **Fix with:** none
-- **Effort:** M
-
 ### TNS-047 · P2 · Propagate or remove settings that have no effect
 
 - **Area:** Architecture

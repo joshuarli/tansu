@@ -70,7 +70,9 @@ read-only.
 Wiki links resolve against the configured active-vault notes. A leading `/`
 selects a vault-root path. `./` and `../` paths resolve from the current note's
 directory. A bare basename resolves only when it matches one note. Ambiguous
-targets remain unresolved.
+targets remain unresolved. Clicking a resolved wiki link opens its note. Link
+labels and status refresh when a note is created, renamed, retitled, or deleted,
+and when the current note's path changes.
 
 Renaming a note changes its path and keeps its `noteId`. Tansu2 does not rewrite
 Markdown links that mention the old path.

@@ -47,7 +47,7 @@ import {
   type EditorImageUploadRequest,
   type EditorImageUploadResult,
 } from "./tansu-extensions.js";
-import { resolveWikiTarget, suggestWikiTargets } from "./wiki-target.js";
+import { resolveWikiTarget, suggestWikiTargets, type WikiNote } from "./wiki-target.js";
 import { wikiImages } from "./wiki-images.js";
 import {
   toggleBold,
@@ -466,6 +466,24 @@ function editorExtensions(config: EditorConfig, live: boolean, onFrontmatterTogg
   return extensions;
 }
 
+type WikiScope = { currentNotePath: string; notes: readonly WikiNote[] };
+
+function hasWikiLinks(config: EditorConfig): boolean {
+  return (config.extensions ?? []).some((extension) => extension.kind === "wiki-links");
+}
+
+function wikiScope(config: EditorConfig): WikiScope {
+  return { currentNotePath: config.currentNotePath?.() ?? "", notes: config.wikiNotes?.() ?? [] };
+}
+
+function sameWikiScope(left: WikiScope, right: WikiScope): boolean {
+  return left.currentNotePath === right.currentNotePath && left.notes.length === right.notes.length &&
+    left.notes.every((note, index) => {
+      const other = right.notes[index]!;
+      return note.noteId === other.noteId && note.path === other.path && note.title === other.title;
+    });
+}
+
 function sameRecord(left: Readonly<Record<string, string>>, right: Readonly<Record<string, string>>): boolean {
   const keys = Object.keys(left);
   return keys.length === Object.keys(right).length && keys.every((key) =>
@@ -574,6 +592,7 @@ function createState(
 export function createCodeMirrorEditor(container: HTMLElement, initialConfig: EditorConfig = {}): EditorHandle {
   let config: EditorConfig = { ...initialConfig };
   let activeSession: EditorSession | null = null;
+  let appliedWikiScope: WikiScope | null = null;
   let disposed = false;
   const owner = Symbol("editor");
   const modeCompartment = new Compartment();
@@ -1054,6 +1073,7 @@ export function createCodeMirrorEditor(container: HTMLElement, initialConfig: Ed
     const effects: StateEffect<unknown>[] = [];
     if (parts.editorExtensions ?? true) {
       effects.push(modeCompartment.reconfigure(editorExtensions(config, data.mode === "live", toggleFrontmatter)));
+      appliedWikiScope = hasWikiLinks(config) ? wikiScope(config) : null;
     }
     if (parts.readOnly ?? true) effects.push(readOnlyCompartment.reconfigure(readOnlyExtension(data.readOnly)));
     if (parts.keymap ?? true) effects.push(keymapCompartment.reconfigure(editorKeymap(config)));
@@ -1356,8 +1376,10 @@ export function createCodeMirrorEditor(container: HTMLElement, initialConfig: Ed
       if (Object.hasOwn(partial, "mode")) data.mode = partial.mode ?? data.mode;
       if (session !== null && data.readOnly) abortInvalidImagePastes(session);
       const modeChanged = data.mode !== previousMode;
+      const wikiScopeChanged = data.mode === "live" && hasWikiLinks(config) &&
+        (appliedWikiScope === null || !sameWikiScope(appliedWikiScope, wikiScope(config)));
       const editorExtensionsChanged = modeChanged || previous.noteTitle !== config.noteTitle ||
-        !sameNoteTags(previous.noteTags, config.noteTags) ||
+        !sameNoteTags(previous.noteTags, config.noteTags) || wikiScopeChanged ||
         (data.mode === "live" && !sameEditorExtensionInputs(previous, config));
       const readOnlyChanged = data.readOnly !== previousReadOnly;
       const keymapChanged = previous.onSave !== config.onSave || previous.onFindRequested !== config.onFindRequested;

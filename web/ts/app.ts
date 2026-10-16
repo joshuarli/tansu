@@ -8,7 +8,7 @@ import { sameTabIdentity, toTabKey, type TabIdentity } from "./app/tab-identity.
 import { logClientEvent } from "./dev-log.ts";
 import { V2ApiError } from "./app/v2-api.ts";
 import type { EditorHandle, EditorSession } from "./editor/codemirror-adapter.ts";
-import { createCalloutExtension, createWikiImageExtension, type EditorConfig } from "./editor/tansu-extensions.ts";
+import { createCalloutExtension, createWikiImageExtension, createWikiLinkExtension, type EditorConfig } from "./editor/tansu-extensions.ts";
 import { canMutateTags } from "./editor/tag-source.ts";
 import { normalizeTag } from "./markdown-tags.ts";
 import { canonicalSourceHash } from "./source-hash.ts";
@@ -524,6 +524,7 @@ export class TansuApp {
     const extensions = [
       createWikiImageExtension({ resolveUrl: (name) => this.resolveAssetUrl(name) }),
       createCalloutExtension(),
+      createWikiLinkExtension(),
     ];
     if (sameVault && cached !== null) {
       const config = this.editorConfigForActiveNote({ ...cached.config, extensions });

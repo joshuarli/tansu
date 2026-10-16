@@ -6,7 +6,7 @@ import { canonicalSourceHash } from "./source-hash.ts";
 import { V2ApiError, type V2VaultBootstrap, type V2VaultClient, type V2VaultSnapshot } from "./app/v2-api.ts";
 import { serverInstanceId, vaultId, workspaceId } from "./app/identity.ts";
 import type { EditorConfig } from "./editor/tansu-extensions.ts";
-import type { EditorHandle, EditorSession, EditorSnapshot } from "./editor/codemirror-adapter.ts";
+import { createCodeMirrorEditor, type EditorHandle, type EditorSession, type EditorSnapshot } from "./editor/codemirror-adapter.ts";
 import type {
   Settings,
   V2BootstrapResponse,
@@ -1712,6 +1712,119 @@ describe("v2 desktop shell", () => {
     expect(root.querySelector(".auth-gate")?.textContent).toContain("Unlock your notes");
     expect(root.querySelector(".unavailable-state")).toBeNull();
     await app.dispose();
+  });
+
+  describe("wiki links in the production editor", () => {
+    const one = noteMeta("note-1", "one.md", "One");
+    const two = noteMeta("note-2", "docs/two.md", "Two");
+
+    async function mountWithLink(source: string, notes: V2NoteMeta[] = [one, two]) {
+      const client = configureVault(notes, workspaceSeed([
+        { noteId: one.noteId, title: one.title, path: one.path, cursorOffset: 0, sourceMode: false },
+      ], one.noteId));
+      client.openNote.mockImplementation(async (id) => {
+        const meta = notes.find((item) => item.noteId === id)!;
+        return documentFor(meta, id === one.noteId ? source : `# ${meta.title}\n`);
+      });
+      const mounted = mountApp({ ...createServices(), editor: { createEditor: createCodeMirrorEditor } });
+      await mounted.app.boot();
+      await until(() => mounted.root.querySelector(".cm-content")?.textContent?.includes("See") === true);
+      return { client, ...mounted };
+    }
+
+    function wikiLink(root: HTMLElement): HTMLElement | null {
+      return root.querySelector<HTMLElement>("[data-wiki-link-target]");
+    }
+
+    function click(link: HTMLElement): void {
+      link.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 }));
+    }
+
+    it("opens the note a rendered wiki link resolves to", async () => {
+      const { client, root } = await mountWithLink("See [[Two]]\n");
+      expect(wikiLink(root)).not.toBeNull();
+      await until(() => wikiLink(root)!.classList.contains("cm-atomic-wiki-link-resolved"));
+      const link = wikiLink(root)!;
+      expect(link.textContent).toBe("Two");
+
+      click(link);
+
+      await until(() => root.querySelector<HTMLButtonElement>(".tab.active")?.title === "Two");
+      await until(() => client.openNote.mock.calls.some(([id]) => id === two.noteId));
+      await until(() => root.querySelector(".cm-content")?.textContent?.includes("See") === false);
+    });
+
+    it("keeps an ambiguous basename unresolved and does not navigate", async () => {
+      const first = noteMeta("note-2", "a/Dup.md", "Dup");
+      const second = noteMeta("note-3", "b/Dup.md", "Dup");
+      const { client, root } = await mountWithLink("See [[Dup]]\n", [one, first, second]);
+      await until(() => wikiLink(root)?.classList.contains("cm-atomic-wiki-link-unresolved") === true);
+
+      click(wikiLink(root)!);
+      await flushAsync();
+
+      expect(client.openNote).toHaveBeenCalledTimes(1);
+      expect(root.querySelector(".cm-content")?.textContent).toContain("See");
+    });
+
+    it.each([
+      ["./sibling", "note-sibling"],
+      ["../top", "note-top"],
+      ["/docs/sibling", "note-sibling"],
+    ])("resolves %s from the current note's directory", async (target, expectedId) => {
+      const current = noteMeta("note-1", "docs/one.md", "One");
+      const sibling = noteMeta("note-sibling", "docs/sibling.md", "Sibling");
+      const top = noteMeta("note-top", "top.md", "Top");
+      const client = configureVault([current, sibling, top], workspaceSeed([
+        { noteId: current.noteId, title: current.title, path: current.path, cursorOffset: 0, sourceMode: false },
+      ], current.noteId));
+      client.openNote.mockImplementation(async (id) => {
+        const meta = [current, sibling, top].find((item) => item.noteId === id)!;
+        return documentFor(meta, id === current.noteId ? `See [[${target}]]\n` : `# ${meta.title}\n`);
+      });
+      const { app, root } = mountApp({ ...createServices(), editor: { createEditor: createCodeMirrorEditor } });
+      await app.boot();
+      await until(() => wikiLink(root)?.classList.contains("cm-atomic-wiki-link-resolved") === true);
+
+      click(wikiLink(root)!);
+
+      await until(() => client.openNote.mock.calls.some(([id]) => id === expectedId));
+    });
+
+    it("marks a missing target and does not navigate", async () => {
+      const { client, root } = await mountWithLink("See [[Nowhere]]\n");
+      await until(() => wikiLink(root)?.classList.contains("cm-atomic-wiki-link-missing") === true);
+
+      click(wikiLink(root)!);
+      await flushAsync();
+
+      expect(client.openNote).toHaveBeenCalledTimes(1);
+      expect(root.querySelector(".cm-content")?.textContent).toContain("See");
+    });
+
+    it("stops resolving the old name after a rename and resolves the new one", async () => {
+      const { client, root } = await mountWithLink("See [[Two]] and [[Renamed]]\n");
+      await until(() => root.querySelectorAll("[data-wiki-link-target]").length === 2);
+      await until(() => wikiLink(root)?.classList.contains("cm-atomic-wiki-link-resolved") === true);
+      const renamed = noteMeta(two.noteId, "docs/renamed.md", "Renamed", [], 2, HASH_B);
+
+      client.eventHandlers?.onEvent({
+        eventVersion: 1,
+        resyncRequired: false,
+        update: { kind: "vaultChanged", notes: [renamed] },
+      });
+      await until(() => wikiLink(root)?.classList.contains("cm-atomic-wiki-link-missing") === true);
+      const [oldName, newName] = [...root.querySelectorAll<HTMLElement>("[data-wiki-link-target]")];
+      expect(oldName!.classList.contains("cm-atomic-wiki-link-missing")).toBe(true);
+      expect(newName!.classList.contains("cm-atomic-wiki-link-resolved")).toBe(true);
+
+      click(oldName!);
+      await flushAsync();
+      expect(client.openNote).toHaveBeenCalledTimes(1);
+
+      click(newName!);
+      await until(() => client.openNote.mock.calls.some(([id]) => id === two.noteId));
+    });
   });
 
   it("boots through the public entry point using v2 services", async () => {
