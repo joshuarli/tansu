@@ -32,6 +32,12 @@ futures-lite I/O, and has no Tokio dependency. `serve_listener_with_shutdown`
 owns the executor and blocks the calling thread until its `CancellationToken`
 is canceled. The CLI maps process termination signals into the same token.
 
+Each `VaultRuntime` owns its search and watcher worker threads. Workers hold a
+`Weak` runtime reference, so dropping the last runtime handle or calling
+`App::shutdown` stops and joins them; `serve_listener_with_shutdown` calls
+`App::shutdown` after the server stops. Shutdown aborts queued search jobs, and
+the next start rebuilds search from canonical content.
+
 ## Ownership
 
 | Area                    | Files                                                     |

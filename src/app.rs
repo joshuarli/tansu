@@ -60,7 +60,7 @@ impl App {
             );
         }
         for vault in app.vaults.iter() {
-            vault.start_search_worker();
+            vault.start_search_worker()?;
             vault.start_watcher()?;
         }
         Ok(app)
@@ -111,6 +111,12 @@ impl App {
     ) -> Result<EventSubscription> {
         self.vault_by_id(vault_id)?
             .subscribe_v2_events(after_event_version)
+    }
+
+    pub fn shutdown(&self) {
+        for vault in self.vaults.iter() {
+            vault.shutdown();
+        }
     }
 
     pub fn logs(&self) -> &LogHub {

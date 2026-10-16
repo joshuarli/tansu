@@ -3,15 +3,6 @@
 Prefix: TNS
 Next: 54
 
-### TNS-027 · P2 · Give vault worker threads shutdown owners
-
-- **Area:** Concurrency
-- **Where:** `src/vault.rs:814`, `src/vault.rs:829`, `src/http.rs:301`
-- **Problem:** Search and watcher workers are detached and each captures an `Arc<VaultRuntime>`. The search worker also owns a receiver while the runtime owns its sender, so dropping the app does not stop the worker or release its runtime, watcher, and channels.
-- **Recommendation:** Retain worker handles, add cancellation, and join workers during server shutdown and partial startup failure. Each worker has one named owner that stops and joins it; the watcher trigger bound is TNS-041.
-- **Fix with:** lifecycle-concurrency
-- **Effort:** M
-
 ### TNS-028 · P2 · Reject public-suffix RP IDs on exact host matches
 
 - **Area:** Security

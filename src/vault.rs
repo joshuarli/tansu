@@ -3,7 +3,7 @@ use std::collections::{HashMap, VecDeque};
 use std::path::{Component, Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, Sender, SyncSender, TryRecvError, TrySendError};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Condvar, Mutex, MutexGuard, Weak};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError, Weak};
 use std::time::{Duration, Instant};
 use std::thread;
 
@@ -73,12 +73,81 @@ pub struct VaultRuntime {
     subscribers: Mutex<Vec<Sender<ServerEvent>>>,
     v2_subscribers: Arc<Mutex<Vec<(u64, Weak<EventQueue<V2EventEnvelope>>)>>>,
     next_subscriber_id: AtomicU64,
-    watcher: Mutex<Option<RecommendedWatcher>>,
-    search_tx: SyncSender<SearchJob>,
-    search_rx: Mutex<Option<Receiver<SearchJob>>>,
+    workers: Mutex<VaultWorkers>,
+    search_tx: SyncSender<SearchCommand>,
     search_needs_reconciliation: AtomicBool,
     logs: LogHub,
     _owner_lock: VaultOwnerLock,
+}
+
+struct VaultWorkers {
+    search: SearchWorkerSlot,
+    watcher: WatcherWorkerSlot,
+}
+
+enum SearchWorkerSlot {
+    Idle(Receiver<SearchCommand>),
+    Running(SearchWorker),
+    Stopped,
+}
+
+enum WatcherWorkerSlot {
+    Idle,
+    Running(WatcherWorker),
+    Stopped,
+}
+
+struct StopSignal {
+    stopped: Mutex<bool>,
+    changed: Condvar,
+}
+
+impl StopSignal {
+    fn new() -> Arc<Self> {
+        Arc::new(Self {
+            stopped: Mutex::new(false),
+            changed: Condvar::new(),
+        })
+    }
+
+    fn stop(&self) {
+        *self.stopped.lock().unwrap_or_else(PoisonError::into_inner) = true;
+        self.changed.notify_all();
+    }
+
+    fn is_stopped(&self) -> bool {
+        *self.stopped.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    fn sleep(&self, duration: Duration) -> bool {
+        let guard = self.stopped.lock().unwrap_or_else(PoisonError::into_inner);
+        *self
+            .changed
+            .wait_timeout_while(guard, duration, |stopped| !*stopped)
+            .unwrap_or_else(PoisonError::into_inner)
+            .0
+    }
+}
+
+struct SearchWorker {
+    stop: Arc<StopSignal>,
+    handle: thread::JoinHandle<()>,
+}
+
+struct WatcherWorker {
+    stop: Arc<StopSignal>,
+    watcher: RecommendedWatcher,
+    wake: Sender<()>,
+    handle: thread::JoinHandle<()>,
+}
+
+fn join_worker(runtime: &VaultRuntime, name: &str, handle: thread::JoinHandle<()>) {
+    if handle.thread().id() == thread::current().id() {
+        return;
+    }
+    if handle.join().is_err() {
+        runtime.log_worker_panic(name);
+    }
 }
 
 struct VaultOwnerLock {
@@ -97,6 +166,12 @@ impl VaultOwnerLock {
             }),
             Err(fs::TryLockError::Error(error)) => Err(Error::Io(error)),
         }
+    }
+}
+
+impl Drop for VaultRuntime {
+    fn drop(&mut self) {
+        self.shutdown();
     }
 }
 
@@ -727,33 +802,73 @@ enum SearchJob {
     Rebuild,
 }
 
+enum SearchCommand {
+    Run(SearchJob),
+    Stop,
+}
+
 enum SearchOverlayIdentityKind {
     Saved(String),
     New(String),
 }
 
-fn run_search_worker(runtime: Arc<VaultRuntime>, receiver: Receiver<SearchJob>) {
+fn run_search_worker(
+    runtime: Weak<VaultRuntime>,
+    receiver: Receiver<SearchCommand>,
+    stop: Arc<StopSignal>,
+) {
     loop {
-        if runtime
-            .search_needs_reconciliation
-            .swap(false, Ordering::AcqRel)
-            && !runtime.run_search_job(SearchJob::Rebuild)
-        {
-            thread::sleep(Duration::from_secs(1));
+        if stop.is_stopped() {
+            return;
+        }
+        let rebuild_failed = match runtime.upgrade() {
+            Some(runtime) => {
+                runtime
+                    .search_needs_reconciliation
+                    .swap(false, Ordering::AcqRel)
+                    && !runtime.run_search_job(SearchJob::Rebuild)
+            }
+            None => return,
+        };
+        if rebuild_failed && stop.sleep(Duration::from_secs(1)) {
+            return;
         }
         let mut job = match receiver.recv_timeout(Duration::from_secs(1)) {
-            Ok(job) => job,
+            Ok(SearchCommand::Run(job)) => job,
+            Ok(SearchCommand::Stop) | Err(mpsc::RecvTimeoutError::Disconnected) => return,
             Err(mpsc::RecvTimeoutError::Timeout) => continue,
-            Err(mpsc::RecvTimeoutError::Disconnected) => return,
+        };
+        let Some(runtime) = runtime.upgrade() else {
+            return;
         };
         loop {
             runtime.run_search_job(job);
+            if stop.is_stopped() {
+                return;
+            }
             match receiver.try_recv() {
-                Ok(next) => job = next,
+                Ok(SearchCommand::Run(next)) => job = next,
+                Ok(SearchCommand::Stop) | Err(TryRecvError::Disconnected) => return,
                 Err(TryRecvError::Empty) => break,
-                Err(TryRecvError::Disconnected) => return,
             }
         }
+    }
+}
+
+fn run_watcher_worker(runtime: Weak<VaultRuntime>, events: Receiver<()>, stop: Arc<StopSignal>) {
+    while events.recv().is_ok() {
+        while events.recv_timeout(Duration::from_millis(150)).is_ok() {
+            if stop.is_stopped() {
+                return;
+            }
+        }
+        if stop.is_stopped() {
+            return;
+        }
+        let Some(runtime) = runtime.upgrade() else {
+            return;
+        };
+        let _ = runtime.reconcile_from_watcher();
     }
 }
 
@@ -820,34 +935,49 @@ impl VaultRuntime {
             subscribers: Mutex::new(Vec::new()),
             v2_subscribers: Arc::new(Mutex::new(Vec::new())),
             next_subscriber_id: AtomicU64::new(1),
-            watcher: Mutex::new(None),
+            workers: Mutex::new(VaultWorkers {
+                search: SearchWorkerSlot::Idle(search_rx),
+                watcher: WatcherWorkerSlot::Idle,
+            }),
             search_tx,
-            search_rx: Mutex::new(Some(search_rx)),
             search_needs_reconciliation: AtomicBool::new(search_needs_reconciliation),
             logs,
             _owner_lock: owner_lock,
         })
     }
 
-    pub fn start_search_worker(self: &Arc<Self>) {
-        let Some(rx) = self
-            .search_rx
-            .lock()
-            .expect("search receiver mutex poisoned")
-            .take()
-        else {
-            return;
+    pub fn start_search_worker(self: &Arc<Self>) -> Result<()> {
+        let mut workers = self.lock_workers();
+        let receiver = match std::mem::replace(&mut workers.search, SearchWorkerSlot::Stopped) {
+            SearchWorkerSlot::Idle(receiver) => receiver,
+            other => {
+                workers.search = other;
+                return Err(Error::Internal(
+                    "search worker is already started or stopped".to_string(),
+                ));
+            }
         };
-        let runtime = Arc::clone(self);
-        thread::spawn(move || {
-            run_search_worker(runtime, rx);
-        });
+        let stop = StopSignal::new();
+        let runtime = Arc::downgrade(self);
+        let worker_stop = Arc::clone(&stop);
+        let handle = thread::Builder::new()
+            .name(format!("tansu-search-{}", self.vault_id))
+            .spawn(move || run_search_worker(runtime, receiver, worker_stop))?;
+        workers.search = SearchWorkerSlot::Running(SearchWorker { stop, handle });
+        Ok(())
     }
 
     pub fn start_watcher(self: &Arc<Self>) -> Result<()> {
+        let mut workers = self.lock_workers();
+        if !matches!(workers.watcher, WatcherWorkerSlot::Idle) {
+            return Err(Error::Internal(
+                "watcher is already started or stopped".to_string(),
+            ));
+        }
         let root = self.root.clone();
         let state_root = self.state_root.clone();
         let (tx, rx) = mpsc::channel::<()>();
+        let wake = tx.clone();
         let mut watcher =
             notify::recommended_watcher(move |result: notify::Result<notify::Event>| {
                 if let Ok(event) = result {
@@ -861,15 +991,78 @@ impl VaultRuntime {
                 }
             })?;
         watcher.watch(&root, RecursiveMode::Recursive)?;
-        *self.watcher.lock().expect("watcher mutex poisoned") = Some(watcher);
-        let runtime = Arc::clone(self);
-        thread::spawn(move || {
-            while rx.recv().is_ok() {
-                while rx.recv_timeout(Duration::from_millis(150)).is_ok() {}
-                let _ = runtime.reconcile_from_watcher();
-            }
+        let stop = StopSignal::new();
+        let runtime = Arc::downgrade(self);
+        let worker_stop = Arc::clone(&stop);
+        let handle = thread::Builder::new()
+            .name(format!("tansu-watcher-{}", self.vault_id))
+            .spawn(move || run_watcher_worker(runtime, rx, worker_stop))?;
+        workers.watcher = WatcherWorkerSlot::Running(WatcherWorker {
+            stop,
+            watcher,
+            wake,
+            handle,
         });
         Ok(())
+    }
+
+    pub fn shutdown(&self) {
+        let (search, watcher) = {
+            let mut workers = self.lock_workers();
+            (
+                std::mem::replace(&mut workers.search, SearchWorkerSlot::Stopped),
+                std::mem::replace(&mut workers.watcher, WatcherWorkerSlot::Stopped),
+            )
+        };
+        if let WatcherWorkerSlot::Running(worker) = watcher {
+            let WatcherWorker {
+                stop,
+                watcher,
+                wake,
+                handle,
+            } = worker;
+            stop.stop();
+            drop(watcher);
+            let _ = wake.send(());
+            join_worker(self, "watcher", handle);
+        }
+        if let SearchWorkerSlot::Running(worker) = search {
+            worker.stop.stop();
+            let _ = self.search_tx.try_send(SearchCommand::Stop);
+            join_worker(self, "search", worker.handle);
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn workers_stopped(&self) -> bool {
+        let workers = self.lock_workers();
+        matches!(workers.search, SearchWorkerSlot::Stopped)
+            && matches!(workers.watcher, WatcherWorkerSlot::Stopped)
+    }
+
+    fn lock_workers(&self) -> MutexGuard<'_, VaultWorkers> {
+        self.workers.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    fn log_worker_panic(&self, worker: &str) {
+        if self.logs.enabled() {
+            self.logs.server_event(
+                LogLevel::Error,
+                "system.event",
+                None,
+                fields([
+                    (
+                        "system",
+                        serde_json::json!({
+                            "component": "vault",
+                            "action": "worker_panic",
+                            "worker": worker,
+                        }),
+                    ),
+                    ("vault", serde_json::json!(self.index)),
+                ]),
+            );
+        }
     }
 
     pub fn subscribe(&self) -> Result<Receiver<ServerEvent>> {
@@ -2933,7 +3126,7 @@ impl VaultRuntime {
         if let Err(error) = catalog.set_search_dirty(true, degraded) {
             self.log_search_failure("persist queued search status", &error.to_string());
         }
-        match self.search_tx.try_send(job) {
+        match self.search_tx.try_send(SearchCommand::Run(job)) {
             Ok(()) => {}
             Err(TrySendError::Full(_)) => {
                 self.search_needs_reconciliation
@@ -5484,6 +5677,74 @@ mod tests {
         assert!(!state.path().join("second").join("vault.db").exists());
 
         drop(owner);
+        VaultRuntime::open(0, &config_for(&root, state.path().join("second")), logs()).unwrap();
+    }
+
+    #[test]
+    fn dropping_a_runtime_with_started_workers_releases_the_vault_root() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        let state = tempfile::tempdir().unwrap();
+        let logs = || LogHub::new(crate::logging::LogMode::Off);
+
+        let runtime = Arc::new(
+            VaultRuntime::open(0, &config_for(&root, state.path().join("first")), logs()).unwrap(),
+        );
+        runtime.start_search_worker().unwrap();
+        runtime.start_watcher().unwrap();
+        assert_eq!(Arc::strong_count(&runtime), 1);
+        drop(runtime);
+
+        VaultRuntime::open(0, &config_for(&root, state.path().join("second")), logs()).unwrap();
+    }
+
+    #[test]
+    fn shutdown_joins_both_workers_while_other_handles_remain() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        let state = tempfile::tempdir().unwrap();
+        let runtime = Arc::new(
+            VaultRuntime::open(
+                0,
+                &config_for(&root, state.path().join("state")),
+                LogHub::new(crate::logging::LogMode::Off),
+            )
+            .unwrap(),
+        );
+        runtime.start_search_worker().unwrap();
+        runtime.start_watcher().unwrap();
+        let other_handle = Arc::clone(&runtime);
+
+        runtime.shutdown();
+
+        assert!(matches!(
+            runtime.search_tx.try_send(SearchCommand::Run(SearchJob::Rebuild)),
+            Err(TrySendError::Disconnected(_))
+        ));
+        assert!(matches!(runtime.start_watcher(), Err(Error::Internal(_))));
+        assert!(matches!(runtime.start_search_worker(), Err(Error::Internal(_))));
+        runtime.shutdown();
+        drop(other_handle);
+    }
+
+    #[test]
+    fn a_failed_watcher_start_leaves_no_running_watcher_and_drop_stops_the_search_worker() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        let state = tempfile::tempdir().unwrap();
+        let logs = || LogHub::new(crate::logging::LogMode::Off);
+        let runtime = Arc::new(
+            VaultRuntime::open(0, &config_for(&root, state.path().join("first")), logs()).unwrap(),
+        );
+        runtime.start_search_worker().unwrap();
+        fs::remove_dir_all(&root).unwrap();
+        assert!(runtime.start_watcher().is_err());
+        assert!(matches!(
+            runtime.lock_workers().watcher,
+            WatcherWorkerSlot::Idle
+        ));
+        drop(runtime);
+
         VaultRuntime::open(0, &config_for(&root, state.path().join("second")), logs()).unwrap();
     }
 

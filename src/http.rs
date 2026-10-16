@@ -310,14 +310,16 @@ pub fn serve_listener_with_shutdown(
 ) -> Result<()> {
     let executor = Arc::new(Executor::new());
     let server_executor = executor.clone();
-    async_io::block_on(executor.run(serve_listener_with_limits(
-        app,
+    let result = async_io::block_on(executor.run(serve_listener_with_limits(
+        app.clone(),
         listener,
         services,
         shutdown,
         server_executor,
         TransportLimits::default(),
-    )))
+    )));
+    app.shutdown();
+    result
 }
 
 async fn serve_listener_with_limits(
@@ -1785,7 +1787,12 @@ mod tests {
         let shutdown = CancellationToken::new();
         shutdown.cancel();
 
+        let retained = app.clone();
+
         serve_listener_with_shutdown(app, listener, ServerServices::default(), shutdown).unwrap();
+
+        let vault_id = retained.v2_bootstrap().vaults[0].vault_id.clone();
+        assert!(retained.vault_by_id(&vault_id).unwrap().workers_stopped());
     }
 
     #[test]
