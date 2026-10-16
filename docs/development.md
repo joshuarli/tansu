@@ -3,10 +3,10 @@
 ## Set up
 
 Install the Rust toolchain in `rust-toolchain.toml`, Deno 2, Node 26 or later,
-and pnpm 12.13.0.
+and pnpm 12.13.0. `make dev` installs the locked frontend dependencies for you.
 
 ```sh
-pnpm install
+pnpm install --frozen-lockfile
 deno task playwright:install
 ```
 
@@ -42,7 +42,8 @@ backup and recovery procedures.
 manifest under `web/dist/`. That directory is generated and ignored. Cargo runs `build.rs`
 whenever it compiles the root package, and that script reads the manifest.
 `make check`, `make test`, `make types`, and `make types-check` build production
-assets first. `make dev` builds development assets before generating API types.
+assets first. `make dev` installs frontend dependencies, builds development
+assets, and generates API types before starting the server.
 Run `deno task build` before invoking Cargo directly. Cargo embeds the listed
 assets and does not run Node or Deno.
 
