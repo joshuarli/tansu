@@ -93,15 +93,6 @@ Next: 44
 - **Fix with:** dead-code-archaeology
 - **Effort:** M
 
-### TNS-033 · P2 · Verify packaged binaries before release upload
-
-- **Area:** Build
-- **Where:** `.github/workflows/build-server.yml:54-63`, `.github/workflows/build-server.yml:136-155`, `Makefile:97-101`
-- **Problem:** The release workflow builds and uploads archives without running the existing packaged-binary smoke check. A binary can compile and still fail its packaged runtime checks after the release is published.
-- **Recommendation:** Run the narrow package smoke check on release artifacts before uploading them, including auth backup and restore with the release SQLite build.
-- **Fix with:** none
-- **Effort:** S
-
 ### TNS-039 · P2 · Version immutable WebP encoder asset URLs
 
 - **Area:** Build
