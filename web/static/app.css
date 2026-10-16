@@ -1067,7 +1067,7 @@ button {
 .search-snippet b {
   border-radius: 3px;
   background: #fff2a8;
-  color: var(--color-text);
+  color: rgb(33 36 41);
   font-weight: 600;
 }
 
@@ -1499,9 +1499,40 @@ button {
 }
 
 .search-panel .command-input:focus,
-.search-panel .command-input:focus-visible {
+.search-panel .command-input:focus-visible,
+.note-dialog-panel.is-create .settings-input:focus,
+.note-dialog-panel.is-create .settings-input:focus-visible {
   outline: none;
   box-shadow: none;
+}
+
+.note-dialog-panel.is-create .modal-header {
+  flex: 0 0 56px;
+  height: 56px;
+  min-height: 0;
+  padding: 0 16px;
+  font-size: 15px;
+  line-height: 22px;
+}
+
+.note-dialog-panel.is-create .field-label {
+  margin: 0;
+  padding: 0 16px 16px;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.note-dialog-panel.is-create .settings-input {
+  min-height: 0;
+  padding: 0;
+  font-size: 17px;
+  line-height: 22px;
+}
+
+.note-dialog-panel.is-create .modal-actions {
+  justify-content: flex-end;
+  min-height: 0;
+  padding: 0 16px 16px;
 }
 
 .search-field {
@@ -1619,7 +1650,7 @@ button {
   flex: 0 0 56px;
   height: 56px;
   margin: 0 16px;
-  border-bottom: 1px solid #e2e4e8;
+  border-bottom: 1px solid var(--color-border);
 }
 
 .command-search-icon {
@@ -1662,7 +1693,7 @@ button {
   height: 55px;
   min-height: 55px;
   padding: 0;
-  color: rgb(33 36 41);
+  color: var(--color-text);
   font-size: 15px;
   line-height: 22px;
 }
@@ -1712,7 +1743,7 @@ button {
   right: 12px;
   transform: translateY(1px);
   min-width: 56px;
-  color: rgb(110 117 128);
+  color: var(--color-text-muted);
   font-size: 12.5px;
   line-height: 20px;
   text-align: right;
@@ -1762,7 +1793,7 @@ button {
   display: block;
   transform: translateY(1px);
   margin: 0;
-  color: rgb(110 117 128);
+  color: var(--color-text-muted);
   font-size: 12px;
   line-height: 18px;
 }
@@ -1865,7 +1896,7 @@ button {
 .search-panel .search-result-title {
   position: relative;
   top: 1px;
-  color: rgb(33 36 41);
+  color: var(--color-text);
   font-size: 15px;
   font-weight: 600;
   line-height: 20px;
@@ -1908,7 +1939,7 @@ button {
   -webkit-line-clamp: 4;
   position: relative;
   top: 1px;
-  color: rgb(110 117 128);
+  color: var(--color-text-muted);
   font-size: 13.5px;
   line-height: 19px;
   overflow: hidden;
@@ -2022,7 +2053,7 @@ button {
   width: 58px;
   height: 16px;
   margin-left: 2px;
-  border-left: 0.5px solid #e2e4e8;
+  border-left: 0.5px solid var(--color-border);
   color: var(--color-text-muted);
   font-size: 12px;
   padding-left: 14.5px;
@@ -2077,7 +2108,7 @@ button {
 .find-close::after { transform: rotate(-45deg); }
 
 .find-control:hover:not(:disabled) {
-  background: #f3f4f6;
+  background: var(--color-bg-hover);
   color: var(--color-text);
 }
 

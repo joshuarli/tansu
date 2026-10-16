@@ -150,7 +150,12 @@ function renderNoteTags(tags: NoteTags | undefined, onFrontmatterToggle: () => v
   return row;
 }
 
-type FrontmatterRange = { from: number; to: number; closingLine: number };
+type FrontmatterRange = {
+  from: number;
+  to: number;
+  foldTo: number;
+  closingLine: number;
+};
 
 function frontmatterRange(state: EditorState): FrontmatterRange | null {
   const firstLine = state.doc.line(1);
@@ -165,10 +170,10 @@ function frontmatterRange(state: EditorState): FrontmatterRange | null {
   }
   if (closingLine === 0) return null;
 
-  const closing = state.doc.line(closingLine);
-  let to = closing.to;
+  const foldTo = state.doc.line(closingLine).to;
+  let to = foldTo;
   while (to < state.doc.length && state.doc.sliceString(to, to + 1) === "\n") to++;
-  return { from: firstLine.from, to, closingLine };
+  return { from: firstLine.from, to, foldTo, closingLine };
 }
 
 function frontmatterDecorations(state: EditorState): DecorationSet {
@@ -201,7 +206,7 @@ function foldFrontmatterState(state: EditorState, mode: EditorMode, expanded: bo
   if (range === null || mode !== "live" || expanded) return state;
   return state.update({
     selection: EditorSelection.cursor(range.to),
-    effects: foldEffect.of(range),
+    effects: foldEffect.of({ from: range.from, to: range.foldTo }),
   }).state;
 }
 
@@ -940,7 +945,7 @@ export function createCodeMirrorEditor(container: HTMLElement, initialConfig: Ed
     });
     const currentFold = folds[0] ?? null;
     const shouldFold = range !== null && data.mode === "live" && !data.frontmatterExpanded;
-    const alreadyFolded = shouldFold && range !== null && currentFold?.to === range.to;
+    const alreadyFolded = shouldFold && range !== null && currentFold?.to === range.foldTo;
     if (alreadyFolded || (!shouldFold && currentFold === null)) {
       syncFrontmatterDisclosure();
       return;
@@ -948,7 +953,7 @@ export function createCodeMirrorEditor(container: HTMLElement, initialConfig: Ed
 
     const effects: StateEffect<unknown>[] = [];
     if (currentFold !== null) effects.push(unfoldEffect.of(currentFold));
-    if (shouldFold && range !== null) effects.push(foldEffect.of(range));
+    if (shouldFold && range !== null) effects.push(foldEffect.of({ from: range.from, to: range.foldTo }));
     const selectionTouches = shouldFold && range !== null &&
       selectionTouchesFrontmatter(view.state.selection, range);
     view.dispatch({

@@ -912,6 +912,7 @@ function renderNoteDialog(state: State, actions: ViewActions): HTMLElement {
       ? input(title, dialog.kind === "tag" ? dialog.value : dialog.title)
       : null;
   if (inputEl !== null) inputEl.dataset["key"] = `note-dialog-input:${dialog?.kind ?? "delete"}`;
+  if (inputEl !== null && dialog?.kind === "create") inputEl.placeholder = "Note title";
   const localDraft = dialog?.kind === "create"
     ? state.tabs.find((tab) => tab.kind === "local-draft" && tab.localDraftId === dialog.localDraftId)
     : undefined;

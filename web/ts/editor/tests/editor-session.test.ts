@@ -158,6 +158,28 @@ describe("CodeMirror editor sessions", () => {
     expect(container.querySelector(".cm-content")?.textContent).not.toContain("tags:");
   });
 
+  it("keeps the first body line out of the folded frontmatter line", () => {
+    const body = "First paragraph after the metadata.";
+    const source = `---\ntags:\n  - alpha\n---\n\n${body}\n`;
+    const { container, editor } = mountEditor(source, { noteTitle: "Note" });
+    const button = container.querySelector<HTMLButtonElement>(".tag-frontmatter-toggle");
+    const bodyLine = () => [...container.querySelectorAll<HTMLElement>(".cm-line")].find((line) =>
+      line.textContent?.includes(body)
+    );
+
+    expect(button?.getAttribute("aria-expanded")).toBe("false");
+    expect(bodyLine()?.classList.contains("cm-frontmatter-line")).toBe(false);
+    expect(bodyLine()?.querySelector(".cm-foldPlaceholder")).toBeNull();
+
+    button?.click();
+    expect(bodyLine()?.classList.contains("cm-frontmatter-line")).toBe(false);
+
+    button?.click();
+    expect(bodyLine()?.classList.contains("cm-frontmatter-line")).toBe(false);
+    expect(bodyLine()?.querySelector(".cm-foldPlaceholder")).toBeNull();
+    expect(editor.getSnapshot()).toMatchObject({ source, revision: 0, dirty: false });
+  });
+
   it("rejects editor, extension, task, table, paste, and resize changes while read-only", () => {
     const source = "- [ ] task\n\n| A | B |\n| --- | --- |\n| x | y |\n\n![[photo]]";
     const { container, editor, view } = mountEditor(source, {
