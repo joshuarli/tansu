@@ -12,12 +12,11 @@ import {
 } from "./state.ts";
 import { vaultId } from "./app/identity.ts";
 import { excludedFoldersProblem, normalizeSettings, SETTINGS_LIMITS } from "./app/settings-policy.ts";
+import { KEYBOARD_SHORTCUTS } from "./app/keyboard-shortcuts.ts";
 import { sameTabIdentity, type TabIdentity } from "./app/tab-identity.ts";
 import { createTagPill } from "./tag-pill.ts";
 import type { V2OverlayCoverage, V2SearchHit } from "./types.generated.ts";
 import type { FindMatch, Outline } from "./editor/source-navigation.js";
-
-const MAX_RESULT_TAGS = 3;
 
 export type ViewActions = {
   dispatch: (event: ViewEvent) => void;
@@ -561,7 +560,7 @@ function renderFindBar(state: State, actions: ViewActions): HTMLElement {
   previous.disabled = matches.length === 0;
   next.disabled = matches.length === 0;
   const close = button("×", "Close find", () => actions.dispatch({ type: "find.close" }), "find-control find-close");
-  const bar = el("div", "find-bar", span("⌕", "find-icon"), input, span(count, "find-count"), previous, next, close);
+  const bar = el("div", "find-bar", input, span(count, "find-count"), previous, next, close);
   queueMicrotask(() => input.focus());
   return bar;
 }
@@ -608,9 +607,7 @@ function renderOverlays(state: State, actions: ViewActions): HTMLElement {
       if (command.shortcut !== undefined) row.append(span(command.shortcut, "palette-command-shortcut"));
       list.append(row);
     }
-    const searchIcon = el("span", "command-search-icon");
-    searchIcon.setAttribute("aria-hidden", "true");
-    const field = el("div", "command-field", searchIcon, input);
+    const field = el("div", "command-field", input);
     const panel = el("div", "command-panel command-palette-panel", field, list);
     panel.dataset["key"] = "modal:command";
     host.append(backdrop(actions), panel);
@@ -684,7 +681,7 @@ function renderOverlays(state: State, actions: ViewActions): HTMLElement {
         }
       }
     }
-    const searchField = el("div", "search-field", span("", "search-icon"), input);
+    const searchField = el("div", "search-field", input);
     searchField.dataset["key"] = "search-field";
     const panel = el(
       "div",
@@ -701,6 +698,22 @@ function renderOverlays(state: State, actions: ViewActions): HTMLElement {
   }
   if (state.settingsOpen && state.boot !== null) {
     host.append(backdrop(actions), renderSettingsPanel(state, actions));
+  }
+  if (state.helpOpen) {
+    const rows = KEYBOARD_SHORTCUTS.map((shortcut) =>
+      el(
+        "div",
+        "help-shortcut-row",
+        el("kbd", "help-shortcut-key", shortcut.label),
+        span(shortcut.action === "help.open" ? "Open help or close the active overlay" : shortcut.description, "help-shortcut-description"),
+      )
+    );
+    const list = el("div", "keyboard-help-list", ...rows);
+    const panel = el("section", "modal-panel keyboard-help-panel", el("header", "modal-header", span("Keyboard shortcuts")), list);
+    panel.setAttribute("role", "dialog");
+    panel.setAttribute("aria-modal", "true");
+    panel.dataset["key"] = "modal:keyboard-help";
+    host.append(backdrop(actions), panel);
   }
   if (state.conflictDraft !== null) {
     host.append(backdrop(actions), renderConflictPanel(state, actions));
@@ -780,7 +793,6 @@ function renderRevisionsPanel(state: State, actions: ViewActions): HTMLElement {
       "div",
       "modal-header",
       span("Revisions"),
-      button("×", "Close", () => actions.dispatch({ type: "overlay.close" }), "tab-close"),
     ),
     el("div", "revision-body", list, preview),
     el(
@@ -807,7 +819,6 @@ function renderConflictPanel(state: State, actions: ViewActions): HTMLElement {
       "div",
       "modal-header",
       span("Conflict Draft"),
-      button("×", "Close", () => actions.dispatch({ type: "overlay.close" }), "tab-close"),
     ),
     el("pre", "diff-preview", draft?.content ?? ""),
     el(
@@ -853,7 +864,6 @@ function renderSettingsPanel(state: State, actions: ViewActions): HTMLElement {
       "div",
       "modal-header",
       span("Settings"),
-      button("×", "Close", () => actions.dispatch({ type: "overlay.close" }), "tab-close"),
     ),
     el("label", "field-label", span("Excluded folders"), excluded),
     el("label", "field-label", span("Autosave delay ms"), autosave),
@@ -929,7 +939,6 @@ function renderNoteDialog(state: State, actions: ViewActions): HTMLElement {
   const isCompact = isCreate || isTag;
   const fieldLabel = isTag ? "Tag" : "Note title";
   if (inputEl !== null && isCompact) inputEl.placeholder = isTag ? "Add tag" : "Note title";
-  const close = () => actions.dispatch({ type: "overlay.close" });
   const panel = el(
     "form",
     `modal-panel note-dialog-panel${isCompact ? " is-create" : ""}${isTag ? " is-tag" : ""}${isRename ? " is-rename" : ""}`,
@@ -939,7 +948,6 @@ function renderNoteDialog(state: State, actions: ViewActions): HTMLElement {
         "div",
         "modal-header",
         span(title),
-        ...(isRename ? [] : [button("×", "Close", close, "tab-close")]),
       )]),
   );
   const dialogKey = dialog === null
@@ -976,7 +984,7 @@ function renderNoteDialog(state: State, actions: ViewActions): HTMLElement {
     inputEl.addEventListener("input", () => {
       actions.dispatch({ type: "dialog.input", value: inputEl.value });
     });
-    panel.append(el("div", "note-dialog-field", inputEl, button("×", "Close", close, "tab-close")));
+    panel.append(el("div", "note-dialog-field", inputEl));
     panel.addEventListener("submit", (event) => {
       event.preventDefault();
       actions.dispatch({ type: "dialog.submit", value: inputEl.value });
@@ -1088,13 +1096,7 @@ function searchHitTags(identity: Exclude<V2SearchHit["identity"], { kind: "newLo
 function appendResultTags(row: HTMLElement, tags: readonly string[]): void {
   if (tags.length === 0) return;
   const list = el("span", "search-result-tags");
-  for (const tag of tags.slice(0, MAX_RESULT_TAGS)) list.append(createTagPill(tag, "span"));
-  const hidden = tags.length - MAX_RESULT_TAGS;
-  if (hidden > 0) {
-    const overflow = el("span", "search-result-tags-overflow", `+${hidden}`);
-    overflow.title = tags.slice(MAX_RESULT_TAGS).map((tag) => `#${tag}`).join(" ");
-    list.append(overflow);
-  }
+  for (const tag of tags) list.append(createTagPill(tag, "span"));
   row.append(list);
 }
 

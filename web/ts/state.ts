@@ -101,6 +101,7 @@ export type State = {
   revisionDocument: V2RevisionDocument | null;
   conflictDraft: V2ConflictDraftDocument | null;
   settingsOpen: boolean;
+  helpOpen: boolean;
   storagePersisted: boolean | null;
   noteDialog: NoteDialog | null;
   contextMenu: ContextMenuState | null;
@@ -141,6 +142,7 @@ export function createState(vault: VaultId): State {
     revisionDocument: null,
     conflictDraft: null,
     settingsOpen: false,
+    helpOpen: false,
     storagePersisted: null,
     noteDialog: null,
     contextMenu: null,
