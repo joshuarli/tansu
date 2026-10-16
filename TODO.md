@@ -3,15 +3,6 @@
 Prefix: TNS
 Next: 54
 
-### TNS-048 · P2 · Replace campaign verification with a permanent acceptance suite
-
-- **Area:** Tests
-- **Where:** `web/ts/e2e/server.test.ts`, `Makefile`, `docs/development.md`
-- **Problem:** Verification of save and recovery behavior has come from one-off campaign runs, so regressions in persistence and lifecycle do not fail a standing check. Releases are not tied to the exact revision and artifact that was tested.
-- **Recommendation:** Add a small suite covering persistence (immediate close, delayed saves, retries, two browser contexts, server restart), conflict recovery, editor continuity, canonical light and dark UI baselines, and long-session leak checks (workers, asset URLs, editor instances). Add a deterministic interleaving suite on the existing service injection: delay a response, switch tabs, expire auth, complete an upload, close a document, replay an event. Tie the release process to the exact revision and artifact the suite ran against.
-- **Fix with:** renovate-tests
-- **Effort:** L
-
 ### TNS-049 · P2 · Bind async mutations to captured identity, not current selection
 
 - **Area:** Concurrency

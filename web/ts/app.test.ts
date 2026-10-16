@@ -1907,6 +1907,126 @@ describe("v2 desktop shell", () => {
     defaultServices.htmlImport = previous.htmlImport;
     await app.dispose();
   });
+
+  describe("interleavings", () => {
+    function twoNoteVault() {
+      const first = noteMeta("one", "one.md", "One");
+      const second = noteMeta("two", "two.md", "Two");
+      const client = configureVault([first, second], workspaceSeed([
+        { noteId: first.noteId, title: first.title, path: first.path, cursorOffset: null, sourceMode: false },
+        { noteId: second.noteId, title: second.title, path: second.path, cursorOffset: null, sourceMode: false },
+      ], first.noteId));
+      client.openNote.mockImplementation(async (id) => documentFor(id === first.noteId ? first : second, `# ${id}\n`));
+      return { first, second, client };
+    }
+
+    it("keeps the selected tab when a delayed load resolves after switching back", async () => {
+      const { first, second, client } = twoNoteVault();
+      const pending = deferred<V2NoteDocument>();
+      client.openNote.mockImplementation(async (id) => id === second.noteId ? pending.promise : documentFor(first, "# one\n"));
+      const { app, root } = mountApp();
+      await app.boot();
+      const editor = editorMock.instances[0]!;
+
+      root.querySelector<HTMLButtonElement>('[title="Two"]')?.click();
+      await until(() => root.querySelector(".workspace .loading") !== null);
+      root.querySelector<HTMLButtonElement>('[title="One"]')?.click();
+      await until(() => editor.getSnapshot()?.noteId === "saved:one");
+      pending.resolve(documentFor(second, "# Two\n"));
+      await flushAsync();
+      await flushAsync();
+
+      expect(editor.getSnapshot()).toMatchObject({ noteId: "saved:one", source: "# one\n" });
+      expect(root.querySelector(".tab.active")?.getAttribute("title")).toBe("One");
+    });
+
+    it("keeps the newest edit in the journal when auth expires during an in-flight save", async () => {
+      const { first, client } = twoNoteVault();
+      const inFlight = deferred<V2MutationResponse>();
+      client.saveNote.mockReturnValue(inFlight.promise);
+      const { app, root } = mountApp();
+      await app.boot();
+      const editor = editorMock.instances[0]!;
+
+      editor.simulateEdit("# Sent\n");
+      await flushEditorCapture();
+      await runCommand(root, "save");
+      await until(() => client.saveNote.mock.calls.length === 1);
+      editor.simulateEdit("# Newer than the request\n");
+      await flushEditorCapture();
+      inFlight.reject(new V2ApiError("Authentication required", 401, { code: "auth_required" }));
+      await until(() => root.querySelector(".auth-gate") !== null);
+
+      expect(client.saveNote).toHaveBeenCalledTimes(1);
+      expect(memory.savedDrafts.get(first.noteId)?.source).toBe("# Newer than the request\n");
+    });
+
+    it("saves the queued newer edit when a tab is closed during an in-flight save", async () => {
+      vi.useFakeTimers();
+      const { first, client } = twoNoteVault();
+      const inFlight = deferred<V2MutationResponse>();
+      client.saveNote.mockReturnValueOnce(inFlight.promise);
+      const { app, root } = mountApp();
+      await app.boot();
+      const editor = editorMock.instances[0]!;
+
+      editor.simulateEdit("# Sent\n");
+      await vi.advanceTimersByTimeAsync(150);
+      await runCommand(root, "save");
+      await flushAsync();
+      expect(client.saveNote).toHaveBeenCalledTimes(1);
+      editor.simulateEdit("# Queued\n");
+      await vi.advanceTimersByTimeAsync(150);
+      root.querySelector<HTMLButtonElement>(".tab.active .tab-close")?.click();
+      await flushAsync();
+      const request = client.saveNote.mock.calls[0]![1];
+      inFlight.resolve(accepted(request.mutationId, noteMeta(first.noteId, first.path, first.title, [], 2, request.sourceHash)));
+      await vi.advanceTimersByTimeAsync(1000);
+      await flushAsync();
+
+      expect(client.saveNote.mock.calls.map(([, sent]) => sent.content)).toStrictEqual(["# Sent\n", "# Queued\n"]);
+      expect(client.saveNote.mock.calls[1]![1].precondition.baseRevision).toBe(2);
+    });
+
+    it("clears upload status and leaves the visible note alone when an upload outlives the tab switch", async () => {
+      const { client } = twoNoteVault();
+      const { app, root } = mountApp();
+      await app.boot();
+      const editor = editorMock.instances[0]!;
+      const onState = editor.config["onImagePasteStateChange"] as NonNullable<EditorConfig["onImagePasteStateChange"]>;
+      const paste = { uploadId: 1, noteId: "saved:one", revision: 0, selection: { anchor: 0, head: 0 } };
+
+      onState({ ...paste, status: "uploading", previewUrl: "blob:preview" });
+      expect(root.querySelector(".image-upload-status")).not.toBeNull();
+      root.querySelector<HTMLButtonElement>('[title="Two"]')?.click();
+      await until(() => editor.getSnapshot()?.noteId === "saved:two");
+      onState({ ...paste, status: "inserted" });
+      await flushAsync();
+
+      expect(root.querySelector(".image-upload-status")).toBeNull();
+      expect(editor.getSnapshot()).toMatchObject({ noteId: "saved:two", source: "# two\n" });
+      expect(client.saveNote).not.toHaveBeenCalled();
+    });
+
+    it.fails("saves an image inserted into a note after the user switched away (known gap: inactive-session edits are not captured)", async () => {
+      vi.useFakeTimers();
+      const { first, client } = twoNoteVault();
+      const { app, root } = mountApp();
+      await app.boot();
+      const editor = editorMock.instances[0]!;
+
+      root.querySelector<HTMLButtonElement>('[title="Two"]')?.click();
+      await flushAsync();
+      editor.simulateInactiveEdit("saved:one", "# one\n![[z-images/a.webp]]\n");
+      await vi.advanceTimersByTimeAsync(150);
+      await vi.advanceTimersByTimeAsync(1000);
+      await flushAsync();
+
+      expect(client.saveNote).toHaveBeenCalledWith(first.noteId, expect.objectContaining({
+        content: "# one\n![[z-images/a.webp]]\n",
+      }));
+    });
+  });
 });
 
 function createTestClient(id: string) {
@@ -2134,6 +2254,13 @@ function createFakeEditor(initialConfig?: EditorConfig): FakeEditor {
     updateTags: vi.fn(() => true),
     undo: vi.fn(() => true),
     redo: vi.fn(() => true),
+    simulateInactiveEdit(noteKey: string, source: string) {
+      const entry = [...snapshots.entries()].find(([session, snapshot]) => snapshot.noteId === noteKey && session !== active);
+      if (entry === undefined) throw new Error(`No inactive editor session for ${noteKey}`);
+      const [session, snapshot] = entry;
+      snapshots.set(session, { ...snapshot, source, revision: snapshot.revision + 1, dirty: true });
+      (config["onChange"] as ((change: { noteId: string; revision: number; origin: "userEdit" }) => void) | undefined)?.({ noteId: noteKey, revision: snapshot.revision + 1, origin: "userEdit" });
+    },
     simulateEdit(source: string, selection = { anchor: source.length, head: source.length }) {
       if (active === null) throw new Error("No editor session is active");
       const snapshot = snapshots.get(active)!;
@@ -2146,7 +2273,7 @@ function createFakeEditor(initialConfig?: EditorConfig): FakeEditor {
   return editor;
 }
 
-type FakeEditor = EditorHandle & { readonly config: Record<string, unknown>; readonly snapshots: Map<EditorSession, EditorSnapshot>; readonly attachedSession: EditorSession | null; simulateEdit: (source: string, selection?: EditorSnapshot["selection"]) => void };
+type FakeEditor = EditorHandle & { readonly config: Record<string, unknown>; readonly snapshots: Map<EditorSession, EditorSnapshot>; readonly attachedSession: EditorSession | null; simulateEdit: (source: string, selection?: EditorSnapshot["selection"]) => void; simulateInactiveEdit: (noteKey: string, source: string) => void };
 
 function mountApp(services: AppServices = createServices()): { app: TansuApp; root: HTMLElement } {
   const root = document.createElement("div");

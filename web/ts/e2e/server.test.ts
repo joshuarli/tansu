@@ -1,7 +1,7 @@
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { once } from "node:events";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import net from "node:net";
 import { join, resolve } from "node:path";
 
@@ -11,9 +11,12 @@ import {
   type Browser,
   type BrowserType,
   type Page,
+  type Route,
   type Response as PlaywrightResponse,
 } from "playwright";
 import { expect, afterAll, beforeEach, describe, beforeAll, it } from "vitest";
+
+import { canonicalSourceHash } from "../source-hash.ts";
 
 let server: ChildProcess | undefined;
 let browser: Browser | undefined;
@@ -1023,6 +1026,99 @@ describe("real server harness", () => {
     ).content).toBe(winningContent);
   }, 120_000);
 
+  it("acceptance: an edit closed immediately is on disk and visible from a second browser context", async () => {
+    const page = await newLoggedPage();
+    await page.goto(baseUrl);
+    await page.waitForSelector(".main");
+    await createCodeMirrorNote(page, "Acceptance Close Tab");
+    const content = "# Acceptance Close Tab\n\nwritten just before the tab closed\n";
+
+    await page.locator("#editor-mount .cm-content").fill(content);
+    await page.locator(".tab.active .tab-close").click();
+    await page.waitForSelector(".tab", { state: "detached" });
+
+    await expect.poll(() => readVaultFile("acceptance-close-tab.md")).toBe(content);
+    const otherContext = await newLoggedPage();
+    await otherContext.goto(baseUrl);
+    await otherContext.waitForSelector(".main");
+    await openSearchNote(otherContext, "Acceptance Close Tab");
+    await expect.poll(() => otherContext.locator("#editor-mount .cm-content").textContent()).toContain(
+      "written just before the tab closed",
+    );
+    expect(await readVaultFile("acceptance-close-tab.md")).toBe(content);
+    await otherContext.close();
+    await page.close();
+  });
+
+  it("acceptance: a save held in flight across a server restart lands on disk", async () => {
+    const page = await newLoggedPage();
+    await page.goto(baseUrl);
+    await page.waitForSelector(".main");
+    await createCodeMirrorNote(page, "Acceptance Restart");
+    const content = "# Acceptance Restart\n\nsaved while the server restarted\n";
+    const heldSave = holdNextNoteSave(page);
+
+    await page.locator("#editor-mount .cm-content").fill(content);
+    const route = await heldSave;
+    expect(await readVaultFile("acceptance-restart.md")).not.toBe(content);
+    await stopFixtureServer();
+    await startFixtureServer();
+    const saved = page.waitForResponse((response) =>
+      response.request().method() === "PUT" && response.status() === 200
+    );
+    await route.continue();
+    await saved;
+
+    await expect.poll(() => readVaultFile("acceptance-restart.md")).toBe(content);
+    await page.close();
+  }, 120_000);
+
+  it("acceptance: a stale save creates a conflict draft that restores against the canonical revision", async () => {
+    const page = await newLoggedPage();
+    await page.route((url) => url.pathname.endsWith("/events"), (route) => route.abort());
+    await page.goto(baseUrl);
+    await page.waitForSelector(".main");
+    await createCodeMirrorNote(page, "Acceptance Conflict");
+    const draftContent = "# Acceptance Conflict\n\nthe stale tab's draft\n";
+    const winningContent = "# Acceptance Conflict\n\nthe other writer's canonical text\n";
+    const base = await waitForNoteByPath("acceptance-conflict.md");
+    const heldSave = holdNextNoteSave(page);
+
+    await page.locator("#editor-mount .cm-content").fill(draftContent);
+    const route = await heldSave;
+    const winning = await v2Request(vaultOneId, `/notes/${base.meta.noteId}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        mutationId: randomUUID(),
+        precondition: {
+          baseRevision: base.meta.revision,
+          baseSourceHash: base.meta.sourceHash,
+          baseDiskHash: base.meta.diskHash,
+        },
+        content: winningContent,
+        sourceHash: await canonicalSourceHash(winningContent),
+      }),
+    }).then((response) => response.json()) as { outcome: { state: string } };
+    expect(winning.outcome.state).toBe("accepted");
+    const rejected = page.waitForResponse((response) =>
+      response.request().method() === "PUT" && response.status() === 200
+    );
+    await route.continue();
+    const rejection = await (await rejected).json() as { outcome: { state: string; draft?: { draftId: number } } };
+    expect(rejection.outcome.state).toBe("conflict");
+    expect(rejection.outcome.draft?.draftId).toBeDefined();
+    await page.waitForSelector(".conflict-banner");
+    expect(await readVaultFile("acceptance-conflict.md")).toBe(winningContent);
+
+    await page.locator('.conflict-banner [title="View conflict draft"]').click();
+    await expect.poll(() => page.locator(".revisions-panel .diff-preview").textContent()).toBe(draftContent);
+    await page.locator('.revisions-panel [title="Restore conflict draft"]').click();
+    await page.waitForSelector(".conflict-banner", { state: "detached" });
+
+    await expect.poll(() => readVaultFile("acceptance-conflict.md")).toBe(draftContent);
+    await page.close();
+  });
 });
 
 function browserTypeFromEnv(): BrowserType {
@@ -1253,4 +1349,37 @@ async function expectSavedContent(path: string, content: string): Promise<void> 
 
 function shortcutModifier(): "Control" | "Meta" {
   return process.platform === "darwin" ? "Meta" : "Control";
+}
+
+function readVaultFile(path: string): Promise<string | null> {
+  return readFile(join(vaultOnePath, path), "utf8").catch((error: NodeJS.ErrnoException) => {
+    if (error.code === "ENOENT") return null;
+    throw error;
+  });
+}
+
+function holdNextNoteSave(page: Page): Promise<Route> {
+  return new Promise((resolve) => {
+    let held = false;
+    void page.route(
+      (url) => /\/api\/v2\/vaults\/[^/]+\/notes\/[^/]+$/.test(url.pathname),
+      (route) => {
+        if (!held && route.request().method() === "PUT") {
+          held = true;
+          resolve(route);
+        } else {
+          void route.fallback();
+        }
+      },
+    );
+  });
+}
+
+async function waitForNoteByPath(path: string): Promise<TestNoteDocument> {
+  let note: TestNoteDocument | undefined;
+  await expect.poll(async () => {
+    note = await loadNoteByPath(vaultOneId, path).catch(() => undefined);
+    return note !== undefined;
+  }).toBe(true);
+  return note!;
 }

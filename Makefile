@@ -84,6 +84,15 @@ auth-recovery-drill:
 	mkdir -p "$(CURDIR)/.work/tmp"
 	TMPDIR="$(CURDIR)/.work/tmp" scripts/auth-recovery-drill.sh "$(AUTH_DRILL_BIN)"
 
+ACCEPTANCE_BROWSER ?= chromium
+
+test-acceptance:
+	@rev="$$(git rev-parse HEAD)$$(git diff --quiet HEAD -- || echo -dirty)"; \
+	echo "acceptance suite revision: $$rev"; \
+	node_modules/.bin/vitest run web/ts/app.test.ts -t interleavings && \
+	TANSU2_E2E_BROWSER=$(ACCEPTANCE_BROWSER) deno task test:browser -t "acceptance:" && \
+	echo "acceptance suite passed at revision: $$rev"
+
 build-linux-musl-docker:
 	mkdir -p "$(CURDIR)/.work/tmp" "$(CURDIR)/.work/dist/$${TARGET:-x86_64-unknown-linux-musl}"
 	TMPDIR="$(CURDIR)/.work/tmp" deno task build
@@ -133,4 +142,4 @@ bench-long-session:
 	TMPDIR="$(CURDIR)/.work/tmp" node bench/long-session.mjs
 	$(PERF_GATE_AFTER)
 
-.PHONY: auth-recovery-drill bench bench-full bench-long-session build-linux-musl-aarch64 build-linux-musl-both build-linux-musl-docker build-linux-musl-x86_64 coverage coverage-html deploy dev dev-config check lint test-package types types-check types-generated ts test test-e2e-chromium test-e2e-webkit test-rs test-sqlite-static
+.PHONY: auth-recovery-drill bench bench-full bench-long-session build-linux-musl-aarch64 build-linux-musl-both build-linux-musl-docker build-linux-musl-x86_64 coverage coverage-html deploy dev dev-config check lint test-package types types-check types-generated ts test test-e2e-chromium test-e2e-webkit test-rs test-sqlite-static test-acceptance

@@ -21,6 +21,7 @@ make check
 make test
 make test-e2e-chromium
 make test-e2e-webkit
+make test-acceptance
 ```
 
 `make dev` serves the app on port `3000` with one demo note and its WebP images.
@@ -35,6 +36,29 @@ Chrome's and Safari's browser engines.
 See [Configuration](configuration.md) for server settings and
 [Deployment](deployment.md) for passkey administration, remote access, and
 backup and recovery procedures.
+
+## Acceptance suite
+
+`make test-acceptance` is the standing check for save and recovery behavior. It
+prints the git revision it ran against (with `-dirty` when the tree has
+uncommitted changes) when it starts and again when it passes. Record that revision in the
+release notes and run the suite on the exact commit you build the release from.
+
+It runs two groups of tests:
+
+- Interleavings in `web/ts/app.test.ts` (`interleavings`). Injected services
+  delay or reject one response at a time while the test switches tabs, closes a
+  tab, expires auth, or finishes an image upload.
+- Persistence and conflict recovery in `web/ts/e2e/server.test.ts`
+  (`acceptance:`), against the real server in one browser. They assert the exact
+  Markdown bytes on disk: an edit closed immediately and read from a second
+  browser context, a save held in flight across a server restart, and a stale
+  save whose conflict draft restores against the canonical revision.
+
+`ACCEPTANCE_BROWSER=webkit make test-acceptance` runs the browser group in Safari's
+engine. The test named `saves an image inserted into a note after the user
+switched away` is marked `it.fails` because the defect is open; when it is fixed
+the suite fails until the marker is removed.
 
 ## Build
 
