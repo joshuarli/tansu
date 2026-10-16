@@ -29,7 +29,7 @@ use crate::api::{decode_path_segment, handle_v2_api, validate_v2_server_instance
 use crate::api_types::{AppSettings, V2AppSettingsResponse, V2ApiErrorKind};
 use crate::app::App;
 use crate::auth::{
-    AuthError, AuthPolicy, AuthRequestContext, AuthStore, RequestAction, SessionLease,
+    AuthError, AuthPolicy, AuthRequestContext, AuthStore, MAX_CREDENTIALS, RequestAction, SessionLease,
     SessionRequirement, VerifiedSession,
 };
 use crate::embedded_assets;
@@ -904,7 +904,7 @@ fn handle_auth_route_sync(
         }
         ("POST", "/api/v2/auth/login/options") => {
             let credentials = match auth.credentials() {
-                Ok(credentials) if !credentials.is_empty() && credentials.len() <= 32 => credentials,
+                Ok(credentials) if !credentials.is_empty() && credentials.len() <= MAX_CREDENTIALS => credentials,
                 Ok(_) => return auth_error(AuthError::Unauthorized, request_id),
                 Err(error) => return auth_error(error, request_id),
             };
@@ -983,6 +983,7 @@ fn auth_error(error: AuthError, request_id: &str) -> HttpResponse {
 fn auth_error_kind(error: AuthError, request_id: &str) -> V2ApiErrorKind {
     match error {
         AuthError::InvalidRequest(message) | AuthError::WebAuthn(message) => V2ApiErrorKind::BadRequest { message },
+        AuthError::CredentialLimit => V2ApiErrorKind::BadRequest { message: AuthError::CredentialLimit.to_string() },
         AuthError::Unauthorized => V2ApiErrorKind::AuthRequired,
         AuthError::OriginRejected => V2ApiErrorKind::OriginRejected,
         AuthError::CsrfRejected => V2ApiErrorKind::CsrfRejected,
@@ -1632,6 +1633,16 @@ mod tests {
             api_error_field(&response),
             serde_json::json!({ "code": "rate_limited", "retryAfterMs": 1000 }),
         );
+    }
+
+    #[test]
+    fn credential_limit_is_a_bad_request_naming_the_limit() {
+        let response = auth_error(AuthError::CredentialLimit, "request-id");
+
+        assert_eq!(response.status(), 400);
+        let error = api_error_field(&response);
+        assert_eq!(error["code"], "bad_request");
+        assert!(error["message"].as_str().unwrap().contains(&MAX_CREDENTIALS.to_string()));
     }
 
     #[test]

@@ -3,15 +3,6 @@
 Prefix: TNS
 Next: 54
 
-### TNS-026 · P2 · Enforce the login credential limit during enrollment
-
-- **Area:** Security
-- **Where:** `src/http.rs:901`, `src/auth.rs:478`, `src/auth.rs:1119`
-- **Problem:** Login rejects stores with more than 32 credentials, but successful registration inserts credentials without enforcing the same limit. Enrolling a 33rd passkey therefore makes every passkey login fail as unauthorized.
-- **Recommendation:** Enforce the shared credential cap inside the registration transaction, or remove the login cap while retaining a safe resource bound.
-- **Fix with:** durable-state
-- **Effort:** S
-
 ### TNS-027 · P2 · Give vault worker threads shutdown owners
 
 - **Area:** Concurrency

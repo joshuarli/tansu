@@ -221,7 +221,9 @@ ceremonies and ticket-bound finishes are available before a session; initial
 enrollment also requires its one-time capability.
 
 Enrollment after the first credential requires a recently verified owner
-session and its CSRF token. State-changing requests send `X-Tansu-CSRF` with the
+session and its CSRF token. A store holds at most 32 credentials; finishing a
+registration that would add a 33rd returns `bad_request` and consumes the
+ceremony. State-changing requests send `X-Tansu-CSRF` with the
 value readable from the session-bound `__Host-tansu_csrf` cookie. The cookie is
 Secure, SameSite=Strict, and scoped to `/`; logout clears it with the HttpOnly
 session cookie.

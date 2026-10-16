@@ -17,6 +17,7 @@ use crate::CancellationToken;
 
 const AUTH_TOKEN_HASH_VERSION: i64 = 2;
 const MAX_PENDING_CEREMONIES: i64 = 256;
+pub const MAX_CREDENTIALS: usize = 32;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AuthError {
@@ -27,6 +28,7 @@ pub enum AuthError {
     Expired,
     CeremonyUsed,
     CeremonyLimit,
+    CredentialLimit,
     Storage(String),
     WebAuthn(String),
 }
@@ -41,6 +43,7 @@ impl std::fmt::Display for AuthError {
             Self::Expired => f.write_str("authentication state expired"),
             Self::CeremonyUsed => f.write_str("ceremony already used"),
             Self::CeremonyLimit => f.write_str("too many pending authentication ceremonies"),
+            Self::CredentialLimit => write!(f, "passkey limit of {MAX_CREDENTIALS} reached; remove a passkey before enrolling another"),
         }
     }
 }
@@ -477,6 +480,10 @@ impl AuthStore {
         };
         let result = match result {
             Ok(credential) => {
+                if !credential_exists(&transaction, &credential.cred_id)? && credential_count(&transaction)? >= MAX_CREDENTIALS as u64 {
+                    transaction.commit().map_err(storage)?;
+                    return Err(AuthError::CredentialLimit);
+                }
                 store_credential(&transaction, &credential)?;
                 if row.capability_hash.is_some() {
                     Some(create_session(&transaction, now, self.session_ttl_secs)?)
@@ -1107,6 +1114,11 @@ fn credential_count(transaction: &Transaction<'_>) -> Result<u64, AuthError> {
         .map(|count| count as u64).map_err(storage)
 }
 
+fn credential_exists(transaction: &Transaction<'_>, credential_id: &[u8]) -> Result<bool, AuthError> {
+    transaction.query_row("SELECT EXISTS(SELECT 1 FROM credentials WHERE credential_id = ?1)", params![credential_id], |row| row.get(0))
+        .map_err(storage)
+}
+
 fn read_credentials(connection: &Connection) -> Result<Vec<StoredCredential>, AuthError> {
     let mut statement = connection.prepare("SELECT value FROM credentials ORDER BY credential_id").map_err(storage)?;
     let values = statement.query_map([], |row| row.get::<_, Vec<u8>>(0)).map_err(storage)?;
@@ -1535,6 +1547,52 @@ mod tests {
         let ticket = store.begin_registration(&state, Some(&capability), None, 2, 10).unwrap();
         assert_eq!(store.finish_registration(&ticket.id, 13, |_| Ok(credential(1))), Err(AuthError::Expired));
         assert_eq!(store.finish_registration(&ticket.id, 14, |_| Ok(credential(1))), Err(AuthError::CeremonyUsed));
+    }
+
+    #[test]
+    fn enrollment_beyond_the_credential_limit_is_rejected_and_login_keeps_working() {
+        let (_root, store) = store();
+        let (capability, _) = store.create_enrollment_capability(10, 30).unwrap();
+        let state = RegChallenge { challenge: "first".into(), user_id: "owner".into(), username: "owner".into() };
+        let ticket = store.begin_registration(&state, Some(&capability), None, 11, 30).unwrap();
+        store.finish_registration(&ticket.id, 12, |_| Ok(credential(1))).unwrap();
+        for id in 2..=MAX_CREDENTIALS as u8 {
+            seed_credential(&store, &credential(id));
+        }
+        let login = AuthChallenge { challenge: "login".into(), allowed_credential_ids: vec![vec![1]], owner_handle: vec![7, 8] };
+        let login_ticket = store.begin_authentication(&login, 13, 30).unwrap();
+        let session = store.finish_authentication(&login_ticket.id, 14, |_, credentials| {
+            let credential = credentials.first().ok_or(AuthError::Unauthorized)?.clone();
+            Ok(AuthenticationFinish { credential, counter: CounterResult::Unsupported })
+        }).unwrap();
+        let enroll = store.begin_registration(&state, None, Some(&session.cookie_value), 15, 30).unwrap();
+        assert_eq!(
+            store.finish_registration(&enroll.id, 16, |_| Ok(credential(MAX_CREDENTIALS as u8 + 1))),
+            Err(AuthError::CredentialLimit),
+        );
+        assert_eq!(store.credentials().unwrap().len(), MAX_CREDENTIALS);
+        assert_eq!(store.finish_registration(&enroll.id, 17, |_| unreachable!()), Err(AuthError::CeremonyUsed));
+    }
+
+    #[test]
+    fn re_enrolling_an_existing_credential_at_the_limit_is_not_rejected() {
+        let (_root, store) = store();
+        let (capability, _) = store.create_enrollment_capability(10, 30).unwrap();
+        let state = RegChallenge { challenge: "first".into(), user_id: "owner".into(), username: "owner".into() };
+        let ticket = store.begin_registration(&state, Some(&capability), None, 11, 30).unwrap();
+        store.finish_registration(&ticket.id, 12, |_| Ok(credential(1))).unwrap();
+        for id in 2..=MAX_CREDENTIALS as u8 {
+            seed_credential(&store, &credential(id));
+        }
+        let login = AuthChallenge { challenge: "login".into(), allowed_credential_ids: vec![vec![1]], owner_handle: vec![7, 8] };
+        let login_ticket = store.begin_authentication(&login, 13, 30).unwrap();
+        let session = store.finish_authentication(&login_ticket.id, 14, |_, credentials| {
+            let credential = credentials.first().ok_or(AuthError::Unauthorized)?.clone();
+            Ok(AuthenticationFinish { credential, counter: CounterResult::Unsupported })
+        }).unwrap();
+        let enroll = store.begin_registration(&state, None, Some(&session.cookie_value), 15, 30).unwrap();
+        assert!(store.finish_registration(&enroll.id, 16, |_| Ok(credential(1))).is_ok());
+        assert_eq!(store.credentials().unwrap().len(), MAX_CREDENTIALS);
     }
 
     #[test]
