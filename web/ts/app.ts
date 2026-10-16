@@ -96,6 +96,7 @@ export class TansuApp {
   private readonly globalEventCleanups: Array<() => void> = [];
   private assetController: AbortController | null = null;
   private eventSubscription: { close: () => void } | null = null;
+  private creatingDraftId: LocalDraftId | null = null;
   private workspaceTimer: number | undefined;
   private noticeTimer: number | undefined;
   private disposeTask: Promise<void> | null = null;
@@ -1306,7 +1307,12 @@ export class TansuApp {
       const path = uniqueNotePath(title, this.state.notes.values());
       tab.title = title;
       tab.path = path;
-      await this.promoteLocalDraft(tab, title, path);
+      this.creatingDraftId = dialog.localDraftId;
+      try {
+        await this.promoteLocalDraft(tab, title, path);
+      } finally {
+        this.creatingDraftId = null;
+      }
     } else if (dialog.kind === "rename") {
       const tab = tabById(this.state, dialog.noteId);
       const title = (value ?? dialog.title).trim();
@@ -2034,6 +2040,7 @@ export class TansuApp {
 
   private async closeOverlays(): Promise<void> {
     const dialog = this.state.noteDialog;
+    if (dialog?.kind === "create" && this.creatingDraftId === dialog.localDraftId) return;
     if (dialog?.kind === "rename") tabById(this.state, dialog.noteId)?.session?.editTitle(null);
     this.clearFindHighlights();
     this.state.commandOpen = false;
@@ -2047,6 +2054,7 @@ export class TansuApp {
     this.render();
     this.restoreOverlayReturn();
     if (dialog?.kind === "rename") await this.journal?.flushAll();
+    if (dialog?.kind === "create") await this.closeTab({ kind: "local-draft", localDraftId: dialog.localDraftId }, false);
   }
 
   private hasOverlay(): boolean {

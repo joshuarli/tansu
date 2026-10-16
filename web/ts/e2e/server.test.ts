@@ -458,7 +458,7 @@ describe("real server harness", () => {
 
     await runPaletteCommand(page, "create");
     await page.locator(".note-dialog-panel input").fill("Meeting Notes");
-    await page.locator(".note-dialog-panel .primary-button").click();
+    await page.locator(".note-dialog-panel input").press("Enter");
     await page.waitForFunction(() =>
       document.querySelector(".tab.active")?.textContent?.includes("Meeting Notes"),
     );
@@ -1003,6 +1003,7 @@ describe("real server harness", () => {
       await v2Request(vaultOneId, `/notes/${note.meta.noteId}`).then((response) => response.json()) as TestNoteDocument
     ).content).toBe(winningContent);
   }, 120_000);
+
 });
 
 function browserTypeFromEnv(): BrowserType {
@@ -1199,7 +1200,7 @@ async function loadNoteByPath(vaultId: string, path: string): Promise<TestNoteDo
 async function createCodeMirrorNote(page: Page, title: string): Promise<void> {
   await runPaletteCommand(page, "create");
   await page.locator(".note-dialog-panel input").fill(title);
-  await page.locator(".note-dialog-panel .primary-button").click();
+  await page.locator(".note-dialog-panel input").press("Enter");
   await page.waitForFunction(
     (expected) => document.querySelector(".tab.active")?.textContent?.includes(expected),
     title,

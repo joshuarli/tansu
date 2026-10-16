@@ -498,7 +498,6 @@ button {
 }
 
 .tab.active {
-  background: var(--color-bg-soft);
   color: var(--color-text);
   font-weight: 520;
 }
@@ -1380,7 +1379,6 @@ button {
 }
 
 .tab.active {
-  background: var(--color-bg-soft);
   font-weight: 400;
 }
 
@@ -1403,7 +1401,7 @@ button {
   width: min(100%, 740px);
   max-width: 740px;
   margin: 0 auto;
-  padding: 12px 0 80px;
+  padding: 62px 0 80px;
   font-size: 17px;
   line-height: 1.5;
 }
@@ -1506,33 +1504,21 @@ button {
   box-shadow: none;
 }
 
-.note-dialog-panel.is-create .modal-header {
-  flex: 0 0 56px;
+.note-dialog-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   height: 56px;
-  min-height: 0;
   padding: 0 16px;
-  font-size: 15px;
-  line-height: 22px;
-}
-
-.note-dialog-panel.is-create .field-label {
-  margin: 0;
-  padding: 0 16px 16px;
-  font-size: 12px;
-  line-height: 18px;
 }
 
 .note-dialog-panel.is-create .settings-input {
+  flex: 1 1 auto;
+  min-width: 0;
   min-height: 0;
   padding: 0;
   font-size: 17px;
   line-height: 22px;
-}
-
-.note-dialog-panel.is-create .modal-actions {
-  justify-content: flex-end;
-  min-height: 0;
-  padding: 0 16px 16px;
 }
 
 .search-field {
@@ -2134,7 +2120,7 @@ button {
 @media (max-width: 539px) {
   .new-note { margin-left: 3px; }
   .document-title { width: calc(100% - 40px); font-size: 23px; }
-  .editor-mount .cm-content { width: calc(100% - 40px); padding-top: 10px; }
+  .editor-mount .cm-content { width: calc(100% - 40px); padding-top: 60px; }
   .floating-controls { bottom: 12px; left: 12px; }
   .selection-toolbar-button { width: 34px; height: 34px; }
   .find-bar { right: 12px; width: min(348px, calc(100vw - 24px)); }

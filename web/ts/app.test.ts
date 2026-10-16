@@ -910,15 +910,13 @@ describe("v2 desktop shell", () => {
     const title = root.querySelector<HTMLInputElement>(".note-dialog-panel input")!;
     title.value = "Meeting Notes";
     title.dispatchEvent(new Event("input", { bubbles: true }));
-    root.querySelector<HTMLButtonElement>(".note-dialog-panel .primary-button")?.click();
+    root.querySelector<HTMLFormElement>(".note-dialog-panel")?.dispatchEvent(new Event("submit", { cancelable: true }));
     await flushAsync();
     const request = client.createNote.mock.calls[0]![0];
     expect(request).toMatchObject({ path: "meeting-notes.md", content: "", sourceHash: expect.stringMatching(/^blake3-v3:/) });
-    expect(root.querySelector<HTMLInputElement>(".note-dialog-panel input")?.disabled).toBeTruthy();
-    expect(root.querySelector<HTMLButtonElement>(".note-dialog-panel .primary-button")?.textContent).toBe("Retry create");
     pending.resolve({ mutationId: request.mutationId, outcome: { state: "pendingMaterialization", operationId: "op-1" } });
     await flushAsync();
-    root.querySelector<HTMLButtonElement>(".note-dialog-panel .primary-button")?.click();
+    root.querySelector<HTMLFormElement>(".note-dialog-panel")?.dispatchEvent(new Event("submit", { cancelable: true }));
     await flushAsync();
     expect(client.createNote).toHaveBeenCalledTimes(2);
     expect(client.createNote.mock.calls[1]?.[0].mutationId).toBe(request.mutationId);
@@ -1126,7 +1124,7 @@ describe("v2 desktop shell", () => {
     expect(client.renameNote).not.toHaveBeenCalled();
   });
 
-  it("keeps a local draft checkpoint when Create is canceled", async () => {
+  it("closes a new note tab and keeps its checkpoint when the dialog is dismissed", async () => {
     configureVault([]);
     const { root } = mountApp();
     const app = apps.at(-1)!;
@@ -1138,12 +1136,12 @@ describe("v2 desktop shell", () => {
     title.value = "Unfinished note";
     title.dispatchEvent(new Event("input", { bubbles: true }));
     await until(() => [...memory.localDrafts.values()].some((record) => record.titleDraft === "Unfinished note"));
-    root.querySelector<HTMLButtonElement>(".note-dialog-panel [title=\"Cancel\"]")?.click();
+    root.querySelector<HTMLDivElement>(".overlay-backdrop")?.click();
     await until(() => root.querySelector(".note-dialog-panel") === null);
 
     const checkpoint = [...memory.localDrafts.values()].find((record) => record.titleDraft === "Unfinished note");
     expect(checkpoint).toBeDefined();
-    expect(root.querySelector<HTMLButtonElement>(".tab.active")?.title).toBe("Unfinished note");
+    expect(root.querySelector(".tab")).toBeNull();
   });
 
   it("persists and recovers a dirty closed tab through its workspace and journal", async () => {

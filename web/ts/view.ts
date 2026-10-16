@@ -913,20 +913,19 @@ function renderNoteDialog(state: State, actions: ViewActions): HTMLElement {
       : null;
   if (inputEl !== null) inputEl.dataset["key"] = `note-dialog-input:${dialog?.kind ?? "delete"}`;
   if (inputEl !== null && dialog?.kind === "create") inputEl.placeholder = "Note title";
-  const localDraft = dialog?.kind === "create"
-    ? state.tabs.find((tab) => tab.kind === "local-draft" && tab.localDraftId === dialog.localDraftId)
-    : undefined;
-  const promotionPending = localDraft?.kind === "local-draft" && localDraft.session?.state.promotionPending === true;
-  if (inputEl !== null && promotionPending) inputEl.disabled = true;
+  const isCreate = dialog?.kind === "create";
+  const close = () => actions.dispatch({ type: "overlay.close" });
   const panel = el(
     "form",
-    `modal-panel note-dialog-panel${dialog?.kind === "create" ? " is-create" : ""}${isRename ? " is-rename" : ""}`,
-    el(
-      "div",
-      "modal-header",
-      span(title),
-      ...(isRename ? [] : [button("×", "Close", () => actions.dispatch({ type: "overlay.close" }), "tab-close")]),
-    ),
+    `modal-panel note-dialog-panel${isCreate ? " is-create" : ""}${isRename ? " is-rename" : ""}`,
+    ...(isCreate
+      ? []
+      : [el(
+        "div",
+        "modal-header",
+        span(title),
+        ...(isRename ? [] : [button("×", "Close", close, "tab-close")]),
+      )]),
   );
   const dialogKey = dialog === null
     ? "delete"
@@ -957,6 +956,17 @@ function renderNoteDialog(state: State, actions: ViewActions): HTMLElement {
         ),
       ),
     );
+  } else if (inputEl !== null && isCreate) {
+    inputEl.setAttribute("aria-label", "Note title");
+    inputEl.addEventListener("input", () => {
+      actions.dispatch({ type: "dialog.input", value: inputEl.value });
+    });
+    panel.append(el("div", "note-dialog-field", inputEl, button("×", "Close", close, "tab-close")));
+    panel.addEventListener("submit", (event) => {
+      event.preventDefault();
+      actions.dispatch({ type: "dialog.submit", value: inputEl.value });
+    });
+    focusOnOpen(inputEl);
   } else if (inputEl !== null) {
     const label = el("label", `field-label${isRename ? " rename-field-label" : ""}`, span(dialog?.kind === "tag" ? "Tag" : "Title"));
     if (isRename) {
@@ -974,9 +984,8 @@ function renderNoteDialog(state: State, actions: ViewActions): HTMLElement {
       () => actions.dispatch({ type: "overlay.close" }),
       isRename ? "rename-cancel-button" : "text-button",
     );
-    cancel.disabled = promotionPending;
     const submit = button(
-      dialog?.kind === "create" ? (promotionPending ? "Retry create" : "Create") : dialog?.kind === "rename" ? "Rename" : "Add",
+      dialog?.kind === "rename" ? "Rename" : "Add",
       title,
       () => actions.dispatch({ type: "dialog.submit", value: inputEl.value }),
       isRename ? "primary-button rename-submit-button" : "primary-button",
