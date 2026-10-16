@@ -17,6 +17,7 @@ import {
 import { expect, afterAll, beforeEach, describe, beforeAll, it } from "vitest";
 
 import { canonicalSourceHash } from "../source-hash.ts";
+import type { V2ServerEvent } from "../types.generated.ts";
 
 let server: ChildProcess | undefined;
 let browser: Browser | undefined;
@@ -1179,6 +1180,165 @@ describe("real server harness", () => {
     await expect.poll(() => readVaultFile("acceptance-conflict.md")).toBe(draftContent);
     await page.close();
   });
+
+  it("acceptance: a save that hits network failures is retried under one mutation id and lands once", async () => {
+    const page = await newLoggedPage();
+    await page.goto(baseUrl);
+    await page.waitForSelector(".main");
+    await createCodeMirrorNote(page, "Acceptance Retry");
+    const base = await waitForNoteByPath("acceptance-retry.md");
+    const content = "# Acceptance Retry\n\nsent after two dropped connections\n";
+    const mutationIds: string[] = [];
+    await page.route(noteMutationUrl, (route) => {
+      const request = route.request();
+      if (request.method() === "GET") return route.fallback();
+      mutationIds.push((JSON.parse(request.postData() ?? "{}") as { mutationId?: string }).mutationId ?? "");
+      return mutationIds.length <= 2 ? route.abort("connectionfailed") : route.fallback();
+    });
+
+    await page.locator("#editor-mount .cm-content").fill(content);
+
+    await expect.poll(() => readVaultFile("acceptance-retry.md"), { timeout: 15_000 }).toBe(content);
+    expect(mutationIds).toHaveLength(3);
+    expect(new Set(mutationIds).size).toBe(1);
+    expect(mutationIds[0]).not.toBe("");
+    const revisions = await v2Request(vaultOneId, `/notes/${base.meta.noteId}/revisions`)
+      .then((response) => response.json()) as { sourceHash: string | null }[];
+    expect(revisions.filter((revision) => revision.sourceHash === base.meta.sourceHash)).toHaveLength(1);
+    expect((await loadNoteByPath(vaultOneId, "acceptance-retry.md")).meta.revision).toBe(base.meta.revision + 1);
+    await page.close();
+  });
+
+  it("acceptance: auth expiring while an image upload is in flight locks the app without losing the note", async () => {
+    const page = await newLoggedPage();
+    await page.goto(baseUrl);
+    await page.waitForSelector(".main");
+    await createCodeMirrorNote(page, "Acceptance Auth Upload");
+    await waitForNoteByPath("acceptance-auth-upload.md");
+    const content = "# Acceptance Auth Upload\n\ntyped before the session expired\n";
+    await page.locator("#editor-mount .cm-content").fill(content);
+    await expect.poll(() => readVaultFile("acceptance-auth-upload.md"), { timeout: 15_000 }).toBe(content);
+    let expired = false;
+    await page.route("**/api/v2/**", (route) => expired ? route.fulfill(authRequiredResponse()) : route.fallback());
+    let uploadStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      uploadStarted = resolve;
+    });
+    let expireNow!: () => void;
+    const expiry = new Promise<void>((resolve) => {
+      expireNow = resolve;
+    });
+    await page.route(`**/api/v2/vaults/${encodeURIComponent(vaultOneId)}/images`, async (route) => {
+      uploadStarted();
+      await expiry;
+      expired = true;
+      await route.fulfill(authRequiredResponse());
+    });
+
+    await page.keyboard.press("Control+End");
+    await pasteImage(page);
+    await started;
+    await page.locator("#editor-mount .cm-content").pressSequentially("typed during the upload\n");
+    expireNow();
+
+    await page.waitForSelector(".auth-gate");
+    expect(await readVaultFile("acceptance-auth-upload.md")).not.toContain("![[");
+    expired = false;
+    await page.reload();
+    await page.waitForSelector(".main");
+    await expect.poll(() => page.locator("#editor-mount .cm-content").textContent()).toContain(
+      "typed during the upload",
+    );
+    expect(await page.locator("#editor-mount .cm-content").textContent()).not.toContain("![[");
+    expect(await readVaultFile("acceptance-auth-upload.md")).not.toContain("![[");
+    await page.close();
+  }, 120_000);
+
+  it("acceptance: a replayed stale event after a duplicated stream leaves the note list at the latest rename and the cursor advances", async () => {
+    const page = await newLoggedPage();
+    const streamRequests: string[] = [];
+    let releaseFirstStream!: () => void;
+    const firstStreamGate = new Promise<void>((resolve) => {
+      releaseFirstStream = resolve;
+    });
+    let replayFrames: string[] = [];
+    let staleFrame = "";
+    await page.route((url) => url.pathname.endsWith("/events"), async (route) => {
+      streamRequests.push(new URL(route.request().url()).search);
+      if (streamRequests.length > 1) return route.fallback();
+      await firstStreamGate;
+      return route.fulfill({
+        status: 200,
+        headers: { ...v2ResponseHeaders(), "Content-Type": "text/event-stream", "Cache-Control": "no-store" },
+        body: [...replayFrames, ...replayFrames, staleFrame].map((frame) => `${frame}\n\n`).join(""),
+      });
+    });
+    await page.goto(baseUrl);
+    await page.waitForSelector(".main");
+    await expect.poll(() => streamRequests.length).toBe(1);
+    const after = Number(new URLSearchParams(streamRequests[0]).get("after"));
+
+    const original = "acceptance-replay-before.md";
+    const renamed = "acceptance-replay-after.md";
+    const content = "# Acceptance Replay\n\nreplayed\n";
+    const created = await v2Request(vaultOneId, "/notes", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        mutationId: randomUUID(),
+        path: original,
+        content,
+        sourceHash: await canonicalSourceHash(content),
+      }),
+    }).then((response) => response.json()) as { outcome: { state: string; result: TestNoteMeta } };
+    expect(created.outcome.state).toBe("accepted");
+    const meta = created.outcome.result;
+    const rename = await v2Request(vaultOneId, `/notes/${meta.noteId}/rename`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        mutationId: randomUUID(),
+        precondition: { baseRevision: meta.revision, baseSourceHash: meta.sourceHash, baseDiskHash: meta.diskHash },
+        path: renamed,
+      }),
+    }).then((response) => response.json()) as { outcome: { state: string } };
+    expect(rename.outcome.state).toBe("accepted");
+    replayFrames = await readEventFramesUntil(after, (event) =>
+      event.update.kind === "noteChanged" && event.update.note.noteId === meta.noteId &&
+      event.update.note.path === renamed);
+    staleFrame = replayFrames.find((frame) => frame.includes(`"path":"${original}"`)) ?? "";
+    expect(staleFrame).not.toBe("");
+    releaseFirstStream();
+
+    await page.keyboard.press("Control+/");
+    await page.locator(`.recent-search-result[title="${renamed}"]`).waitFor();
+    await expect(page.locator(`.recent-search-result[title="${original}"]`).count()).resolves.toBe(0);
+    await expect(page.locator(`.recent-search-result[title="${renamed}"]`).count()).resolves.toBe(1);
+
+    await expect.poll(() => streamRequests.length, { timeout: 15_000 }).toBeGreaterThanOrEqual(2);
+    const lastVersion = Number(JSON.parse(replayFrames.at(-1)!.split("\n").find((line) => line.startsWith("data: "))!.slice(6)).eventVersion);
+    expect(Number(new URLSearchParams(streamRequests[1]).get("after"))).toBe(lastVersion);
+
+    const later = "acceptance-replay-later.md";
+    const renamedAgain = await v2Request(vaultOneId, `/notes/${meta.noteId}`)
+      .then((response) => response.json()) as TestNoteDocument;
+    await v2Request(vaultOneId, `/notes/${meta.noteId}/rename`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        mutationId: randomUUID(),
+        precondition: {
+          baseRevision: renamedAgain.meta.revision,
+          baseSourceHash: renamedAgain.meta.sourceHash,
+          baseDiskHash: renamedAgain.meta.diskHash,
+        },
+        path: later,
+      }),
+    });
+    await page.locator(`.recent-search-result[title="${later}"]`).waitFor();
+    await expect(page.locator(`.recent-search-result[title="${renamed}"]`).count()).resolves.toBe(0);
+    await page.close();
+  }, 120_000);
 });
 
 function browserTypeFromEnv(): BrowserType {
@@ -1463,4 +1623,69 @@ async function waitForNoteByPath(path: string): Promise<TestNoteDocument> {
     return note !== undefined;
   }).toBe(true);
   return note!;
+}
+
+const noteMutationUrl = (url: URL): boolean => /\/api\/v2\/vaults\/[^/]+\/notes\/[^/]+$/.test(url.pathname);
+
+function v2ResponseHeaders(): Record<string, string> {
+  return { "X-Tansu-Api-Version": "2", "X-Tansu-Build-Id": "e2e" };
+}
+
+function authRequiredResponse() {
+  return {
+    status: 401,
+    headers: { ...v2ResponseHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({ error: { code: "auth_required" } }),
+  };
+}
+
+async function readEventFramesUntil(
+  after: number,
+  done: (event: V2ServerEvent) => boolean,
+): Promise<string[]> {
+  const controller = new AbortController();
+  const response = await fetch(`${baseUrl}/api/v2/vaults/${encodeURIComponent(vaultOneId)}/events?after=${after}`, {
+    headers: { "X-Tansu-Server-Instance": serverInstanceId },
+    signal: controller.signal,
+  });
+  const reader = response.body!.getReader();
+  const decoder = new TextDecoder();
+  const frames: string[] = [];
+  let buffer = "";
+  try {
+    while (true) {
+      const chunk = await reader.read();
+      if (chunk.done) throw new Error("event stream ended before the awaited event");
+      buffer += decoder.decode(chunk.value, { stream: true });
+      const blocks = buffer.split("\n\n");
+      buffer = blocks.pop() ?? "";
+      for (const block of blocks) {
+        const data = block.split("\n").find((line) => line.startsWith("data: "));
+        if (data === undefined) continue;
+        frames.push(block);
+        if (done(JSON.parse(data.slice(6)))) return frames;
+      }
+    }
+  } finally {
+    controller.abort();
+  }
+}
+
+async function pasteImage(page: Page): Promise<void> {
+  await page.locator("#editor-mount .cm-content").evaluate(async (content) => {
+    const canvas = document.createElement("canvas");
+    canvas.width = 1;
+    canvas.height = 1;
+    const context = canvas.getContext("2d");
+    if (context === null) throw new Error("2D canvas is unavailable");
+    context.fillRect(0, 0, 1, 1);
+    const blob = await new Promise<Blob>((resolveBlob, rejectBlob) => {
+      canvas.toBlob((result) => result === null ? rejectBlob(new Error("Could not create PNG fixture")) : resolveBlob(result));
+    });
+    const clipboard = new DataTransfer();
+    clipboard.items.add(new File([blob], "pasted.png", { type: "image/png" }));
+    const paste = new Event("paste", { bubbles: true, cancelable: true });
+    Object.defineProperty(paste, "clipboardData", { value: clipboard });
+    content.dispatchEvent(paste);
+  });
 }
