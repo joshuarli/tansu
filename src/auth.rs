@@ -1629,6 +1629,13 @@ mod tests {
     }
 
     #[test]
+    fn linked_sqlite_supports_quick_check_for_database_verification() {
+        let connection = Connection::open_in_memory().unwrap();
+        connection.execute_batch("CREATE TABLE probe (id INTEGER PRIMARY KEY);").unwrap();
+        verify_database(&connection).expect("linked SQLite must support PRAGMA quick_check");
+    }
+
+    #[test]
     fn backup_includes_committed_wal_state_and_restore_discards_live_tokens() {
         let root = tempfile::tempdir().unwrap();
         let state_directory = root.path().join("auth");

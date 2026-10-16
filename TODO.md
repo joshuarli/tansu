@@ -3,16 +3,6 @@
 Prefix: TNS
 Next: 54
 
-### TNS-038 · P1 · Keep auth database validation available in release builds
-
-- **Area:** Data
-- **Where:** `scripts/build-sqlite-static.sh:89`, `src/auth.rs:857-865`
-- **Problem:** The release SQLite build defines `SQLITE_OMIT_INTEGRITY_CHECK`, which also removes `PRAGMA quick_check`. Auth backup and restore call `verify_database`, which expects that pragma to return a row. Against the release SQLite build, those operations fail even for a valid database.
-- **Status:** Commit 46a7805 removed the `SQLITE_OMIT_INTEGRITY_CHECK` define from `scripts/build-sqlite-static.sh`, which now has no match for it. Still open: no test runs auth recovery against the exact shipped static SQLite build.
-- **Recommendation:** Add a test that runs `verify_database` through backup and restore against the static SQLite build, plus a backup and restore drill with the release binary. Close the ticket when that exists.
-- **Fix with:** error-model
-- **Effort:** S
-
 ### TNS-025 · P2 · Reject malformed persisted catalog values
 
 - **Area:** Data

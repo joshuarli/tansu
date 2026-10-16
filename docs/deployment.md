@@ -85,6 +85,26 @@ server's public credential records, not authenticator private keys. If every
 registered authenticator is lost, an auth database backup alone cannot restore
 login access.
 
+Backup and restore verify the database with `PRAGMA quick_check`, which a
+SQLite build compiled with `SQLITE_OMIT_INTEGRITY_CHECK` does not provide.
+Check the shipped SQLite build and binary before a release:
+
+```sh
+make test-sqlite-static
+make build-linux-musl-x86_64
+make auth-recovery-drill
+```
+
+`make test-sqlite-static` builds the static SQLite archive from
+`scripts/build-sqlite-static.sh`, which downloads the SQLite source, and runs
+the auth tests linked against it. `make auth-recovery-drill` runs
+`scripts/auth-recovery-drill.sh` against the binary at `AUTH_DRILL_BIN`, which
+defaults to the x86_64 musl artifact. The drill uses a scratch config, data, and
+vault under `.work/tmp/auth-recovery-drill`. It enrolls, backs up, restores,
+backs up the restored database, and confirms that restore rejects a corrupt
+backup. The binary must run on the host, so run the drill on Linux for the musl
+artifact.
+
 ## Back up and restore Tansu2 state
 
 Stop Tansu2 and other vault writers before copying state. Back up these items

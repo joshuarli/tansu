@@ -3,6 +3,8 @@ DEV_DIR := $(CURDIR)/.dev
 DEV_CONFIG_HOME := $(DEV_DIR)/config
 DEV_DATA_HOME := $(DEV_DIR)/data
 DEPLOY_HOST ?= ubuntu@oracle
+SQLITE_STATIC_DIR ?= $(CURDIR)/.work/sqlite-static
+AUTH_DRILL_BIN ?= $(CURDIR)/.work/dist/x86_64-unknown-linux-musl/tansu2
 
 dev:
 	pnpm install --frozen-lockfile
@@ -72,6 +74,16 @@ test-e2e-webkit:
 test-rs:
 	cargo test -q --workspace
 
+test-sqlite-static:
+	mkdir -p "$(CURDIR)/.work/tmp"
+	TMPDIR="$(CURDIR)/.work/tmp" scripts/build-sqlite-static.sh "$(SQLITE_STATIC_DIR)"
+	TMPDIR="$(CURDIR)/.work/tmp" deno task build
+	TMPDIR="$(CURDIR)/.work/tmp" CARGO_TARGET_DIR="$(CURDIR)/.work/target-sqlite-static" SQLITE3_STATIC=1 SQLITE3_LIB_DIR="$(SQLITE_STATIC_DIR)/lib" SQLITE3_INCLUDE_DIR="$(SQLITE_STATIC_DIR)/include" LIBSQLITE3_SYS_USE_PKG_CONFIG=0 cargo test --locked --lib auth::tests
+
+auth-recovery-drill:
+	mkdir -p "$(CURDIR)/.work/tmp"
+	TMPDIR="$(CURDIR)/.work/tmp" scripts/auth-recovery-drill.sh "$(AUTH_DRILL_BIN)"
+
 build-linux-musl-docker:
 	mkdir -p "$(CURDIR)/.work/tmp" "$(CURDIR)/.work/dist/$${TARGET:-x86_64-unknown-linux-musl}"
 	TMPDIR="$(CURDIR)/.work/tmp" deno task build
@@ -112,4 +124,4 @@ bench-long-session:
 	mkdir -p "$(CURDIR)/.work/tmp"
 	TMPDIR="$(CURDIR)/.work/tmp" node bench/long-session.mjs
 
-.PHONY: bench bench-full bench-long-session build-linux-musl-aarch64 build-linux-musl-both build-linux-musl-docker build-linux-musl-x86_64 coverage coverage-html deploy dev dev-config check lint test-package types types-check types-generated ts test test-e2e-chromium test-e2e-webkit test-rs
+.PHONY: auth-recovery-drill bench bench-full bench-long-session build-linux-musl-aarch64 build-linux-musl-both build-linux-musl-docker build-linux-musl-x86_64 coverage coverage-html deploy dev dev-config check lint test-package types types-check types-generated ts test test-e2e-chromium test-e2e-webkit test-rs test-sqlite-static
