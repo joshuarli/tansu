@@ -35,6 +35,7 @@ import { sanitizeHtmlToMarkdown } from "./clipboard.js";
 import { findLiteral, outlineFromSyntaxTree, type FindMatch, type Outline, type OutlineHeading } from "./source-navigation.js";
 import { encodeImageDataAsWebp } from "./image-encoder.js";
 import { tagsSourceEdit } from "./tag-source.js";
+import { createTagPill } from "../tag-pill.ts";
 import { tufteNotes } from "./tufte-notes.js";
 import { addPendingImagePreview, pendingImagePreviews, removePendingImagePreview } from "./pasted-image-preview.js";
 import {
@@ -119,13 +120,10 @@ function renderNoteTags(tags: NoteTags | undefined, onFrontmatterToggle: () => v
   row.append(frontmatterToggle);
   if (tags !== undefined) {
     for (const tag of tags.tags) {
-      const remove = document.createElement("button");
-      remove.type = "button";
-      remove.className = "tag";
+      const remove = createTagPill(tag, "button");
       remove.disabled = tags.status !== "editable";
       remove.title = `Remove ${tag}`;
       remove.setAttribute("aria-label", `Remove ${tag}`);
-      remove.textContent = `#${tag} x`;
       remove.addEventListener("click", () => tags.onRemoveTag(tag));
       row.append(remove);
     }

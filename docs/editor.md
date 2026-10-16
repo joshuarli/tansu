@@ -48,6 +48,11 @@ top-level `tags` field alongside other frontmatter fields. They preserve the
 other fields and stay locked when the frontmatter is malformed or the tag
 value uses unsupported syntax.
 
+Each tag renders as a colored pill from `web/ts/tag-pill.ts`. The pill hue is a
+stable hash of the lowercased, normalized tag text, exposed as the `--tag-hue`
+custom property. `app.css` derives the light and dark colors from that hue.
+Other views that show tags reuse `createTagPill`.
+
 ## Read-only sessions
 
 Read-only sessions use both `EditorState.readOnly` and a transaction filter.

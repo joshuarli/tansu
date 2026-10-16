@@ -134,6 +134,29 @@ describe("CodeMirror editor sessions", () => {
     expect(editor.getSnapshot()?.mode).toBe("live");
   });
 
+  it("renders header tags as removable pills that disable with the tag status", () => {
+    const onRemoveTag = vi.fn();
+    const noteTags = (status: "editable" | "locked") => ({
+      tags: ["alpha", "beta"],
+      status,
+      onAddTag: vi.fn(),
+      onRemoveTag,
+    });
+    const editable = mountEditor("# Body\n", { noteTitle: "Note", noteTags: noteTags("editable") });
+    const pills = [...editable.container.querySelectorAll<HTMLButtonElement>(".tag-row .tag-pill")];
+
+    expect(pills.map((pill) => pill.textContent)).toStrictEqual(["#alpha", "#beta"]);
+    expect(pills.map((pill) => pill.getAttribute("aria-label"))).toStrictEqual(["Remove alpha", "Remove beta"]);
+    expect(pills.every((pill) => pill.style.getPropertyValue("--tag-hue") !== "")).toBeTruthy();
+    expect(pills.some((pill) => pill.disabled)).toBeFalsy();
+    pills[1]!.click();
+    expect(onRemoveTag).toHaveBeenCalledWith("beta");
+
+    const locked = mountEditor("# Body\n", { noteTitle: "Note", noteTags: noteTags("locked") }, "locked-note");
+    expect([...locked.container.querySelectorAll<HTMLButtonElement>(".tag-row .tag-pill")].every((pill) => pill.disabled)).toBeTruthy();
+    expect(locked.container.querySelector<HTMLButtonElement>(".tag-add")?.disabled).toBeTruthy();
+  });
+
   it("folds frontmatter in live mode until the header control reveals it", () => {
     const source = "---\ntags:\n  - alpha\n---\n\n# Body\n";
     const { container, editor } = mountEditor(source, { noteTitle: "Note" });

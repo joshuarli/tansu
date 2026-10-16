@@ -1,7 +1,7 @@
 import { vi, expect, describe, it } from "vitest";
 
 import type { CommandItem, ViewEvent } from "./app/events.ts";
-import { serverInstanceId, vaultId } from "./app/identity.ts";
+import { localDraftId, serverInstanceId, vaultId } from "./app/identity.ts";
 import { SETTINGS_LIMITS } from "./app/settings-policy.ts";
 import {
   createState,
@@ -13,6 +13,7 @@ import {
   type State,
 } from "./state.ts";
 import type { Settings, V2ConflictDraftDocument, V2NoteMeta, V2RevisionMeta } from "./types.generated.ts";
+import { createTagPill, tagHue } from "./tag-pill.ts";
 import { renderApp, renderAuthGate, renderLoading, renderStatusBar } from "./view.ts";
 import type { Outline } from "./editor/source-navigation.js";
 
@@ -376,6 +377,68 @@ describe("view rendering", () => {
       .querySelector<HTMLFormElement>(".note-dialog-panel")!
       .dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
     expectDispatched(actions, { type: "dialog.submit", value: "" });
+  });
+
+  it("renders the add-tag dialog with the create dialog structure", () => {
+    const state = baseState();
+    state.noteDialog = { kind: "create", localDraftId: localDraftId("draft-1"), title: "" };
+    const create = render(state).querySelector<HTMLFormElement>(".note-dialog-panel")!;
+    state.noteDialog = { kind: "tag", value: "idea" };
+    const actions = actionSpies();
+    const tag = render(state, actions).querySelector<HTMLFormElement>(".note-dialog-panel")!;
+
+    expect([...tag.classList].filter((name) => name !== "is-tag")).toStrictEqual([...create.classList]);
+    expect(tag.classList.contains("is-tag")).toBeTruthy();
+    expect(tag.querySelector(".modal-header")).toBeNull();
+    expect(tag.querySelector("label")).toBeNull();
+    expect(tag.querySelector(".modal-actions")).toBeNull();
+    expect([...tag.children].map((child) => child.className)).toStrictEqual(
+      [...create.children].map((child) => child.className),
+    );
+    const field = tag.querySelector<HTMLInputElement>(".note-dialog-field > input.settings-input")!;
+    expect(field.value).toBe("idea");
+    expect(field.getAttribute("aria-label")).toBe("Tag");
+    expect(field.placeholder).toBe("Add tag");
+
+    field.value = "#idea-two";
+    field.dispatchEvent(new Event("input"));
+    expectDispatched(actions, { type: "dialog.input", value: "#idea-two" });
+    const submit = new Event("submit", { bubbles: true, cancelable: true });
+    tag.dispatchEvent(submit);
+    expect(submit.defaultPrevented).toBeTruthy();
+    expectDispatched(actions, { type: "dialog.submit", value: "#idea-two" });
+
+    tag.querySelector<HTMLButtonElement>(".note-dialog-field > .tab-close")!.click();
+    expectDispatched(actions, { type: "overlay.close" });
+  });
+
+  it("derives one stable hue per normalized tag", () => {
+    expect(tagHue("alpha")).toBe(tagHue("alpha"));
+    expect(tagHue("alpha")).toBe(tagHue(" #alpha "));
+    expect(tagHue("alpha")).toBe(tagHue("Alpha"));
+    expect(tagHue("alpha")).not.toBe(tagHue("beta"));
+    expect(tagHue("alpha")).not.toBe(tagHue("alpha-2"));
+    for (const tag of ["alpha", "beta", "a-very-long-tag-name-that-wraps", "日本語"]) {
+      expect(Number.isInteger(tagHue(tag))).toBeTruthy();
+      expect(tagHue(tag)).toBeGreaterThanOrEqual(0);
+      expect(tagHue(tag)).toBeLessThan(360);
+    }
+    expect(() => tagHue(" # ")).toThrow("Invalid tag");
+  });
+
+  it("renders a tag pill with its hue and the same markup for both elements", () => {
+    const button = createTagPill("#Alpha", "button");
+    const label = createTagPill("Alpha", "span");
+
+    expect(button.tagName).toBe("BUTTON");
+    expect(button.type).toBe("button");
+    expect(label.tagName).toBe("SPAN");
+    expect(button.classList.contains("tag-pill")).toBeTruthy();
+    expect(button.textContent).toBe("#Alpha");
+    expect(button.style.getPropertyValue("--tag-hue")).toBe(String(tagHue("Alpha")));
+    expect(label.style.getPropertyValue("--tag-hue")).toBe(button.style.getPropertyValue("--tag-hue"));
+    expect(label.innerHTML).toBe(button.innerHTML);
+    expect(() => createTagPill("", "span")).toThrow("Invalid tag");
   });
 
   it("renders search excerpts as text and preserves highlighted ranges", () => {

@@ -920,13 +920,16 @@ function renderNoteDialog(state: State, actions: ViewActions): HTMLElement {
       ? input(title, dialog.kind === "tag" ? dialog.value : dialog.title)
       : null;
   if (inputEl !== null) inputEl.dataset["key"] = `note-dialog-input:${dialog?.kind ?? "delete"}`;
-  if (inputEl !== null && dialog?.kind === "create") inputEl.placeholder = "Note title";
   const isCreate = dialog?.kind === "create";
+  const isTag = dialog?.kind === "tag";
+  const isCompact = isCreate || isTag;
+  const fieldLabel = isTag ? "Tag" : "Note title";
+  if (inputEl !== null && isCompact) inputEl.placeholder = isTag ? "Add tag" : "Note title";
   const close = () => actions.dispatch({ type: "overlay.close" });
   const panel = el(
     "form",
-    `modal-panel note-dialog-panel${isCreate ? " is-create" : ""}${isRename ? " is-rename" : ""}`,
-    ...(isCreate
+    `modal-panel note-dialog-panel${isCompact ? " is-create" : ""}${isTag ? " is-tag" : ""}${isRename ? " is-rename" : ""}`,
+    ...(isCompact
       ? []
       : [el(
         "div",
@@ -964,8 +967,8 @@ function renderNoteDialog(state: State, actions: ViewActions): HTMLElement {
         ),
       ),
     );
-  } else if (inputEl !== null && isCreate) {
-    inputEl.setAttribute("aria-label", "Note title");
+  } else if (inputEl !== null && isCompact) {
+    inputEl.setAttribute("aria-label", fieldLabel);
     inputEl.addEventListener("input", () => {
       actions.dispatch({ type: "dialog.input", value: inputEl.value });
     });
@@ -976,13 +979,9 @@ function renderNoteDialog(state: State, actions: ViewActions): HTMLElement {
     });
     focusOnOpen(inputEl);
   } else if (inputEl !== null) {
-    const label = el("label", `field-label${isRename ? " rename-field-label" : ""}`, span(dialog?.kind === "tag" ? "Tag" : "Title"));
-    if (isRename) {
-      inputEl.id = "rename-note-title";
-      label.htmlFor = inputEl.id;
-    } else {
-      label.append(inputEl);
-    }
+    const label = el("label", "field-label rename-field-label", span("Title"));
+    inputEl.id = "rename-note-title";
+    label.htmlFor = inputEl.id;
     inputEl.addEventListener("input", () => {
       actions.dispatch({ type: "dialog.input", value: inputEl.value });
     });
@@ -990,22 +989,20 @@ function renderNoteDialog(state: State, actions: ViewActions): HTMLElement {
       "Cancel",
       "Cancel",
       () => actions.dispatch({ type: "overlay.close" }),
-      isRename ? "rename-cancel-button" : "text-button",
+      "rename-cancel-button",
     );
     const submit = button(
-      dialog?.kind === "rename" ? "Rename" : "Add",
+      "Rename",
       title,
       () => actions.dispatch({ type: "dialog.submit", value: inputEl.value }),
-      isRename ? "primary-button rename-submit-button" : "primary-button",
+      "primary-button rename-submit-button",
     );
-    panel.append(label);
-    if (isRename) panel.append(inputEl);
-    panel.append(el("div", `modal-actions${isRename ? " rename-actions" : ""}`, cancel, submit));
+    panel.append(label, inputEl, el("div", "modal-actions rename-actions", cancel, submit));
     panel.addEventListener("submit", (event) => {
       event.preventDefault();
       actions.dispatch({ type: "dialog.submit", value: inputEl.value });
     });
-    focusOnOpen(inputEl, isRename);
+    focusOnOpen(inputEl, true);
   }
   return panel;
 }

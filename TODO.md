@@ -22,15 +22,6 @@ Next: 54
 - **Design:** `docs/rfcs/TNS-050-document-controller.md`
 - **Effort:** L
 
-### TNS-051 · P2 · Show tags as colored pills and clean up the add-tag modal
-
-- **Area:** UI
-- **Where:** `web/ts/view.ts:907`, `web/ts/view.ts:971`, `web/static/app.css`, `web/ts/view.test.ts`
-- **Problem:** Tags render as plain text and the "Add Tag" dialog does not match the visual polish of the other note dialogs.
-- **Recommendation:** Render every tag as a pill whose color derives deterministically from the normalized tag text (stable across sessions, readable in light and dark). Share one tag-pill renderer across the note header, search results, and recent notes (TNS-052). Rebuild the add-tag dialog on the same structure and styles as the existing rename/create dialogs. Cover the pill color stability and the dialog markup in `view.test.ts`.
-- **Fix with:** single-source-of-truth
-- **Effort:** M
-
 ### TNS-052 · P2 · Show tags on search and recent-note entries and weigh them in search
 
 - **Area:** Search

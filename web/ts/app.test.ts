@@ -1463,7 +1463,7 @@ describe("v2 desktop shell", () => {
     const input = root.querySelector<HTMLInputElement>(".note-dialog-panel input")!;
     input.value = "beta";
     input.dispatchEvent(new Event("input", { bubbles: true }));
-    root.querySelector<HTMLButtonElement>(".note-dialog-panel .primary-button")?.click();
+    root.querySelector<HTMLFormElement>(".note-dialog-panel")?.dispatchEvent(new Event("submit", { cancelable: true }));
     await flushAsync();
     expect(editorMock.instances[0]?.updateTags).toHaveBeenCalledWith(["alpha", "beta"]);
   });

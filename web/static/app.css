@@ -19,6 +19,11 @@
   --color-warning-bg: #fff7e7;
   --color-backdrop: rgb(0 0 0 / 15%);
   --shadow-floating: 0 6px 18px rgb(0 0 0 / 18%);
+  --tag-bg-lightness: 0.94;
+  --tag-bg-hover-lightness: 0.89;
+  --tag-bg-chroma: 0.045;
+  --tag-fg-lightness: 0.4;
+  --tag-fg-chroma: 0.11;
   --font-body: -apple-system, BlinkMacSystemFont, system-ui, "Segoe UI", sans-serif;
   --font-body-size: 17px;
   --font-body-leading: 1.5;
@@ -64,6 +69,11 @@
   --color-warning-bg: #352d20;
   --color-backdrop: rgb(0 0 0 / 48%);
   --shadow-floating: 0 8px 24px rgb(0 0 0 / 42%);
+  --tag-bg-lightness: 0.33;
+  --tag-bg-hover-lightness: 0.39;
+  --tag-bg-chroma: 0.06;
+  --tag-fg-lightness: 0.88;
+  --tag-fg-chroma: 0.08;
 }
 
 * {
@@ -542,6 +552,7 @@ button {
 
 .tag-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 5px;
   overflow: hidden;
@@ -558,6 +569,42 @@ button {
 
 .tag:disabled {
   color: var(--color-text-muted);
+}
+
+.tag.tag-pill,
+.tag.tag-pill:disabled {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: min(100%, 28ch);
+  background: oklch(var(--tag-bg-lightness) var(--tag-bg-chroma) var(--tag-hue));
+  color: oklch(var(--tag-fg-lightness) var(--tag-fg-chroma) var(--tag-hue));
+  line-height: 18px;
+  white-space: nowrap;
+}
+
+.tag-pill-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+button.tag-pill:not(:disabled) {
+  cursor: pointer;
+}
+
+button.tag-pill:not(:disabled)::after {
+  flex: 0 0 auto;
+  opacity: 0.6;
+  content: "\00d7";
+}
+
+button.tag-pill:not(:disabled):hover {
+  background: oklch(var(--tag-bg-hover-lightness) var(--tag-bg-chroma) var(--tag-hue));
+}
+
+button.tag-pill:not(:disabled):hover::after {
+  opacity: 1;
 }
 
 .tag-add {
