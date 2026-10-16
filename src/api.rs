@@ -1032,7 +1032,7 @@ mod tests {
             "req",
         );
         assert_eq!(deleted.status(), 200);
-        assert!(!vault.root.join("nested/renamed.md").exists());
+        assert!(!vault.root().join("nested/renamed.md").exists());
     }
 
     fn v2_precondition(meta: &crate::api_types::V2NoteMeta) -> serde_json::Value {

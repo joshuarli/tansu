@@ -3,15 +3,6 @@
 Prefix: TNS
 Next: 54
 
-### TNS-029 · P2 · Keep vault identity fields immutable to callers
-
-- **Area:** Architecture
-- **Where:** `src/vault.rs:64-68`
-- **Problem:** `VaultRuntime` exposes writable `root`, `vault_id`, `name`, and `index` fields while keeping `state_root` private. A caller can change the visible root while operations continue using the original state directory, splitting one runtime’s identity across paths.
-- **Recommendation:** Make identity fields private and expose read-only accessors for consumers.
-- **Fix with:** api-surface-and-module-boundaries
-- **Effort:** S
-
 ### TNS-030 · P2 · Synchronize watcher e2e on stream readiness
 
 - **Area:** Tests

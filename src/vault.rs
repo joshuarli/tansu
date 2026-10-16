@@ -62,10 +62,10 @@ fn v2_note_meta(meta: &NoteMeta, disk_hash: &str) -> Result<V2NoteMeta> {
 }
 
 pub struct VaultRuntime {
-    pub index: usize,
-    pub name: String,
-    pub vault_id: String,
-    pub root: PathBuf,
+    index: usize,
+    name: String,
+    vault_id: String,
+    root: PathBuf,
     state_root: PathBuf,
     catalog: Mutex<Catalog>,
     search: Mutex<SearchIndex>,
@@ -944,6 +944,22 @@ impl VaultRuntime {
             logs,
             _owner_lock: owner_lock,
         })
+    }
+
+    pub fn index(&self) -> usize {
+        self.index
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub fn vault_id(&self) -> &str {
+        &self.vault_id
+    }
+
+    pub fn root(&self) -> &Path {
+        &self.root
     }
 
     pub fn start_search_worker(self: &Arc<Self>) -> Result<()> {

@@ -69,7 +69,7 @@ impl App {
     pub fn vault_by_id(&self, vault_id: &str) -> Result<Arc<VaultRuntime>> {
         self.vaults
             .iter()
-            .find(|vault| vault.vault_id == vault_id)
+            .find(|vault| vault.vault_id() == vault_id)
             .cloned()
             .ok_or_else(|| Error::NotFound(format!("unknown vault ID {vault_id}")))
     }
