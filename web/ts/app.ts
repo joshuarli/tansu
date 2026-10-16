@@ -1,8 +1,9 @@
 import { commandItems } from "./app/commands.ts";
 import type { CommandId, SettingsFormValue, ViewEvent } from "./app/events.ts";
 import { applySettingsForm } from "./app/settings-policy.ts";
-import { DocumentSession, defaultDocumentSessionServices, type DocumentSessionState } from "./app/document-session.ts";
+import { DocumentSession, defaultDocumentSessionServices, type DocumentSessionServices, type DocumentSessionState } from "./app/document-session.ts";
 import { dirtySnapshot, DocumentControllers } from "./app/document-controller.ts";
+import { JournalHandle } from "./app/journal-handle.ts";
 import { LocalDraftSession } from "./app/local-draft-session.ts";
 import { defaultServices, type AppServices } from "./app/services.ts";
 import { localDraftId, noteId, serverInstanceId, vaultId, type DocumentIdentity, type LocalDraftId, type ServerIdentity, type WorkspaceId } from "./app/identity.ts";
@@ -76,8 +77,7 @@ export class TansuApp {
   private readonly workspaceId: WorkspaceId;
   private readonly recentPreviews = new Map<string, string>();
   private identity: ServerIdentity | null = null;
-  private journal: ReturnType<AppServices["workspace"]["createJournal"]> | null = null;
-  private detachVisibilityFlush: (() => void) | null = null;
+  private readonly journal: JournalHandle;
   private vaultClient: ReturnType<AppServices["api"]["forVault"]> | null = null;
   private editor: EditorHandle | null = null;
   private cachedEditorConfig: {
@@ -130,6 +130,7 @@ export class TansuApp {
     this.state.theme = savedTheme();
     document.documentElement.dataset["theme"] = this.state.theme;
     this.workspaceId = this.services.workspace.createWorkspaceId();
+    this.journal = new JournalHandle(this.services.workspace, (error) => this.notifyStorageFailure(error));
     this.editorMount.className = "editor-mount";
     this.editorMount.id = "editor-mount";
   }
@@ -253,7 +254,7 @@ export class TansuApp {
       this.workspaceTimer = undefined;
       await Promise.all([
         this.services.workspace.saveWorkspaceState(this.workspaceSnapshot(identity)),
-        this.journal?.flushAll() ?? Promise.resolve(),
+        this.journal.flushAll(),
       ]);
       if (this.workspaceTimer === undefined) return;
     }
@@ -293,7 +294,7 @@ export class TansuApp {
     const onBeforeUnload = () => {
       this.captureActiveEditor();
       this.persistWorkspace();
-      void this.journal?.flushAll();
+      void this.journal.flushAll();
     };
     const onKeyDown = (event: KeyboardEvent) => {
       if (this.transitioningVault || this.state.authRequired || this.state.boot === null) return;
@@ -377,17 +378,10 @@ export class TansuApp {
     ++this.bootGeneration;
     for (const cleanup of this.globalEventCleanups.splice(0)) cleanup();
     this.captureActiveEditor();
-    let pendingJournalFlush: Promise<void>;
-    try {
-      pendingJournalFlush = this.journal?.flushAll() ?? Promise.resolve();
-    } catch (error) {
-      pendingJournalFlush = Promise.reject(error);
-    }
+    const pendingJournalFlush = this.journal.dispose();
     this.eventSubscription?.close();
     this.eventSubscription = null;
     this.clearAssetScope();
-    this.detachVisibilityFlush?.();
-    this.detachVisibilityFlush = null;
     for (const tab of this.state.tabs) if (tab.kind === "saved") tab.session?.close();
     this.editor?.dispose();
     this.editor = null;
@@ -759,24 +753,28 @@ export class TansuApp {
     await this.documents.for(tab.noteId).ensureLoaded(() => this.loadSavedTab(tab));
   }
 
+  private documentSessionServices(client: VaultClient): DocumentSessionServices {
+    const journal = this.journal.get();
+    const services = defaultDocumentSessionServices(
+      async (documentIdentity, generation, request) => ({
+        identity: documentIdentity,
+        generation,
+        response: await client.saveNote(documentIdentity.noteId, request),
+      }),
+      this.services.workspace.checkpointWriter(journal),
+      this.services.workspace.checkpointClearer(journal, this.workspaceId),
+    );
+    services.clearTitleCheckpoint = this.services.workspace.titleCheckpointClearer(journal, this.workspaceId);
+    return services;
+  }
+
   private async loadSavedTab(tab: SavedTab): Promise<void> {
-    if (this.identity === null || this.vaultClient === null) return;
+    if (this.disposed || this.identity === null || this.vaultClient === null) return;
     const serverIdentity = this.identity;
     const client = this.vaultClient;
     const identity: DocumentIdentity = { ...serverIdentity, noteId: tab.noteId };
     const generation = ++this.sessionGeneration;
-    const journal = this.ensureJournal();
-    const clear = this.services.workspace.checkpointClearer(journal, this.workspaceId);
-    const services = defaultDocumentSessionServices(
-      async (documentIdentity, responseGeneration, request) => ({
-        identity: { serverInstanceId: documentIdentity.serverInstanceId, vaultId: documentIdentity.vaultId, noteId: documentIdentity.noteId },
-        generation: responseGeneration,
-        response: await client.saveNote(documentIdentity.noteId, request),
-      }),
-      this.services.workspace.checkpointWriter(journal),
-      clear,
-    );
-    services.clearTitleCheckpoint = this.services.workspace.titleCheckpointClearer(journal, this.workspaceId);
+    const services = this.documentSessionServices(client);
     const session = new DocumentSession(identity, generation, this.workspaceId, services);
     tab.session = session;
     this.documents.for(tab.noteId).attachSession(session, (value) => this.onDocumentSessionState(tab, session, serverIdentity, client, value));
@@ -839,8 +837,8 @@ export class TansuApp {
   private async loadLocalDraft(tab: Extract<Tab, { kind: "local-draft" }>): Promise<void> {
     const identity = this.identity;
     const client = this.vaultClient;
-    if (identity === null || client === null) return;
-    const journal = this.ensureJournal();
+    if (this.disposed || identity === null || client === null) return;
+    const journal = this.journal.get();
     const session = new LocalDraftSession(identity, this.workspaceId, tab.localDraftId, {
       createMutationId: mutationId,
       checkpoint: this.services.workspace.localCheckpointWriter(journal),
@@ -993,7 +991,7 @@ export class TansuApp {
     if (checkpointPending) {
       if (wasActive) this.configureActiveEditor(true);
       try {
-        await this.journal?.flushAll();
+        await this.journal.flushAll();
       } catch (error) {
         if (wasActive) this.configureActiveEditor(false);
         this.notifyStorageFailure(error);
@@ -1304,17 +1302,7 @@ export class TansuApp {
     const client = this.vaultClient;
     if (client === null) throw new Error("Vault client is unavailable");
     const identity: DocumentIdentity = { ...serverIdentity, noteId: tab.noteId };
-    const journal = this.ensureJournal();
-    const services = defaultDocumentSessionServices(
-      async (documentIdentity, generation, request) => ({
-        identity: documentIdentity,
-        generation,
-        response: await client.saveNote(documentIdentity.noteId, request),
-      }),
-      this.services.workspace.checkpointWriter(journal),
-      this.services.workspace.checkpointClearer(journal, this.workspaceId),
-    );
-    services.clearTitleCheckpoint = this.services.workspace.titleCheckpointClearer(journal, this.workspaceId);
+    const services = this.documentSessionServices(client);
     const session = new DocumentSession(identity, ++this.sessionGeneration, this.workspaceId, services);
     tab.session = session;
     this.documents.for(tab.noteId).attachSession(session, (value) => this.onDocumentSessionState(tab, session, serverIdentity, client, value));
@@ -1974,13 +1962,6 @@ export class TansuApp {
     this.assetScope.clear();
   }
 
-  private ensureJournal() {
-    if (this.journal !== null) return this.journal;
-    this.journal = this.services.workspace.createJournal((error) => this.notifyStorageFailure(error));
-    this.detachVisibilityFlush = this.services.workspace.attachVisibilityFlush(this.journal);
-    return this.journal;
-  }
-
   private cacheDocument(document: V2NoteDocument): void {
     const serverIdentity = this.identity;
     const client = this.vaultClient;
@@ -2094,7 +2075,7 @@ export class TansuApp {
     const copied = await local.session!.persist();
     if (!copied) throw new Error("Could not checkpoint recreated draft locally");
     const cleared = await this.services.workspace.checkpointClearer(
-      this.ensureJournal(),
+      this.journal.get(),
       this.workspaceId,
     )({ ...this.identity, noteId: original.noteId }, recovered.localRevision, recovered.mutationId);
     if (!cleared) {
@@ -2134,7 +2115,7 @@ export class TansuApp {
     this.state.contextMenu = null;
     this.render();
     this.restoreOverlayReturn();
-    if (dialog?.kind === "rename") await this.journal?.flushAll();
+    if (dialog?.kind === "rename") await this.journal.flushAll();
     if (dialog?.kind === "create") await this.closeTab({ kind: "local-draft", localDraftId: dialog.localDraftId }, "materialized");
   }
 

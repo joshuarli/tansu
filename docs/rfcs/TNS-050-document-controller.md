@@ -39,5 +39,6 @@ Done:
 
 - `DocumentControllers` in `web/ts/app/document-controller.ts` owns the per-note load dedupe and autosave timer. Closing a tab releases its controller.
 - `dirtySnapshot` in the same file projects a `DocumentSessionState` into the tab's draft, dirty, saving, conflict, title, and path fields. `DocumentController.attachSession` owns the one session subscription per note, replaces the previous subscription, and `release` and `disposeAll` unsubscribe it.
+- `JournalHandle` in `web/ts/app/journal-handle.ts` owns the lazily created draft journal and its visibility-flush attachment. `dispose` flushes, detaches, and makes later `get` calls throw, so a load that outlives `dispose` can no longer create a journal and listener nobody detaches; `loadSavedTab` and `loadLocalDraft` return early once disposed. The duplicated session service wiring in `loadSavedTab` and `createDocumentSession` is one `documentSessionServices`.
 
-Next boundaries, in order: the journal handle, then stale-completion checks in `loadSavedTab`.
+Next boundaries, in order: stale-completion checks in `loadSavedTab`.
