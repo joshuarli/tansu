@@ -38,6 +38,7 @@ fn main() {
         };
         assert_eq!(content_type, actual_content_type, "manifest MIME type must match the asset allowlist");
         assert_eq!(immutable, url.starts_with("/assets/"), "only fingerprinted assets are immutable");
+        assert!(!immutable || has_content_hash(url), "immutable asset URL {url} has no content-hash segment");
         println!("cargo:rerun-if-changed={}", canonical_path.display());
         entries.push((url.to_string(), content_type.to_string(), immutable, canonical_path));
     }
@@ -64,6 +65,17 @@ fn main() {
     println!("cargo:rerun-if-changed=build.rs");
 }
 
+fn has_content_hash(url: &str) -> bool {
+    let segments = url.split('/').collect::<Vec<_>>();
+    segments.iter().enumerate().any(|(index, segment)| {
+        let parts = segment.split('.').collect::<Vec<_>>();
+        let end = if index + 1 == segments.len() { parts.len().saturating_sub(1) } else { parts.len() };
+        parts.get(1..end).unwrap_or_default().iter().any(|part| {
+            part.len() >= 8 && part.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-')
+        })
+    })
+}
+
 fn files_below(root: &Path) -> BTreeSet<String> {
     let mut files = BTreeSet::new();
     let mut pending = vec![root.to_path_buf()];
@@ -83,4 +95,23 @@ fn files_below(root: &Path) -> BTreeSet<String> {
         }
     }
     files
+}
+
+#[cfg(test)]
+mod tests {
+    use super::has_content_hash;
+
+    #[test]
+    fn immutable_urls_need_a_hash_segment() {
+        for url in [
+            "/assets/app.BbvJxb9l.js",
+            "/assets/app.DBFh0y5L.css",
+            "/assets/jsquash-webp.7d60e1412c0e/codec/enc/webp_enc.wasm",
+        ] {
+            assert!(has_content_hash(url), "{url}");
+        }
+        for url in ["/assets/app.js", "/assets/encode/webp_enc.wasm", "/assets/app.min.js", "/assets/app.v1.js"] {
+            assert!(!has_content_hash(url), "{url}");
+        }
+    }
 }
