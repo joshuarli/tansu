@@ -12,6 +12,9 @@ use std::os::fd::{AsRawFd, FromRawFd, RawFd};
 #[cfg(unix)]
 use std::os::unix::ffi::OsStrExt;
 
+#[cfg(all(unix, not(any(target_os = "linux", target_os = "macos"))))]
+compile_error!("descriptor-relative vault file access is supported only on Linux and macOS");
+
 use crate::api_types::PathValidationReason;
 use crate::{Error, Result};
 
@@ -522,34 +525,21 @@ fn open_vault_file(root: &Path, relative: &Path) -> Result<File> {
 }
 
 #[cfg(unix)]
-const O_RDONLY: i32 = 0;
+const O_RDONLY: i32 = rustix::fs::OFlags::RDONLY.bits() as i32;
 #[cfg(unix)]
-const O_WRONLY: i32 = 1;
-#[cfg(target_os = "linux")]
-const O_CREAT: i32 = 0x40;
-#[cfg(target_os = "macos")]
-const O_CREAT: i32 = 0x200;
-#[cfg(target_os = "linux")]
-const O_EXCL: i32 = 0x80;
-#[cfg(target_os = "macos")]
-const O_EXCL: i32 = 0x800;
-#[cfg(target_os = "linux")]
-const O_DIRECTORY: i32 = 0x10000;
-#[cfg(target_os = "macos")]
-const O_DIRECTORY: i32 = 0x100000;
-#[cfg(target_os = "linux")]
-const O_NOFOLLOW: i32 = 0x20000;
-#[cfg(target_os = "macos")]
-const O_NOFOLLOW: i32 = 0x100;
-#[cfg(target_os = "linux")]
-const O_NONBLOCK: i32 = 0x800;
-#[cfg(target_os = "macos")]
-const O_NONBLOCK: i32 = 0x4;
+const O_WRONLY: i32 = rustix::fs::OFlags::WRONLY.bits() as i32;
 #[cfg(unix)]
-#[cfg(target_os = "linux")]
-const O_CLOEXEC: i32 = 0x80000;
-#[cfg(target_os = "macos")]
-const O_CLOEXEC: i32 = 0x1000000;
+const O_CREAT: i32 = rustix::fs::OFlags::CREATE.bits() as i32;
+#[cfg(unix)]
+const O_EXCL: i32 = rustix::fs::OFlags::EXCL.bits() as i32;
+#[cfg(unix)]
+const O_DIRECTORY: i32 = rustix::fs::OFlags::DIRECTORY.bits() as i32;
+#[cfg(unix)]
+const O_NOFOLLOW: i32 = rustix::fs::OFlags::NOFOLLOW.bits() as i32;
+#[cfg(unix)]
+const O_NONBLOCK: i32 = rustix::fs::OFlags::NONBLOCK.bits() as i32;
+#[cfg(unix)]
+const O_CLOEXEC: i32 = rustix::fs::OFlags::CLOEXEC.bits() as i32;
 
 #[cfg(unix)]
 fn current_directory() -> RawFd {
