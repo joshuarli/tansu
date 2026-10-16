@@ -23,18 +23,39 @@ fn parse_tags_frontmatter(content: &str) -> (Vec<String>, bool) {
         return (Vec::new(), true);
     }
     let mut tags = Vec::new();
+    let mut has_tags = false;
+    let mut tags_only = true;
     let mut in_tags_list = false;
     for line in lines {
         if line == "---" {
-            return (tags, true);
+            return (tags, tags_only);
         }
         let trimmed = line.trim();
         if trimmed.is_empty() {
             continue;
         }
-        if let Some(rest) = trimmed.strip_prefix("tags:") {
-            in_tags_list = true;
+        if trimmed.starts_with('#') {
+            tags_only = false;
+            continue;
+        }
+        if !line.starts_with(' ') && !line.starts_with('\t') {
+            in_tags_list = false;
+            let Some((key, rest)) = line.split_once(':') else {
+                return (Vec::new(), false);
+            };
+            if key.trim() != "tags" {
+                tags_only = false;
+                continue;
+            }
+            if has_tags {
+                return (Vec::new(), false);
+            }
+            has_tags = true;
             let rest = rest.trim();
+            if rest.is_empty() {
+                in_tags_list = true;
+                continue;
+            }
             if rest.starts_with('[') && rest.ends_with(']') {
                 tags.extend(
                     rest.trim_matches(['[', ']'])
@@ -43,6 +64,8 @@ fn parse_tags_frontmatter(content: &str) -> (Vec<String>, bool) {
                         .filter(|tag| !tag.is_empty())
                         .map(ToOwned::to_owned),
                 );
+            } else if rest.starts_with('[') || rest.ends_with(']') {
+                return (Vec::new(), false);
             } else if !rest.is_empty() {
                 tags.extend(
                     rest.split(',')
@@ -60,7 +83,10 @@ fn parse_tags_frontmatter(content: &str) -> (Vec<String>, bool) {
             }
             continue;
         }
-        return (Vec::new(), false);
+        tags_only = false;
+        if in_tags_list && !trimmed.starts_with('#') {
+            return (Vec::new(), false);
+        }
     }
     (Vec::new(), false)
 }
@@ -129,6 +155,6 @@ mod tests {
 
         let mixed = parse_markdown("x.md", "---\ntags:\n  - alpha\nauthor: Jane\n---\n");
         assert!(!mixed.frontmatter_supported);
-        assert!(mixed.tags.is_empty());
+        assert_eq!(mixed.tags, vec!["alpha"]);
     }
 }

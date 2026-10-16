@@ -31,7 +31,10 @@ The note title and tag controls render inside the scrolling editor header, in
 that order before Markdown content. Live mode folds frontmatter by default.
 The Frontmatter control appears before the tag controls and reveals the source
 for editing. Source mode always shows the full document. The tag row follows
-the active note and keeps its read-only and frontmatter-lock states.
+the active note and keeps its read-only state. Tag controls can update a
+top-level `tags` field alongside other frontmatter fields. They preserve the
+other fields and stay locked when the frontmatter is malformed or the tag
+value uses unsupported syntax.
 
 ## Read-only sessions
 
@@ -47,8 +50,9 @@ The adapter keeps authored source while CodeMirror renders live decorations.
 Decorations cover the full document, including content outside the viewport.
 Word edits and caret moves in plain paragraphs map existing decorations; edits
 that can affect Markdown syntax rebuild them from the syntax tree.
-Syntax on the saved cursor line stays revealed when focus moves to a transient
-control. Find highlights remain separate from the document selection and do not
+Editable live mode reveals syntax on the saved cursor line when focus moves to a
+transient control. Read-only mode keeps margin notes rendered while selection
+moves. Find highlights remain separate from the document selection and do not
 change source or undo history.
 Blank lines between Markdown paragraphs carry native paragraph spacing in the
 rendered editor without changing source text.
@@ -91,9 +95,11 @@ line: `Text[^label]` and `[^label]: Note text`. Labels are case-insensitive and
 must be unique. Live mode shows a numbered marker and the note beside its first
 reference at viewport widths of 1440 pixels or more. Narrower screens place the
 note under the reference.
-Click a marker to reveal its source definition. Source mode shows the original
-Markdown. The note body is displayed as plain text. Unmatched references,
-duplicate definitions, code blocks, and frontmatter stay unchanged.
+In editable live mode, click a marker to reveal its source definition. In
+read-only mode, click a marker to show or hide the rendered note text. Selection
+does not reveal note source in read-only mode. Source mode shows the original
+Markdown. Unmatched references, duplicate definitions, code blocks, and
+frontmatter stay unchanged.
 
 Copy and cut read the selected source ranges from CodeMirror's document. Plain
 text paste goes through CodeMirror. Rich HTML paste passes through
@@ -120,8 +126,8 @@ text, uses smart case, and returns UTF-16 source ranges. The outline reads
 headings from the Markdown syntax tree and skips frontmatter and fenced code.
 As the editor scrolls, the outline highlights the heading at the reading
 position and fades the highlight between headings.
-Tag updates edit only tags-only frontmatter. They leave the body and all other
-source unchanged.
+Tag updates edit the top-level `tags` field and leave all other frontmatter and
+the Markdown body unchanged. Tansu reads only tag metadata from frontmatter.
 
 ## Dependencies and fixture
 

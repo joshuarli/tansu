@@ -1,6 +1,7 @@
 import { ensureSyntaxTree, syntaxTree } from "@codemirror/language";
 import type { EditorState, Extension, Range } from "@codemirror/state";
 import { Decoration, EditorView, ViewPlugin, WidgetType, type DecorationSet, type ViewUpdate } from "@codemirror/view";
+import { readOnlyFacet } from "./vendor/atomic/read-only.js";
 
 type NoteDefinition = {
   label: string;
@@ -41,12 +42,15 @@ class SidenoteReferenceWidget extends WidgetType {
     readonly marker: string,
     readonly definitionFrom: number,
     readonly text: string | null,
+    readonly readOnly: boolean,
+    readonly initiallyVisible: boolean,
   ) {
     super();
   }
 
   override eq(other: SidenoteReferenceWidget): boolean {
-    return this.marker === other.marker && this.definitionFrom === other.definitionFrom && this.text === other.text;
+    return this.marker === other.marker && this.definitionFrom === other.definitionFrom && this.text === other.text &&
+      this.readOnly === other.readOnly && this.initiallyVisible === other.initiallyVisible;
   }
 
   override toDOM(view: EditorView): HTMLElement {
@@ -56,28 +60,51 @@ class SidenoteReferenceWidget extends WidgetType {
     marker.type = "button";
     marker.className = "tansu-sidenote-marker";
     marker.textContent = this.marker;
-    marker.setAttribute("aria-label", `Show note ${this.marker}`);
-    marker.title = "Show note source";
+    marker.setAttribute(
+      "aria-label",
+      this.readOnly
+        ? `${this.initiallyVisible ? "Hide" : "Show"} note ${this.marker}`
+        : `Show note source ${this.marker}`,
+    );
+    marker.title = this.readOnly
+      ? `${this.initiallyVisible ? "Hide" : "Show"} note`
+      : "Show note source";
     marker.addEventListener("pointerdown", (event) => event.preventDefault());
-    marker.addEventListener("click", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      view.dispatch({ selection: { anchor: this.definitionFrom }, scrollIntoView: true });
-      view.focus();
-    });
     reference.append(marker);
 
+    let noteElement: HTMLElement | null = null;
     if (this.text !== null) {
       const note = document.createElement("aside");
       note.className = "tansu-sidenote-card";
       note.setAttribute("role", "note");
       note.setAttribute("aria-label", `Note ${this.marker}`);
+      note.hidden = this.readOnly && !this.initiallyVisible;
       const content = document.createElement("span");
       content.className = "tansu-sidenote-text";
       content.textContent = this.text;
       note.append(content);
       reference.append(note);
+      if (this.readOnly) {
+        marker.setAttribute("aria-expanded", String(!note.hidden));
+      }
+      noteElement = note;
     }
+
+    marker.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (this.readOnly) {
+        const card = noteElement;
+        if (card === null) return;
+        card.hidden = !card.hidden;
+        marker.setAttribute("aria-expanded", String(!card.hidden));
+        marker.setAttribute("aria-label", `${card.hidden ? "Show" : "Hide"} note ${this.marker}`);
+        marker.title = `${card.hidden ? "Show" : "Hide"} note`;
+        return;
+      }
+      view.dispatch({ selection: { anchor: this.definitionFrom }, scrollIntoView: true });
+      view.focus();
+    });
     return reference;
   }
 
@@ -97,6 +124,7 @@ function frontmatterEnd(state: EditorState): number {
 }
 
 function buildSidenoteLayout(state: EditorState): SidenoteLayout {
+  const readOnly = state.facet(readOnlyFacet);
   const tree = ensureSyntaxTree(state, state.doc.length, 200) ?? syntaxTree(state);
   const frontmatterTo = frontmatterEnd(state);
   const codeRanges: Array<{ from: number; to: number }> = [];
@@ -151,7 +179,7 @@ function buildSidenoteLayout(state: EditorState): SidenoteLayout {
   for (const label of visibleLabels) {
     const definition = definitions.get(label)!;
     const line = state.doc.lineAt(definition.lineFrom);
-    if (activeLine !== line.from) {
+    if (readOnly || activeLine !== line.from) {
       ranges.push(Decoration.replace({}).range(line.from, line.to));
     }
   }
@@ -163,14 +191,20 @@ function buildSidenoteLayout(state: EditorState): SidenoteLayout {
     const active = state.selection.ranges.some((selection) =>
       selection.from <= reference.to && selection.to >= reference.from
     );
-    if (active) continue;
+    if (active && !readOnly) continue;
     if (!anchorLines.has(reference.lineFrom)) {
       ranges.push(Decoration.line({ attributes: { class: "tansu-sidenote-anchor" } }).range(reference.lineFrom));
       anchorLines.add(reference.lineFrom);
     }
     ranges.push(
       Decoration.replace({
-        widget: new SidenoteReferenceWidget(marker, definition.from, isFirst ? definition.text : null),
+        widget: new SidenoteReferenceWidget(
+          marker,
+          definition.from,
+          readOnly ? definition.text : isFirst ? definition.text : null,
+          readOnly,
+          isFirst,
+        ),
       }).range(reference.from + 1, reference.to - 1),
     );
   }
@@ -193,7 +227,8 @@ export function tufteNotes(): Extension {
     }
 
     update(update: ViewUpdate): void {
-      if (update.docChanged || update.selectionSet || update.viewportChanged) this.refresh();
+      if (update.docChanged || update.selectionSet || update.viewportChanged ||
+        update.startState.facet(readOnlyFacet) !== update.state.facet(readOnlyFacet)) this.refresh();
     }
 
     private refresh(): void {

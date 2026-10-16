@@ -72,6 +72,10 @@
   white-space: normal;
 }
 
+.tansu-sidenote-card[hidden] {
+  display: none;
+}
+
 @media (min-width: 1440px) {
   .cm-editor.tansu-has-sidenotes .tansu-sidenote-card {
     position: absolute;

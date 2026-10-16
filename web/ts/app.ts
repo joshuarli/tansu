@@ -9,7 +9,8 @@ import { logClientEvent } from "./dev-log.ts";
 import { V2ApiError } from "./app/v2-api.ts";
 import type { EditorHandle, EditorSession } from "./editor/codemirror-adapter.ts";
 import { createCalloutExtension, createWikiImageExtension, type EditorConfig } from "./editor/tansu-extensions.ts";
-import { frontmatterSupportsTags, normalizeTag } from "./markdown-tags.ts";
+import { canMutateTags } from "./editor/tag-source.ts";
+import { normalizeTag } from "./markdown-tags.ts";
 import { canonicalSourceHash } from "./source-hash.ts";
 import {
   activeTab,
@@ -610,7 +611,7 @@ export class TansuApp {
     const tab = activeTab(this.state);
     if (tab?.kind !== "saved" || tab.doc === null) return undefined;
     const content = tab.draft ?? tab.doc.content;
-    const status = !frontmatterSupportsTags(content)
+    const status = !canMutateTags(content)
       ? "locked"
       : this.state.readingMode || this.transitioningVault
       ? "read-only"
