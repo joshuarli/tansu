@@ -41,8 +41,14 @@ backup and recovery procedures.
 
 `make test-acceptance` is the standing check for save and recovery behavior. It
 prints the git revision it ran against (with `-dirty` when the tree has
-uncommitted changes) when it starts and again when it passes. Record that revision in the
-release notes and run the suite on the exact commit you build the release from.
+uncommitted changes) when it starts and again when it passes, and the SHA-256 of
+the server binary the browser group ran against. Record the artifact hash in the
+release notes: it identifies what was tested, and the revision only says where
+it came from. The browser group fails if the binary changes while it runs.
+
+By default the suite builds and tests the debug binary. To test a release
+artifact, run `ACCEPTANCE_SERVER_BINARY=path/to/tansu2 make test-acceptance`; the
+printed hash must equal `node scripts/artifact-hash.mjs` of the file you ship.
 
 It runs two groups of tests:
 

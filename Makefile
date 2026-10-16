@@ -85,13 +85,16 @@ auth-recovery-drill:
 	TMPDIR="$(CURDIR)/.work/tmp" scripts/auth-recovery-drill.sh "$(AUTH_DRILL_BIN)"
 
 ACCEPTANCE_BROWSER ?= chromium
+ACCEPTANCE_RECORD ?= $(CURDIR)/.work/tmp/acceptance-artifact
 
 test-acceptance:
-	@rev="$$(git rev-parse HEAD)$$(git diff --quiet HEAD -- || echo -dirty)"; \
+	@mkdir -p "$(dir $(ACCEPTANCE_RECORD))"; rm -f "$(ACCEPTANCE_RECORD)"; \
+	rev="$$(git rev-parse HEAD)$$(git diff --quiet HEAD -- || echo -dirty)"; \
 	echo "acceptance suite revision: $$rev"; \
 	node_modules/.bin/vitest run web/ts/app.test.ts -t interleavings && \
-	TANSU2_E2E_BROWSER=$(ACCEPTANCE_BROWSER) deno task test:browser -t "acceptance:" && \
-	echo "acceptance suite passed at revision: $$rev"
+	TANSU2_ACCEPTANCE_RECORD="$(ACCEPTANCE_RECORD)" TANSU2_E2E_SERVER_BINARY="$(ACCEPTANCE_SERVER_BINARY)" TANSU2_E2E_BROWSER=$(ACCEPTANCE_BROWSER) deno task test:browser -t "acceptance:" && \
+	echo "acceptance suite passed at revision: $$rev" && \
+	echo "acceptance suite passed against artifact: $$(cat "$(ACCEPTANCE_RECORD)")"
 
 build-linux-musl-docker:
 	mkdir -p "$(CURDIR)/.work/tmp" "$(CURDIR)/.work/dist/$${TARGET:-x86_64-unknown-linux-musl}"

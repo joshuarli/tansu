@@ -29,6 +29,8 @@ let serverInstanceId = "";
 let vaultOneId = "";
 let vaultTwoId = "";
 let serverBinaryBuilt = false;
+let serverBinaryPath = "";
+let serverArtifactHash = "";
 let settingsSeeded = false;
 const serverOutput: string[] = [];
 const e2eBrowser = browserTypeFromEnv();
@@ -103,6 +105,9 @@ describe("real server harness", () => {
     } finally {
       try {
         await stopFixtureServer();
+        if (serverArtifactHash !== "" && artifactHash(serverBinaryPath) !== serverArtifactHash) {
+          throw new Error(`server artifact changed while the suite ran: ${serverBinaryPath}`);
+        }
       } finally {
         if (fixtureRoot !== undefined) {
           await rm(fixtureRoot, { recursive: true, force: true });
@@ -1216,15 +1221,26 @@ async function startFixtureServer(): Promise<void> {
     XDG_DATA_HOME: fixture.dataHome,
   };
   if (!serverBinaryBuilt) {
-    execFileSync("cargo", ["build", "--quiet", "--bin", "tansu2"], {
-      cwd: process.cwd(),
-      env: environment,
-      stdio: "pipe",
-    });
+    const supplied = process.env["TANSU2_E2E_SERVER_BINARY"];
+    if (supplied === undefined || supplied === "") {
+      execFileSync("cargo", ["build", "--quiet", "--bin", "tansu2"], {
+        cwd: process.cwd(),
+        env: environment,
+        stdio: "pipe",
+      });
+      const targetDirectory = resolve(process.env["CARGO_TARGET_DIR"] ?? "target");
+      serverBinaryPath = join(targetDirectory, "debug", process.platform === "win32" ? "tansu2.exe" : "tansu2");
+    } else {
+      serverBinaryPath = resolve(supplied);
+    }
+    serverArtifactHash = artifactHash(serverBinaryPath);
+    const record = process.env["TANSU2_ACCEPTANCE_RECORD"];
+    if (record !== undefined && record !== "") {
+      await writeFile(record, `${serverArtifactHash} ${serverBinaryPath}\n`);
+    }
     serverBinaryBuilt = true;
   }
-  const targetDirectory = resolve(process.env["CARGO_TARGET_DIR"] ?? "target");
-  const serverBinary = join(targetDirectory, "debug", process.platform === "win32" ? "tansu2.exe" : "tansu2");
+  const serverBinary = serverBinaryPath;
   if (!settingsSeeded) {
     execFileSync(serverBinary, [
       "config", "init", "--vault", "One", fixture.vaultOne,
@@ -1240,6 +1256,16 @@ async function startFixtureServer(): Promise<void> {
   server.stdout?.on("data", (chunk: Buffer) => serverOutput.push(chunk.toString("utf8")));
   server.stderr?.on("data", (chunk: Buffer) => serverOutput.push(chunk.toString("utf8")));
   await waitForReady(`${baseUrl}/api/v2/health`);
+}
+
+function artifactHash(path: string): string {
+  const line = execFileSync(process.execPath, ["scripts/artifact-hash.mjs", path], {
+    cwd: process.cwd(),
+    encoding: "utf8",
+  });
+  const hash = /^sha256:[0-9a-f]{64}/u.exec(line)?.[0];
+  if (hash === undefined) throw new Error(`unexpected artifact hash output: ${line}`);
+  return hash;
 }
 
 async function stopFixtureServer(): Promise<void> {
