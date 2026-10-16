@@ -2,7 +2,7 @@ import { commandItems } from "./app/commands.ts";
 import type { CommandId, SettingsFormValue, ViewEvent } from "./app/events.ts";
 import { applySettingsForm } from "./app/settings-policy.ts";
 import { DocumentSession, defaultDocumentSessionServices, type DocumentSessionState } from "./app/document-session.ts";
-import { DocumentControllers } from "./app/document-controller.ts";
+import { dirtySnapshot, DocumentControllers } from "./app/document-controller.ts";
 import { LocalDraftSession } from "./app/local-draft-session.ts";
 import { defaultServices, type AppServices } from "./app/services.ts";
 import { localDraftId, noteId, serverInstanceId, vaultId, type DocumentIdentity, type LocalDraftId, type ServerIdentity, type WorkspaceId } from "./app/identity.ts";
@@ -779,7 +779,7 @@ export class TansuApp {
     services.clearTitleCheckpoint = this.services.workspace.titleCheckpointClearer(journal, this.workspaceId);
     const session = new DocumentSession(identity, generation, this.workspaceId, services);
     tab.session = session;
-    session.subscribe((value) => this.onDocumentSessionState(tab, session, serverIdentity, client, value));
+    this.documents.for(tab.noteId).attachSession(session, (value) => this.onDocumentSessionState(tab, session, serverIdentity, client, value));
     const [checkpoint, cached] = await Promise.all([
       this.services.workspace.getDraftCheckpoint(identity, this.workspaceId, tab.noteId),
       this.services.workspace.getCachedNoteBody(identity, this.state.notes.get(tab.noteId) ?? { noteId: tab.noteId, sourceHash: "" }),
@@ -876,17 +876,16 @@ export class TansuApp {
   ): void {
     if (tab.session !== session || !this.isCurrentTab(tab, identity, client)) return;
     const wasSaving = tab.saving;
-    tab.draft = "draft" in value && value.draft !== null ? value.draft.source : null;
-    if ("draft" in value && value.draft !== null) tab.selection = value.draft.selection;
-    tab.dirty = value.status === "dirty" || value.status === "saving" || value.status === "conflict" ||
-      value.status === "unavailable" && value.draft !== null ||
-      value.status === "auth-locked" && value.draft.mutationId !== null;
-    tab.saving = value.status === "saving";
-    tab.savePending = value.status === "saving" && value.phase === "pendingMaterialization";
-    tab.conflict = value.status === "conflict";
-    tab.conflictDraftId = value.status === "conflict" && value.conflictDraft !== null ? value.conflictDraft.draftId as SavedTab["conflictDraftId"] : null;
-    if ("title" in value) tab.title = value.titleDraft ?? value.title;
-    if ("path" in value) tab.path = value.path;
+    const snapshot = dirtySnapshot(value);
+    tab.draft = snapshot.draft;
+    if (snapshot.selection !== undefined) tab.selection = snapshot.selection;
+    tab.dirty = snapshot.dirty;
+    tab.saving = snapshot.saving;
+    tab.savePending = snapshot.savePending;
+    tab.conflict = snapshot.conflict;
+    tab.conflictDraftId = snapshot.conflictDraftId;
+    if (snapshot.title !== undefined) tab.title = snapshot.title;
+    if (snapshot.path !== undefined) tab.path = snapshot.path;
     if (value.status === "auth-locked") {
       this.runAsync(this.lockForAuthentication(), "Local recovery storage failed", false);
       return;
@@ -1318,7 +1317,7 @@ export class TansuApp {
     services.clearTitleCheckpoint = this.services.workspace.titleCheckpointClearer(journal, this.workspaceId);
     const session = new DocumentSession(identity, ++this.sessionGeneration, this.workspaceId, services);
     tab.session = session;
-    session.subscribe((value) => this.onDocumentSessionState(tab, session, serverIdentity, client, value));
+    this.documents.for(tab.noteId).attachSession(session, (value) => this.onDocumentSessionState(tab, session, serverIdentity, client, value));
     if (tab.doc !== null && checkpoint !== null) session.recover(tab.doc, checkpoint);
     else if (tab.doc !== null) {
       tab.selection = selectionWithin(tab.selection, tab.doc.content.length);

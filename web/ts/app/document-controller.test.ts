@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DocumentControllers } from "./document-controller.ts";
-import { noteId } from "./identity.ts";
+import { dirtySnapshot, DocumentControllers, type SessionSource } from "./document-controller.ts";
+import { DocumentSession, type DocumentSessionServices, type DocumentSessionState } from "./document-session.ts";
+import { noteId, serverInstanceId, vaultId, workspaceId } from "./identity.ts";
+import type { V2NoteDocument } from "../types.generated.ts";
 
 describe("DocumentControllers", () => {
   beforeEach(() => vi.useFakeTimers());
@@ -66,5 +68,120 @@ describe("DocumentControllers", () => {
     await old;
     void controllers.for(noteId("a")).ensureLoaded(start);
     expect(start).toHaveBeenCalledTimes(1);
+  });
+});
+
+function fakeSource() {
+  const listeners = new Set<(state: DocumentSessionState) => void>();
+  const source: SessionSource = {
+    subscribe: (listener) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+  };
+  return { source, listeners, emit: (state: DocumentSessionState) => listeners.forEach((listener) => listener(state)) };
+}
+
+const loadingState: DocumentSessionState = {
+  status: "loading",
+  identity: { serverInstanceId: serverInstanceId("s"), vaultId: vaultId("v"), noteId: noteId("a") },
+  generation: 1,
+  localRevision: 0,
+  acceptedRevision: null,
+  storage: { kind: "available" },
+};
+
+describe("DocumentController session subscription", () => {
+  it("delivers states to the attached session only", () => {
+    const controllers = new DocumentControllers();
+    const first = fakeSource();
+    const second = fakeSource();
+    const seen: string[] = [];
+    controllers.for(noteId("a")).attachSession(first.source, () => seen.push("first"));
+    controllers.for(noteId("a")).attachSession(second.source, () => seen.push("second"));
+
+    first.emit(loadingState);
+    second.emit(loadingState);
+
+    expect(first.listeners.size).toBe(0);
+    expect(seen).toEqual(["second"]);
+  });
+
+  it("release and disposeAll unsubscribe the session", () => {
+    const controllers = new DocumentControllers();
+    const released = fakeSource();
+    const disposed = fakeSource();
+    controllers.for(noteId("a")).attachSession(released.source, () => {});
+    controllers.for(noteId("b")).attachSession(disposed.source, () => {});
+
+    controllers.release(noteId("a"));
+    expect(released.listeners.size).toBe(0);
+    controllers.disposeAll();
+    expect(disposed.listeners.size).toBe(0);
+  });
+});
+
+describe("dirtySnapshot", () => {
+  const identity = { serverInstanceId: serverInstanceId("s"), vaultId: vaultId("v"), noteId: noteId("a") };
+
+  function session(): DocumentSession {
+    const services: DocumentSessionServices = {
+      createMutationId: () => "mutation-1",
+      sourceHash: async () => "sha256-v2:" + "0".repeat(64),
+      save: () => new Promise(() => {}),
+      retryable: () => false,
+      wait: async () => {},
+      checkpointDraft: () => undefined,
+      clearCheckpoint: async () => true,
+    };
+    const created = new DocumentSession(identity, 1, workspaceId("w"), services);
+    const document: V2NoteDocument = {
+      meta: {
+        noteId: "a",
+        path: "a.md",
+        title: "A",
+        tags: [],
+        revision: 1,
+        sourceHash: "sha256-v2:" + "0".repeat(64),
+        diskHash: "sha256:" + "0".repeat(64),
+        sourceHashFormatVersion: 2,
+        diskHashFormatVersion: 1,
+        updatedAtMs: 1,
+      },
+      content: "# A\n",
+    };
+    created.loaded(document);
+    return created;
+  }
+
+  it("has no draft and is not dirty while loading", () => {
+    expect(dirtySnapshot(loadingState)).toMatchObject({
+      draft: null, selection: undefined, dirty: false, saving: false, title: undefined, path: undefined,
+    });
+  });
+
+  it("is clean with the loaded source and the note's title and path", () => {
+    expect(dirtySnapshot(session().state)).toMatchObject({
+      draft: "# A\n", dirty: false, saving: false, conflict: false, title: "A", path: "a.md",
+    });
+  });
+
+  it("is dirty after an edit and prefers the title draft", () => {
+    const edited = session();
+    edited.edit("# B\n", { anchor: 1, head: 1 });
+    edited.editTitle("Renamed");
+    expect(dirtySnapshot(edited.state)).toMatchObject({
+      draft: "# B\n", selection: { anchor: 1, head: 1 }, dirty: true, saving: false, title: "Renamed",
+    });
+  });
+
+  it("is dirty and saving while a save is in flight", async () => {
+    const saving = session();
+    saving.edit("# B\n", null);
+    void saving.save();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(saving.state.status).toBe("saving");
+    expect(dirtySnapshot(saving.state)).toMatchObject({ dirty: true, saving: true, savePending: false });
   });
 });

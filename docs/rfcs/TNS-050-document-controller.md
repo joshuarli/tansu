@@ -38,5 +38,6 @@ Accepted. Extraction proceeds one boundary at a time.
 Done:
 
 - `DocumentControllers` in `web/ts/app/document-controller.ts` owns the per-note load dedupe and autosave timer. Closing a tab releases its controller.
+- `dirtySnapshot` in the same file projects a `DocumentSessionState` into the tab's draft, dirty, saving, conflict, title, and path fields. `DocumentController.attachSession` owns the one session subscription per note, replaces the previous subscription, and `release` and `disposeAll` unsubscribe it.
 
-Next boundaries, in order: the dirty snapshot and session subscription, then the journal handle, then stale-completion checks in `loadSavedTab`.
+Next boundaries, in order: the journal handle, then stale-completion checks in `loadSavedTab`.
