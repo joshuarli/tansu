@@ -1,4 +1,3 @@
-use std::num::NonZeroUsize;
 
 use crate::error::SearchError;
 
@@ -275,8 +274,6 @@ pub struct SearchOptions {
     pub(crate) mode: SearchMode,
     pub(crate) fuzziness: Fuzziness,
     pub(crate) limit: SearchLimit,
-    pub(crate) prefix_length: NonZeroUsize,
-    pub(crate) score_breakdown: bool,
     pub(crate) weights: SearchWeights,
     pub(crate) now_ms: i64,
 }
@@ -298,16 +295,6 @@ impl SearchOptions {
         })
     }
 
-    pub fn with_prefix_length(mut self, prefix_length: NonZeroUsize) -> Self {
-        self.prefix_length = prefix_length;
-        self
-    }
-
-    pub fn with_score_breakdown(mut self, enabled: bool) -> Self {
-        self.score_breakdown = enabled;
-        self
-    }
-
     pub fn with_weights(mut self, weights: SearchWeights) -> Self {
         self.weights = weights;
         self
@@ -325,8 +312,6 @@ impl Default for SearchOptions {
             mode: SearchMode::ExactPrefix,
             fuzziness: Fuzziness::OneEdit,
             limit: SearchLimit::DEFAULT,
-            prefix_length: NonZeroUsize::new(1).unwrap(),
-            score_breakdown: false,
             weights: SearchWeights::default(),
             now_ms: 0,
         }
@@ -386,15 +371,6 @@ pub struct MatchInfo {
     pub fuzzy: bool,
 }
 
-#[derive(Debug, Clone, Default, PartialEq)]
-pub struct FieldScoreBreakdown {
-    pub title: f32,
-    pub path: f32,
-    pub headings: f32,
-    pub tags: f32,
-    pub content: f32,
-}
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct SearchResult {
     pub note_id: String,
@@ -403,7 +379,6 @@ pub struct SearchResult {
     pub title: String,
     pub path: String,
     pub score: f32,
-    pub field_scores: Option<FieldScoreBreakdown>,
     pub matched_terms: Vec<String>,
     pub excerpt: String,
     pub excerpt_ranges: Vec<ExcerptRange>,
@@ -533,7 +508,6 @@ impl DirtyNoteSnapshot {
 #[derive(Debug, Clone, PartialEq)]
 pub struct OverlaySearchResult {
     pub hits: Vec<SearchResult>,
-    pub skipped_notes: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -693,20 +693,15 @@ impl AuthStore {
         if !backup_file.metadata().map_err(storage)?.is_file() {
             return Err(AuthError::InvalidRequest("auth backup must be a regular file".into()));
         }
-        let (source_snapshot, mut source_copy) = create_temporary_database(&directory)?;
+        let (temporary, mut source_copy) = create_temporary_database(&directory)?;
         io::copy(&mut backup_file, &mut source_copy).map_err(storage)?;
         source_copy.sync_all().map_err(storage)?;
         drop(source_copy);
-        let source = Connection::open_with_flags(
-            &source_snapshot.path,
-            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NOFOLLOW,
+        let destination_database = Connection::open_with_flags(
+            &temporary.path,
+            OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NOFOLLOW,
         )
             .map_err(storage)?;
-        let (temporary, file) = create_temporary_database(&directory)?;
-        drop(file);
-        let mut destination_database = Connection::open_with_flags(&temporary.path, OpenFlags::SQLITE_OPEN_READ_WRITE)
-            .map_err(storage)?;
-        copy_database(&source, &mut destination_database)?;
         verify_database(&destination_database)?;
         destination_database.execute_batch(
             "BEGIN IMMEDIATE;
@@ -769,7 +764,6 @@ fn acquire_process_lock(directory: &Path) -> Result<File, AuthError> {
     if !lock.metadata().map_err(storage)?.is_file() {
         return Err(AuthError::InvalidRequest("auth lock must be a regular file".into()));
     }
-    #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         lock.set_permissions(fs::Permissions::from_mode(0o600)).map_err(storage)?;
@@ -812,7 +806,6 @@ fn create_temporary_database(parent: &Path) -> Result<(TemporaryDatabase, File),
         let path = parent.join(format!(".tansu-auth-{}", random_token()?));
         let mut options = OpenOptions::new();
         options.read(true).write(true).create_new(true);
-        #[cfg(unix)]
         {
             use std::os::unix::fs::OpenOptionsExt;
             options.mode(0o600);
@@ -820,7 +813,6 @@ fn create_temporary_database(parent: &Path) -> Result<(TemporaryDatabase, File),
         match options.open(&path) {
             Ok(file) => {
                 let temporary = TemporaryDatabase { path };
-                #[cfg(unix)]
                 {
                     use std::os::unix::fs::PermissionsExt;
                     file.set_permissions(fs::Permissions::from_mode(0o600)).map_err(storage)?;
@@ -849,7 +841,6 @@ fn create_temporary_output(directory: &File) -> Result<(TemporaryOutput, File), 
                     directory: directory.try_clone().map_err(storage)?,
                     name,
                 };
-                #[cfg(unix)]
                 {
                     use std::os::unix::fs::PermissionsExt;
                     output.set_permissions(fs::Permissions::from_mode(0o600)).map_err(storage)?;
@@ -1063,7 +1054,6 @@ fn secure_auth_directory(state_directory: &Path) -> Result<PathBuf, AuthError> {
         return Err(AuthError::InvalidRequest("auth state path must be a real directory".into()));
     }
     let directory = fs::canonicalize(state_directory).map_err(storage)?;
-    #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         fs::set_permissions(&directory, fs::Permissions::from_mode(0o700)).map_err(storage)?;
@@ -1081,7 +1071,6 @@ fn secure_file(path: &Path) -> Result<(), AuthError> {
     } else {
         OpenOptions::new().write(true).create_new(true).open(path).map_err(storage)?
     };
-    #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         file.set_permissions(fs::Permissions::from_mode(0o600)).map_err(storage)?;
@@ -1365,31 +1354,6 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM credential_counter_anomalies", [], |row| row.get(0))
             .unwrap();
         assert_eq!(anomalies, 0);
-    }
-
-    #[test]
-    fn opening_old_auth_schema_adds_counter_anomaly_table_without_version_change() {
-        let (root, store) = store();
-        let version: i64 = store.connection.lock().unwrap()
-            .pragma_query_value(None, "user_version", |row| row.get(0)).unwrap();
-        store.connection.lock().unwrap().execute("DROP TABLE IF EXISTS credential_counter_anomalies", []).unwrap();
-        drop(store);
-
-        let reopened = AuthStore::open(
-            root.path().join("auth"),
-            AuthPolicy::authenticated("https://notes.example.com", "example.com", "Tansu").unwrap(),
-            3600,
-            300,
-        ).unwrap();
-        let connection = reopened.connection.lock().unwrap();
-        let table: i64 = connection.query_row(
-            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'credential_counter_anomalies'",
-            [],
-            |row| row.get(0),
-        ).unwrap();
-        let reopened_version: i64 = connection.pragma_query_value(None, "user_version", |row| row.get(0)).unwrap();
-        assert_eq!(table, 1);
-        assert_eq!(reopened_version, version);
     }
 
     fn auth_challenge() -> AuthChallenge {
@@ -1762,7 +1726,6 @@ mod tests {
         assert!(fs::metadata(&wal_path).unwrap().len() > 0);
 
         AuthStore::backup_to(&state_directory, &backup_path).unwrap();
-        #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
             assert_eq!(fs::metadata(&backup_path).unwrap().permissions().mode() & 0o777, 0o600);
@@ -1903,7 +1866,6 @@ mod tests {
         assert!(policy.validate_origin_host("localhost:3000", Some("http://localhost:4000"), false).is_err());
     }
 
-    #[cfg(unix)]
     #[test]
     fn rejects_symlink_auth_state_and_database_paths() {
         use std::os::unix::fs::symlink;
@@ -1921,7 +1883,6 @@ mod tests {
         assert!(!external.join("outside.db").exists());
     }
 
-    #[cfg(unix)]
     #[test]
     fn restore_rejects_backup_path_replaced_with_symlink() {
         use std::os::unix::fs::symlink;
@@ -1945,7 +1906,6 @@ mod tests {
         assert_eq!(fs::read(&valid_backup).unwrap(), original_backup);
     }
 
-    #[cfg(unix)]
     #[test]
     fn backup_never_overwrites_existing_or_symlink_destination() {
         use std::os::unix::fs::symlink;
@@ -1971,7 +1931,6 @@ mod tests {
         assert_eq!(fs::read(&target).unwrap(), b"preserve target");
     }
 
-    #[cfg(unix)]
     #[test]
     fn auth_database_sidecars_reject_symlinks_before_sqlite_opens_them() {
         use std::os::unix::fs::symlink;
@@ -1991,7 +1950,6 @@ mod tests {
         assert_eq!(fs::read(&target).unwrap(), b"preserve sidecar target");
     }
 
-    #[cfg(unix)]
     #[test]
     fn restore_rejects_sidecar_symlinks_and_clears_regular_sidecars() {
         use std::os::unix::fs::symlink;

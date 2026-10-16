@@ -680,7 +680,6 @@ mod tests {
         drop(connection);
         assert!(ConfigStore::open(&future).unwrap_err().to_string().contains("newer than supported"));
 
-        #[cfg(unix)]
         {
             use std::os::unix::fs::symlink;
             let target = root.path().join("target.sqlite3");
@@ -756,7 +755,6 @@ mod tests {
         assert_eq!(value["state"], "complete");
     }
 
-    #[cfg(unix)]
     #[test]
     fn state_layout_rejects_symlink_aliased_roots() {
         use std::os::unix::fs::symlink;

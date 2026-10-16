@@ -37,25 +37,12 @@ export function localDraftId(value: string): LocalDraftId {
   return nonEmptyIdentity(value, "local draft") as LocalDraftId;
 }
 
-export function serverIdentityKey(identity: ServerIdentity): string {
-  return JSON.stringify(["server-v1", identity.serverInstanceId, identity.vaultId]);
-}
-
 export function documentIdentityKey(identity: DocumentIdentity): string {
   return JSON.stringify([
     "document-v1",
     identity.serverInstanceId,
     identity.vaultId,
     identity.noteId,
-  ]);
-}
-
-export function workspaceIdentityKey(identity: ServerIdentity, workspace: WorkspaceId): string {
-  return JSON.stringify([
-    "workspace-v1",
-    identity.serverInstanceId,
-    identity.vaultId,
-    workspace,
   ]);
 }
 

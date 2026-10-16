@@ -1,10 +1,7 @@
 import { expect, describe, it } from "vitest";
 
 import {
-  clearInlineFormats,
-  shiftIndent,
   toggleBold,
-  toggleCodeFence,
   toggleHeading,
   toggleHighlight,
   toggleItalic,
@@ -43,14 +40,6 @@ describe("format operations", () => {
     expect(toggleItalic("*one*\n\n**two**", 0, 14).md).toBe("**one**\n\n***two***");
   });
 
-  it("removes inline formatting markers from a selection", () => {
-    expect(clearInlineFormats("a **b** ~~c~~ ==d== `e` _f_", 2, 29)).toStrictEqual({
-      md: "a b c d e f",
-      selStart: 2,
-      selEnd: 11,
-    });
-  });
-
   it("toggles heading levels at the current line", () => {
     expect(toggleHeading("one\ntwo", 4, 2)).toStrictEqual({
       md: "one\n## two",
@@ -67,32 +56,5 @@ describe("format operations", () => {
       selStart: 2,
       selEnd: 2,
     });
-  });
-
-  it("wraps and unwraps code fences around selected lines", () => {
-    expect(toggleCodeFence("one\ntwo", 1, 6)).toStrictEqual({
-      md: "```\none\ntwo\n```",
-      selStart: 5,
-      selEnd: 10,
-    });
-    expect(toggleCodeFence("```\none\ntwo\n```", 4, 11)).toStrictEqual({
-      md: "one\ntwo",
-      selStart: 0,
-      selEnd: 7,
-    });
-  });
-
-  it("indents and dedents selected lines while preserving selection bounds", () => {
-    expect(shiftIndent("one\ntwo", 1, 6, false)).toStrictEqual({
-      md: "  one\n  two",
-      selStart: 3,
-      selEnd: 10,
-    });
-    expect(shiftIndent("\tone\n  two\n    three\nfour", 1, 13, true)).toStrictEqual({
-      md: "one\ntwo\n  three\nfour",
-      selStart: 0,
-      selEnd: 8,
-    });
-    expect(shiftIndent("one", 0, 3, true)).toStrictEqual({ md: "one", selStart: 0, selEnd: 3 });
   });
 });

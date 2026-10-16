@@ -14,8 +14,7 @@ export type LocalDraftSessionState = {
   titleDraft: string;
   promotionPending: boolean;
   selection: Selection;
-  storage: "available" | "pending" | "failed";
-  storageError: unknown | null;
+  storage: "available" | "failed";
 };
 
 export type LocalDraftSessionServices = {
@@ -51,7 +50,6 @@ export class LocalDraftSession {
       promotionPending: false,
       selection: null,
       storage: "available",
-      storageError: null,
     };
   }
 
@@ -86,7 +84,6 @@ export class LocalDraftSession {
       promotionPending: record.promotionPending,
       selection: record.selection,
       storage: "available",
-      storageError: null,
     });
   }
 
@@ -125,12 +122,6 @@ export class LocalDraftSession {
     return result instanceof Promise ? await result : true;
   }
 
-  cancelPromotion(): void {
-    if (!this.current.promotionPending) return;
-    this.set({ ...this.current, promotionPending: false });
-    this.checkpointInBackground("structural");
-  }
-
   exportSource(): string {
     return this.current.source;
   }
@@ -167,12 +158,11 @@ export class LocalDraftSession {
       selection: state.selection,
       checkpointedAtMs: Date.now(),
     };
-    this.set({ ...state, storage: "pending", storageError: null });
     let failed = false;
-    const fail = (error: unknown) => {
+    const fail = () => {
       failed = true;
       if (sequence === this.checkpointGeneration) {
-        this.set({ ...this.current, storage: "failed", storageError: error });
+        this.set({ ...this.current, storage: "failed" });
       }
     };
     try {
@@ -180,19 +170,19 @@ export class LocalDraftSession {
       if (result instanceof Promise) {
         return result.then((written) => {
           if (!written) {
-            fail(new Error("Local draft checkpoint was rejected"));
-          } else if (!failed && sequence === this.checkpointGeneration) {
-            this.set({ ...this.current, storage: "available", storageError: null });
+            fail();
+          } else if (!failed && sequence === this.checkpointGeneration && this.current.storage === "failed") {
+            this.set({ ...this.current, storage: "available" });
           }
           return written;
         }, (error: unknown) => {
-          fail(error);
+          fail();
           throw error;
         });
       }
       return result;
     } catch (error) {
-      fail(error);
+      fail();
       throw error;
     }
   }

@@ -14,7 +14,6 @@
   --color-accent-soft: rgb(0 0 0 / 10%);
   --color-border: rgb(0 0 0 / 10%);
   --color-danger: #8f3328;
-  --color-danger-bg: #fff3ef;
   --color-warning: #8a5d13;
   --color-warning-bg: #fff7e7;
   --color-backdrop: rgb(0 0 0 / 15%);
@@ -29,19 +28,9 @@
   --font-body-leading: 1.5;
   --radius-control: 7px;
   --radius-panel: 12px;
-  --content-width: 760px;
-  --content-offset: 0;
-  --chrome-top: 0px;
   --chrome-control-height: 22px;
   --chrome-text-size: 15px;
   --chrome-line-height: 18px;
-  --md-color-bg: var(--color-bg);
-  --md-color-bg-elevated: var(--color-bg-elevated);
-  --md-color-bg-hover: var(--color-bg-hover);
-  --md-color-text: var(--color-text);
-  --md-color-text-muted: var(--color-text-muted);
-  --md-color-border: transparent;
-  --md-radius: var(--radius-control);
   font-family: var(--font-body);
   -webkit-font-smoothing: antialiased;
   background: var(--color-bg);
@@ -64,7 +53,6 @@
   --color-accent-soft: rgb(255 255 255 / 12%);
   --color-border: rgb(255 255 255 / 12%);
   --color-danger: #f09b91;
-  --color-danger-bg: #3b2524;
   --color-warning: #e9bf75;
   --color-warning-bg: #352d20;
   --color-backdrop: rgb(0 0 0 / 48%);
@@ -1247,15 +1235,6 @@ button.tag-pill:not(:disabled):hover::after {
   gap: 12px;
   padding-top: 12px;
   border-top: 1px solid var(--color-border);
-}
-
-.find-panel {
-  width: min(560px, calc(100vw - 32px));
-}
-
-.find-results {
-  max-height: 55vh;
-  overflow: auto;
 }
 
 .main.has-note-outline {

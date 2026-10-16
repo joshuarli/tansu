@@ -4,13 +4,6 @@ use ts_rs::TS;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
-pub struct VaultEntry {
-    pub index: usize,
-    pub name: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
 pub struct NoteMeta {
     pub note_id: String,
     pub path: String,
@@ -21,13 +14,6 @@ pub struct NoteMeta {
     pub content_hash: String,
     #[ts(type = "number")]
     pub updated_at_ms: i64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct NoteDocument {
-    pub meta: NoteMeta,
-    pub content: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -43,13 +29,6 @@ pub struct RevisionMeta {
     pub content_hash: Option<String>,
     #[ts(type = "number")]
     pub created_at_ms: i64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct RevisionDocument {
-    pub revision: RevisionMeta,
-    pub content: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -88,13 +67,6 @@ pub struct ConflictDraftMeta {
     pub content_hash: String,
     #[ts(type = "number")]
     pub created_at_ms: i64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct ConflictDraftDocument {
-    pub draft: ConflictDraftMeta,
-    pub content: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -264,76 +236,6 @@ pub struct SearchStatus {
     pub degraded: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct SearchFieldScores {
-    pub title: f32,
-    pub headings: f32,
-    pub tags: f32,
-    pub content: f32,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct SearchHit {
-    pub note: NoteMeta,
-    pub snippet: String,
-    pub score: f32,
-    pub field_scores: SearchFieldScores,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct ServerEvent {
-    pub kind: ServerEventKind,
-    pub vault: usize,
-    pub notes: Vec<NoteMeta>,
-    pub deleted_note_ids: Vec<String>,
-    pub search_status: SearchStatus,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[serde(rename_all = "snake_case")]
-pub enum ServerEventKind {
-    Ready,
-    VaultChanged,
-    NoteChanged,
-    NoteDeleted,
-    SearchChanged,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[serde(deny_unknown_fields)]
-pub struct CreateNoteRequest {
-    pub path: String,
-    pub content: String,
-    pub source: Option<NoteEventSource>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[serde(deny_unknown_fields)]
-pub struct SaveNoteRequest {
-    pub content: String,
-    #[ts(type = "number")]
-    pub base_seq: i64,
-    pub base_hash: String,
-    pub checkpoint: Option<bool>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[serde(deny_unknown_fields)]
-pub struct SaveNoteDeltaRequest {
-    #[ts(type = "number")]
-    pub base_seq: i64,
-    pub base_hash: String,
-    pub content_hash: String,
-    pub edits: Vec<TextEdit>,
-    pub checkpoint: Option<bool>,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
@@ -354,35 +256,6 @@ pub struct TextPosition {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[serde(deny_unknown_fields)]
-pub struct RenameNoteRequest {
-    pub path: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct NoteMutationResponse {
-    pub document: Option<NoteDocument>,
-    pub meta: NoteMeta,
-    #[ts(type = "number")]
-    pub sync_version: i64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct ImageUploadResponse {
-    pub name: String,
-    pub markdown: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct ApiErrorResponse {
-    pub error: ApiErrorKind,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(tag = "code", rename_all = "snake_case")]
 pub enum ApiErrorKind {
     PathInvalid {
@@ -393,10 +266,6 @@ pub enum ApiErrorKind {
     },
     NoteNotFound {
         note_id: String,
-    },
-    SaveConflict {
-        current: Box<NoteDocument>,
-        draft: ConflictDraftMeta,
     },
     UnresolvedNote {
         note_id: String,

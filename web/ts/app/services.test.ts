@@ -41,10 +41,6 @@ describe("default app services", () => {
     const journal = defaultServices.workspace.createJournal(() => {});
     const detach = defaultServices.workspace.attachVisibilityFlush(journal);
     detach();
-    expect(defaultServices.workspace.serverIdentity("server-1", "vault-1")).toStrictEqual({
-      serverInstanceId: "server-1",
-      vaultId: "vault-1",
-    });
     await expect(defaultServices.storage.requestPersistent()).resolves.toBeFalsy();
   });
 });

@@ -1,14 +1,13 @@
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use pulldown_cmark::{Event, Parser, Tag, TagEnd};
 use tansu_search::{
     DirtyNoteSnapshot, DocumentInput, Fuzziness, NoteIdentity, OverlaySearchResult,
-    QuickOpenResponse, SearchLimit, SearchMode, SearchOptions, SearchResult, SearchService, SearchWeights, MAX_REBUILD_NOTES,
+    QuickOpenResponse, SearchLimit, SearchMode, SearchOptions, SearchService, SearchWeights, MAX_REBUILD_NOTES,
     MAX_REBUILD_SOURCE_BYTES,
 };
 
-use crate::api_types::{NoteMeta, SearchFieldScores, SearchHit, Settings};
+use crate::api_types::{NoteMeta, Settings};
 use crate::catalog::now_ms;
 use crate::history;
 use crate::paths::visible_path;
@@ -131,44 +130,6 @@ impl SearchIndex {
             self.mark_needs_reconciliation(false);
         }
         Ok(())
-    }
-
-    pub fn try_search(
-        &mut self,
-        query: &str,
-        current: &[NoteMeta],
-        limit: usize,
-        settings: &Settings,
-    ) -> Result<Vec<SearchHit>> {
-        let options = SearchOptions::new(
-            SearchMode::ExactPrefix,
-            Fuzziness::OneEdit,
-            SearchLimit::try_from(limit).map_err(search_error)?,
-        )
-        .map_err(search_error)?
-        .with_weights(search_weights(settings).map_err(search_error)?)
-        .with_now_ms(now_ms());
-        let identities = current
-            .iter()
-            .map(note_identity)
-            .collect::<std::result::Result<Vec<_>, _>>()
-            .map_err(search_error)?;
-        let results = self
-            .call_service(|service| service.search(query.to_owned(), options, identities))
-            .map_err(search_error)?;
-        let metadata = current
-            .iter()
-            .map(|note| (note.note_id.as_str(), note))
-            .collect::<HashMap<_, _>>();
-        results
-            .into_iter()
-            .map(|result| {
-                let note = metadata.get(result.note_id.as_str()).ok_or_else(|| {
-                    Error::Internal("search result is missing canonical metadata".to_string())
-                })?;
-                result_to_hit(result, (*note).clone())
-            })
-            .collect()
     }
 
     pub fn try_search_with_overlay(
@@ -355,69 +316,6 @@ fn read_documents(
             .map_err(search_error)?;
     }
     Ok(documents)
-}
-
-fn result_to_hit(result: SearchResult, note: NoteMeta) -> Result<SearchHit> {
-    let field_scores = result.field_scores.as_ref();
-    Ok(SearchHit {
-        note,
-        snippet: highlighted_excerpt(&result)?,
-        score: result.score,
-        field_scores: SearchFieldScores {
-            title: field_scores.map_or(0.0, |scores| scores.title),
-            headings: field_scores.map_or(0.0, |scores| scores.headings),
-            tags: field_scores.map_or(0.0, |scores| scores.tags),
-            content: field_scores.map_or(0.0, |scores| scores.content),
-        },
-    })
-}
-
-fn highlighted_excerpt(result: &SearchResult) -> Result<String> {
-    let mut output = String::new();
-    let mut cursor = 0usize;
-    for range in &result.excerpt_ranges {
-        let start = utf16_byte_offset(&result.excerpt, range.start())
-            .ok_or_else(|| Error::Internal("search excerpt range is invalid".to_string()))?;
-        let end = utf16_byte_offset(&result.excerpt, range.end())
-            .ok_or_else(|| Error::Internal("search excerpt range is invalid".to_string()))?;
-        if start < cursor || end > result.excerpt.len() {
-            return Err(Error::Internal("search excerpt range is invalid".to_string()));
-        }
-        push_escaped(&mut output, &result.excerpt[cursor..start]);
-        output.push_str("<mark>");
-        push_escaped(&mut output, &result.excerpt[start..end]);
-        output.push_str("</mark>");
-        cursor = end;
-    }
-    push_escaped(&mut output, &result.excerpt[cursor..]);
-    Ok(output)
-}
-
-fn utf16_byte_offset(text: &str, offset: u32) -> Option<usize> {
-    let mut units = 0u32;
-    for (byte, character) in text.char_indices() {
-        if units == offset {
-            return Some(byte);
-        }
-        units = units.checked_add(character.len_utf16() as u32)?;
-        if units > offset {
-            return None;
-        }
-    }
-    (units == offset).then_some(text.len())
-}
-
-fn push_escaped(output: &mut String, value: &str) {
-    for character in value.chars() {
-        match character {
-            '&' => output.push_str("&amp;"),
-            '<' => output.push_str("&lt;"),
-            '>' => output.push_str("&gt;"),
-            '"' => output.push_str("&quot;"),
-            '\'' => output.push_str("&#39;"),
-            _ => output.push(character),
-        }
-    }
 }
 
 fn extract_headings(markdown: &str) -> String {

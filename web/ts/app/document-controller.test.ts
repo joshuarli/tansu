@@ -182,7 +182,7 @@ describe("dirtySnapshot", () => {
     await Promise.resolve();
     await Promise.resolve();
     expect(saving.state.status).toBe("saving");
-    expect(dirtySnapshot(saving.state)).toMatchObject({ dirty: true, saving: true, savePending: false });
+    expect(dirtySnapshot(saving.state)).toMatchObject({ dirty: true, saving: true });
   });
 });
 

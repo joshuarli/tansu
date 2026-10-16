@@ -209,10 +209,7 @@ impl SearchService {
                 .then_with(|| left.note_id.cmp(&right.note_id))
         });
         canonical.truncate(options.limit.get());
-        Ok(OverlaySearchResult {
-            hits: canonical,
-            skipped_notes: overlay_result.result.skipped_notes,
-        })
+        Ok(OverlaySearchResult { hits: canonical })
     }
 
     pub fn quick_open(
@@ -939,29 +936,6 @@ mod tests {
             )
             .unwrap();
         assert_eq!(indexed.len(), 1);
-    }
-
-    #[test]
-    fn skipped_overlay_notes_keep_their_canonical_hits() {
-        let temp = tempfile::tempdir().unwrap();
-        let service = SearchService::open(&temp.path().join("search")).unwrap();
-        let skipped = document("skipped", 1, "canonical needle");
-        service.upsert(skipped.clone()).unwrap();
-        let mut identities = Vec::new();
-        let mut snapshots = Vec::new();
-        for number in 0..20 {
-            let dirty = document(&format!("dirty-{number}"), 1, "noise");
-            identities.push(dirty.identity().clone());
-            snapshots.push(snapshot(dirty.identity().clone(), "noise", 2));
-        }
-        identities.push(skipped.identity().clone());
-        snapshots.push(snapshot(skipped.identity().clone(), "local draft", 2));
-        let overlaid = service
-            .search_with_overlay("needle".into(), options(), identities, &snapshots)
-            .unwrap();
-        assert_eq!(overlaid.skipped_notes, 1);
-        assert_eq!(overlaid.hits.len(), 1);
-        assert_eq!(overlaid.hits[0].note_id, "skipped");
     }
 
     #[test]

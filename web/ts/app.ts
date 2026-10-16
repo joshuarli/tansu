@@ -678,7 +678,6 @@ export class TansuApp {
       if (tab.selection !== null) this.editor.revealSelection(tab.selection);
       this.editor.updateConfiguration({ ...this.editorConfig(), mode: tab.sourceMode ? "source" : "live", readOnly: this.transitioningVault || this.state.readingMode || (tab.kind === "local-draft" && tab.session?.state.promotionPending === true) });
       void this.prefetchAssets(tab, loadedDraft(tab) ?? "");
-      this.services.performance.markNextPaint("tansu:editor:first-editable-paint");
     } else {
       this.editor.updateConfiguration({ ...this.editorConfig(), mode: tab.sourceMode ? "source" : "live", readOnly: this.transitioningVault || this.state.readingMode || (tab.kind === "local-draft" && tab.session?.state.promotionPending === true) });
     }
@@ -756,11 +755,7 @@ export class TansuApp {
   private documentSessionServices(client: VaultClient): DocumentSessionServices {
     const journal = this.journal.get();
     const services = defaultDocumentSessionServices(
-      async (documentIdentity, generation, request) => ({
-        identity: documentIdentity,
-        generation,
-        response: await client.saveNote(documentIdentity.noteId, request),
-      }),
+      (documentIdentity, request) => client.saveNote(documentIdentity.noteId, request),
       this.services.workspace.checkpointWriter(journal),
       this.services.workspace.checkpointClearer(journal, this.workspaceId),
     );
@@ -874,9 +869,7 @@ export class TansuApp {
     if (snapshot.selection !== undefined) tab.selection = snapshot.selection;
     tab.dirty = snapshot.dirty;
     tab.saving = snapshot.saving;
-    tab.savePending = snapshot.savePending;
     tab.conflict = snapshot.conflict;
-    tab.conflictDraftId = snapshot.conflictDraftId;
     if (snapshot.title !== undefined) tab.title = snapshot.title;
     if (snapshot.path !== undefined) tab.path = snapshot.path;
     if (value.status === "auth-locked") {
@@ -1233,9 +1226,7 @@ export class TansuApp {
       draft: source,
       dirty: true,
       saving: false,
-      savePending: false,
       conflict: false,
-      conflictDraftId: null,
       selection: null,
       scrollTop: 0,
       sourceMode: false,
@@ -1285,7 +1276,6 @@ export class TansuApp {
       saved.selection = selectionWithin(tab.selection, document.content.length);
       saved.scrollTop = tab.scrollTop;
       saved.sourceMode = tab.sourceMode;
-      saved.title = title;
       saved.session = this.createDocumentSession(saved, promoted);
       this.state.tabs.splice(index, 1, saved);
       if (wasActive) this.state.activeTab = { kind: "saved", noteId: saved.noteId };

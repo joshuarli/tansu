@@ -2,24 +2,14 @@ use std::fs::{self, File};
 use std::io::ErrorKind;
 use std::path::{Component, Path, PathBuf};
 use std::io::{Read, Write};
-#[cfg(unix)]
 use std::sync::atomic::{AtomicU64, Ordering};
 
-#[cfg(unix)]
 use std::ffi::CString;
-#[cfg(unix)]
 use std::os::fd::{AsRawFd, FromRawFd, RawFd};
-#[cfg(unix)]
 use std::os::unix::ffi::OsStrExt;
-
-#[cfg(all(unix, not(any(target_os = "linux", target_os = "macos"))))]
-compile_error!("descriptor-relative vault file access is supported only on Linux and macOS");
 
 use crate::api_types::PathValidationReason;
 use crate::{Error, Result};
-
-#[cfg(not(unix))]
-use std::fs::OpenOptions;
 
 pub fn normalize_note_path(input: &str) -> std::result::Result<String, PathValidationReason> {
     let trimmed = input.trim().replace('\\', "/");
@@ -129,7 +119,6 @@ pub fn write_visible_note_bytes_atomic(root: &Path, note_path: &str, bytes: &[u8
     write_visible_note_bytes(root, note_path, bytes, false)
 }
 
-#[cfg(unix)]
 fn write_visible_note_bytes(
     root: &Path,
     note_path: &str,
@@ -193,69 +182,30 @@ fn write_visible_note_bytes(
     ))
 }
 
-#[cfg(not(unix))]
-fn write_visible_note_bytes(
-    root: &Path,
-    note_path: &str,
-    bytes: &[u8],
-    no_clobber: bool,
-) -> Result<()> {
-    let path = create_visible_parent(root, note_path)?;
-    if no_clobber {
-        let mut file = OpenOptions::new().write(true).create_new(true).open(path)?;
-        file.write_all(bytes)?;
-        file.sync_all()?;
-        return Ok(());
+pub fn remove_visible_note_file(root: &Path, note_path: &str) -> Result<()> {
+    let (directory, leaf) = open_visible_parent(root, note_path, false)?;
+    let file = openat_path(
+        directory.as_raw_fd(),
+        std::ffi::OsStr::from_bytes(leaf.as_bytes()),
+        O_RDONLY | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC,
+    )?;
+    if !file.metadata()?.is_file() {
+        return Err(Error::BadRequest(
+            "visible path is not a regular file".to_string(),
+        ));
     }
-    fs::write(path, bytes)?;
+    drop(file);
+    unlink_at(directory.as_raw_fd(), &leaf)?;
+    directory.sync_all()?;
     Ok(())
 }
 
-pub fn remove_visible_note_file(root: &Path, note_path: &str) -> Result<()> {
-    #[cfg(unix)]
-    {
-        let (directory, leaf) = open_visible_parent(root, note_path, false)?;
-        let file = openat_path(
-            directory.as_raw_fd(),
-            std::ffi::OsStr::from_bytes(leaf.as_bytes()),
-            O_RDONLY | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC,
-        )?;
-        if !file.metadata()?.is_file() {
-            return Err(Error::BadRequest(
-                "visible path is not a regular file".to_string(),
-            ));
-        }
-        drop(file);
-        unlink_at(directory.as_raw_fd(), &leaf)?;
-        directory.sync_all()?;
-        Ok(())
-    }
-    #[cfg(not(unix))]
-    {
-        let visible = checked_visible_path(root, note_path)?;
-        fs::remove_file(visible)?;
-        Ok(())
-    }
-}
-
 pub fn sync_visible_note_parent(root: &Path, note_path: &str) -> Result<()> {
-    #[cfg(unix)]
-    {
-        let (directory, _) = open_visible_parent(root, note_path, false)?;
-        directory.sync_all()?;
-        Ok(())
-    }
-    #[cfg(not(unix))]
-    {
-        let visible = checked_visible_path(root, note_path)?;
-        if let Some(parent) = visible.parent() {
-            File::open(parent)?.sync_all()?;
-        }
-        Ok(())
-    }
+    let (directory, _) = open_visible_parent(root, note_path, false)?;
+    directory.sync_all()?;
+    Ok(())
 }
 
-#[cfg(unix)]
 fn open_visible_parent(root: &Path, note_path: &str, create: bool) -> Result<(File, CString)> {
     let normalized = normalize_note_path(note_path)
         .map_err(|_| Error::BadRequest("invalid visible path".to_string()))?;
@@ -308,7 +258,6 @@ fn open_visible_parent(root: &Path, note_path: &str, create: bool) -> Result<(Fi
     Ok((directory, leaf))
 }
 
-#[cfg(unix)]
 fn verify_visible_leaf(directory: &File, leaf: &CString) -> Result<()> {
     match openat_path(
         directory.as_raw_fd(),
@@ -324,7 +273,6 @@ fn verify_visible_leaf(directory: &File, leaf: &CString) -> Result<()> {
     }
 }
 
-#[cfg(unix)]
 fn link_at(source_directory: RawFd, source: &CString, destination_directory: RawFd, destination: &CString) -> Result<()> {
     // SAFETY: both descriptors are live and both names are nul-terminated.
     let result = unsafe {
@@ -342,7 +290,6 @@ fn link_at(source_directory: RawFd, source: &CString, destination_directory: Raw
     Ok(())
 }
 
-#[cfg(unix)]
 fn rename_at(directory: RawFd, source: &CString, destination_directory: RawFd, destination: &CString) -> Result<()> {
     // SAFETY: both descriptors are live and both names are nul-terminated.
     let result = unsafe {
@@ -359,7 +306,6 @@ fn rename_at(directory: RawFd, source: &CString, destination_directory: RawFd, d
     Ok(())
 }
 
-#[cfg(unix)]
 fn unlink_at(directory: RawFd, name: &CString) -> Result<()> {
     // SAFETY: directory is live and name is nul-terminated.
     let result = unsafe { unlinkat(directory, name.as_ptr(), 0) };
@@ -385,7 +331,6 @@ pub fn read_vault_asset(root: &Path, name: &str) -> Result<Vec<u8>> {
     Ok(bytes)
 }
 
-#[cfg(unix)]
 pub fn write_vault_asset_new(root: &Path, name: &str, bytes: &[u8]) -> Result<()> {
     let relative = Path::new(name);
     if relative.is_absolute()
@@ -487,7 +432,6 @@ pub fn write_vault_asset_new(root: &Path, name: &str, bytes: &[u8]) -> Result<()
     Ok(())
 }
 
-#[cfg(unix)]
 fn open_vault_file(root: &Path, relative: &Path) -> Result<File> {
     let root_fd = openat_path(
         current_directory(),
@@ -524,29 +468,19 @@ fn open_vault_file(root: &Path, relative: &Path) -> Result<File> {
     Ok(file)
 }
 
-#[cfg(unix)]
 const O_RDONLY: i32 = rustix::fs::OFlags::RDONLY.bits() as i32;
-#[cfg(unix)]
 const O_WRONLY: i32 = rustix::fs::OFlags::WRONLY.bits() as i32;
-#[cfg(unix)]
 const O_CREAT: i32 = rustix::fs::OFlags::CREATE.bits() as i32;
-#[cfg(unix)]
 const O_EXCL: i32 = rustix::fs::OFlags::EXCL.bits() as i32;
-#[cfg(unix)]
 const O_DIRECTORY: i32 = rustix::fs::OFlags::DIRECTORY.bits() as i32;
-#[cfg(unix)]
 const O_NOFOLLOW: i32 = rustix::fs::OFlags::NOFOLLOW.bits() as i32;
-#[cfg(unix)]
 const O_NONBLOCK: i32 = rustix::fs::OFlags::NONBLOCK.bits() as i32;
-#[cfg(unix)]
 const O_CLOEXEC: i32 = rustix::fs::OFlags::CLOEXEC.bits() as i32;
 
-#[cfg(unix)]
 fn current_directory() -> RawFd {
     rustix::fs::CWD.as_raw_fd()
 }
 
-#[cfg(unix)]
 fn openat_path(directory: RawFd, path: &std::ffi::OsStr, flags: i32) -> Result<File> {
     let path = CString::new(path.as_bytes())
         .map_err(|_| Error::BadRequest("vault path contains a nul byte".to_string()))?;
@@ -559,7 +493,6 @@ fn openat_path(directory: RawFd, path: &std::ffi::OsStr, flags: i32) -> Result<F
     Ok(unsafe { File::from_raw_fd(fd) })
 }
 
-#[cfg(unix)]
 unsafe extern "C" {
     fn openat(directory: i32, path: *const std::ffi::c_char, flags: i32, ...) -> i32;
     fn mkdirat(directory: i32, path: *const std::ffi::c_char, mode: u32) -> i32;
@@ -649,7 +582,6 @@ mod tests {
         assert_ne!(path_key("É.md"), path_key("E\u{301}.md"));
     }
 
-    #[cfg(unix)]
     #[test]
     fn visible_paths_reject_symlinked_parents_and_leaves() {
         use std::os::unix::fs::symlink;
@@ -679,7 +611,6 @@ mod tests {
         assert!(root.path().join("nested").is_dir());
     }
 
-    #[cfg(unix)]
     #[test]
     fn asset_reads_and_writes_reject_symlinked_directories_and_files() {
         use std::os::unix::fs::symlink;
@@ -706,7 +637,6 @@ mod tests {
         assert!(write_vault_asset_new(root.path(), "z-images/new.webp", b"new").is_err());
     }
 
-    #[cfg(unix)]
     #[test]
     fn note_writes_and_removals_stay_inside_the_vault() {
         use std::os::unix::fs::symlink;
@@ -730,7 +660,6 @@ mod tests {
         assert_eq!(fs::read(root.path().join("nested/new.md")).unwrap(), b"replace");
     }
 
-    #[cfg(unix)]
     #[test]
     fn operations_accept_a_root_relative_to_the_current_directory() {
         let root = tempfile::tempdir().unwrap().keep().canonicalize().unwrap();
@@ -750,7 +679,6 @@ mod tests {
         fs::remove_dir_all(root).unwrap();
     }
 
-    #[cfg(unix)]
     #[test]
     fn asset_reads_do_not_follow_a_replaced_parent_directory() {
         use std::os::unix::fs::symlink;

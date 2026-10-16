@@ -86,61 +86,33 @@ fn emit_tokens(tokens: &mut Vec<Token>, segment: &str, offset_from: usize, posit
         ..Default::default()
     });
 
-    if segment.is_ascii() {
-        let mut part_start = 0;
-        let mut prev_lower = false;
-        let mut has_boundary = false;
-        for (byte_idx, byte) in segment.bytes().enumerate() {
-            if prev_lower && byte.is_ascii_uppercase() && byte_idx > part_start {
-                tokens.push(Token {
-                    offset_from,
-                    offset_to,
-                    position: pos,
-                    text: lowercase(&segment[part_start..byte_idx]),
-                    ..Default::default()
-                });
-                part_start = byte_idx;
-                has_boundary = true;
-            }
-            prev_lower = byte.is_ascii_lowercase();
-        }
-        if has_boundary {
+    let mut part_start = 0;
+    let mut prev_lower = false;
+    let mut has_boundary = false;
+    for (byte_idx, ch) in segment.char_indices() {
+        if prev_lower && ch.is_uppercase() && byte_idx > part_start {
             tokens.push(Token {
                 offset_from,
                 offset_to,
                 position: pos,
-                text: lowercase(&segment[part_start..]),
+                text: lowercase(&segment[part_start..byte_idx]),
                 ..Default::default()
             });
+            part_start = byte_idx;
+            has_boundary = true;
         }
-    } else {
-        let mut part_start = 0;
-        let mut prev_lower = false;
-        let mut has_boundary = false;
-        for (byte_idx, ch) in segment.char_indices() {
-            if prev_lower && ch.is_uppercase() && byte_idx > part_start {
-                tokens.push(Token {
-                    offset_from,
-                    offset_to,
-                    position: pos,
-                    text: lowercase(&segment[part_start..byte_idx]),
-                    ..Default::default()
-                });
-                part_start = byte_idx;
-                has_boundary = true;
-            }
-            prev_lower = ch.is_lowercase();
-        }
-        if has_boundary {
-            tokens.push(Token {
-                offset_from,
-                offset_to,
-                position: pos,
-                text: lowercase(&segment[part_start..]),
-                ..Default::default()
-            });
-        }
+        prev_lower = ch.is_lowercase();
     }
+    if has_boundary {
+        tokens.push(Token {
+            offset_from,
+            offset_to,
+            position: pos,
+            text: lowercase(&segment[part_start..]),
+            ..Default::default()
+        });
+    }
+
 
     *position += 1;
 }
@@ -152,27 +124,6 @@ fn lowercase(text: &str) -> String {
     } else {
         text.to_lowercase()
     }
-}
-
-#[cfg(test)]
-fn split_camel_case(text: &str) -> Vec<String> {
-    let mut parts: Vec<String> = Vec::new();
-    let mut current = String::new();
-    let mut prev_lower = false;
-
-    for ch in text.chars() {
-        if prev_lower && ch.is_uppercase() && !current.is_empty() {
-            parts.push(std::mem::take(&mut current));
-        }
-        prev_lower = ch.is_lowercase();
-        current.push(ch);
-    }
-
-    if !current.is_empty() {
-        parts.push(current);
-    }
-
-    if parts.len() <= 1 { Vec::new() } else { parts }
 }
 
 pub struct FerrisearchTokenStream {
@@ -299,11 +250,6 @@ mod tests {
     }
 
     #[test]
-    fn no_camel_case_for_all_lower() {
-        assert!(split_camel_case("lowercase").is_empty());
-    }
-
-    #[test]
     fn unicode_separator() {
         let t = tokenize("foo\u{2013}bar");
         assert!(t.contains(&"foo".into()));
@@ -313,14 +259,6 @@ mod tests {
     #[test]
     fn empty_input() {
         assert!(tokenize("").is_empty());
-    }
-
-    #[test]
-    fn camel_case_function() {
-        assert_eq!(
-            split_camel_case("fooBarBAZLorem"),
-            ["foo", "Bar", "BAZLorem"]
-        );
     }
 
     #[test]
@@ -349,21 +287,6 @@ mod tests {
     #[test]
     fn only_separators() {
         assert!(tokenize("...   !!!").is_empty());
-    }
-
-    #[test]
-    fn camel_case_single_boundary() {
-        assert_eq!(split_camel_case("fooBar"), ["foo", "Bar"]);
-    }
-
-    #[test]
-    fn camel_case_all_upper() {
-        assert!(split_camel_case("ALLCAPS").is_empty());
-    }
-
-    #[test]
-    fn camel_case_single_char() {
-        assert_eq!(split_camel_case("aB"), ["a", "B"]);
     }
 
     #[test]

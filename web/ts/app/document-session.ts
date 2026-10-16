@@ -8,7 +8,6 @@ export type Selection = { anchor: number; head: number } | null;
 
 export type StorageState =
   | { kind: "available" }
-  | { kind: "pending" }
   | { kind: "failed"; error: unknown };
 
 export type SessionBase = {
@@ -97,20 +96,10 @@ export type InFlightSave = {
   retryAttempt: number;
 };
 
-export type SaveEnvelope = {
-  identity: DocumentIdentity;
-  generation: number;
-  response: V2MutationResponse;
-};
-
 export type DocumentSessionServices = {
   createMutationId: () => string;
   sourceHash: (source: string) => Promise<string>;
-  save: (
-    identity: DocumentIdentity,
-    generation: number,
-    request: V2SaveNoteRequest,
-  ) => Promise<SaveEnvelope>;
+  save: (identity: DocumentIdentity, request: V2SaveNoteRequest) => Promise<V2MutationResponse>;
   retryable: (error: unknown) => boolean;
   wait: (milliseconds: number) => Promise<void>;
   checkpointDraft: (
@@ -656,20 +645,6 @@ export class DocumentSession {
     await this.save();
   }
 
-  lock(): void {
-    const state = this.loadedState("lock");
-    this.set({ ...state, status: "auth-locked" } as DocumentSessionState);
-  }
-
-  unlock(): void {
-    if (this.current.status !== "auth-locked") {
-      throw new InvalidSessionTransitionError(this.current.status, "unlock");
-    }
-    const state = this.current;
-    const isDirty = state.draft.mutationId !== null;
-    this.set({ ...state, status: isDirty ? "dirty" : "clean" } as DocumentSessionState);
-  }
-
   markUnavailable(error: unknown): void {
     if (this.current.status === "loading") {
       this.set({
@@ -686,10 +661,6 @@ export class DocumentSession {
     }
     const state = this.loadedState("mark unavailable");
     this.set({ ...state, status: "unavailable", reason: classifyUnavailable(error) } as DocumentSessionState);
-  }
-
-  markStorageUnavailable(error: unknown): void {
-    this.updateStorage({ kind: "failed", error });
   }
 
   exportSource(): string {
@@ -865,25 +836,18 @@ export class DocumentSession {
     let attempt = 0;
     while (true) {
       try {
-        const envelope = await this.services.save(this.identity, generation, inFlight.request);
+        const response = await this.services.save(this.identity, inFlight.request);
         if (!this.isCurrent(generation, identityKey)) {
           return null;
         }
-        if (documentIdentityKey(envelope.identity) !== identityKey || envelope.generation !== generation) {
-          this.failCurrent(generation, identityKey, {
-            kind: "failure",
-            error: new SessionProtocolError("Save response belongs to a different session generation"),
-          });
-          return null;
-        }
-        if (envelope.response.mutationId !== inFlight.mutationId) {
+        if (response.mutationId !== inFlight.mutationId) {
           this.failCurrent(generation, identityKey, {
             kind: "failure",
             error: new SessionProtocolError("Save response mutation identity does not match the request"),
           });
           return null;
         }
-        return envelope.response;
+        return response;
       } catch (error) {
         if (!this.isCurrent(generation, identityKey)) {
           return null;
@@ -979,7 +943,6 @@ export class DocumentSession {
       selection: draft.selection,
       checkpointedAtMs: Date.now(),
     };
-    this.updateStorage({ kind: "pending" });
     let failureReported = false;
     const onFailure = (error: unknown) => {
       failureReported = true;
@@ -994,7 +957,7 @@ export class DocumentSession {
           if (!written) {
             onFailure(new SessionProtocolError("A newer draft checkpoint is already stored"));
           } else if (!this.disposed && sequence === this.checkpointGeneration) {
-            this.updateStorage({ kind: "available" });
+            this.clearStorageFailure();
           }
         }, (error) => {
           if (!failureReported) {
@@ -1018,11 +981,17 @@ export class DocumentSession {
         if (cleared && !this.disposed && this.current.status !== "loading" &&
           !(this.current.status === "unavailable" && this.current.draft === null) &&
           this.current.draft.localRevision === localRevision) {
-          this.updateStorage({ kind: "available" });
+          this.clearStorageFailure();
         }
       }, onFailure);
     } catch (error) {
       onFailure(error);
+    }
+  }
+
+  private clearStorageFailure(): void {
+    if (this.current.storage.kind === "failed") {
+      this.updateStorage({ kind: "available" });
     }
   }
 

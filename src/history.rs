@@ -464,17 +464,9 @@ fn create_temp_file(path: &Path, bytes: &[u8]) -> Result<PathBuf> {
     Err(Error::Internal("could not allocate an atomic temp file".to_string()))
 }
 
-#[cfg(unix)]
 fn sync_dir(path: &Path) -> Result<()> {
     fs::File::open(path)?.sync_all()?;
     Ok(())
-}
-
-#[cfg(not(unix))]
-fn sync_dir(_path: &Path) -> Result<()> {
-    Err(Error::BadRequest(
-        "durable directory sync is unsupported on this platform".to_string(),
-    ))
 }
 
 fn hash_filename(hash: &str) -> String {

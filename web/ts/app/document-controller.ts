@@ -1,4 +1,3 @@
-import type { ConflictDraftId } from "../state.ts";
 import type { DocumentSessionState, Selection } from "./document-session.ts";
 import type { NoteId } from "./identity.ts";
 
@@ -7,9 +6,7 @@ export type DirtySnapshot = {
   selection: Selection | undefined;
   dirty: boolean;
   saving: boolean;
-  savePending: boolean;
   conflict: boolean;
-  conflictDraftId: ConflictDraftId | null;
   title: string | undefined;
   path: string | undefined;
 };
@@ -23,11 +20,7 @@ export function dirtySnapshot(value: DocumentSessionState): DirtySnapshot {
       value.status === "unavailable" && value.draft !== null ||
       value.status === "auth-locked" && value.draft.mutationId !== null,
     saving: value.status === "saving",
-    savePending: value.status === "saving" && value.phase === "pendingMaterialization",
     conflict: value.status === "conflict",
-    conflictDraftId: value.status === "conflict" && value.conflictDraft !== null
-      ? value.conflictDraft.draftId as ConflictDraftId
-      : null,
     title: "title" in value ? value.titleDraft ?? value.title : undefined,
     path: "path" in value ? value.path : undefined,
   };

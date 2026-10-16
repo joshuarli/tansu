@@ -16,31 +16,19 @@ pub(crate) fn search(
     snapshots: &[DirtyNoteSnapshot],
 ) -> Result<OverlaySearchOutput, SearchError> {
     let mut seen = HashSet::new();
-    let mut included = Vec::new();
-    let mut bytes = 0usize;
-    for snapshot in snapshots.iter().take(MAX_OVERLAY_NOTES) {
+    for snapshot in snapshots {
         if !seen.insert(snapshot.identity().note_id()) {
             return Err(SearchError::DuplicateOverlayNote);
         }
-        let input_bytes = snapshot.source().len();
-        if bytes.saturating_add(input_bytes) > MAX_OVERLAY_BYTES {
-            break;
-        }
-        bytes += input_bytes;
-        included.push(snapshot);
     }
-    let skipped_notes = snapshots.len().saturating_sub(included.len());
-    if included.is_empty() {
+    if snapshots.is_empty() {
         return Ok(OverlaySearchOutput {
-            result: OverlaySearchResult {
-                hits: Vec::new(),
-                skipped_notes,
-            },
+            result: OverlaySearchResult { hits: Vec::new() },
             covered_note_ids: HashSet::new(),
         });
     }
     let mut index = IndexManager::new_in_memory()?;
-    let documents = included
+    let documents = snapshots
         .iter()
         .map(|snapshot| {
             DocumentInput::new(
@@ -54,7 +42,7 @@ pub(crate) fn search(
     let mut hits = execute(&index, query, options)?;
     crate::search::rank_hits(&mut hits, |_| options.now_ms, &options);
     for hit in &mut hits {
-        if let Some(snapshot) = included
+        if let Some(snapshot) = snapshots
             .iter()
             .find(|snapshot| snapshot.identity().note_id() == hit.note_id)
         {
@@ -62,11 +50,8 @@ pub(crate) fn search(
         }
     }
     Ok(OverlaySearchOutput {
-        result: OverlaySearchResult {
-            hits,
-            skipped_notes,
-        },
-        covered_note_ids: included
+        result: OverlaySearchResult { hits },
+        covered_note_ids: snapshots
             .iter()
             .map(|snapshot| snapshot.identity().note_id().to_owned())
             .collect(),
@@ -121,20 +106,6 @@ mod tests {
         assert_eq!(result.result.hits[0].note_id, "draft");
         assert_eq!(result.result.hits[0].local_revision, Some(7));
         assert_eq!(result.result.hits[0].source_hash, "sha256-v2:base");
-    }
-
-    #[test]
-    fn overlay_uses_ordered_note_and_byte_bounds() {
-        let large = "x".repeat(MAX_OVERLAY_BYTES + 1);
-        let snapshots = [
-            snapshot("first", "first phrase", 1),
-            snapshot("too-large", &large, 2),
-            snapshot("after", "after phrase", 3),
-        ];
-        let result = search("phrase", options(), &snapshots).unwrap();
-        assert_eq!(result.result.hits.len(), 1);
-        assert_eq!(result.result.hits[0].note_id, "first");
-        assert_eq!(result.result.skipped_notes, 2);
     }
 
     #[test]

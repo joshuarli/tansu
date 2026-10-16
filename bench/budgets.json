@@ -64,30 +64,5 @@
     "serverRssBytes": {
       "maxBytes": 800000000
     }
-  },
-  "productionAssets": {
-    "rawJavaScriptBytes": {
-      "maxBytes": 1500000
-    },
-    "minifiedJavaScriptBytes": {
-      "maxBytes": 850000
-    },
-    "minifiedJavaScriptGzipBytes": {
-      "maxBytes": 275000
-    },
-    "stylesheetBytes": {
-      "maxBytes": 25000
-    },
-    "stylesheetGzipBytes": {
-      "maxBytes": 5000
-    }
-  },
-  "releaseBinaries": {
-    "x86_64-unknown-linux-musl": {
-      "maxBytes": 12000000
-    },
-    "aarch64-unknown-linux-musl": {
-      "maxBytes": 10000000
-    }
   }
 }

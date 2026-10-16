@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 import { chromium, webkit } from "playwright";
 
 import { createTestFixture } from "../scripts/test-fixture.mjs";
-import { canonicalSourceHash } from "../web/ts/save-delta.ts";
+import { canonicalSourceHash } from "../web/ts/source-hash.ts";
 import { directorySize } from "./directory-size.mjs";
 import { stopProcessGroup } from "./process-group.mjs";
 
@@ -45,17 +45,20 @@ async function main() {
     const port = await freePort();
     const baseUrl = `http://127.0.0.1:${port}`;
     execFileSync("cargo", ["build", "--quiet", "--bin", "tansu2"], { cwd: REPO_ROOT, stdio: "inherit" });
-    const serverStart = performance.now();
-    server = spawn(
-      join(REPO_ROOT, "target", "debug", "tansu2"),
-      ["--port", String(port)],
-      {
-        cwd: REPO_ROOT,
-        env: { ...process.env, XDG_CONFIG_HOME: fixture.configHome, XDG_DATA_HOME: fixture.dataHome },
-        stdio: ["ignore", "pipe", "pipe"],
-        detached: true,
-      },
+    const serverBinary = join(REPO_ROOT, "target", "debug", "tansu2");
+    const serverEnv = { ...process.env, XDG_CONFIG_HOME: fixture.configHome, XDG_DATA_HOME: fixture.dataHome };
+    execFileSync(
+      serverBinary,
+      ["config", "init", "--vault", "One", fixture.vaultOne, "--vault", "Two", fixture.vaultTwo],
+      { cwd: REPO_ROOT, env: serverEnv, stdio: "pipe" },
     );
+    const serverStart = performance.now();
+    server = spawn(serverBinary, ["--port", String(port)], {
+      cwd: REPO_ROOT,
+      env: serverEnv,
+      stdio: ["ignore", "pipe", "pipe"],
+      detached: true,
+    });
 
     const results = {
       generatedAt: new Date().toISOString(),
@@ -120,7 +123,7 @@ async function runBrowserBenchmarks(browser, baseUrl, fixture, identity, first, 
     out.firstEditorInteractive = await measure(async () => {
       await page.goto(baseUrl);
       await page.waitForSelector(".main");
-      await openNoteThroughQuickOpen(page, first.title);
+      await openNoteThroughSearch(page, first.title);
       await page.waitForSelector(".cm-editor");
       activeNote = first;
     });
@@ -129,7 +132,7 @@ async function runBrowserBenchmarks(browser, baseUrl, fixture, identity, first, 
     });
     out.switchNote = await measure(async () => {
       const target = activeNote.noteId === first.noteId ? second : first;
-      await openNoteThroughQuickOpen(page, target.title);
+      await openNoteThroughSearch(page, target.title);
       await page.locator(`.tab.active[title="${cssEscape(target.title)}"]`).waitFor();
       activeNote = target;
     });
@@ -231,7 +234,7 @@ async function runBrowserBenchmarks(browser, baseUrl, fixture, identity, first, 
     const largeNoteResponse = page.waitForResponse((response) =>
       response.request().method() === "GET" && new URL(response.url()).pathname === largeNoteUrl
     );
-    await openNoteThroughQuickOpen(page, largeNote.title);
+    await openNoteThroughSearch(page, largeNote.title);
     const loadedLargeNote = await largeNoteResponse.then((response) => response.json());
     if (Buffer.byteLength(loadedLargeNote.content) !== largeNote.bytes) {
       throw new Error("large benchmark note response has an unexpected size");
@@ -281,12 +284,12 @@ async function runBrowserBenchmarks(browser, baseUrl, fixture, identity, first, 
   }
 }
 
-async function openNoteThroughQuickOpen(page, title) {
-  await page.keyboard.press("Control+p");
-  const panel = page.locator(".quick-open-panel");
+async function openNoteThroughSearch(page, title) {
+  await page.keyboard.press("Control+Shift+f");
+  const panel = page.locator(".search-panel");
   await panel.waitFor({ state: "visible" });
   await panel.locator(".command-input").fill(title);
-  const row = panel.locator(".quick-open-results .command-row").filter({ hasText: title }).first();
+  const row = panel.locator(".search-result-row:not(.recent-search-result)").filter({ hasText: title }).first();
   await row.waitFor({ state: "visible" });
   await row.click();
   await panel.waitFor({ state: "detached" });
