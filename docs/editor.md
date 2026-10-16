@@ -55,8 +55,7 @@ rendered editor without changing source text.
 The adapter shows a floating formatting toolbar centered above the selection
 head. It hides the toolbar when the selection collapses or the session is
 read-only.
-Enable wiki links with `createWikiLinkExtension()`. Wiki links resolve against
-the configured active-vault notes. A leading `/`
+Wiki links resolve against the configured active-vault notes. A leading `/`
 selects a vault-root path. `./` and `../` paths resolve from the current note's
 directory. A bare basename resolves only when it matches one note. Ambiguous
 targets remain unresolved.

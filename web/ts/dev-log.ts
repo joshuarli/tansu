@@ -13,16 +13,10 @@ const LOG_MODE = process.env["TANSU2_LOGS"] ?? "off";
 const FLUSH_DELAY_MS = 100;
 const MAX_BATCH_EVENTS = 32;
 
-let requestSeq = 0;
 let eventSeq = 0;
 let flushTimer: number | undefined;
 let disabled = LOG_MODE === "off";
 const pending: LogEventInput[] = [];
-
-export function createRequestId(): string {
-  requestSeq += 1;
-  return `cli-${Date.now().toString(36)}-${requestSeq.toString(36)}`;
-}
 
 export function logClientEvent(
   level: LogLevel,

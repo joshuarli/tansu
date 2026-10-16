@@ -75,24 +75,6 @@ Next: 44
 - **Fix with:** renovate-tests
 - **Effort:** S
 
-### TNS-031 · P2 · Audit Rust dependencies in the audit target
-
-- **Area:** Dependencies
-- **Where:** `Makefile:46-48`
-- **Problem:** `make audit` runs only `pnpm audit`; the Rust audit command is commented out and there is no active Rust dependency audit configuration. Vulnerable Rust dependencies can pass the repository’s named audit target unnoticed.
-- **Recommendation:** Configure and run a Rust dependency audit from the target, or narrow the target name and remove the stale command.
-- **Fix with:** none
-- **Effort:** S
-
-### TNS-032 · P2 · Remove the unreferenced handwritten editor stack
-
-- **Area:** Dead code
-- **Where:** `web/ts/editor/index.ts:1-40`
-- **Problem:** The handwritten renderer and serializer are still exported from the editor entry point, but production uses the CodeMirror adapter and repository search found no non-test imports of this entry point. Keeping both editor stacks expands the code and tests maintainers must understand.
-- **Recommendation:** Confirm there are no supported external consumers, then remove the legacy renderer, serializer, extensions, and tests that exist only for them.
-- **Fix with:** dead-code-archaeology
-- **Effort:** M
-
 ### TNS-039 · P2 · Version immutable WebP encoder asset URLs
 
 - **Area:** Build

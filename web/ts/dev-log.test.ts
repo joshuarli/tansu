@@ -28,9 +28,9 @@ describe("dev log client", () => {
     process.env["TANSU2_LOGS"] = "buffer";
     const fetch = vi.fn(async () => ({ ok: true }));
     vi.stubGlobal("fetch", fetch);
-    const { createRequestId, logClientEvent } = await import("./dev-log.ts");
+    const { logClientEvent } = await import("./dev-log.ts");
 
-    const requestId = createRequestId();
+    const requestId = "request-1";
     logClientEvent("info", "system.event", { system: { component: "test", action: "run" } }, requestId);
     vi.runOnlyPendingTimers();
 
