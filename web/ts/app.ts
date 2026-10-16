@@ -2,6 +2,7 @@ import { commandItems } from "./app/commands.ts";
 import type { CommandId, SettingsFormValue, ViewEvent } from "./app/events.ts";
 import { applySettingsForm } from "./app/settings-policy.ts";
 import { DocumentSession, defaultDocumentSessionServices, type DocumentSessionState } from "./app/document-session.ts";
+import { DocumentControllers } from "./app/document-controller.ts";
 import { LocalDraftSession } from "./app/local-draft-session.ts";
 import { defaultServices, type AppServices } from "./app/services.ts";
 import { localDraftId, noteId, serverInstanceId, vaultId, type DocumentIdentity, type LocalDraftId, type ServerIdentity, type WorkspaceId } from "./app/identity.ts";
@@ -95,8 +96,7 @@ export class TansuApp {
     if (tab?.kind !== "saved" || tab.doc === null) return;
     this.dispatch({ type: "tags.update", tags: tab.doc.meta.tags.filter((item) => item !== tag) });
   };
-  private readonly noteLoads = new Map<string, Promise<void>>();
-  private readonly autoSaveTimers = new Map<string, number>();
+  private readonly documents = new DocumentControllers();
   private editorCaptureTimer: number | undefined;
   private readonly inFlightActions = new Set<Promise<unknown>>();
   private readonly assetScope = new Map<string, string>();
@@ -210,9 +210,7 @@ export class TansuApp {
     }
     this.clearAssetScope();
     for (const tab of this.state.tabs) if (tab.kind === "saved") tab.session?.close();
-    for (const timer of this.autoSaveTimers.values()) window.clearTimeout(timer);
-    this.autoSaveTimers.clear();
-    this.noteLoads.clear();
+    this.documents.disposeAll();
     this.recentPreviews.clear();
     this.state.vault = nextIdentity.vaultId;
     this.state.serverInstanceId = global.serverInstanceId;
@@ -273,8 +271,7 @@ export class TansuApp {
   }
 
   private cancelAutoSaves(): void {
-    for (const timer of this.autoSaveTimers.values()) window.clearTimeout(timer);
-    this.autoSaveTimers.clear();
+    this.documents.cancelAutoSaves();
   }
 
   private restoreCurrentVault(generation: number): void {
@@ -385,8 +382,7 @@ export class TansuApp {
     this.editor = null;
     this.activeEditorKey = null;
     this.attachedEditor = null;
-    for (const timer of this.autoSaveTimers.values()) window.clearTimeout(timer);
-    this.autoSaveTimers.clear();
+    this.documents.cancelAutoSaves();
     if (this.workspaceTimer !== undefined) window.clearTimeout(this.workspaceTimer);
     this.workspaceTimer = undefined;
     if (this.noticeTimer !== undefined) window.clearTimeout(this.noticeTimer);
@@ -745,16 +741,7 @@ export class TansuApp {
       return;
     }
     if (tab.session !== null && tab.doc !== null) return;
-    const key = `${this.state.serverInstanceId}:${this.state.vault}:${tab.noteId}`;
-    const existing = this.noteLoads.get(key);
-    if (existing !== undefined) return existing;
-    const load = this.loadSavedTab(tab);
-    this.noteLoads.set(key, load);
-    try {
-      await load;
-    } finally {
-      if (this.noteLoads.get(key) === load) this.noteLoads.delete(key);
-    }
+    await this.documents.for(tab.noteId).ensureLoaded(() => this.loadSavedTab(tab));
   }
 
   private async loadSavedTab(tab: SavedTab): Promise<void> {
@@ -1002,18 +989,11 @@ export class TansuApp {
     }
     const [closed] = this.state.tabs.splice(this.state.tabs.indexOf(candidate), 1);
     if (closed === undefined) return;
-    if (closed.kind === "saved") {
-      this.noteLoads.delete(`${this.state.serverInstanceId}:${this.state.vault}:${closed.noteId}`);
-    }
+    if (closed.kind === "saved") this.documents.release(closed.noteId);
     if (closed.kind === "saved" && closed.session !== null) {
       const session = closed.session;
       if (reason === "user") this.runAsync(session.save().finally(() => session.close()), "Save failed");
       else session.close();
-    }
-    const autoSave = this.autoSaveTimers.get(closed.key);
-    if (autoSave !== undefined) {
-      window.clearTimeout(autoSave);
-      this.autoSaveTimers.delete(closed.key);
     }
     if (reason === "user") this.state.closedTabs = [workspaceTabFromTab(closed), ...this.state.closedTabs.filter((item) => !sameTabIdentity(identityOfWorkspace(item), identity))].slice(0, 50);
     if (sameTabIdentity(this.state.activeTab, identity)) {
@@ -1046,16 +1026,12 @@ export class TansuApp {
   }
 
   private scheduleAutoSave(tab: SavedTab): void {
-    const old = this.autoSaveTimers.get(tab.key);
-    if (old !== undefined) window.clearTimeout(old);
     const delay = this.state.boot?.settings.autosaveDelayMs ?? 900;
     const session = tab.session;
     if (session === null) return;
-    const timer = window.setTimeout(() => {
-      this.autoSaveTimers.delete(tab.key);
+    this.documents.for(tab.noteId).scheduleAutoSave(delay, () => {
       if (tab.session === session && tabIsDirty(tab)) this.runAsync(session.save(), "Save failed");
-    }, delay);
-    this.autoSaveTimers.set(tab.key, timer);
+    });
   }
 
   private workspaceSnapshot(identity: ServerIdentity): WorkspaceState {

@@ -1,6 +1,6 @@
 # TNS-050: Per-document controller
 
-Status: draft
+Status: accepted
 
 ## Summary
 
@@ -33,4 +33,10 @@ No sweeping file split. Editor behavior stays inside `web/ts/editor/`.
 
 ## Decision
 
-None yet.
+Accepted. Extraction proceeds one boundary at a time.
+
+Done:
+
+- `DocumentControllers` in `web/ts/app/document-controller.ts` owns the per-note load dedupe and autosave timer. Closing a tab releases its controller.
+
+Next boundaries, in order: the dirty snapshot and session subscription, then the journal handle, then stale-completion checks in `loadSavedTab`.
