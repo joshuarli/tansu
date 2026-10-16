@@ -149,7 +149,9 @@ As the editor scrolls, the outline highlights the heading at the reading
 position and fades the highlight between headings. The outline and the
 margin-note layout derive from the syntax tree once per document and tree
 version and are reused across selection, scroll, and viewport updates; only a
-document change or a newer syntax tree rebuilds them.
+document change or a newer syntax tree rebuilds them. The live-preview
+paragraph-gap lines follow the same rule. Its decoration walk still runs on each
+selection change because reveal depends on the active lines.
 Tag updates edit the top-level `tags` field and leave all other frontmatter and
 the Markdown body unchanged. Tansu reads only tag metadata from frontmatter.
 

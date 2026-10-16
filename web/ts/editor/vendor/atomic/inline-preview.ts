@@ -1,10 +1,11 @@
 import { ensureSyntaxTree, syntaxTree } from '@codemirror/language';
-import type { SyntaxNode } from '@lezer/common';
+import type { SyntaxNode, Tree } from '@lezer/common';
 import {
   EditorSelection,
   Prec,
   StateEffect,
   StateField,
+  type EditorState,
   type Extension,
   type Range,
   type Text,
@@ -516,6 +517,24 @@ function hasAncestor(node: SyntaxNode | null, name: string): boolean {
   return false;
 }
 
+const paragraphGapCache = new WeakMap<Tree, { doc: Text; starts: readonly number[] }>();
+
+function paragraphGapLineStarts(state: EditorState, tree: Tree): readonly number[] {
+  const cached = paragraphGapCache.get(tree);
+  if (cached !== undefined && cached.doc === state.doc) return cached.starts;
+  const { doc } = state;
+  const starts: number[] = [];
+  for (let number = 2; number < doc.lines; number++) {
+    const line = doc.line(number);
+    if (line.length !== 0) continue;
+    const previous = tree.resolveInner(doc.line(number - 1).from, 1);
+    const next = tree.resolveInner(doc.line(number + 1).from, 1);
+    if (hasAncestor(previous, 'Paragraph') && hasAncestor(next, 'Paragraph')) starts.push(line.from);
+  }
+  paragraphGapCache.set(tree, { doc, starts });
+  return starts;
+}
+
 function buildInlineDecorations(view: EditorView): DecorationSet {
   const { state } = view;
   const { doc } = state;
@@ -866,16 +885,8 @@ function buildInlineDecorations(view: EditorView): DecorationSet {
     },
   });
 
-  for (let number = 2; number < doc.lines; number++) {
-    const line = doc.line(number);
-    if (line.length !== 0) continue;
-    const previous = tree.resolveInner(doc.line(number - 1).from, 1);
-    const next = tree.resolveInner(doc.line(number + 1).from, 1);
-    if (hasAncestor(previous, 'Paragraph') && hasAncestor(next, 'Paragraph')) {
-      ranges.push(
-        Decoration.line({ class: 'cm-atomic-paragraph-gap' }).range(line.from),
-      );
-    }
+  for (const from of paragraphGapLineStarts(state, tree)) {
+    ranges.push(Decoration.line({ class: 'cm-atomic-paragraph-gap' }).range(from));
   }
 
   // Supplemental inline marks for the line containing the cursor.
