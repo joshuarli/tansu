@@ -990,12 +990,7 @@ impl Catalog {
     }
 
     pub fn sync_version(&self) -> Result<i64> {
-        let value: String = self.conn.query_row(
-            "SELECT value FROM vault_meta WHERE key='sync_version'",
-            [],
-            |row| row.get(0),
-        )?;
-        Ok(value.parse().unwrap_or(0))
+        read_sync_version(&self.conn)
     }
 
     fn advance_sync(&mut self) -> Result<()> {
@@ -1006,12 +1001,17 @@ impl Catalog {
     }
 
     fn meta_bool(&self, key: &str) -> Result<bool> {
-        let value: String = self.conn.query_row(
-            "SELECT value FROM vault_meta WHERE key=?1",
-            params![key],
-            |row| row.get(0),
-        )?;
-        Ok(value == "true")
+        self.conn
+            .query_row(
+                "SELECT value FROM vault_meta WHERE key=?1",
+                params![key],
+                |row| match row.get::<_, String>(0)?.as_str() {
+                    "true" => Ok(true),
+                    "false" => Ok(false),
+                    other => Err(invalid_column(0, format!("{key} is {other:?}, not a boolean"))),
+                },
+            )
+            .map_err(Into::into)
     }
 }
 
@@ -1057,7 +1057,12 @@ fn note_by_id_tx(tx: &Transaction<'_>, note_id: &str) -> Result<Option<NoteRow>>
 
 fn row_from_sql(row: &rusqlite::Row<'_>) -> rusqlite::Result<NoteRow> {
     let tags_json: String = row.get(3)?;
-    let tags = serde_json::from_str(&tags_json).unwrap_or_default();
+    let tags = serde_json::from_str(&tags_json).map_err(|error| invalid_column(3, error))?;
+    let tombstoned = match row.get::<_, i64>(8)? {
+        0 => false,
+        1 => true,
+        other => return Err(invalid_column(8, format!("tombstoned is {other}, not 0 or 1"))),
+    };
     Ok(NoteRow {
         meta: NoteMeta {
             note_id: row.get(0)?,
@@ -1069,7 +1074,7 @@ fn row_from_sql(row: &rusqlite::Row<'_>) -> rusqlite::Result<NoteRow> {
             updated_at_ms: row.get(7)?,
         },
         visible_hash: row.get(6)?,
-        tombstoned: row.get::<_, i64>(8)? != 0,
+        tombstoned,
         unresolved_reason: row.get(9)?,
     })
 }
@@ -1101,13 +1106,33 @@ fn ensure_column(conn: &Connection, table: &str, column: &str, declaration: &str
     Ok(())
 }
 
-fn advance_sync_tx(tx: &Transaction<'_>) -> Result<()> {
-    let value: String = tx.query_row(
+fn invalid_column(
+    index: usize,
+    error: impl Into<Box<dyn std::error::Error + Send + Sync>>,
+) -> rusqlite::Error {
+    rusqlite::Error::FromSqlConversionFailure(index, rusqlite::types::Type::Text, error.into())
+}
+
+fn read_sync_version(conn: &Connection) -> Result<i64> {
+    conn.query_row(
         "SELECT value FROM vault_meta WHERE key='sync_version'",
         [],
-        |row| row.get(0),
-    )?;
-    let next = value.parse::<i64>().unwrap_or(0) + 1;
+        |row| {
+            let value: String = row.get(0)?;
+            match value.parse::<i64>() {
+                Ok(version) if version >= 0 => Ok(version),
+                Ok(version) => Err(invalid_column(0, format!("sync_version is negative: {version}"))),
+                Err(error) => Err(invalid_column(0, error)),
+            }
+        },
+    )
+    .map_err(Into::into)
+}
+
+fn advance_sync_tx(tx: &Transaction<'_>) -> Result<()> {
+    let next = read_sync_version(tx)?
+        .checked_add(1)
+        .ok_or_else(|| Error::Internal("sync version exhausted".to_string()))?;
     tx.execute(
         "UPDATE vault_meta SET value=?1 WHERE key='sync_version'",
         params![next.to_string()],
@@ -1278,5 +1303,101 @@ mod tests {
             ).optional().unwrap();
             assert!(found.is_none());
         }
+    }
+
+    fn open_catalog_with_note() -> (tempfile::TempDir, Catalog, String) {
+        let dir = tempfile::tempdir().unwrap();
+        let mut catalog = Catalog::open(&dir.path().join("vault.db")).unwrap();
+        let note_id = catalog
+            .insert_note(InsertNote {
+                path: "A.md",
+                path_key: "a.md",
+                title: "A",
+                tags: &["x".to_string()],
+                content_hash: "sha256:a",
+                visible_hash: "sha256:a-disk",
+                kind: NoteEventKind::Create,
+                source: NoteEventSource::User,
+                unresolved: None,
+            })
+            .unwrap();
+        (dir, catalog, note_id)
+    }
+
+    fn set_meta(catalog: &Catalog, key: &str, value: &str) {
+        catalog
+            .conn
+            .execute("UPDATE vault_meta SET value=?2 WHERE key=?1", params![key, value])
+            .unwrap();
+    }
+
+    #[test]
+    fn malformed_settings_json_is_an_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let catalog = Catalog::open(&dir.path().join("vault.db")).unwrap();
+        catalog
+            .conn
+            .execute("INSERT INTO settings(key, value) VALUES('settings', '{not json')", [])
+            .unwrap();
+        assert!(catalog.settings().is_err());
+    }
+
+    #[test]
+    fn malformed_tags_json_is_an_error_on_every_note_read() {
+        let (_dir, catalog, note_id) = open_catalog_with_note();
+        catalog
+            .conn
+            .execute("UPDATE notes SET tags_json='[not json'", [])
+            .unwrap();
+        assert!(catalog.note_by_id(&note_id).is_err());
+        assert!(catalog.note_by_path_key("a.md").is_err());
+        assert!(catalog.live_notes().is_err());
+        assert!(catalog.all_rows().is_err());
+    }
+
+    #[test]
+    fn malformed_sync_version_is_an_error() {
+        let (_dir, mut catalog, _) = open_catalog_with_note();
+        for value in ["", "abc", "-1", "1.5"] {
+            set_meta(&catalog, "sync_version", value);
+            assert!(catalog.sync_version().is_err(), "{value:?}");
+            assert!(catalog.save_settings(&Settings::default()).is_err(), "{value:?}");
+            let stored: String = catalog
+                .conn
+                .query_row("SELECT value FROM vault_meta WHERE key='sync_version'", [], |row| row.get(0))
+                .unwrap();
+            assert_eq!(stored, value);
+        }
+    }
+
+    #[test]
+    fn exhausted_sync_version_is_an_error() {
+        let (_dir, mut catalog, _) = open_catalog_with_note();
+        set_meta(&catalog, "sync_version", &i64::MAX.to_string());
+        assert!(catalog.save_settings(&Settings::default()).is_err());
+    }
+
+    #[test]
+    fn malformed_search_flags_are_errors() {
+        let (_dir, catalog, _) = open_catalog_with_note();
+        for key in ["search_dirty", "search_degraded"] {
+            for value in ["", "True", "1", "yes"] {
+                set_meta(&catalog, key, value);
+                assert!(catalog.search_status().is_err(), "{key}={value:?}");
+            }
+            set_meta(&catalog, key, "false");
+        }
+        let status = catalog.search_status().unwrap();
+        assert!(!status.dirty && !status.degraded);
+    }
+
+    #[test]
+    fn malformed_tombstone_flag_is_an_error() {
+        let (_dir, catalog, note_id) = open_catalog_with_note();
+        catalog
+            .conn
+            .execute("UPDATE notes SET tombstoned=2", [])
+            .unwrap();
+        assert!(catalog.note_by_id(&note_id).is_err());
     }
 }

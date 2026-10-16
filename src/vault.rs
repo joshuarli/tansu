@@ -4355,6 +4355,26 @@ mod tests {
     }
 
     #[test]
+    fn startup_fails_on_malformed_persisted_tags() {
+        let dir = tempfile::tempdir().unwrap().keep();
+        let state_path = dir.join("state");
+        fs::write(dir.join("A.md"), "# A\n").unwrap();
+        let config = VaultConfig {
+            name: "Test".to_string(),
+            path: dir.clone(),
+            state_path: state_path.clone(),
+        };
+        let vault = VaultRuntime::open(0, &config, LogHub::new(crate::logging::LogMode::Off)).unwrap();
+        drop(vault);
+        rusqlite::Connection::open(state_path.join("vault.db"))
+            .unwrap()
+            .execute("UPDATE notes SET tags_json='[not json'", [])
+            .unwrap();
+
+        assert!(VaultRuntime::open(0, &config, LogHub::new(crate::logging::LogMode::Off)).is_err());
+    }
+
+    #[test]
     fn startup_pending_repair_preserves_unexpected_external_bytes() {
         let dir = tempfile::tempdir().unwrap().keep();
         let state_path = dir.join("state");

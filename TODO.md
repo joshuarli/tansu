@@ -3,15 +3,6 @@
 Prefix: TNS
 Next: 54
 
-### TNS-025 · P2 · Reject malformed persisted catalog values
-
-- **Area:** Data
-- **Where:** `src/catalog.rs:1025`, `src/catalog.rs:1082`, `src/catalog.rs:1144`, `src/catalog.rs:1212`
-- **Problem:** Invalid session JSON becomes an empty session, invalid tag JSON becomes empty tags, invalid sync versions become zero, and malformed persisted booleans become false. The app silently discards persisted state or resets values instead of surfacing catalog corruption.
-- **Recommendation:** Return a corruption error for malformed persisted JSON, booleans, and sync versions, so the server fails closed on malformed persisted data.
-- **Fix with:** durable-state
-- **Effort:** S
-
 ### TNS-026 · P2 · Enforce the login credential limit during enrollment
 
 - **Area:** Security
