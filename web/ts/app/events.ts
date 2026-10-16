@@ -72,6 +72,7 @@ export type ViewEvent =
   | { type: "note.addTag" }
   | { type: "tags.update"; tags: string[] }
   | { type: "reading.toggle" }
+  | { type: "theme.toggle" }
   | { type: "revisions.open" }
   | { type: "revisions.select"; eventId: RevisionEventId }
   | { type: "revisions.restore" }

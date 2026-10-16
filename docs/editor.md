@@ -53,9 +53,13 @@ change source or undo history.
 Blank lines between Markdown paragraphs carry native paragraph spacing in the
 rendered editor without changing source text.
 CodeMirror measures wrapped lines without CSS pretty wrapping so rendered text
-stays aligned with source positions. In read-only live mode, hovering a Markdown
-link shows a pill with its destination. Move the pointer onto the pill and click
-to open the link through `onLinkClick`.
+stays aligned with source positions. In editable live mode, hovering a Markdown
+link shows a pill with its destination. The pill stays open briefly while the
+pointer moves from the link, and remains open while the pointer is over it. Click
+the pill to open the link through `onLinkClick`. Read-only links open directly
+when you click them. The floating controls beside the vault selector toggle
+reading mode and the light or dark theme; the theme choice persists in browser
+storage.
 The adapter shows a floating formatting toolbar centered above the selection
 head. It hides the toolbar when the selection collapses or the session is
 read-only.

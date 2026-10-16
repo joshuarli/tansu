@@ -172,6 +172,95 @@ describe("real server harness", () => {
     await page.close();
   });
 
+  it("shows a clickable pill when hovering a rendered link in live mode", async () => {
+    const page = await newLoggedPage();
+    await page.setViewportSize({ width: 600, height: 900 });
+    await page.addInitScript(() => {
+      if (window.sessionStorage.getItem("tansu2-e2e-theme-reset") !== "done") {
+        window.localStorage.removeItem("tansu2.theme.v1");
+        window.sessionStorage.setItem("tansu2-e2e-theme-reset", "done");
+      }
+      window.open = (url) => {
+        document.documentElement.dataset["openedLink"] = String(url);
+        return null;
+      };
+    });
+    await page.goto(baseUrl);
+    await page.waitForSelector(".main");
+    await createCodeMirrorNote(page, "Link Hover");
+    const saved = page.waitForResponse((response) =>
+      response.request().method() === "PUT" && response.status() === 200
+    );
+    await page.locator("#editor-mount .cm-content").fill(
+      "# Link Hover\n\nOpen [the destination label wraps across several visible line fragments in this narrow article column](https://example.test/article).",
+    );
+    await page.keyboard.press(`${shortcutModifier()}+s`);
+    await saved;
+
+    const link = page.locator("#editor-mount .cm-atomic-link");
+    await expect.poll(() => link.isVisible()).toBeTruthy();
+    const fragments = await link.evaluate((element) =>
+      Array.from(element.getClientRects(), ({ x, y, width, height }) => ({ x, y, width, height }))
+    );
+    expect(fragments.length).toBeGreaterThan(1);
+    const hoverFragment = fragments[fragments.length - 1]!;
+    const hoverX = hoverFragment.x + Math.min(4, hoverFragment.width / 2);
+    const hoverY = hoverFragment.y + hoverFragment.height / 2;
+    await page.mouse.move(hoverX, hoverY);
+    const pill = page.locator(".article-link-pill");
+    await expect.poll(() => pill.isVisible()).toBeTruthy();
+    const pillBox = await pill.boundingBox();
+    if (pillBox === null) throw new Error("link pill has no visible bounds");
+    const expectedLeft = await page.evaluate(({ x, width }) =>
+      Math.max(8, Math.min(x, window.innerWidth - width - 8)),
+    { x: hoverFragment.x, width: pillBox.width });
+    expect(pillBox.x).toBeCloseTo(expectedLeft, 0);
+    expect(pillBox.y).toBeCloseTo(hoverFragment.y + hoverFragment.height + 6, 0);
+    await pill.hover();
+    await expect.poll(() => pill.isVisible()).toBeTruthy();
+    await page.mouse.move(10, 10);
+    await expect.poll(() => pill.count()).toBe(0);
+    await page.mouse.move(hoverX, hoverY);
+    await expect.poll(() => pill.isVisible()).toBeTruthy();
+    await pill.hover();
+    await pill.click();
+    await expect.poll(() => page.locator("html").getAttribute("data-opened-link"))
+      .toBe("https://example.test/article");
+
+    await runPaletteCommand(page, "reading");
+    const readOnlyFragment = await link.evaluate((element) => {
+      const rect = element.getClientRects()[0];
+      return rect === undefined ? null : { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+    });
+    if (readOnlyFragment === null) throw new Error("read-only link has no visible bounds");
+    await page.mouse.move(readOnlyFragment.x + 3, readOnlyFragment.y + readOnlyFragment.height / 2);
+    await expect.poll(() => pill.count()).toBe(0);
+    await page.locator("html").evaluate((element) => element.removeAttribute("data-opened-link"));
+    await page.mouse.click(readOnlyFragment.x + 3, readOnlyFragment.y + readOnlyFragment.height / 2);
+    await expect.poll(() => page.locator("html").getAttribute("data-opened-link"))
+      .toBe("https://example.test/article");
+
+    const readingToggle = page.locator(".reading-mode-toggle");
+    await readingToggle.click();
+    await expect.poll(() => page.locator(".main").getAttribute("class"))
+      .not.toContain("reading-mode");
+    await readingToggle.click();
+    await expect.poll(() => page.locator(".main").getAttribute("class"))
+      .toContain("reading-mode");
+
+    const themeToggle = page.locator(".theme-toggle");
+    await themeToggle.click();
+    await expect.poll(() => page.locator("html").getAttribute("data-theme")).toBe("dark");
+    await expect.poll(() => page.evaluate(() => getComputedStyle(document.documentElement).backgroundColor))
+      .toBe("rgb(25, 26, 28)");
+    await page.reload();
+    await page.waitForSelector(".main");
+    await expect.poll(() => page.locator("html").getAttribute("data-theme")).toBe("dark");
+    await page.locator(".theme-toggle").click();
+    await expect.poll(() => page.locator("html").getAttribute("data-theme")).toBe("light");
+    await page.close();
+  });
+
   it("highlights the active outline heading as the reader scrolls", async () => {
     const page = await newLoggedPage();
     await page.goto(baseUrl);

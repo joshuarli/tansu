@@ -119,6 +119,12 @@ function linkElementFromEvent(event: MouseEvent, root?: HTMLElement): HTMLElemen
   return linkEl;
 }
 
+function linkHitRect(link: HTMLElement, x: number, y: number): DOMRect | null {
+  const rects = Array.from(link.getClientRects());
+  return rects.find((rect) => x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) ??
+    rects[rects.length - 1] ?? null;
+}
+
 function linkUrlFromElement(view: EditorView, linkEl: HTMLElement): string | null {
   const pos = view.posAtDOM(linkEl);
   if (pos < 0) return null;
@@ -135,10 +141,11 @@ function linkUrlFromElement(view: EditorView, linkEl: HTMLElement): string | nul
   return view.state.doc.sliceString(urlNode.from, urlNode.to) || null;
 }
 
-function makeReadOnlyLinkPopup(onLinkClick: (url: string) => void): Extension {
+function makeLinkPopup(onLinkClick: (url: string) => void): Extension {
   return ViewPlugin.fromClass(
     class {
       private popup: HTMLButtonElement | null = null;
+      private anchor: HTMLElement | null = null;
       private hideTimer: number | null = null;
 
       constructor(private readonly view: EditorView) {
@@ -149,7 +156,7 @@ function makeReadOnlyLinkPopup(onLinkClick: (url: string) => void): Extension {
       }
 
       update(update: ViewUpdate) {
-        if (update.docChanged || !update.view.state.facet(readOnlyFacet)) this.close();
+        if (update.docChanged || update.view.state.facet(readOnlyFacet)) this.close();
       }
 
       destroy() {
@@ -161,16 +168,19 @@ function makeReadOnlyLinkPopup(onLinkClick: (url: string) => void): Extension {
       }
 
       private readonly onPointerOver = (event: PointerEvent) => {
-        if (!this.view.state.facet(readOnlyFacet)) return;
+        if (this.view.state.facet(readOnlyFacet)) return;
         const link = linkElementFromEvent(event, this.view.contentDOM);
         if (!link) return;
         const url = linkUrlFromElement(this.view, link);
-        if (url) this.show(url, link.getBoundingClientRect());
+        const rect = linkHitRect(link, event.clientX, event.clientY);
+        if (url && rect) this.show(url, link, rect);
       };
 
       private readonly onPointerOut = (event: PointerEvent) => {
+        const link = linkElementFromEvent(event, this.view.contentDOM);
+        if (link !== this.anchor) return;
         const related = event.relatedTarget;
-        if (related instanceof Node && this.view.contentDOM.contains(related)) return;
+        if (related instanceof Node && (this.anchor?.contains(related) || this.popup?.contains(related))) return;
         this.scheduleClose();
       };
 
@@ -180,11 +190,13 @@ function makeReadOnlyLinkPopup(onLinkClick: (url: string) => void): Extension {
         this.clearHideTimer();
         this.popup?.remove();
         this.popup = null;
+        this.anchor = null;
       };
 
-      private show(url: string, rect: DOMRect) {
+      private show(url: string, anchor: HTMLElement, rect: DOMRect) {
         this.clearHideTimer();
         if (this.popup?.dataset['url'] === url) {
+          this.anchor = anchor;
           this.position(rect);
           return;
         }
@@ -203,6 +215,7 @@ function makeReadOnlyLinkPopup(onLinkClick: (url: string) => void): Extension {
         });
         document.body.append(popup);
         this.popup = popup;
+        this.anchor = anchor;
         this.position(rect);
       }
 
@@ -1335,7 +1348,7 @@ export function inlinePreview(config: InlinePreviewConfig = {}): Extension {
     fencedCodeSelectionPlugin,
     freezeMousePlugin,
     treeProgressPlugin,
-    makeReadOnlyLinkPopup(onLinkClick),
+    makeLinkPopup(onLinkClick),
     makeLinkClickHandler(onLinkClick),
     // Prec.highest to beat @codemirror/lang-markdown's own Enter
     // handler, which is registered internally by the `markdown()`

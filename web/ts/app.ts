@@ -36,6 +36,14 @@ import type { OutlineHeading } from "./editor/source-navigation.js";
 const SESSION_SAVE_DELAY_MS = 250;
 const EDITOR_CAPTURE_DELAY_MS = 150;
 const MIN_SEARCH_QUERY_CHARS = 1;
+const THEME_STORAGE_KEY = "tansu2.theme.v1";
+
+function savedTheme(): State["theme"] {
+  const value = window.localStorage.getItem(THEME_STORAGE_KEY);
+  if (value === null || value === "light") return "light";
+  if (value === "dark") return "dark";
+  throw new TypeError(`Unsupported saved theme: ${value}`);
+}
 
 function markdownPreview(source: string): string {
   const body = source.replace(/^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/, "");
@@ -108,6 +116,8 @@ export class TansuApp {
     private readonly services: AppServices = defaultServices,
   ) {
     this.state = createState(vaultId("boot"));
+    this.state.theme = savedTheme();
+    document.documentElement.dataset["theme"] = this.state.theme;
     this.workspaceId = this.services.workspace.createWorkspaceId();
     this.editorMount.className = "editor-mount";
     this.editorMount.id = "editor-mount";
@@ -1703,6 +1713,14 @@ export class TansuApp {
       }
       case "reading.toggle": {
         this.state.readingMode = !this.state.readingMode;
+        this.render();
+        return;
+      }
+      case "theme.toggle": {
+        const theme = this.state.theme === "dark" ? "light" : "dark";
+        window.localStorage.setItem(THEME_STORAGE_KEY, theme);
+        this.state.theme = theme;
+        document.documentElement.dataset["theme"] = theme;
         this.render();
         return;
       }

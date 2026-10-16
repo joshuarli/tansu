@@ -76,6 +76,7 @@ export type ContextMenuState = {
 };
 
 export type State = {
+  theme: "light" | "dark";
   authRequired: boolean;
   authBusy: "login" | "enroll" | "logout" | null;
   authError: string | null;
@@ -115,6 +116,7 @@ export type State = {
 
 export function createState(vault: VaultId): State {
   return {
+    theme: "light",
     authRequired: false,
     authBusy: null,
     authError: null,

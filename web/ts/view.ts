@@ -254,6 +254,56 @@ function renderVaultPicker(state: State, actions: ViewActions): HTMLElement {
   return vaultControl;
 }
 
+function renderFloatingControls(state: State, actions: ViewActions): HTMLElement {
+  const readingButton = button(
+    "",
+    state.readingMode ? "Switch to edit mode" : "Switch to reading mode",
+    (event) => {
+      event.stopPropagation();
+      actions.dispatch({ type: "reading.toggle" });
+    },
+    "floating-control-button reading-mode-toggle",
+  );
+  readingButton.setAttribute("aria-label", readingButton.title);
+  readingButton.setAttribute("aria-pressed", String(state.readingMode));
+  readingButton.append(controlIcon([
+    "M12 7v14",
+    "M3 5.5A2.5 2.5 0 0 1 5.5 3H12v18H5.5A2.5 2.5 0 0 1 3 18.5z",
+    "M21 5.5A2.5 2.5 0 0 0 18.5 3H12v18h6.5a2.5 2.5 0 0 0 2.5-2.5z",
+  ]));
+
+  const themeIsDark = state.theme === "dark";
+  const themeButton = button(
+    "",
+    themeIsDark ? "Switch to light mode" : "Switch to dark mode",
+    (event) => {
+      event.stopPropagation();
+      actions.dispatch({ type: "theme.toggle" });
+    },
+    "floating-control-button theme-toggle",
+  );
+  themeButton.setAttribute("aria-label", themeButton.title);
+  themeButton.setAttribute("aria-pressed", String(themeIsDark));
+  themeButton.append(controlIcon(themeIsDark
+    ? ["M12 3v2", "M12 19v2", "M5.64 5.64l1.42 1.42", "M16.94 16.94l1.42 1.42", "M3 12h2", "M19 12h2", "M5.64 18.36l1.42-1.42", "M16.94 7.06l1.42-1.42", "M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8z"]
+    : ["M20.9 13A9 9 0 1 1 11 3.1 7 7 0 0 0 20.9 13z"]));
+
+  return el("div", "floating-controls", renderVaultPicker(state, actions), readingButton, themeButton);
+}
+
+function controlIcon(paths: string[]): SVGSVGElement {
+  const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  icon.setAttribute("viewBox", "0 0 24 24");
+  icon.setAttribute("aria-hidden", "true");
+  icon.setAttribute("focusable", "false");
+  for (const pathData of paths) {
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    path.setAttribute("d", pathData);
+    icon.append(path);
+  }
+  return icon;
+}
+
 function renderNoteOutline(state: State, actions: ViewActions): HTMLElement | null {
   const active = activeTab(state);
   if (active === undefined || loadedDraft(active) === null) return null;
@@ -476,7 +526,7 @@ function renderMain(state: State, actions: ViewActions): HTMLElement {
   }
   main.append(topbar);
   main.append(workspace, renderStatusBar(state));
-  main.append(renderVaultPicker(state, actions));
+  main.append(renderFloatingControls(state, actions));
   const outline = renderNoteOutline(state, actions);
   if (outline !== null) {
     main.classList.add("has-note-outline");

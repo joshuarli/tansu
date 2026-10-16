@@ -112,6 +112,24 @@ describe("view rendering", () => {
     expect(vaultControl.classList.contains("open")).toBeFalsy();
   });
 
+  it("renders reading and theme toggles beside the vault picker", () => {
+    const state = baseState();
+    const actions = actionSpies();
+    const root = render(state, actions);
+    const controls = root.querySelector<HTMLElement>(".floating-controls")!;
+    const reading = controls.querySelector<HTMLButtonElement>(".reading-mode-toggle")!;
+    const theme = controls.querySelector<HTMLButtonElement>(".theme-toggle")!;
+
+    expect(controls.querySelector(".vault-control")).not.toBeNull();
+    expect(reading.getAttribute("aria-label")).toBe("Switch to reading mode");
+    expect(theme.getAttribute("aria-label")).toBe("Switch to dark mode");
+    reading.click();
+    theme.click();
+
+    expectDispatched(actions, { type: "reading.toggle" });
+    expectDispatched(actions, { type: "theme.toggle" });
+  });
+
   it("renders outline and current-note find controls without replacing the editor region", () => {
     const state = baseState();
     const tab = tabFromDocument({ meta: note("n1", "one.md", "One"), content: "# One\nbody\n" });

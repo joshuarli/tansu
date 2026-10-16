@@ -45,6 +45,27 @@
   text-rendering: optimizeLegibility;
 }
 
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --color-bg: #191a1c;
+  --color-bg-elevated: #222427;
+  --color-bg-hover: #303237;
+  --color-bg-soft: #202124;
+  --color-text: #e9eaec;
+  --color-text-muted: #b2b6be;
+  --color-text-subtle: #8d929b;
+  --color-text-inverted: #191a1c;
+  --color-accent: #b7c0cc;
+  --color-accent-soft: rgb(255 255 255 / 12%);
+  --color-border: rgb(255 255 255 / 12%);
+  --color-danger: #f09b91;
+  --color-danger-bg: #3b2524;
+  --color-warning: #e9bf75;
+  --color-warning-bg: #352d20;
+  --color-backdrop: rgb(0 0 0 / 48%);
+  --shadow-floating: 0 8px 24px rgb(0 0 0 / 42%);
+}
+
 * {
   box-sizing: border-box;
 }
@@ -241,11 +262,18 @@ button {
   color: var(--color-text);
 }
 
-.floating-vault-control {
+.floating-controls {
   position: absolute;
   bottom: 20px;
   left: 20px;
   z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.floating-vault-control {
+  position: relative;
   display: flex;
   align-items: center;
   width: max-content;
@@ -256,6 +284,37 @@ button {
   box-shadow: 0 4px 14px rgb(0 0 0 / 3%);
   padding: 0 9px;
   backdrop-filter: blur(12px);
+}
+
+.floating-control-button {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  color: var(--color-text-muted);
+  background: color-mix(in srgb, var(--color-bg) 88%, transparent);
+  box-shadow: 0 4px 14px rgb(0 0 0 / 3%);
+  backdrop-filter: blur(12px);
+}
+
+.floating-control-button:hover,
+.floating-control-button[aria-pressed="true"] {
+  color: var(--color-text);
+  background: var(--color-bg-hover);
+}
+
+.floating-control-button svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.7;
 }
 
 .floating-vault-control .vault-label {
@@ -439,7 +498,7 @@ button {
 }
 
 .tab.active {
-  background: #f3f3f3;
+  background: var(--color-bg-soft);
   color: var(--color-text);
   font-weight: 520;
 }
@@ -1321,7 +1380,7 @@ button {
 }
 
 .tab.active {
-  background: #f3f3f3;
+  background: var(--color-bg-soft);
   font-weight: 400;
 }
 
@@ -1400,7 +1459,7 @@ button {
 .editor-mount .cm-line.cm-frontmatter-line.cm-atomic-hr::after { display: none; }
 
 .overlay-backdrop {
-  background: rgb(36 43 54 / 8%);
+  background: var(--color-backdrop);
 }
 
 #app:has(.overlay-backdrop) > .main {
@@ -1411,13 +1470,13 @@ button {
   top: 52px;
   width: min(592px, calc(100vw - 32px));
   border-radius: 12px;
-  background: rgb(254 254 255);
+  background: var(--color-bg-elevated);
   box-shadow: 0 8px 24px rgb(0 0 0 / 7%), inset 0 0 0 0.5px rgb(0 0 0 / 2.5%);
   padding: 16px;
 }
 
 .modal-panel {
-  background: rgb(254 254 255);
+  background: var(--color-bg-elevated);
   box-shadow: 0 6px 18px rgb(0 0 0 / 17%), inset 0 0 0 0.5px rgb(0 0 0 / 4.5%);
 }
 
@@ -1498,7 +1557,7 @@ button {
   height: 25px;
   min-height: 25px;
   padding: 0;
-  color: rgb(33 36 41);
+  color: var(--color-text);
   font-size: 17px;
   line-height: 22px;
 }
@@ -1627,18 +1686,18 @@ button {
   height: 28px;
   border-radius: 7px;
   padding: 4px 12px;
-  color: rgb(33 36 41);
+  color: var(--color-text);
   font-size: 13.5px;
   font-weight: 400;
   line-height: 20px;
 }
 
 .palette-command-row.selected {
-  background: rgb(238 239 242);
+  background: var(--color-bg-hover);
 }
 
 .palette-command-row:hover {
-  background: rgb(238 239 242);
+  background: var(--color-bg-hover);
 }
 
 .palette-command-label {
@@ -1685,7 +1744,7 @@ button {
   min-height: 0;
   height: 43px;
   padding-top: 14px;
-  color: rgb(33 36 41);
+  color: var(--color-text);
   font-size: 16px;
   font-weight: 600;
   line-height: 23px;
@@ -1715,11 +1774,11 @@ button {
   width: calc(100% - 40px);
   height: 32px;
   min-height: 32px;
-  border: 1px solid #bac2cc;
+  border: 1px solid var(--color-border);
   border-radius: 6px;
-  background: #fff;
+  background: var(--color-bg);
   padding: 4px 9px 0;
-  color: rgb(33 36 41);
+  color: var(--color-text);
   font-size: 13.5px;
   line-height: 20px;
 }
@@ -1731,8 +1790,8 @@ button {
 }
 
 .note-dialog-panel.is-rename .settings-input::selection {
-  background: rgb(238 239 242);
-  color: rgb(33 36 41);
+  background: var(--color-bg-hover);
+  color: var(--color-text);
 }
 
 .note-dialog-panel.is-rename .rename-actions {
@@ -1760,22 +1819,22 @@ button {
 
 .note-dialog-panel.is-rename .rename-cancel-button {
   width: 70px;
-  border: 1px solid #e3e6eb;
-  background: #fff;
-  color: rgb(110 117 128);
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-elevated);
+  color: var(--color-text-muted);
 }
 
 .note-dialog-panel.is-rename .rename-submit-button {
   width: 76px;
   border: 0;
-  background: rgb(238 239 242);
-  color: rgb(33 36 41);
+  background: var(--color-bg-hover);
+  color: var(--color-text);
 }
 
 .search-panel .search-history-row:first-of-type {
   min-height: 38px;
   border-radius: 8px;
-  background: #eef0f3;
+  background: var(--color-bg-hover);
   color: var(--color-text);
   padding: 8px 12px;
 }
@@ -1898,9 +1957,9 @@ button {
   align-items: center;
   width: 348px;
   height: 32px;
-  border: 0.5px solid #e2e4e8;
+  border: 0.5px solid var(--color-border);
   border-radius: 8px;
-  background: #fff;
+  background: var(--color-bg-elevated);
   padding: 0;
 }
 
@@ -2045,7 +2104,7 @@ button {
   .new-note { margin-left: 3px; }
   .document-title { width: calc(100% - 40px); font-size: 23px; }
   .editor-mount .cm-content { width: calc(100% - 40px); padding-top: 10px; }
-  .floating-vault-control { bottom: 12px; left: 12px; }
+  .floating-controls { bottom: 12px; left: 12px; }
   .selection-toolbar-button { width: 34px; height: 34px; }
   .find-bar { right: 12px; width: min(348px, calc(100vw - 24px)); }
 }
