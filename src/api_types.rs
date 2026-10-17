@@ -353,6 +353,35 @@ pub struct V2NoteDocument {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
+pub struct V2LinkedNote {
+    pub note_id: String,
+    pub path: String,
+    pub title: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct V2Backlink {
+    pub note: V2LinkedNote,
+    pub mentions: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct V2NoteLinksResponse {
+    pub backlinks: Vec<V2Backlink>,
+    pub outgoing: Vec<V2LinkedNote>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct V2NotePreview {
+    pub note_id: String,
+    pub preview: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
 pub struct V2NotePrecondition {
     #[ts(type = "number")]
     pub base_revision: i64,

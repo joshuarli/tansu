@@ -1,7 +1,7 @@
 # Tansu2 TODO
 
 Prefix: TNS
-Next: 81
+Next: 83
 
 ### TNS-050 · P3 · Move document state into a per-document controller
 
@@ -173,3 +173,21 @@ Next: 81
 - **Recommendation:** Run the app tests against `fake-indexeddb` and delete the seam and the fake.
 - **Fix with:** renovate-tests
 - **Effort:** M
+
+### TNS-081 · P3 · Add a history scrubber and visual conflict-draft merge
+
+- **Area:** Architecture
+- **Where:** `src/history.rs`, `web/ts/app/document-session.ts`, `web/ts/editor/`
+- **Problem:** Every accepted content-changing write has a recoverable snapshot, but the UI offers no way to browse, diff, restore, or branch from one. Conflict drafts are separate notes with no side-by-side merge.
+- **Recommendation:** Add a timeline slider on the editor edge over a note's snapshots, with a live diff (inserted text green, removed text fading), restore, and branch-from-here. Render conflict drafts as a two-pane merge. Needs a snapshot-list API first; surface it in `docs/api.md`.
+- **Fix with:** none
+- **Effort:** L
+
+### TNS-082 · P3 · Add vault-local ambient intelligence
+
+- **Area:** Architecture
+- **Where:** `src/search.rs`, `src/tags.rs`, `web/ts/app.ts`
+- **Problem:** No tag suggestions, related notes, long-note summaries, or ask-your-vault chat. Any of them sends note content to a model, which needs a privacy design before code: what leaves the machine, opt-in, and per-vault scope. Indexing and model failures must not affect accepted writes.
+- **Recommendation:** Write an RFC for the privacy and model-hosting boundary, then ship in order: related notes (derived from the search index, no model), tag suggestions, catch-me-up summary, vault chat with notes cited as clickable chips.
+- **Fix with:** none
+- **Effort:** L

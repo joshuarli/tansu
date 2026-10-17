@@ -1,6 +1,7 @@
 import type {
   V2ConflictDraftDocument,
   V2NoteDocument,
+  V2NoteLinksResponse,
   V2NoteMeta,
   V2RevisionDocument,
   V2RevisionMeta,
@@ -59,7 +60,6 @@ export type LocalDraftTab = TabFields & {
 export type Tab = SavedTab | LocalDraftTab;
 
 export type NoteDialog =
-  | { kind: "create"; localDraftId: LocalDraftId; title: string }
   | { kind: "rename"; noteId: NoteId; title: string }
   | { kind: "tag"; value: string }
   | { kind: "delete"; noteId: NoteId };
@@ -70,8 +70,27 @@ export type ContextMenuState = {
   y: number;
 };
 
+export type NoteLinksState =
+  | { noteId: string; phase: "loading" }
+  | { noteId: string; phase: "ready"; links: V2NoteLinksResponse }
+  | { noteId: string; phase: "error"; message: string };
+
+export const THEMES = ["light", "dark", "paper"] as const;
+export type Theme = (typeof THEMES)[number];
+
+export function nextTheme(theme: Theme): Theme {
+  return THEMES[(THEMES.indexOf(theme) + 1) % THEMES.length]!;
+}
+
+export function parseTheme(value: string | null): Theme {
+  if (value === null) return "light";
+  const theme = THEMES.find((candidate) => candidate === value);
+  if (theme === undefined) throw new TypeError(`Unsupported saved theme: ${value}`);
+  return theme;
+}
+
 export type State = {
-  theme: "light" | "dark";
+  theme: Theme;
   authRequired: boolean;
   authBusy: "login" | "enroll" | "logout" | null;
   authError: string | null;
@@ -95,6 +114,8 @@ export type State = {
   searchOverlayCoverage: V2OverlayCoverage | null;
   commandOpen: boolean;
   commandFilter: string;
+  commandHits: V2SearchHit[] | null;
+  commandIndex: number;
   revisionsOpen: boolean;
   revisionNoteId: NoteId | null;
   revisionList: V2RevisionMeta[] | null;
@@ -108,6 +129,10 @@ export type State = {
   notice: string | null;
   imageUploads: Set<number>;
   readingMode: boolean;
+  focusMode: boolean;
+  linkRailCollapsed: boolean;
+  noteLinks: NoteLinksState | null;
+  knownLinks: Map<string, V2NoteLinksResponse>;
 };
 
 export function createState(vault: VaultId): State {
@@ -136,6 +161,8 @@ export function createState(vault: VaultId): State {
     searchOverlayCoverage: null,
     commandOpen: false,
     commandFilter: "",
+    commandHits: null,
+    commandIndex: 0,
     revisionsOpen: false,
     revisionNoteId: null,
     revisionList: null,
@@ -149,6 +176,10 @@ export function createState(vault: VaultId): State {
     notice: null,
     imageUploads: new Set(),
     readingMode: false,
+    focusMode: false,
+    linkRailCollapsed: true,
+    noteLinks: null,
+    knownLinks: new Map(),
   };
 }
 

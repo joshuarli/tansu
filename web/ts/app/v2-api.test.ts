@@ -417,6 +417,20 @@ describe("v2 API client", () => {
       .rejects.toBeInstanceOf(V2ProtocolError);
   });
 
+  it("decodes note links and previews and rejects malformed or mismatched bodies", async () => {
+    const links = {
+      backlinks: [{ note: { noteId: "n2", path: "two.md", title: "Two" }, mentions: ["See [[One]]"] }],
+      outgoing: [{ noteId: "n3", path: "three.md", title: "Three" }],
+    };
+    await expect(vaultWithResponse(links).noteLinks("n1")).resolves.toEqual(links);
+    await expect(vaultWithResponse({ ...links, outgoing: "x" }).noteLinks("n1"))
+      .rejects.toBeInstanceOf(V2ProtocolError);
+    await expect(vaultWithResponse({ noteId: "n1", preview: "Hello" }).notePreview("n1"))
+      .resolves.toEqual({ noteId: "n1", preview: "Hello" });
+    await expect(vaultWithResponse({ noteId: "n9", preview: "Hello" }).notePreview("n1"))
+      .rejects.toBeInstanceOf(V2ProtocolError);
+  });
+
   it("reads the shared CSRF cookie for mutations and sends it with image uploads", async () => {
     const previous = Object.getOwnPropertyDescriptor(globalThis, "document");
     Object.defineProperty(globalThis, "document", {

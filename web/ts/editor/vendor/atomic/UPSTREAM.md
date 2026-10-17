@@ -18,7 +18,8 @@ whole-document decorations across syntax-safe edits in plain paragraphs and cach
 `table-widget.ts` resolves the edited cell's current source span and replaces
 only that span. `wiki-links.ts` skips `[[...]]` inside `![[...]]` image syntax.
 The included source files also use explicit type assertions and overrides
-needed by Tansu's stricter TypeScript options. Tansu rejects every unapproved
+needed by Tansu's stricter TypeScript options. `atomic-theme.ts` tags `processingInstruction` tokens with the `tansu-syntax-mark` class
+for the active-line fade. Tansu rejects every unapproved
 document-changing transaction while read-only.
 
 To update, check out the recorded commit, compare each imported path, copy the

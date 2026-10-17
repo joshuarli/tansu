@@ -34,6 +34,8 @@ export const KEYBOARD_SHORTCUTS = [
   { action: "close", key: "x", modifiers: { ctrl: true }, label: "Ctrl+X", description: "Close current tab" },
   { action: "delete", key: "Backspace", modifiers: { meta: true }, label: "⌘⌫", description: "Move current note to trash" },
   { action: "reopen", key: "t", modifiers: { meta: true, shift: true }, label: "⌘⇧T", description: "Reopen last closed note" },
+  { action: "focus", key: "Enter", modifiers: { meta: true, shift: true }, label: "⌘⇧Enter", description: "Toggle focus mode" },
+  { action: "focus", key: "Enter", modifiers: { ctrl: true, shift: true }, label: "Ctrl+Shift+Enter", description: "Toggle focus mode" },
   { action: "help.open", key: "Escape", modifiers: {}, label: "Esc", description: "Open keyboard shortcuts" },
 ] as const satisfies readonly KeyboardShortcut[];
 

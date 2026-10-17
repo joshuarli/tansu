@@ -3,6 +3,7 @@ import { button, el, span } from "./dom.ts";
 import {
   activeTab,
   loadedDraft,
+  nextTheme,
   tabIsDirty,
   tabIdentity,
   toNoteId,
@@ -14,7 +15,9 @@ import { vaultId } from "./app/identity.ts";
 import { excludedFoldersProblem, normalizeSettings, SETTINGS_LIMITS } from "./app/settings-policy.ts";
 import { KEYBOARD_SHORTCUTS } from "./app/keyboard-shortcuts.ts";
 import { sameTabIdentity, type TabIdentity } from "./app/tab-identity.ts";
+import { renderLinksRail } from "./links-rail.ts";
 import { createTagPill } from "./tag-pill.ts";
+import { paletteEntries, paletteRawQuery, parsePaletteQuery, type PaletteEntry, type PaletteMode } from "./app/commands.ts";
 import type { V2OverlayCoverage, V2SearchHit } from "./types.generated.ts";
 import type { FindMatch, Outline } from "./editor/source-navigation.js";
 
@@ -275,10 +278,9 @@ function renderFloatingControls(state: State, actions: ViewActions): HTMLElement
     "M21 5.5A2.5 2.5 0 0 0 18.5 3H12v18h6.5a2.5 2.5 0 0 0 2.5-2.5z",
   ]));
 
-  const themeIsDark = state.theme === "dark";
   const themeButton = button(
     "",
-    themeIsDark ? "Switch to light mode" : "Switch to dark mode",
+    `Switch to ${nextTheme(state.theme)} mode`,
     (event) => {
       event.stopPropagation();
       actions.dispatch({ type: "theme.toggle" });
@@ -286,9 +288,11 @@ function renderFloatingControls(state: State, actions: ViewActions): HTMLElement
     "floating-control-button theme-toggle",
   );
   themeButton.setAttribute("aria-label", themeButton.title);
-  themeButton.setAttribute("aria-pressed", String(themeIsDark));
-  themeButton.append(controlIcon(themeIsDark
+  themeButton.dataset["theme"] = state.theme;
+  themeButton.append(controlIcon(nextTheme(state.theme) === "light"
     ? ["M12 3v2", "M12 19v2", "M5.64 5.64l1.42 1.42", "M16.94 16.94l1.42 1.42", "M3 12h2", "M19 12h2", "M5.64 18.36l1.42-1.42", "M16.94 7.06l1.42-1.42", "M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8z"]
+    : nextTheme(state.theme) === "paper"
+    ? ["M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z", "M14 3v5h5", "M9 13h6", "M9 17h6"]
     : ["M20.9 13A9 9 0 1 1 11 3.1 7 7 0 0 0 20.9 13z"]));
 
   return el("div", "floating-controls", renderVaultPicker(state, actions), readingButton, themeButton);
@@ -377,7 +381,7 @@ function renderMain(state: State, actions: ViewActions): HTMLElement {
   const reading = state.readingMode;
   const main = el(
     "main",
-    ["main", reading ? "reading-mode" : "", state.findOpen ? "find-open" : ""]
+    ["main", reading ? "reading-mode" : "", state.focusMode ? "focus-mode" : "", state.findOpen ? "find-open" : ""]
       .filter(Boolean)
       .join(" "),
   );
@@ -535,6 +539,8 @@ function renderMain(state: State, actions: ViewActions): HTMLElement {
     main.classList.add("has-note-outline");
     main.append(outline);
   }
+  const linksRail = renderLinksRail(state, actions.dispatch);
+  if (linksRail !== null) main.append(linksRail);
   if (findBar !== null) main.append(findBar);
   return main;
 }
@@ -583,36 +589,7 @@ function activeDraftStorageFailed(tab: Tab): boolean {
 
 function renderOverlays(state: State, actions: ViewActions): HTMLElement {
   const host = el("div", "overlay-host");
-  if (state.commandOpen) {
-    const input = document.createElement("input");
-    input.className = "command-input";
-    input.dataset["key"] = "command-filter";
-    input.value = state.commandFilter;
-    input.placeholder = "Type a command";
-    input.addEventListener("input", () => {
-      actions.dispatch({ type: "command.filter", query: input.value });
-    });
-    const list = el("div", "command-list");
-    for (const [index, command] of actions.commandItems().entries()) {
-      const row = button(
-        "",
-        command.label,
-        () => actions.dispatch({ type: "command.run", id: command.id }),
-        "command-row palette-command-row",
-      );
-      row.dataset["commandId"] = command.id;
-      row.setAttribute("aria-label", command.label);
-      if (index === 0 && state.commandFilter === "") row.classList.add("selected");
-      row.append(span(command.label, "palette-command-label"));
-      if (command.shortcut !== undefined) row.append(span(command.shortcut, "palette-command-shortcut"));
-      list.append(row);
-    }
-    const field = el("div", "command-field", input);
-    const panel = el("div", "command-panel command-palette-panel", field, list);
-    panel.dataset["key"] = "modal:command";
-    host.append(backdrop(actions), panel);
-    focusOnOpen(input);
-  }
+  if (state.commandOpen) host.append(backdrop(actions), renderCommandPalette(state, actions));
   if (state.searchOpen) {
     const input = document.createElement("input");
     input.className = "command-input";
@@ -738,6 +715,116 @@ function renderOverlays(state: State, actions: ViewActions): HTMLElement {
     host.append(status);
   }
   return host;
+}
+
+const PALETTE_PLACEHOLDERS: Readonly<Record<PaletteMode, string>> = {
+  notes: "Search notes · > actions · # tags",
+  actions: "Run an action",
+  tags: "Filter by tag",
+};
+
+const PALETTE_MODE_GLYPHS: Readonly<Record<Exclude<PaletteMode, "notes">, string>> = {
+  actions: ">",
+  tags: "#",
+};
+
+function renderCommandPalette(state: State, actions: ViewActions): HTMLElement {
+  const { mode, text } = parsePaletteQuery(state.commandFilter);
+  const entries = paletteEntries(state, actions.commandItems());
+  const selectedIndex = Math.min(state.commandIndex, Math.max(entries.length - 1, 0));
+  const input = document.createElement("input");
+  input.className = "command-input";
+  input.dataset["key"] = "command-filter";
+  input.dataset["mode"] = mode;
+  input.value = text;
+  input.placeholder = PALETTE_PLACEHOLDERS[mode];
+  input.setAttribute("aria-label", "Command palette");
+  input.addEventListener("input", () => {
+    const current = input.dataset["mode"] === "actions" || input.dataset["mode"] === "tags" ? input.dataset["mode"] : "notes";
+    actions.dispatch({ type: "command.filter", query: paletteRawQuery(current, input.value) });
+  });
+  input.addEventListener("keydown", (event) => {
+    if (event.isComposing) return;
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      actions.dispatch({ type: "command.move", delta: event.key === "ArrowDown" ? 1 : -1 });
+    } else if (event.key === "Enter") {
+      event.preventDefault();
+      input.closest(".command-palette-panel")?.querySelector<HTMLElement>(".palette-entry.selected")?.click();
+    } else if (event.key === "Backspace" && input.value === "" && input.dataset["mode"] !== "notes") {
+      event.preventDefault();
+      actions.dispatch({ type: "command.filter", query: "" });
+    }
+  });
+  const field = el("div", "command-field");
+  if (mode !== "notes") {
+    const chip = span(PALETTE_MODE_GLYPHS[mode], "palette-mode-chip");
+    chip.dataset["key"] = "command-mode-chip";
+    field.append(chip);
+  }
+  field.append(input);
+  const list = el("div", "command-list palette-list");
+  for (const [index, entry] of entries.entries()) {
+    list.append(paletteRow(entry, index === selectedIndex, actions));
+  }
+  if (entries.length === 0) list.append(span("No matches", "search-status"));
+  const panel = el("div", "command-panel command-palette-panel", field, list);
+  panel.dataset["key"] = "modal:command";
+  focusOnOpen(input);
+  queueMicrotask(() => {
+    document.querySelector<HTMLElement>(".palette-entry.selected")?.scrollIntoView?.({ block: "nearest" });
+  });
+  return panel;
+}
+
+function paletteRow(entry: PaletteEntry, selected: boolean, actions: ViewActions): HTMLElement {
+  if (entry.kind === "command") {
+    const command = entry.command;
+    const row = button(
+      "",
+      command.label,
+      () => actions.dispatch({ type: "command.run", id: command.id }),
+      "command-row palette-command-row palette-entry",
+    );
+    row.dataset["commandId"] = command.id;
+    row.setAttribute("aria-label", command.label);
+    row.classList.toggle("selected", selected);
+    row.append(span(command.label, "palette-command-label"));
+    if (command.shortcut !== undefined) row.append(span(command.shortcut, "palette-command-shortcut"));
+    return row;
+  }
+  if (entry.kind === "hit") {
+    const hit = entry.hit;
+    const row = button(
+      "",
+      hit.path || hit.title,
+      () => actions.dispatch({ type: "search.hitOpen", hit }),
+      "command-row palette-command-row palette-note-row palette-entry",
+    );
+    row.dataset["key"] = `palette-hit:${paletteHitKey(hit)}`;
+    row.classList.toggle("selected", selected);
+    row.append(span(hit.title || hit.path, "palette-command-label"), span(hit.path, "palette-note-path"));
+    return row;
+  }
+  const note = entry.note;
+  const row = button(
+    "",
+    note.path,
+    () => actions.dispatch({ type: "search.recentOpen", noteId: toNoteId(note.noteId) }),
+    "command-row palette-command-row palette-note-row palette-entry",
+  );
+  row.dataset["key"] = `palette-note:${note.noteId}`;
+  row.dataset["noteId"] = note.noteId;
+  row.classList.toggle("selected", selected);
+  row.append(span(note.title || note.path, "palette-command-label"), span(note.path, "palette-note-path"));
+  return row;
+}
+
+function paletteHitKey(hit: V2SearchHit): string {
+  const identity = hit.identity;
+  return identity.kind === "newLocalDraft"
+    ? `${identity.kind}:${identity.localId}:${identity.sourceHash}`
+    : `${identity.kind}:${identity.noteId}:${identity.sourceHash}`;
 }
 
 function backdrop(actions: ViewActions): HTMLElement {
@@ -921,28 +1008,18 @@ function renderNoteDialog(state: State, actions: ViewActions): HTMLElement {
   const dialog = state.noteDialog;
   const isDelete = dialog?.kind === "delete";
   const isRename = dialog?.kind === "rename";
-  const title =
-    dialog?.kind === "create"
-      ? "New Note"
-      : isRename
-        ? "Rename note"
-        : dialog?.kind === "tag"
-          ? "Add Tag"
-          : "Delete Note";
+  const title = isRename ? "Rename note" : dialog?.kind === "tag" ? "Add Tag" : "Delete Note";
   const inputEl =
     dialog !== null && dialog.kind !== "delete"
       ? input(title, dialog.kind === "tag" ? dialog.value : dialog.title)
       : null;
   if (inputEl !== null) inputEl.dataset["key"] = `note-dialog-input:${dialog?.kind ?? "delete"}`;
-  const isCreate = dialog?.kind === "create";
   const isTag = dialog?.kind === "tag";
-  const isCompact = isCreate || isTag;
-  const fieldLabel = isTag ? "Tag" : "Note title";
-  if (inputEl !== null && isCompact) inputEl.placeholder = isTag ? "Add tag" : "Note title";
+  if (inputEl !== null && isTag) inputEl.placeholder = "Add tag";
   const panel = el(
     "form",
-    `modal-panel note-dialog-panel${isCompact ? " is-create" : ""}${isTag ? " is-tag" : ""}${isRename ? " is-rename" : ""}`,
-    ...(isCompact
+    `modal-panel note-dialog-panel${isTag ? " is-create" : ""}${isTag ? " is-tag" : ""}${isRename ? " is-rename" : ""}`,
+    ...(isTag
       ? []
       : [el(
         "div",
@@ -954,8 +1031,6 @@ function renderNoteDialog(state: State, actions: ViewActions): HTMLElement {
     ? "delete"
     : dialog.kind === "rename" || dialog.kind === "delete"
     ? `${dialog.kind}:${dialog.noteId}`
-    : dialog.kind === "create"
-    ? `create:${dialog.localDraftId}`
     : "tag";
   panel.dataset["key"] = `modal:note:${dialogKey}`;
   if (isDelete) {
@@ -979,8 +1054,8 @@ function renderNoteDialog(state: State, actions: ViewActions): HTMLElement {
         ),
       ),
     );
-  } else if (inputEl !== null && isCompact) {
-    inputEl.setAttribute("aria-label", fieldLabel);
+  } else if (inputEl !== null && isTag) {
+    inputEl.setAttribute("aria-label", "Tag");
     inputEl.addEventListener("input", () => {
       actions.dispatch({ type: "dialog.input", value: inputEl.value });
     });

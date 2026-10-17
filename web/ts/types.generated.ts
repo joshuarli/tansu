@@ -35,6 +35,14 @@ export type V2NoteMeta = { noteId: string, path: string, title: string, tags: Ar
 
 export type V2NoteDocument = { meta: V2NoteMeta, content: string, };
 
+export type V2LinkedNote = { noteId: string, path: string, title: string, };
+
+export type V2Backlink = { note: V2LinkedNote, mentions: Array<string>, };
+
+export type V2NoteLinksResponse = { backlinks: Array<V2Backlink>, outgoing: Array<V2LinkedNote>, };
+
+export type V2NotePreview = { noteId: string, preview: string, };
+
 export type V2NotePrecondition = { baseRevision: number, baseSourceHash: string, baseDiskHash: string, };
 
 export type V2CreateNoteRequest = { mutationId: string, path: string, content: string, sourceHash: string, };

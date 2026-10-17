@@ -261,10 +261,12 @@ describe("real server harness", () => {
     await themeToggle.click();
     await expect.poll(() => page.locator("html").getAttribute("data-theme")).toBe("dark");
     await expect.poll(() => page.evaluate(() => getComputedStyle(document.documentElement).backgroundColor))
-      .toBe("rgb(25, 26, 28)");
+      .toBe("rgb(23, 23, 23)");
     await page.reload();
     await page.waitForSelector(".main");
     await expect.poll(() => page.locator("html").getAttribute("data-theme")).toBe("dark");
+    await page.locator(".theme-toggle").click();
+    await expect.poll(() => page.locator("html").getAttribute("data-theme")).toBe("paper");
     await page.locator(".theme-toggle").click();
     await expect.poll(() => page.locator("html").getAttribute("data-theme")).toBe("light");
     await page.close();
@@ -296,39 +298,6 @@ describe("real server harness", () => {
     await page.setViewportSize({ width: 1600, height: 1000 });
     await page.goto(baseUrl);
     await page.waitForSelector(".main");
-
-    await page.keyboard.press("Control+/");
-    const searchPanel = page.locator(".search-panel");
-    await searchPanel.waitFor({ state: "visible" });
-    const modalStyle = (panel: typeof searchPanel) =>
-      panel.evaluate((element) => {
-        const style = getComputedStyle(element);
-        return {
-          backdropFilter: style.backdropFilter,
-          backgroundColor: style.backgroundColor,
-          borderRadius: style.borderRadius,
-          boxShadow: style.boxShadow,
-          display: style.display,
-          flexDirection: style.flexDirection,
-          left: style.left,
-          maxHeight: style.maxHeight,
-          overflow: style.overflow,
-          padding: style.padding,
-          top: style.top,
-          transform: style.transform,
-          width: style.width,
-        };
-      });
-    const searchStyle = await modalStyle(searchPanel);
-    await page.keyboard.press("Escape");
-    await searchPanel.waitFor({ state: "detached" });
-
-    await runPaletteCommand(page, "create");
-    const createPanel = page.locator(".note-dialog-panel.is-create");
-    await createPanel.waitFor({ state: "visible" });
-    await expect(modalStyle(createPanel)).resolves.toStrictEqual(searchStyle);
-    await page.keyboard.press("Escape");
-    await createPanel.waitFor({ state: "detached" });
 
     await createCodeMirrorNote(page, "Plain Article");
     const plainSave = page.waitForResponse((response) =>
@@ -473,17 +442,7 @@ describe("real server harness", () => {
       page.evaluate(() => getComputedStyle(document.querySelector(".tabs")!).scrollbarWidth),
     ).resolves.toBe("none");
 
-    await runPaletteCommand(page, "create");
-    await page.waitForSelector(".note-dialog-panel");
-    await page.locator(".overlay-backdrop").click({ position: { x: 4, y: 4 } });
-    await page.waitForSelector(".note-dialog-panel", { state: "detached" });
-
-    await runPaletteCommand(page, "create");
-    await page.locator(".note-dialog-panel input").fill("Meeting Notes");
-    await page.locator(".note-dialog-panel input").press("Enter");
-    await page.waitForFunction(() =>
-      document.querySelector(".tab.active")?.textContent?.includes("Meeting Notes"),
-    );
+    await createCodeMirrorNote(page, "Meeting Notes");
 
     await page.locator(".tab.active").click({ button: "right" });
     await page.waitForSelector(".context-menu");
@@ -1672,8 +1631,8 @@ async function loadNoteByPath(vaultId: string, path: string): Promise<TestNoteDo
 
 async function createCodeMirrorNote(page: Page, title: string): Promise<void> {
   await runPaletteCommand(page, "create");
-  await page.locator(".note-dialog-panel input").fill(title);
-  await page.locator(".note-dialog-panel input").press("Enter");
+  await page.locator("#editor-mount .cm-editor .cm-content").click();
+  await page.keyboard.type(`# ${title}`);
   await page.waitForFunction(
     (expected) => document.querySelector(".tab.active")?.textContent?.includes(expected),
     title,

@@ -18,6 +18,8 @@ catalog and revision state in the XDG data path, keyed by stable vault ID. See
   the runtime drops or the process exits. A second owner fails startup with
   `vault root ... is already owned by another Tansu2 server`.
 - Search is derived state. Indexing failure cannot fail an accepted write.
+- Backlinks, outgoing links, and previews are derived on request from live notes
+  and files by `src/links.rs`. No link index is persisted.
 - Watcher events request reconciliation instead of making semantic edits.
 - Bootstrap returns note metadata, not all note bodies.
 - Inactive restored tabs do not fetch content until selected.
@@ -50,6 +52,7 @@ the next start rebuilds search from canonical content.
 | Snapshots and hashes    | `src/history.rs`                                          |
 | Reconciliation          | `src/reconcile.rs`                                        |
 | Search                  | `src/search.rs`                                           |
+| Link context            | `src/links.rs`, `src/vault.rs`                            |
 | Tags-only frontmatter   | `src/tags.rs`                                             |
 | Vault orchestration     | `src/vault.rs`                                            |
 | Frontend state/API      | `web/ts/app.ts`, `web/ts/app/v2-api.ts`, `web/ts/state.ts`, `web/ts/app/workspace-store.ts` |

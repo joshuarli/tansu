@@ -151,7 +151,7 @@ export const atomicMarkdownHighlight = HighlightStyle.define([
   { tag: t.link, color: 'var(--atomic-editor-link, #818cf8)' },
   { tag: t.url, color: 'var(--atomic-editor-link, #818cf8)' },
 
-  { tag: t.processingInstruction, color: 'var(--atomic-editor-fg-faint, #666)' },
+  { tag: t.processingInstruction, color: 'var(--atomic-editor-fg-faint, #666)', class: 'tansu-syntax-mark' },
   { tag: t.contentSeparator, color: 'var(--atomic-editor-fg-faint, #666)' },
   { tag: t.quote, color: 'var(--atomic-editor-fg-muted, #888)' },
   { tag: t.list, color: 'var(--atomic-editor-fg, #dcddde)' },

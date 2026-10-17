@@ -23,6 +23,7 @@ export type EditorConfig = {
   currentNotePath?: () => string;
   wikiNotes?: () => readonly WikiNote[];
   onWikiNoteOpen?: (noteId: string) => void;
+  loadNotePreview?: (noteId: string, signal: AbortSignal) => Promise<string>;
   onLinkOpen?: (url: string) => void;
   onSave?: () => void;
   onFindRequested?: () => void;

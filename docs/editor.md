@@ -50,7 +50,7 @@ value uses unsupported syntax.
 
 Each tag renders as a colored pill from `web/ts/tag-pill.ts`. The pill hue is a
 stable hash of the lowercased, normalized tag text, exposed as the `--tag-hue`
-custom property. `app.css` derives the light and dark colors from that hue.
+custom property. `app.css` derives the light, dark, and paper colors from that hue.
 Other views that show tags reuse `createTagPill`.
 
 ## Read-only sessions
@@ -79,17 +79,55 @@ link shows a pill with its destination. The pill stays open briefly while the
 pointer moves from the link, and remains open while the pointer is over it. Click
 the pill to open the link through `onLinkClick`. Read-only links open directly
 when you click them. The floating controls beside the vault selector toggle
-reading mode and the light or dark theme; the theme choice persists in browser
-storage.
+reading mode and cycle the light, dark, and paper themes; the theme choice
+persists in browser storage.
+Focus mode (command palette, Ctrl+Shift+Enter or ⌘⇧Enter) dims every line except
+the active one, fades the tab strip and controls, and hides the outline and link
+rail. Escape exits. It is not persisted.
 The adapter shows a floating formatting toolbar centered above the selection
 head. It hides the toolbar when the selection collapses or the session is
 read-only.
+Typing `/` at line start or after whitespace opens a floating block menu in
+live mode: heading 1 to 3, bullet, numbered, and task lists, quote, callout,
+code block, table, and divider.
+Typing filters the rows; Arrow keys move, Enter or Tab inserts, and Escape
+closes while leaving the typed `/`. The menu stays closed in read-only
+sessions, code blocks, and frontmatter. After text on the same line, the
+block inserts on a new line. A divider gets a blank line above it after a
+paragraph so it is not read as a heading underline.
+
+Hovering the left margin beside a top-level block (paragraph, heading, list item,
+quote, code block, table, rule) in editable live mode shows a grip in the gutter. Dragging
+the grip shows a drop line and, on release, rewrites the source as one
+undoable transaction that moves the block's full source span, nested list
+items included. The moved block settles with a short CSS animation. Frontmatter
+never moves. Read-only sessions show no grip and `moveBlock` refuses.
+
+A line that holds only an `http(s)` URL renders as a card with the host and URL
+in live mode when no selection touches the line, and always in read-only
+sessions. The source stays the bare URL and no marker is stored. Code blocks
+and frontmatter are excluded. Clicking the card in an editable session reveals
+the source; Cmd or Ctrl click, or any click when read-only, calls `onLinkOpen`.
+
+Markers revealed on the active line fade in over 160 ms. Reduced-motion
+preferences disable the fade and the block settle animation.
+
 Wiki links resolve against the configured active-vault notes. A leading `/`
 selects a vault-root path. `./` and `../` paths resolve from the current note's
 directory. A bare basename resolves only when it matches one note. Ambiguous
 targets remain unresolved. Clicking a resolved wiki link opens its note. Link
 labels and status refresh when a note is created, renamed, retitled, or deleted,
 and when the current note's path changes.
+
+When `loadNotePreview(noteId, signal)` is configured, hovering a resolved wiki
+link for 300 ms in live mode, editable or read-only, shows a floating card with
+the note title, path, preview text, and a faint "click to open" hint. The card
+stays open while the pointer is over it and closes 350 ms after the pointer
+leaves, on scroll, resize, Escape, and any selection or document change.
+Leaving the link aborts the pending load. Unresolved and ambiguous links and
+failed loads show nothing. The card fades in over 120 ms unless reduced motion
+is preferred. The editor receives the callback through configuration and does
+not import app code.
 
 Renaming a note changes its path and keeps its `noteId`. Tansu2 does not rewrite
 Markdown links that mention the old path.
@@ -183,5 +221,5 @@ The build fails if the fixture bundle contains React or more than one
 Run the focused adapter tests with:
 
 ```sh
-pnpm exec vitest run web/ts/editor/tests/editor-session.test.ts web/ts/editor/tests/editor-source-operations.test.ts web/ts/editor/tests/image-paste.test.ts
+pnpm exec vitest run web/ts/editor/tests/editor-session.test.ts web/ts/editor/tests/editor-source-operations.test.ts web/ts/editor/tests/image-paste.test.ts web/ts/editor/tests/block-editing.test.ts
 ```

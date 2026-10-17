@@ -30,7 +30,11 @@ import { inlinePreview } from "./vendor/atomic/inline-preview.js";
 import { readOnlyExtension, readOnlyFacet } from "./vendor/atomic/read-only.js";
 import { tables } from "./vendor/atomic/table-widget.js";
 import { wikiLinks } from "./vendor/atomic/wiki-links.js";
+import { blockDragHandles } from "./block-drag.js";
 import { calloutDecoration } from "./callout-decoration.js";
+import { slashMenu } from "./slash-menu.js";
+import { urlCards } from "./url-card.js";
+import { frontmatterRange, type FrontmatterRange } from "./frontmatter.js";
 import { sanitizeHtmlToMarkdown } from "./clipboard.js";
 import { findLiteral, outlineFromSyntaxTree, type FindMatch, type Outline, type OutlineHeading } from "./source-navigation.js";
 import { encodeImageDataAsWebp } from "./image-encoder.js";
@@ -51,6 +55,7 @@ import {
 } from "./tansu-extensions.js";
 import { resolveWikiTarget, suggestWikiTargets, type WikiNote } from "./wiki-target.js";
 import { wikiImages } from "./wiki-images.js";
+import { wikiPreviewCards } from "./wiki-preview.js";
 import {
   toggleBold,
   toggleHeading,
@@ -148,32 +153,6 @@ function renderNoteTags(tags: NoteTags | undefined, onFrontmatterToggle: () => v
     }
   }
   return row;
-}
-
-type FrontmatterRange = {
-  from: number;
-  to: number;
-  foldTo: number;
-  closingLine: number;
-};
-
-function frontmatterRange(state: EditorState): FrontmatterRange | null {
-  const firstLine = state.doc.line(1);
-  if (firstLine.text !== "---" && firstLine.text !== "\uFEFF---") return null;
-
-  let closingLine = 0;
-  for (let number = 2; number <= state.doc.lines; number++) {
-    if (state.doc.line(number).text === "---") {
-      closingLine = number;
-      break;
-    }
-  }
-  if (closingLine === 0) return null;
-
-  const foldTo = state.doc.line(closingLine).to;
-  let to = foldTo;
-  while (to < state.doc.length && state.doc.sliceString(to, to + 1) === "\n") to++;
-  return { from: firstLine.from, to, foldTo, closingLine };
 }
 
 function frontmatterDecorations(state: EditorState): DecorationSet {
@@ -460,9 +439,22 @@ function editorExtensions(config: EditorConfig, live: boolean, onFrontmatterTogg
     tables(config.onLinkOpen ? { onLinkClick: config.onLinkOpen } : {}),
     calloutDecoration({ icons: callout.icons }),
     tufteNotes(),
+    slashMenu(),
+    blockDragHandles(),
+    urlCards(config.onLinkOpen ? { onOpen: config.onLinkOpen } : {}),
   );
   if (configured.some((extension) => extension.kind === "wiki-links")) {
     extensions.push(wikiLinks(wikiConfig));
+    const loadNotePreview = config.loadNotePreview;
+    if (loadNotePreview !== undefined) {
+      extensions.push(wikiPreviewCards({
+        resolve: (target) => {
+          const result = resolveWikiTarget(target, config.currentNotePath?.() ?? "", config.wikiNotes?.() ?? []);
+          return result.kind === "resolved" ? result.note : null;
+        },
+        load: loadNotePreview,
+      }));
+    }
   }
   return extensions;
 }
@@ -521,7 +513,8 @@ function sameEditorExtensionInputs(left: EditorConfig, right: EditorConfig): boo
     (!leftWikiLinks || (
       left.currentNotePath === right.currentNotePath &&
       left.wikiNotes === right.wikiNotes &&
-      left.onWikiNoteOpen === right.onWikiNoteOpen
+      left.onWikiNoteOpen === right.onWikiNoteOpen &&
+      left.loadNotePreview === right.loadNotePreview
     ));
 }
 

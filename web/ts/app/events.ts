@@ -13,9 +13,12 @@ export type CommandId =
   | "close"
   | "reopen"
   | "reading"
+  | "focus"
   | "search"
   | "import"
   | "revisions"
+  | "restore"
+  | "tag"
   | "settings"
   | "find"
   | "source";
@@ -54,6 +57,7 @@ export type ViewEvent =
   | { type: "storage.persist" }
   | { type: "command.open" }
   | { type: "command.filter"; query: string }
+  | { type: "command.move"; delta: -1 | 1 }
   | { type: "command.run"; id: CommandId }
   | { type: "dialog.input"; value: string }
   | { type: "dialog.submit"; value?: string }
@@ -72,7 +76,10 @@ export type ViewEvent =
   | { type: "note.addTag" }
   | { type: "tags.update"; tags: string[] }
   | { type: "reading.toggle" }
+  | { type: "focus.toggle" }
   | { type: "theme.toggle" }
+  | { type: "linkRail.toggle" }
+  | { type: "links.refresh" }
   | { type: "revisions.open" }
   | { type: "revisions.select"; eventId: RevisionEventId }
   | { type: "revisions.restore" }

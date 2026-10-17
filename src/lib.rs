@@ -23,6 +23,7 @@ mod failure_point;
 pub mod history;
 pub mod http;
 pub mod embedded_assets;
+pub mod links;
 pub mod logging;
 pub mod paths;
 pub mod reconcile;

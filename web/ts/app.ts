@@ -1,4 +1,4 @@
-import { commandItems } from "./app/commands.ts";
+import { commandItems, paletteEntries, parsePaletteQuery } from "./app/commands.ts";
 import { keyboardShortcutFor } from "./app/keyboard-shortcuts.ts";
 import type { CommandId, SettingsFormValue, ViewEvent } from "./app/events.ts";
 import { applySettingsForm } from "./app/settings-policy.ts";
@@ -11,6 +11,9 @@ import { localDraftId, noteId, serverInstanceId, vaultId, type DocumentIdentity,
 import { sameTabIdentity, toTabKey, type TabIdentity } from "./app/tab-identity.ts";
 import { logClientEvent } from "./dev-log.ts";
 import { V2ApiError } from "./app/v2-api.ts";
+import { titleFromSource } from "./app/note-title.ts";
+import { createNoteLinksLoader, createNotePreviewCache, type NoteLinksOutcome } from "./app/note-links.ts";
+import { linksRailNoteId } from "./links-rail.ts";
 import type { EditorHandle, EditorSession, EditorSnapshot } from "./editor/codemirror-adapter.ts";
 import { createCalloutExtension, createWikiImageExtension, createWikiLinkExtension, type EditorConfig } from "./editor/tansu-extensions.ts";
 import { canMutateTags } from "./editor/tag-source.ts";
@@ -21,7 +24,9 @@ import {
   activeTab,
   createState,
   loadedDraft,
+  nextTheme,
   normalizeMarkdownNewlines,
+  parseTheme,
   tabById,
   tabFromDocument,
   tabFromMeta,
@@ -42,17 +47,25 @@ import type { OutlineHeading } from "./editor/source-navigation.js";
 const SESSION_SAVE_DELAY_MS = 250;
 const EDITOR_CAPTURE_DELAY_MS = 150;
 const MIN_SEARCH_QUERY_CHARS = 1;
+const COMMAND_SEARCH_DEBOUNCE_MS = 60;
+const COMMAND_SEARCH_LIMIT = 20;
 const ASSET_PREFETCH_CONCURRENCY = 4;
 const ASSET_CACHE_LIMIT = 64;
 const THEME_STORAGE_KEY = "tansu2.theme.v1";
+const LINK_RAIL_STORAGE_KEY = "tansu2.link-rail.v1";
+const NOTE_LINKS_REFRESH_DELAY_MS = 400;
 
 type TabCloseReason = "user" | "deleted" | "materialized";
 
 function savedTheme(): State["theme"] {
-  const value = window.localStorage.getItem(THEME_STORAGE_KEY);
-  if (value === null || value === "light") return "light";
-  if (value === "dark") return "dark";
-  throw new TypeError(`Unsupported saved theme: ${value}`);
+  return parseTheme(window.localStorage.getItem(THEME_STORAGE_KEY));
+}
+
+function savedLinkRailCollapsed(): boolean {
+  const value = window.localStorage.getItem(LINK_RAIL_STORAGE_KEY);
+  if (value === "open") return false;
+  if (value === null || value === "collapsed") return true;
+  throw new TypeError(`Unsupported saved link rail state: ${value}`);
 }
 
 function markdownPreview(source: string): string {
@@ -106,11 +119,26 @@ export class TansuApp {
   private readonly globalEventCleanups: Array<() => void> = [];
   private assetController: AbortController | null = null;
   private eventSubscription: { close: () => void } | null = null;
-  private creatingDraftId: LocalDraftId | null = null;
+  private readonly draftPromotionTimers = new Map<LocalDraftId, number>();
   private workspaceTimer: number | undefined;
   private noticeTimer: number | undefined;
   private disposeTask: Promise<void> | null = null;
   private searchOverlayRequestSeq = 0;
+  private commandSearchSeq = 0;
+  private commandSearchTimer: number | undefined;
+  private commandSearchAbort: AbortController | null = null;
+  private readonly noteLinksLoader = createNoteLinksLoader(
+    (id, signal) => {
+      if (this.vaultClient === null) return Promise.reject(new Error("No vault is open"));
+      return this.vaultClient.noteLinks(id, signal);
+    },
+    (outcome) => this.acceptNoteLinks(outcome),
+  );
+  private readonly notePreviews = createNotePreviewCache(async (id) => {
+    if (this.vaultClient === null) throw new Error("No vault is open");
+    return (await this.vaultClient.notePreview(id)).preview;
+  });
+  private noteLinksTimer: number | undefined;
   private bootGeneration = 0;
   private sessionGeneration = 0;
   private transitioningVault = false;
@@ -130,6 +158,7 @@ export class TansuApp {
     this.state = createState(vaultId("boot"));
     this.state.theme = savedTheme();
     document.documentElement.dataset["theme"] = this.state.theme;
+    this.state.linkRailCollapsed = savedLinkRailCollapsed();
     this.workspaceId = this.services.workspace.createWorkspaceId();
     this.journal = new JournalHandle(this.services.workspace, (error) => this.notifyStorageFailure(error));
     this.editorMount.className = "editor-mount";
@@ -141,6 +170,7 @@ export class TansuApp {
     this.transitioningVault = true;
     this.state.imageUploads.clear();
     this.searchOverlayRequestSeq += 1;
+    this.cancelCommandSearch();
     this.eventSubscription?.close();
     this.eventSubscription = null;
     this.cancelAutoSaves();
@@ -219,6 +249,10 @@ export class TansuApp {
     this.state.serverInstanceId = global.serverInstanceId;
     this.identity = nextIdentity;
     this.vaultClient = nextClient;
+    this.noteLinksLoader.cancel();
+    this.state.noteLinks = null;
+    this.state.knownLinks.clear();
+    this.notePreviews.clear();
     this.state.boot = { ...vaultBootstrap, serverInstanceId: global.serverInstanceId, vaults: global.vaults };
     this.state.authRequired = false;
     this.state.notes = new Map(vaultBootstrap.notes.map((meta) => [meta.noteId, meta]));
@@ -304,6 +338,11 @@ export class TansuApp {
         this.runAsync(this.closeOverlays(), "Local recovery storage failed");
         return;
       }
+      if (event.key === "Escape" && this.state.focusMode) {
+        event.preventDefault();
+        this.toggleFocusMode();
+        return;
+      }
       const shortcut = keyboardShortcutFor(event);
       if (shortcut === undefined) return;
       event.preventDefault();
@@ -372,6 +411,11 @@ export class TansuApp {
   dispose(): Promise<void> {
     if (this.disposeTask !== null) return this.disposeTask;
     this.disposed = true;
+    window.clearTimeout(this.noteLinksTimer);
+    for (const timer of this.draftPromotionTimers.values()) window.clearTimeout(timer);
+    this.draftPromotionTimers.clear();
+    this.noteLinksLoader.cancel();
+    this.cancelCommandSearch();
     this.transitioningVault = false;
     ++this.bootGeneration;
     for (const cleanup of this.globalEventCleanups.splice(0)) cleanup();
@@ -421,7 +465,10 @@ export class TansuApp {
           for (const tab of this.state.tabs) {
             if (tab.kind === "saved") await this.reconcileTab(tab);
           }
-          if (generation === this.bootGeneration && this.isCurrentVault(identity, client)) this.render();
+          if (generation === this.bootGeneration && this.isCurrentVault(identity, client)) {
+            this.scheduleNoteLinksRefresh();
+            this.render();
+          }
         })());
       },
       onError: (error) => logClientEvent("warn", "client.events", { error: errorSummary(error) }),
@@ -449,6 +496,7 @@ export class TansuApp {
     } else if (event.update.kind === "searchChanged" && this.state.boot !== null) {
       this.state.boot.searchStatus = { dirty: event.update.dirty, degraded: event.update.degraded };
     }
+    if (event.update.kind !== "searchChanged") this.scheduleNoteLinksRefresh();
     this.render();
   }
 
@@ -478,8 +526,51 @@ export class TansuApp {
     this.cacheDocument(document);
   }
 
+  loadNotePreview(id: string): Promise<string> {
+    return this.notePreviews.load(id);
+  }
+
+  private acceptNoteLinks(outcome: NoteLinksOutcome): void {
+    if (this.disposed || linksRailNoteId(this.state) !== outcome.noteId) return;
+    this.state.noteLinks = outcome;
+    if (outcome.phase === "ready") this.state.knownLinks.set(outcome.noteId, outcome.links);
+    this.render();
+  }
+
+  private syncNoteLinks(): void {
+    const id = this.state.boot === null || this.state.authRequired
+      ? null
+      : linksRailNoteId(this.state);
+    if (id === null) {
+      this.noteLinksLoader.cancel();
+      this.state.noteLinks = null;
+      return;
+    }
+    if (this.state.noteLinks?.noteId === id) return;
+    this.state.noteLinks = { noteId: id, phase: "loading" };
+    this.noteLinksLoader.load(id);
+  }
+
+  private reloadNoteLinks(): void {
+    const id = linksRailNoteId(this.state);
+    if (id === null) return;
+    for (const known of this.state.knownLinks.keys()) if (known !== id) this.state.knownLinks.delete(known);
+    this.notePreviews.clear();
+    if (this.state.noteLinks?.phase !== "ready") {
+      this.state.noteLinks = { noteId: id, phase: "loading" };
+      this.render();
+    }
+    this.noteLinksLoader.load(id);
+  }
+
+  private scheduleNoteLinksRefresh(): void {
+    window.clearTimeout(this.noteLinksTimer);
+    this.noteLinksTimer = window.setTimeout(() => this.reloadNoteLinks(), NOTE_LINKS_REFRESH_DELAY_MS);
+  }
+
   private render(): void {
     if (this.disposed) return;
+    this.syncNoteLinks();
     this.captureActiveEditor();
     const view = this.state.authRequired
       ? [renderAuthGate(this.state, this.viewActions())]
@@ -553,6 +644,7 @@ export class TansuApp {
           this.runAsync(this.openNote(toNoteId(id)), "Open failed");
         }
       },
+      loadNotePreview: (id) => this.loadNotePreview(id),
       onLinkOpen: (url) => window.open(url, "_blank", "noopener,noreferrer"),
       onActiveHeadingChange: (heading) => {
         if (generation !== this.bootGeneration || this.transitioningVault || !currentVault()) return;
@@ -672,6 +764,7 @@ export class TansuApp {
         });
       }
       this.editor.attachSession(tab.editorSession);
+      this.editorMount.dataset["noteEnter"] = this.editorMount.dataset["noteEnter"] === "a" ? "b" : "a";
       this.attachedEditor = { tab, session: tab.editorSession };
       if (tab.selection !== null) this.editor.revealSelection(tab.selection);
       this.editor.updateConfiguration({ ...this.editorConfig(), mode: tab.sourceMode ? "source" : "live", readOnly: this.transitioningVault || this.state.readingMode || (tab.kind === "local-draft" && tab.session?.state.promotionPending === true) });
@@ -849,6 +942,7 @@ export class TansuApp {
       tab.saving = value.promotionPending;
       this.render();
       this.scheduleWorkspaceSave();
+      this.scheduleDraftPromotion(tab);
     });
     this.render();
   }
@@ -1018,10 +1112,7 @@ export class TansuApp {
     this.captureActiveEditor();
     const tab = activeTab(this.state);
     if (tab?.kind === "saved" && tab.session !== null) await tab.session.save();
-    else if (tab?.kind === "local-draft") {
-      this.state.noteDialog = { kind: "create", localDraftId: tab.localDraftId, title: tab.title };
-      this.render();
-    }
+    else if (tab?.kind === "local-draft") await this.promoteDraftFromSource(tab);
   }
 
   private scheduleAutoSave(tab: SavedTab): void {
@@ -1097,8 +1188,55 @@ export class TansuApp {
     this.render();
   }
 
+  private cancelCommandSearch(): void {
+    this.commandSearchSeq += 1;
+    if (this.commandSearchTimer !== undefined) window.clearTimeout(this.commandSearchTimer);
+    this.commandSearchTimer = undefined;
+    this.commandSearchAbort?.abort();
+    this.commandSearchAbort = null;
+  }
+
+  private scheduleCommandSearch(): void {
+    this.cancelCommandSearch();
+    const { mode, text } = parsePaletteQuery(this.state.commandFilter);
+    const query = text.trim();
+    if (mode !== "notes" || query === "") {
+      this.state.commandHits = null;
+      return;
+    }
+    const request = this.commandSearchSeq;
+    this.commandSearchTimer = window.setTimeout(() => {
+      this.commandSearchTimer = undefined;
+      this.runAsync(this.runCommandSearch(request, query), "Search failed");
+    }, COMMAND_SEARCH_DEBOUNCE_MS);
+  }
+
+  private async runCommandSearch(request: number, query: string): Promise<void> {
+    const client = this.vaultClient;
+    const serverIdentity = this.identity;
+    if (client === null || serverIdentity === null) return;
+    const abort = new AbortController();
+    this.commandSearchAbort = abort;
+    try {
+      const response = await client.search(
+        { query, mode: "default", limit: COMMAND_SEARCH_LIMIT, overlays: this.searchOverlays() },
+        abort.signal,
+      );
+      if (request !== this.commandSearchSeq || !this.state.commandOpen ||
+        !this.isCurrentVault(serverIdentity, client)) return;
+      this.state.commandHits = response.hits;
+      this.render();
+    } catch (error) {
+      if (abort.signal.aborted) return;
+      throw error;
+    } finally {
+      if (this.commandSearchAbort === abort) this.commandSearchAbort = null;
+    }
+  }
+
   private async openRecentNote(noteId: ReturnType<typeof toNoteId>): Promise<void> {
     await this.openNote(noteId);
+    this.state.commandOpen = false;
     this.state.searchOpen = false;
     this.overlayReturn = null;
     this.editor?.focus();
@@ -1106,6 +1244,7 @@ export class TansuApp {
   }
 
   private refreshSearchResults(): Promise<void> {
+    if (this.state.commandOpen) this.scheduleCommandSearch();
     return this.state.searchOpen ? this.updateSearchOverlay() : Promise.resolve();
   }
 
@@ -1208,8 +1347,33 @@ export class TansuApp {
     this.state.activeTab = { kind: "local-draft", localDraftId: tab.localDraftId };
     await this.loadLocalDraft(tab);
     if (this.disposed || !this.state.tabs.includes(tab)) return;
-    this.state.noteDialog = { kind: "create", localDraftId: tab.localDraftId, title: "" };
     this.render();
+  }
+
+  private scheduleDraftPromotion(tab: Extract<Tab, { kind: "local-draft" }>): void {
+    window.clearTimeout(this.draftPromotionTimers.get(tab.localDraftId));
+    this.draftPromotionTimers.delete(tab.localDraftId);
+    const session = tab.session;
+    if (session === null || session.state.promotionPending || session.state.source.trim() === "") return;
+    const delay = this.state.boot?.settings.autosaveDelayMs ?? 900;
+    this.draftPromotionTimers.set(tab.localDraftId, window.setTimeout(() => {
+      this.draftPromotionTimers.delete(tab.localDraftId);
+      this.runAsync(this.promoteDraftFromSource(tab), "Create failed");
+    }, delay));
+  }
+
+  private async promoteDraftFromSource(tab: Extract<Tab, { kind: "local-draft" }>): Promise<void> {
+    window.clearTimeout(this.draftPromotionTimers.get(tab.localDraftId));
+    this.draftPromotionTimers.delete(tab.localDraftId);
+    const session = tab.session;
+    if (this.disposed || session === null || !this.state.tabs.includes(tab)) return;
+    const source = session.exportSource();
+    if (source.trim() === "") return;
+    const title = tab.title.trim() === "" ? titleFromSource(source) : tab.title.trim();
+    const path = uniqueNotePath(title, this.state.notes.values());
+    tab.title = title;
+    tab.path = path;
+    await this.promoteLocalDraft(tab, title, path);
   }
 
   private localDraftTab(id: LocalDraftId, title: string, source: string) {
@@ -1305,22 +1469,7 @@ export class TansuApp {
   private async submitNoteDialog(value?: string): Promise<void> {
     const dialog = this.state.noteDialog;
     if (dialog === null) return;
-    if (dialog.kind === "create") {
-      const title = (value ?? dialog.title).trim();
-      if (title === "") return;
-      const candidate = this.state.tabs.find((item) => item.kind === "local-draft" && item.localDraftId === dialog.localDraftId);
-      if (candidate?.kind !== "local-draft") return;
-      const tab = candidate;
-      const path = uniqueNotePath(title, this.state.notes.values());
-      tab.title = title;
-      tab.path = path;
-      this.creatingDraftId = dialog.localDraftId;
-      try {
-        await this.promoteLocalDraft(tab, title, path);
-      } finally {
-        this.creatingDraftId = null;
-      }
-    } else if (dialog.kind === "rename") {
+    if (dialog.kind === "rename") {
       const tab = tabById(this.state, dialog.noteId);
       const title = (value ?? dialog.title).trim();
       if (tab?.session === null || tab === undefined || title === "") return;
@@ -1342,6 +1491,7 @@ export class TansuApp {
       this.state.notes.set(tab.noteId, response.outcome.result);
       this.state.noteDialog = null;
       this.persistWorkspace();
+      this.scheduleNoteLinksRefresh();
       this.render();
     } else if (dialog.kind === "tag") {
       const tab = activeTab(this.state);
@@ -1656,11 +1806,23 @@ export class TansuApp {
         this.state.searchOpen = false;
         this.state.findOpen = false;
         this.state.commandFilter = "";
+        this.state.commandHits = null;
+        this.state.commandIndex = 0;
+        this.cancelCommandSearch();
         this.render();
         return;
       }
       case "command.filter": {
         this.state.commandFilter = event.query;
+        this.state.commandIndex = 0;
+        this.scheduleCommandSearch();
+        this.render();
+        return;
+      }
+      case "command.move": {
+        const count = paletteEntries(this.state, commandItems(this.state)).length;
+        if (count === 0) return;
+        this.state.commandIndex = (Math.min(this.state.commandIndex, count - 1) + event.delta + count) % count;
         this.render();
         return;
       }
@@ -1670,10 +1832,9 @@ export class TansuApp {
       }
       case "dialog.input": {
         const dialog = this.state.noteDialog;
-        if (dialog?.kind === "create" || dialog?.kind === "rename") {
+        if (dialog?.kind === "rename") {
           dialog.title = event.value;
-          if (dialog.kind === "rename") tabById(this.state, dialog.noteId)?.session?.editTitle(event.value);
-          if (dialog.kind === "create") this.state.tabs.find((tab) => tab.kind === "local-draft" && tab.localDraftId === dialog.localDraftId)?.session?.editTitle(event.value);
+          tabById(this.state, dialog.noteId)?.session?.editTitle(event.value);
         } else if (dialog?.kind === "tag") dialog.value = event.value;
         return;
       }
@@ -1751,8 +1912,22 @@ export class TansuApp {
         this.render();
         return;
       }
+      case "focus.toggle": {
+        this.toggleFocusMode();
+        return;
+      }
+      case "linkRail.toggle": {
+        this.state.linkRailCollapsed = !this.state.linkRailCollapsed;
+        window.localStorage.setItem(LINK_RAIL_STORAGE_KEY, this.state.linkRailCollapsed ? "collapsed" : "open");
+        this.render();
+        return;
+      }
+      case "links.refresh": {
+        this.reloadNoteLinks();
+        return;
+      }
       case "theme.toggle": {
-        const theme = this.state.theme === "dark" ? "light" : "dark";
+        const theme = nextTheme(this.state.theme);
         window.localStorage.setItem(THEME_STORAGE_KEY, theme);
         this.state.theme = theme;
         document.documentElement.dataset["theme"] = theme;
@@ -1794,10 +1969,15 @@ export class TansuApp {
     }
   }
 
+  private toggleFocusMode(): void {
+    this.state.focusMode = !this.state.focusMode;
+    this.render();
+  }
+
   private executeCommand(id: CommandId): void {
     this.state.commandOpen = false;
     this.render();
-    if (["save", "pin", "reopen", "reading", "import", "source"].includes(id)) this.restoreOverlayReturn();
+    if (["save", "pin", "reopen", "reading", "focus", "import", "source"].includes(id)) this.restoreOverlayReturn();
     switch (id) {
       case "create": {
         this.runAsync(this.commandCreate(), "Create failed");
@@ -1836,6 +2016,10 @@ export class TansuApp {
         this.render();
         break;
       }
+      case "focus": {
+        this.toggleFocusMode();
+        break;
+      }
       case "search": {
         this.dispatch({ type: "search.open" });
         break;
@@ -1848,8 +2032,13 @@ export class TansuApp {
         this.runAsync(this.importHtml(), "Import failed", false);
         break;
       }
-      case "revisions": {
+      case "revisions":
+      case "restore": {
         this.runAsync(this.commandRevisions(), "Revisions failed");
+        break;
+      }
+      case "tag": {
+        if (activeTab(this.state)?.kind === "saved") this.dispatch({ type: "note.addTag" });
         break;
       }
       case "settings": {
@@ -2094,7 +2283,6 @@ export class TansuApp {
 
   private async closeOverlays(): Promise<void> {
     const dialog = this.state.noteDialog;
-    if (dialog?.kind === "create" && this.creatingDraftId === dialog.localDraftId) return;
     if (dialog?.kind === "rename") tabById(this.state, dialog.noteId)?.session?.editTitle(null);
     this.clearFindHighlights();
     this.state.commandOpen = false;
@@ -2109,7 +2297,6 @@ export class TansuApp {
     this.render();
     this.restoreOverlayReturn();
     if (dialog?.kind === "rename") await this.journal.flushAll();
-    if (dialog?.kind === "create") await this.closeTab({ kind: "local-draft", localDraftId: dialog.localDraftId }, "materialized");
   }
 
   private hasOverlay(): boolean {
