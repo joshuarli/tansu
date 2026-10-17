@@ -1,7 +1,7 @@
 import { vi, expect, describe, it } from "vitest";
 
 import type { CommandItem, ViewEvent } from "./app/events.ts";
-import { localDraftId, serverInstanceId, vaultId } from "./app/identity.ts";
+import { serverInstanceId, vaultId } from "./app/identity.ts";
 import { SETTINGS_LIMITS } from "./app/settings-policy.ts";
 import {
   createState,
@@ -188,6 +188,34 @@ describe("view rendering", () => {
     expect(root.querySelector(".editor-meta")).toBeNull();
     root.querySelector<HTMLButtonElement>('[data-command-id="reading"]')!.click();
     expectDispatched(actions, { type: "command.run", id: "reading" });
+  });
+
+  it("shows the mode chip and clears the mode with backspace on empty text", () => {
+    const state = baseState();
+    state.commandOpen = true;
+    state.commandFilter = ">";
+    const actions = actionSpies();
+    const root = render(state, actions);
+
+    expect(root.querySelector(".palette-mode-chip")?.textContent).toBe(">");
+    expect(root.querySelector<HTMLInputElement>(".command-input")?.placeholder).toBe("Run an action");
+    root.querySelector<HTMLInputElement>(".command-input")!.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Backspace", cancelable: true }),
+    );
+    expectDispatched(actions, { type: "command.filter", query: "" });
+  });
+
+  it("moves the selection with arrows and opens the selected row on enter", () => {
+    const state = baseState();
+    state.commandOpen = true;
+    const actions = actionSpies();
+    const root = render(state, actions);
+    const input = root.querySelector<HTMLInputElement>(".command-input")!;
+
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", cancelable: true }));
+    expectDispatched(actions, { type: "command.move", delta: 1 });
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", cancelable: true }));
+    expectDispatched(actions, { type: "command.run", id: "save" });
   });
 
   it("shows tab close hint and captures x before editor key handlers", () => {
@@ -411,23 +439,17 @@ describe("view rendering", () => {
     expectDispatched(actions, { type: "dialog.submit", value: "" });
   });
 
-  it("renders the add-tag dialog with the create dialog structure", () => {
+  it("renders the add-tag dialog", () => {
     const state = baseState();
-    state.noteDialog = { kind: "create", localDraftId: localDraftId("draft-1"), title: "" };
-    const create = render(state).querySelector<HTMLFormElement>(".note-dialog-panel")!;
     state.noteDialog = { kind: "tag", value: "idea" };
     const actions = actionSpies();
     const tagRoot = render(state, actions);
     const tag = tagRoot.querySelector<HTMLFormElement>(".note-dialog-panel")!;
 
-    expect([...tag.classList].filter((name) => name !== "is-tag")).toStrictEqual([...create.classList]);
     expect(tag.classList.contains("is-tag")).toBeTruthy();
     expect(tag.querySelector(".modal-header")).toBeNull();
     expect(tag.querySelector("label")).toBeNull();
     expect(tag.querySelector(".modal-actions")).toBeNull();
-    expect([...tag.children].map((child) => child.className)).toStrictEqual(
-      [...create.children].map((child) => child.className),
-    );
     const field = tag.querySelector<HTMLInputElement>(".note-dialog-field > input.settings-input")!;
     expect(field.value).toBe("idea");
     expect(field.getAttribute("aria-label")).toBe("Tag");

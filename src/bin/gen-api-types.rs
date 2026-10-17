@@ -26,6 +26,10 @@ fn main() {
     push::<V2VaultBootstrapResponse>(&mut output);
     push::<V2NoteMeta>(&mut output);
     push::<V2NoteDocument>(&mut output);
+    push::<V2LinkedNote>(&mut output);
+    push::<V2Backlink>(&mut output);
+    push::<V2NoteLinksResponse>(&mut output);
+    push::<V2NotePreview>(&mut output);
     push::<V2NotePrecondition>(&mut output);
     push::<V2CreateNoteRequest>(&mut output);
     push::<V2SaveNoteRequest>(&mut output);

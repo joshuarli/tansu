@@ -3,6 +3,8 @@ import { expect, describe, it } from "vitest";
 import {
   activeTab,
   createState,
+  nextTheme,
+  parseTheme,
   tabById,
   tabFromDocument,
   tabFromMeta,
@@ -27,6 +29,15 @@ describe("state helpers", () => {
     expect(second.vault).toBe("vault-2");
     expect(second.notes.size).toBe(0);
     expect(second.pinned.size).toBe(0);
+  });
+
+  it("cycles themes light, dark, paper and rejects unknown saved values", () => {
+    expect(nextTheme("light")).toBe("dark");
+    expect(nextTheme("dark")).toBe("paper");
+    expect(nextTheme("paper")).toBe("light");
+    expect(parseTheme(null)).toBe("light");
+    expect(parseTheme("paper")).toBe("paper");
+    expect(() => parseTheme("sepia")).toThrow(TypeError);
   });
 
   it("finds active and arbitrary saved tabs by note id", () => {

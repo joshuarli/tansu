@@ -143,6 +143,12 @@ fn dispatch_v2_api(app: &App, request: &HttpRequest) -> std::result::Result<Http
             let body = parse_v2_body::<V2DeleteNoteRequest>(&request.body)?;
             v2_json(200, &vault.v2_delete_note(note_id, body)?, "deleted note")
         }
+        ("GET", ["notes", note_id, "links"]) => {
+            v2_json(200, &vault.v2_note_links(note_id)?, "note links")
+        }
+        ("GET", ["notes", note_id, "preview"]) => {
+            v2_json(200, &vault.v2_note_preview(note_id)?, "note preview")
+        }
         ("GET", ["notes", note_id, "revisions"]) => {
             v2_json(200, &vault.v2_list_revisions(note_id)?, "revision list")
         }
@@ -270,6 +276,10 @@ fn percent_decode(value: &str) -> Result<String> {
         V2ApiErrorKind::BadRequest { message } => Error::BadRequest(message),
         _ => unreachable!(),
     })
+}
+
+pub(crate) fn percent_decode_path(value: &str) -> Option<String> {
+    percent_decode_bytes(value, false).ok()
 }
 
 fn percent_decode_bytes(value: &str, plus_as_space: bool) -> std::result::Result<String, V2ApiErrorKind> {
@@ -409,6 +419,43 @@ mod tests {
         );
         assert_eq!(route_gap.status(), 501);
         assert!(String::from_utf8_lossy(route_gap.body()).contains("not_implemented"));
+    }
+
+    #[test]
+    fn v2_links_and_preview_routes_return_note_link_context() {
+        let fixture = app_fixture(&[("One", &[("a.md", "# A\n[[b]]\n"), ("b.md", "---\ntags: [x]\n---\n# B\nbody\n")])]);
+        let app = fixture.app();
+        let server_id = app.server_instance_id().to_string();
+        let vault_id = app.v2_bootstrap().vaults[0].vault_id.clone();
+        let vault = app.vault_by_id(&vault_id).unwrap();
+        let notes = vault.v2_notes().unwrap();
+        let b = notes.iter().find(|n| n.path == "b.md").unwrap().note_id.clone();
+
+        let links = handle_v2_api(
+            &app,
+            &v2_request("GET", &format!("/api/v2/vaults/{vault_id}/notes/{b}/links"), Some(&server_id), &[], &[]),
+            "req-1",
+        );
+        assert_eq!(links.status(), 200);
+        let links: crate::api_types::V2NoteLinksResponse = serde_json::from_slice(links.body()).unwrap();
+        assert_eq!(links.backlinks[0].note.path, "a.md");
+        assert_eq!(links.backlinks[0].mentions, vec!["[[b]]"]);
+
+        let preview = handle_v2_api(
+            &app,
+            &v2_request("GET", &format!("/api/v2/vaults/{vault_id}/notes/{b}/preview"), Some(&server_id), &[], &[]),
+            "req-2",
+        );
+        assert_eq!(preview.status(), 200);
+        let preview: crate::api_types::V2NotePreview = serde_json::from_slice(preview.body()).unwrap();
+        assert_eq!(preview.preview, "# B body");
+
+        let missing = handle_v2_api(
+            &app,
+            &v2_request("GET", &format!("/api/v2/vaults/{vault_id}/notes/nope/links"), Some(&server_id), &[], &[]),
+            "req-3",
+        );
+        assert_eq!(missing.status(), 404);
     }
 
     #[test]

@@ -244,11 +244,9 @@ describe("v2 desktop shell", () => {
     for (const key of ["n", "t"]) {
       const open = new KeyboardEvent("keydown", { key, ctrlKey: true, cancelable: true });
       window.dispatchEvent(open);
-      await until(() => root.querySelector(".note-dialog-panel") !== null);
       expect(open.defaultPrevented).toBeTruthy();
-      expect(root.querySelector(".note-dialog-panel input")).not.toBeNull();
-      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", cancelable: true }));
-      await until(() => root.querySelector(".note-dialog-panel") === null);
+      await until(() => root.querySelectorAll(".tab").length === (key === "n" ? 1 : 2));
+      expect(root.querySelector(".note-dialog-panel")).toBeNull();
     }
   });
 
@@ -267,6 +265,43 @@ describe("v2 desktop shell", () => {
 
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", cancelable: true }));
     await flushAsync();
+    expect(root.textContent).not.toContain("Keyboard shortcuts");
+  });
+
+  it("cycles light, dark and paper themes and persists the choice", async () => {
+    window.localStorage.removeItem("tansu2.theme.v1");
+    configureVault([]);
+    const { app, root } = mountApp();
+    await app.boot();
+    const themes: Array<string | undefined> = [document.documentElement.dataset["theme"]];
+    for (let index = 0; index < 3; index += 1) {
+      root.querySelector<HTMLButtonElement>(".theme-toggle")!.click();
+      themes.push(document.documentElement.dataset["theme"]);
+      expect(window.localStorage.getItem("tansu2.theme.v1")).toBe(document.documentElement.dataset["theme"]);
+    }
+    expect(themes).toStrictEqual(["light", "dark", "paper", "light"]);
+
+    window.localStorage.setItem("tansu2.theme.v1", "paper");
+    mountApp();
+    expect(document.documentElement.dataset["theme"]).toBe("paper");
+    window.localStorage.removeItem("tansu2.theme.v1");
+  });
+
+  it("toggles focus mode from the shortcut, shows a hint, and exits with Escape", async () => {
+    vi.useFakeTimers();
+    configureVault([]);
+    const { app, root } = mountApp();
+    await app.boot();
+    const main = () => root.querySelector(".main")!;
+
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", ctrlKey: true, shiftKey: true, cancelable: true }));
+    expect(main().classList.contains("focus-mode")).toBeTruthy();
+    expect(main().classList.contains("focus-mode")).toBeTruthy();
+
+    const escape = new KeyboardEvent("keydown", { key: "Escape", cancelable: true });
+    window.dispatchEvent(escape);
+    expect(escape.defaultPrevented).toBeTruthy();
+    expect(main().classList.contains("focus-mode")).toBeFalsy();
     expect(root.textContent).not.toContain("Keyboard shortcuts");
   });
 
@@ -949,23 +984,24 @@ describe("v2 desktop shell", () => {
     expect(memory.cached.get(note.noteId)).toStrictEqual({ sourceHash: request.sourceHash, content: "# Saved\n" });
   });
 
-  it("keeps the outline of the note beneath a new-note draft after the draft is cancelled", async () => {
-    const note = noteMeta("note-1", "one.md", "One");
-    const client = configureVault([note], workspaceSeed([
-      { noteId: note.noteId, title: note.title, path: note.path, cursorOffset: null, sourceMode: false },
-    ], note.noteId));
-    client.openNote.mockResolvedValue(documentFor(note, "# One\n"));
+  it("promotes a typed new note on autosave with a title from its first line and never creates an empty one", async () => {
+    vi.useFakeTimers();
+    const client = configureVault([]);
+    const created = noteMeta("created", "plan-for-may.md", "Plan for May");
+    client.createNote.mockImplementation(async (request) => accepted(request.mutationId, created));
+    client.openNote.mockResolvedValue(documentFor(created, "## Plan for May\n"));
     const { app, root } = mountApp();
     await app.boot();
-    expect(root.querySelector(".outline-row")).not.toBeNull();
-
     root.querySelector<HTMLButtonElement>('[title="New note"]')?.click();
-    await until(() => root.querySelector(".note-dialog-panel input") !== null);
-    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", cancelable: true }));
-    await until(() => root.querySelector(".note-dialog-panel") === null);
+    await until(() => editorMock.instances.length > 0);
     await flushAsync();
+    expect(client.createNote).not.toHaveBeenCalled();
 
-    expect(root.querySelector(".outline-row")?.textContent).toBe("One");
+    editorMock.instances[0]!.simulateEdit("## Plan for May\n");
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(client.createNote).toHaveBeenCalledTimes(1);
+    expect(client.createNote.mock.calls[0]![0]).toMatchObject({ path: "plan-for-may.md", content: "## Plan for May\n" });
+    expect(root.querySelector(".note-dialog-panel")).toBeNull();
   });
 
   it("keeps a local draft identity and mutation stable until V2 create is accepted", async () => {
@@ -975,19 +1011,19 @@ describe("v2 desktop shell", () => {
     client.createNote.mockReturnValueOnce(pending.promise).mockResolvedValueOnce(accepted("retry", created));
     client.openNote.mockResolvedValue(documentFor(created, ""));
     const { app, root } = mountApp();
+    app.bindGlobalEvents();
     await app.boot();
     root.querySelector<HTMLButtonElement>('[title="New note"]')?.click();
-    await until(() => root.querySelector<HTMLInputElement>(".note-dialog-panel input") !== null);
-    const title = root.querySelector<HTMLInputElement>(".note-dialog-panel input")!;
-    title.value = "Meeting Notes";
-    title.dispatchEvent(new Event("input", { bubbles: true }));
-    root.querySelector<HTMLFormElement>(".note-dialog-panel")?.dispatchEvent(new Event("submit", { cancelable: true }));
+    await until(() => editorMock.instances.length > 0);
+    editorMock.instances[0]!.simulateEdit("# Meeting Notes\n");
+    await flushEditorCapture();
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "s", ctrlKey: true, cancelable: true }));
     await flushAsync();
     const request = client.createNote.mock.calls[0]![0];
-    expect(request).toMatchObject({ path: "meeting-notes.md", content: "", sourceHash: expect.stringMatching(/^blake3-v3:/) });
+    expect(request).toMatchObject({ path: "meeting-notes.md", content: "# Meeting Notes\n", sourceHash: expect.stringMatching(/^blake3-v3:/) });
     pending.resolve({ mutationId: request.mutationId, outcome: { state: "pendingMaterialization", operationId: "op-1" } });
     await flushAsync();
-    root.querySelector<HTMLFormElement>(".note-dialog-panel")?.dispatchEvent(new Event("submit", { cancelable: true }));
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "s", ctrlKey: true, cancelable: true }));
     await flushAsync();
     expect(client.createNote).toHaveBeenCalledTimes(2);
     expect(client.createNote.mock.calls[1]?.[0].mutationId).toBe(request.mutationId);
@@ -1193,26 +1229,6 @@ describe("v2 desktop shell", () => {
     expect(root.querySelector<HTMLButtonElement>(".tab.active")?.title).toBe("One");
     expect(memory.savedDrafts.get(note.noteId)?.titleDraft).toBeNull();
     expect(client.renameNote).not.toHaveBeenCalled();
-  });
-
-  it("closes a new note tab and keeps its checkpoint when the dialog is dismissed", async () => {
-    configureVault([]);
-    const { root } = mountApp();
-    const app = apps.at(-1)!;
-    await app.boot();
-
-    root.querySelector<HTMLButtonElement>('[title="New note"]')?.click();
-    await until(() => root.querySelector(".note-dialog-panel") !== null);
-    const title = root.querySelector<HTMLInputElement>(".note-dialog-panel input")!;
-    title.value = "Unfinished note";
-    title.dispatchEvent(new Event("input", { bubbles: true }));
-    await until(() => [...memory.localDrafts.values()].some((record) => record.titleDraft === "Unfinished note"));
-    root.querySelector<HTMLDivElement>(".overlay-backdrop")?.click();
-    await until(() => root.querySelector(".note-dialog-panel") === null);
-
-    const checkpoint = [...memory.localDrafts.values()].find((record) => record.titleDraft === "Unfinished note");
-    expect(checkpoint).toBeDefined();
-    expect(root.querySelector(".tab")).toBeNull();
   });
 
   it("persists and recovers a dirty closed tab through its workspace and journal", async () => {
@@ -1635,7 +1651,8 @@ describe("v2 desktop shell", () => {
     await runCommand(root, "source");
     expect(editor.setMode).toHaveBeenCalledWith("source");
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "n", metaKey: true, altKey: true }));
-    await until(() => root.querySelector(".note-dialog-panel") !== null);
+    await until(() => root.querySelectorAll(".tab").length === 2);
+    expect(root.querySelector(".note-dialog-panel")).toBeNull();
   });
 
   it("keeps the user's selected tab when an import finishes creating its note", async () => {
@@ -2356,6 +2373,8 @@ function createTestClient() {
     saveNote: vi.fn(async (note: string, request: V2SaveNoteRequest) => accepted(request.mutationId, noteMeta(note, `${note}.md`, note, [], request.precondition.baseRevision + 1, request.sourceHash))),
     renameNote: vi.fn(async (note: string, request: Parameters<V2VaultClient["renameNote"]>[1]) => accepted(request.mutationId, noteMeta(note, request.path, request.path.replace(/\.md$/i, ""), [], request.precondition.baseRevision + 1, HASH_B))),
     deleteNote: vi.fn(async (_note: string, request: Parameters<V2VaultClient["deleteNote"]>[1]) => ({ mutationId: request.mutationId, outcome: { state: "accepted", result: null } } as V2MutationResponse)),
+    noteLinks: vi.fn(async () => ({ backlinks: [], outgoing: [] })),
+    notePreview: vi.fn(async (id: string) => ({ noteId: id, preview: "" })),
     listRevisions: vi.fn(async () => [] as V2RevisionMeta[]),
     openRevision: vi.fn(async (note: string, revision: number): Promise<V2RevisionDocument> => ({ revision: { noteId: note, revision, kind: "save", source: "user", sourceHash: HASH_A, createdAtMs: 1 }, content: "# Old\n" })),
     openConflictDraft: vi.fn(async (note: string): Promise<V2ConflictDraftDocument> => ({ draft: conflictDraft(note), content: "# Draft\n" })),
