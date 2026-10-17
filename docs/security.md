@@ -26,6 +26,13 @@ records the latest counter anomaly for that credential, and issues the session
 in one database transaction. The stored counter never decreases. See
 [RFC 0001](rfcs/0001-webauthn-counter-policy.md).
 
+## Extension import
+
+The page-side import receiver adds no server endpoint and no CORS access. It
+accepts only same-window, same-origin `postMessage` events, validates and caps
+the payload, and creates notes through the existing authenticated writes. See
+[extension import](extension-import.md).
+
 ## Enrollment and sessions
 
 The first credential requires a random, expiring enrollment capability. The

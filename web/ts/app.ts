@@ -12,11 +12,13 @@ import { sameTabIdentity, toTabKey, type TabIdentity } from "./app/tab-identity.
 import { logClientEvent } from "./dev-log.ts";
 import { V2ApiError } from "./app/v2-api.ts";
 import { titleFromSource } from "./app/note-title.ts";
+import { createExtensionImportReceiver, type ExtensionImportReceiver } from "./app/extension-import-receiver.ts";
 import { createNoteLinksLoader, createNotePreviewCache, type NoteLinksOutcome } from "./app/note-links.ts";
 import { linksRailNoteId } from "./links-rail.ts";
 import type { EditorHandle, EditorSession, EditorSnapshot } from "./editor/codemirror-adapter.ts";
 import { createCalloutExtension, createWikiImageExtension, createWikiLinkExtension, type EditorConfig } from "./editor/tansu-extensions.ts";
 import { canMutateTags } from "./editor/tag-source.ts";
+import { convertImageToWebp } from "./editor/image-webp.ts";
 import { resolveWikiTarget } from "./editor/wiki-target.ts";
 import { normalizeTag } from "./markdown-tags.ts";
 import { canonicalSourceHash } from "./source-hash.ts";
@@ -117,6 +119,7 @@ export class TansuApp {
   private readonly assetScope = new Map<string, string>();
   private assetScopeRevision = 0;
   private readonly globalEventCleanups: Array<() => void> = [];
+  private extensionImport: ExtensionImportReceiver | null = null;
   private assetController: AbortController | null = null;
   private eventSubscription: { close: () => void } | null = null;
   private readonly draftPromotionTimers = new Map<LocalDraftId, number>();
@@ -168,6 +171,7 @@ export class TansuApp {
   async boot(requestedVault?: string): Promise<void> {
     const generation = ++this.bootGeneration;
     this.transitioningVault = true;
+    this.extensionImport?.cancel();
     this.state.imageUploads.clear();
     this.searchOverlayRequestSeq += 1;
     this.cancelCommandSearch();
@@ -278,6 +282,7 @@ export class TansuApp {
     this.scheduleWorkspaceSave();
     this.connectEvents(generation);
     this.render();
+    this.extensionImport?.announceReady();
     const active = activeTab(this.state);
     if (active !== undefined) await this.ensureTabLoaded(active);
   }
@@ -399,7 +404,23 @@ export class TansuApp {
     window.addEventListener("click", onClick);
     this.root.addEventListener("wheel", onWheel, { passive: false });
     this.editorMount.addEventListener("click", onWikiLinkClick, true);
+    const extensionImport = createExtensionImportReceiver(window, {
+      isReady: () => this.acceptsExtensionImport(),
+      imageWebpQuality: () => {
+        const settings = this.state.boot?.settings;
+        if (settings === undefined) throw new Error("Vault settings are unavailable");
+        return settings.imageWebpQuality;
+      },
+      convertToWebp: convertImageToWebp,
+      uploadImage: (image, signal) => {
+        if (this.vaultClient === null) throw new Error("No vault is open");
+        return this.vaultClient.uploadImage(mutationId(), image, signal);
+      },
+      createNote: ({ title, markdown }) => this.createImportedNote(title, markdown),
+    });
+    this.extensionImport = extensionImport;
     this.globalEventCleanups.push(
+      () => extensionImport.dispose(),
       () => window.removeEventListener("beforeunload", onBeforeUnload),
       () => window.removeEventListener("keydown", onKeyDown),
       () => window.removeEventListener("click", onClick),
@@ -1398,10 +1419,10 @@ export class TansuApp {
     return tab;
   }
 
-  private async promoteLocalDraft(tab: Extract<Tab, { kind: "local-draft" }>, title: string, path: string): Promise<void> {
+  private async promoteLocalDraft(tab: Extract<Tab, { kind: "local-draft" }>, title: string, path: string): Promise<V2NoteMeta | null> {
     const serverIdentity = this.identity;
     const client = this.vaultClient;
-    if (serverIdentity === null || client === null || tab.session === null) return;
+    if (serverIdentity === null || client === null || tab.session === null) return null;
     if (!tab.session.state.promotionPending) tab.session.editTitle(title);
     else if (tab.session.state.titleDraft !== title) throw new Error("A pending local create cannot change its title");
     const ready = await tab.session.beginPromotion();
@@ -1418,7 +1439,7 @@ export class TansuApp {
     });
     if (response.outcome.state === "pendingMaterialization") {
       this.notify("Note creation is still being applied. Retry the same save to finish promotion.");
-      return;
+      return null;
     }
     if (response.outcome.state !== "accepted" || response.outcome.result === null) {
       if (response.outcome.state === "conflict") throw new Error("A new local note unexpectedly conflicted");
@@ -1429,7 +1450,7 @@ export class TansuApp {
     const documentIdentity: DocumentIdentity = { ...serverIdentity, noteId: noteId(noteMeta.noteId) };
     const promoted = await this.services.workspace.promoteLocalDraftCheckpoint(documentIdentity, this.workspaceId, tab.localDraftId, document);
     if (promoted === null) throw new Error("Local draft checkpoint changed before promotion completed");
-    if (!this.isCurrentVault(serverIdentity, client)) return;
+    if (!this.isCurrentVault(serverIdentity, client)) return null;
     this.state.notes.set(document.meta.noteId, document.meta);
     const index = this.state.tabs.indexOf(tab);
     if (index !== -1) {
@@ -1446,6 +1467,7 @@ export class TansuApp {
     this.cacheDocument(document);
     this.state.noteDialog = null;
     this.render();
+    return document.meta;
   }
 
   private createDocumentSession(tab: SavedTab, checkpoint: DraftJournalRecord | null): DocumentSession {
@@ -1665,23 +1687,23 @@ export class TansuApp {
     this.render();
   }
 
-  private async importHtml(): Promise<void> {
-    const identity = this.identity;
-    const client = this.vaultClient;
-    const generation = this.bootGeneration;
-    if (identity === null || client === null) return;
-    const imported = await this.services.htmlImport.pickHtmlImport(this.state.notes.values());
-    if (imported === null || generation !== this.bootGeneration || this.transitioningVault || !this.isCurrentVault(identity, client)) return;
-    await this.trackAction(this.openImportedHtml(imported));
+  private acceptsExtensionImport(): boolean {
+    return !this.disposed && !this.transitioningVault && !this.state.authRequired &&
+      this.state.boot !== null && this.identity !== null && this.vaultClient !== null;
   }
 
-  private async openImportedHtml(imported: { path: string; content: string }): Promise<void> {
-    const tab = this.localDraftTab(localDraftId(mutationId()), imported.path.replace(/\.md$/i, ""), imported.content);
-    tab.path = imported.path;
+  private async createImportedNote(title: string, markdown: string): Promise<{ noteId: string; path: string }> {
+    const path = uniqueNotePath(title, this.state.notes.values());
+    const tab = this.localDraftTab(localDraftId(mutationId()), title, markdown);
+    tab.path = path;
     this.state.tabs.push(tab);
     this.state.activeTab = tabIdentity(tab);
-    await this.loadLocalDraft(tab);
-    await this.promoteLocalDraft(tab, tab.title, imported.path);
+    const meta = await this.trackAction((async () => {
+      await this.loadLocalDraft(tab);
+      return this.promoteLocalDraft(tab, title, path);
+    })());
+    if (meta === null) throw new Error("The note was not created");
+    return { noteId: meta.noteId, path: meta.path };
   }
 
   private dispatch(event: ViewEvent): void {
@@ -1977,7 +1999,7 @@ export class TansuApp {
   private executeCommand(id: CommandId): void {
     this.state.commandOpen = false;
     this.render();
-    if (["save", "pin", "reopen", "reading", "focus", "import", "source"].includes(id)) this.restoreOverlayReturn();
+    if (["save", "pin", "reopen", "reading", "focus", "source"].includes(id)) this.restoreOverlayReturn();
     switch (id) {
       case "create": {
         this.runAsync(this.commandCreate(), "Create failed");
@@ -2026,10 +2048,6 @@ export class TansuApp {
       }
       case "find": {
         this.dispatch({ type: "find.open" });
-        break;
-      }
-      case "import": {
-        this.runAsync(this.importHtml(), "Import failed", false);
         break;
       }
       case "revisions":
@@ -2352,6 +2370,7 @@ export class TansuApp {
       this.state.authRequired = false;
       if (this.state.boot === null) await this.boot();
       else this.notify("Passkey registered");
+      this.extensionImport?.announceReady();
     } catch (error) {
       this.state.authError = error instanceof Error ? error.message : String(error);
     } finally {

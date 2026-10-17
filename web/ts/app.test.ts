@@ -54,7 +54,6 @@ const api = {
   forVault: vi.fn((_server: string, id: string): TestClient => testClient(id)),
 };
 const editorMock = { instances: [] as FakeEditor[] };
-const htmlImport = { pickHtmlImport: vi.fn(async () => null as { path: string; content: string } | null) };
 
 describe("v2 desktop shell", () => {
   beforeEach(() => {
@@ -73,7 +72,6 @@ describe("v2 desktop shell", () => {
       vaults: [{ vaultId: DEFAULT_VAULT, name: "Notes" }, { vaultId: "vault-2", name: "Other notes" }],
     });
     api.forVault.mockClear();
-    htmlImport.pickHtmlImport.mockReset().mockResolvedValue(null);
     let sequence = 0;
     vi.stubGlobal("crypto", {
       randomUUID: vi.fn(() => `mutation-${++sequence}`),
@@ -231,7 +229,6 @@ describe("v2 desktop shell", () => {
 
     expect(open.defaultPrevented).toBeTruthy();
     expect(root.querySelector(".command-panel")).not.toBeNull();
-    expect(root.textContent).toContain("Import HTML");
     expect(root.textContent).toContain("Settings");
   });
 
@@ -1631,7 +1628,7 @@ describe("v2 desktop shell", () => {
     expect(client.openNote).toHaveBeenCalledWith(closed.noteId);
   });
 
-  it("imports HTML through a V2 local draft and preserves source mode", async () => {
+  it("creates an extension-imported note through a V2 local draft and preserves source mode", async () => {
     const note = noteMeta("note-1", "one.md", "One");
     const imported = noteMeta("imported", "imported.md", "Imported");
     const client = configureVault([note]);
@@ -1639,11 +1636,10 @@ describe("v2 desktop shell", () => {
     client.openNote.mockImplementation(async (id) => id === imported.noteId
       ? documentFor(imported, "# Imported\n")
       : documentFor(note, "# One\n"));
-    htmlImport.pickHtmlImport.mockResolvedValue({ path: "imported.md", content: "# Imported\n" });
     const { app, root } = mountApp();
     app.bindGlobalEvents();
     await app.boot();
-    await runCommand(root, "import");
+    sendImport();
     await until(() => client.createNote.mock.calls.length === 1);
     expect(client.createNote.mock.calls[0]?.[0]).toMatchObject({ path: "imported.md", content: "# Imported\n" });
     await until(() => root.querySelector<HTMLButtonElement>('.tab.active')?.title === "Imported");
@@ -1666,10 +1662,9 @@ describe("v2 desktop shell", () => {
     client.openNote.mockImplementation(async (id) => id === imported.noteId
       ? documentFor(imported, "# Imported\n")
       : documentFor(note, "# One\n"));
-    htmlImport.pickHtmlImport.mockResolvedValue({ path: "imported.md", content: "# Imported\n" });
     const { app, root } = mountApp();
     await app.boot();
-    await runCommand(root, "import");
+    sendImport();
     await until(() => client.createNote.mock.calls.length === 1);
     root.querySelector<HTMLButtonElement>('.tab[title="One"]')?.click();
     await flushAsync();
@@ -1691,10 +1686,9 @@ describe("v2 desktop shell", () => {
     client.openNote.mockImplementation(async (id) => id === imported.noteId
       ? documentFor(imported, "# Imported\n")
       : documentFor(note, "# One\n"));
-    htmlImport.pickHtmlImport.mockResolvedValue({ path: "imported.md", content: "# Imported\n" });
     const { app, root } = mountApp();
     await app.boot();
-    await runCommand(root, "import");
+    sendImport();
     await until(() => client.createNote.mock.calls.length === 1);
     root.querySelector<HTMLButtonElement>('.tab.active .tab-close')?.click();
     await flushAsync();
@@ -1930,14 +1924,13 @@ describe("v2 desktop shell", () => {
     expect(memory.workspaceWrites).toHaveLength(1);
   });
 
-  it("reports V2 save, delete, and import failures in the shell", async () => {
+  it("reports V2 save and delete failures in the shell", async () => {
     const note = noteMeta("note-1", "one.md", "One");
     const client = configureVault([note], workspaceSeed([
       { noteId: note.noteId, title: note.title, path: note.path, cursorOffset: null, sourceMode: false },
     ], note.noteId));
     client.saveNote.mockRejectedValueOnce(new Error("offline"));
     client.deleteNote.mockRejectedValueOnce(new Error("offline"));
-    htmlImport.pickHtmlImport.mockRejectedValueOnce(new Error("invalid html"));
     const { app, root } = mountApp();
     await app.boot();
     editorMock.instances[0]!.simulateEdit("# Changed\n");
@@ -1947,12 +1940,11 @@ describe("v2 desktop shell", () => {
     root.querySelector<HTMLButtonElement>('[title="Delete note"]')?.click();
     root.querySelector<HTMLButtonElement>(".note-dialog-panel .danger-button")?.click();
     await until(() => root.textContent?.includes("Action failed") === true);
-    await runCommand(root, "import");
-    await until(() => root.textContent?.includes("Import failed") === true);
   });
 
   it("awaits journal flush and clears owned timers during disposal", async () => {
     vi.useFakeTimers();
+    vi.spyOn(window, "postMessage").mockImplementation(() => {});
     const note = noteMeta("note-1", "one.md", "One");
     const client = configureVault([note], workspaceSeed([
       { noteId: note.noteId, title: note.title, path: note.path, cursorOffset: null, sourceMode: false },
@@ -2223,13 +2215,11 @@ describe("v2 desktop shell", () => {
       api: defaultServices.api,
       workspace: defaultServices.workspace,
       editor: defaultServices.editor,
-      htmlImport: defaultServices.htmlImport,
     };
     const services = createServices();
     defaultServices.api = services.api;
     defaultServices.workspace = services.workspace;
     defaultServices.editor = services.editor;
-    defaultServices.htmlImport = services.htmlImport;
     const root = document.createElement("div");
     document.body.append(root);
     const app = startApp(root);
@@ -2240,7 +2230,6 @@ describe("v2 desktop shell", () => {
     defaultServices.api = previous.api;
     defaultServices.workspace = previous.workspace;
     defaultServices.editor = previous.editor;
-    defaultServices.htmlImport = previous.htmlImport;
     await app.dispose();
   });
 
@@ -2525,7 +2514,6 @@ function createServices(): AppServices {
     api: api as unknown as AppServices["api"],
     passkeys: { login: vi.fn(async () => {}), enroll: vi.fn(async () => {}), logout: vi.fn(async () => {}) },
     editor: { createEditor: (_container: HTMLElement, config?: EditorConfig) => createFakeEditor(config) },
-    htmlImport,
     workspace,
     storage: { requestPersistent: vi.fn(async () => false) },
   } as unknown as AppServices;
@@ -2618,6 +2606,28 @@ function createFakeEditor(initialConfig?: EditorConfig): FakeEditor {
 
 type FakeEditor = EditorHandle & { readonly config: Record<string, unknown>; readonly snapshots: Map<EditorSession, EditorSnapshot>; readonly attachedSession: EditorSession | null; simulateEdit: (source: string, selection?: EditorSnapshot["selection"]) => void; simulateInactiveEdit: (noteKey: string, source: string) => void; simulateEditIn: (noteId: string, source: string) => void };
 
+function importRequest(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    channel: "tansu",
+    version: 1,
+    type: "import.request",
+    requestId: "request-1",
+    title: "Imported",
+    markdown: "# Imported\n",
+    sourceUrl: "https://example.com/page",
+    images: [],
+    ...overrides,
+  };
+}
+
+function sendImport(overrides: Record<string, unknown> = {}, source: unknown = window, origin = window.location.origin): void {
+  window.dispatchEvent(new MessageEvent("message", { data: importRequest(overrides), origin, source: source as MessageEventSource }));
+}
+
+function postedMessages(post: { mock: { calls: unknown[][] } }, type: string): Array<Record<string, unknown>> {
+  return post.mock.calls.map((call) => call[0] as Record<string, unknown>).filter((message) => message["type"] === type);
+}
+
 function mountApp(services: AppServices = createServices()): { app: TansuApp; root: HTMLElement } {
   const root = document.createElement("div");
   document.body.append(root);
@@ -2691,7 +2701,6 @@ function useShellFixtures(): void {
       vaults: [{ vaultId: DEFAULT_VAULT, name: "Notes" }, { vaultId: "vault-2", name: "Other notes" }],
     });
     api.forVault.mockClear();
-    htmlImport.pickHtmlImport.mockReset().mockResolvedValue(null);
     let sequence = 0;
     vi.stubGlobal("crypto", {
       randomUUID: vi.fn(() => `mutation-${++sequence}`),
@@ -2753,45 +2762,127 @@ describe("wiki link failure notices", () => {
   });
 });
 
-describe("html import picker", () => {
+describe("extension import", () => {
   useShellFixtures();
   const note = noteMeta("note-1", "one.md", "One");
-  const other = noteMeta("note-2", "two.md", "Two");
+  const imported = noteMeta("imported", "imported.md", "Imported");
+  const webpImage = (id: number, base64: string | null) => ({ id, url: `https://example.com/${id}.webp`, contentType: "image/webp", base64 });
 
-  it("does not hold a vault switch while the file picker is open", async () => {
+  function importVault() {
     const client = configureVault([note]);
-    configureVault([other], null, "vault-2");
-    const picker = deferred<{ path: string; content: string } | null>();
-    htmlImport.pickHtmlImport.mockReturnValue(picker.promise);
+    client.createNote.mockImplementation(async (request) => accepted(request.mutationId, imported));
+    client.openNote.mockImplementation(async (id) => id === imported.noteId
+      ? documentFor(imported, "# Imported\n")
+      : documentFor(note, "# One\n"));
+    return client;
+  }
+
+  it("announces readiness after boot and answers pings", async () => {
+    importVault();
+    const post = vi.spyOn(window, "postMessage");
+    const { app } = mountApp();
+    await app.boot();
+    expect(postedMessages(post, "import.ready")).toHaveLength(1);
+    expect(post.mock.calls[0]?.[1]).toBe(window.location.origin);
+
+    window.dispatchEvent(new MessageEvent("message", {
+      data: { channel: "tansu", type: "import.ping" },
+      origin: window.location.origin,
+      source: window,
+    }));
+    expect(postedMessages(post, "import.ready")).toHaveLength(2);
+  });
+
+  it("uploads images before creating the note, rewrites embeds, and posts the result", async () => {
+    const client = importVault();
+    const order: string[] = [];
+    client.uploadImage.mockImplementation(async (id: string) => {
+      order.push("upload");
+      return { mutationId: id, name: "z-images/a.webp", markdown: "![[a.webp]]" };
+    });
+    client.createNote.mockImplementation(async (request) => {
+      order.push("create");
+      return accepted(request.mutationId, imported);
+    });
     const { app, root } = mountApp();
     await app.boot();
-    await runCommand(root, "import");
-    await until(() => htmlImport.pickHtmlImport.mock.calls.length === 1);
+    const post = vi.spyOn(window, "postMessage");
 
-    await app.boot("vault-2");
+    sendImport({
+      markdown: "# Imported\n\n![a [b]](tansu-import-image:0)\n![c](tansu-import-image:1)\n",
+      images: [webpImage(0, btoa("RIFFxxxxWEBP")), webpImage(1, null)],
+    });
+    await until(() => postedMessages(post, "import.result").length === 1);
 
-    expect(root.textContent).toContain("Two");
+    expect(order).toEqual(["upload", "create"]);
+    expect(client.createNote.mock.calls[0]?.[0]).toMatchObject({
+      path: "imported.md",
+      content: "# Imported\n\n![[a.webp]]\n![c](https://example.com/1.webp)\n",
+    });
+    expect(postedMessages(post, "import.result")[0]).toEqual({
+      channel: "tansu",
+      version: 1,
+      type: "import.result",
+      requestId: "request-1",
+      ok: true,
+      noteId: imported.noteId,
+      path: imported.path,
+      imagesLocalized: 1,
+      imagesFailed: 1,
+    });
+    await until(() => root.querySelector<HTMLButtonElement>(".tab.active")?.title === "Imported");
+  });
+
+  it("keeps the remote image when an upload fails", async () => {
+    const client = importVault();
+    client.uploadImage.mockRejectedValue(new Error("offline"));
+    const { app } = mountApp();
+    await app.boot();
+    const post = vi.spyOn(window, "postMessage");
+
+    sendImport({ markdown: "![x](tansu-import-image:0)", images: [webpImage(0, btoa("RIFFxxxxWEBP"))] });
+    await until(() => postedMessages(post, "import.result").length === 1);
+
+    expect(client.createNote.mock.calls[0]?.[0]).toMatchObject({ content: "![x](https://example.com/0.webp)" });
+    expect(postedMessages(post, "import.result")[0]).toMatchObject({ ok: true, imagesLocalized: 0, imagesFailed: 1 });
+  });
+
+  it("rejects invalid payloads without side effects", async () => {
+    const client = importVault();
+    const { app } = mountApp();
+    await app.boot();
+    const post = vi.spyOn(window, "postMessage");
+
+    sendImport({ markdown: 5 });
+    await until(() => postedMessages(post, "import.result").length === 1);
+
+    expect(postedMessages(post, "import.result")[0]).toMatchObject({ ok: false, requestId: "request-1" });
+    expect(client.createNote).not.toHaveBeenCalled();
+    expect(client.uploadImage).not.toHaveBeenCalled();
+  });
+
+  it("ignores messages from other sources or origins", async () => {
+    const client = importVault();
+    const { app } = mountApp();
+    await app.boot();
+    const post = vi.spyOn(window, "postMessage");
+
+    sendImport({}, document.createElement("iframe").contentWindow);
+    sendImport({}, window, "https://evil.example");
+    await flushAsync();
+
+    expect(postedMessages(post, "import.result")).toHaveLength(0);
     expect(client.createNote).not.toHaveBeenCalled();
   });
 
-  it("discards a picked file that arrives after the vault changed", async () => {
-    const oldClient = configureVault([note]);
-    const newClient = configureVault([other], null, "vault-2");
-    const picker = deferred<{ path: string; content: string } | null>();
-    htmlImport.pickHtmlImport.mockReturnValue(picker.promise);
-    const { app, root } = mountApp();
+  it("ignores requests while the app is not ready", async () => {
+    importVault();
+    const { app } = mountApp();
+    const post = vi.spyOn(window, "postMessage");
+    sendImport();
+    await flushAsync();
+    expect(post).not.toHaveBeenCalled();
     await app.boot();
-    await runCommand(root, "import");
-    await until(() => htmlImport.pickHtmlImport.mock.calls.length === 1);
-    await app.boot("vault-2");
-
-    picker.resolve({ path: "imported.md", content: "# Imported\n" });
-    await flushAsync();
-    await flushAsync();
-
-    expect(oldClient.createNote).not.toHaveBeenCalled();
-    expect(newClient.createNote).not.toHaveBeenCalled();
-    expect(root.querySelector('.tab[title="imported"]')).toBeNull();
   });
 });
 

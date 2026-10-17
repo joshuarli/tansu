@@ -21,7 +21,6 @@ describe("native command palette definitions", () => {
       ["reopen", "Reopen Last Closed Note", "⌘⇧T"],
       ["reading", "Reading mode", undefined],
       ["focus", "Focus mode", "⌘⇧Enter / Ctrl+Shift+Enter"],
-      ["import", "Import HTML", undefined],
       ["tag", "Add Tag", undefined],
       ["revisions", "Revisions", undefined],
       ["restore", "Restore Version", undefined],

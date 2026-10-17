@@ -5,6 +5,8 @@ Rust DTOs in `src/api_types.rs` are the source of truth. Generate TypeScript wit
 The transport accepts HTTP/1 and cleartext HTTP/2 prior knowledge; it
 does not support h2c upgrades.
 
+Browser extension import uses no HTTP endpoint. See [extension import](extension-import.md).
+
 ## Version 2
 
 Version 2 identifies a server installation and each configured vault with stable

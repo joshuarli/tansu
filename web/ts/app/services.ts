@@ -1,6 +1,5 @@
 import { createCodeMirrorEditor, type EditorHandle } from "../editor/codemirror-adapter.ts";
 import type { EditorConfig } from "../editor/tansu-extensions.ts";
-import { pickHtmlImport } from "../html-import.ts";
 import {
   cacheNoteBody,
   createDraftCheckpointClearer,
@@ -33,9 +32,6 @@ export type AppServices = {
   };
   editor: {
     createEditor: (container: HTMLElement, config?: EditorConfig) => EditorHandle;
-  };
-  htmlImport: {
-    pickHtmlImport: typeof pickHtmlImport;
   };
   workspace: {
     createWorkspaceId: () => WorkspaceId;
@@ -86,7 +82,6 @@ export const defaultServices: AppServices = {
     logout: () => api.auth.logout(),
   },
   editor: { createEditor: createCodeMirrorEditor },
-  htmlImport: { pickHtmlImport },
   workspace: {
     createWorkspaceId,
     createJournal: (onFailure) => new DraftJournal(onFailure),
