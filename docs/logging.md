@@ -19,7 +19,7 @@ its server request. `seq` gives the canonical order.
 
 The log hub retains up to 100,000 events and 64 MiB. It truncates events over
 16 KiB and drops the oldest events when a retention limit is reached. Do not log
-note bodies, request or response bodies, pasted image bytes, or imported HTML.
+note bodies, request or response bodies, pasted image bytes, or imported page content.
 
 ## Dev endpoints
 

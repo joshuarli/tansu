@@ -15,7 +15,6 @@ const commandDefinitions: readonly CommandItem[] = [
   { id: "reopen", label: "Reopen Last Closed Note" },
   { id: "reading", label: "Reading mode" },
   { id: "focus", label: "Focus mode" },
-  { id: "import", label: "Import HTML" },
   { id: "tag", label: "Add Tag" },
   { id: "revisions", label: "Revisions" },
   { id: "restore", label: "Restore Version" },

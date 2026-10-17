@@ -37,7 +37,7 @@ import { urlCards } from "./url-card.js";
 import { frontmatterRange, type FrontmatterRange } from "./frontmatter.js";
 import { sanitizeHtmlToMarkdown } from "./clipboard.js";
 import { findLiteral, outlineFromSyntaxTree, type FindMatch, type Outline, type OutlineHeading } from "./source-navigation.js";
-import { encodeImageDataAsWebp } from "./image-encoder.js";
+import { convertImageToWebp, webpAssetMarkdown } from "./image-webp.js";
 import { tagsSourceEdit } from "./tag-source.js";
 import { normalizeTag } from "../markdown-tags.ts";
 import { createTagPill } from "../tag-pill.ts";
@@ -673,41 +673,11 @@ export function createCodeMirrorEditor(container: HTMLElement, initialConfig: Ed
     });
   }
 
-  function webpAssetMarkdown(result: EditorImageUploadResult): string {
-    const prefix = "z-images/";
-    const assetName = result.name.startsWith(prefix) ? result.name.slice(prefix.length) : "";
-    if (
-      assetName === "" ||
-      assetName.includes("/") ||
-      assetName.includes("\\") ||
-      !assetName.endsWith(".webp") ||
-      result.markdown.trim() === ""
-    ) {
-      throw new TypeError("Image upload returned an invalid WebP asset");
-    }
-    return result.markdown;
-  }
-
   async function encodeImageAsWebp(file: File): Promise<Blob> {
     if (file.type === "image/webp") return file;
-    const bitmap = await createImageBitmap(file);
-    const canvas = document.createElement("canvas");
-    canvas.width = bitmap.width;
-    canvas.height = bitmap.height;
-    try {
-      const context = canvas.getContext("2d");
-      if (context === null) throw new Error("Could not create an image conversion context");
-      context.drawImage(bitmap, 0, 0);
-      const quality = config.imageWebpQuality;
-      if (quality === undefined) throw new TypeError("Converting a pasted image requires imageWebpQuality");
-      const image = await encodeImageDataAsWebp(context.getImageData(0, 0, bitmap.width, bitmap.height), quality);
-      if (image.type !== "image/webp") throw new Error("Browser did not convert the pasted image to WebP");
-      return image;
-    } finally {
-      canvas.width = 0;
-      canvas.height = 0;
-      bitmap.close();
-    }
+    const quality = config.imageWebpQuality;
+    if (quality === undefined) throw new TypeError("Converting a pasted image requires imageWebpQuality");
+    return convertImageToWebp(file, quality);
   }
 
   function insertPastedImage(paste: PendingImagePaste, markdown: string): void {

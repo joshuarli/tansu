@@ -15,7 +15,6 @@ export type CommandId =
   | "reading"
   | "focus"
   | "search"
-  | "import"
   | "revisions"
   | "restore"
   | "tag"

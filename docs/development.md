@@ -83,6 +83,21 @@ engine. The test named `saves an image inserted into a note after the user
 switched away` is marked `it.fails` because the defect is open; when it is fixed
 the suite fails until the marker is removed.
 
+## Loupe import test
+
+`make test-e2e-loupe` runs an opt-in Chromium test of the Loupe extension
+importing a page into a fixture Tansu server. It is not part of `make test`,
+`make check`, or the default e2e commands, and it needs Chromium only because
+WebKit cannot load extensions.
+
+It needs a checkout of the extensions repository with its own prerequisites (see
+that repository's development guide). The target uses `~/d/extensions`; set
+`LOUPE_EXTENSIONS_DIR` to use another checkout. When the directory is missing the
+target prints a skip reason and exits 0. Otherwise it runs `pnpm run build` there,
+which writes the unpacked extension to `build/extension-loupe`, and then runs
+`web/ts/e2e/loupe-import.loupe.ts`. Running that file without
+`LOUPE_EXTENSIONS_DIR` skips it.
+
 ## Build
 
 `deno task build` uses Vite 8 to create fingerprinted frontend bundles and a
