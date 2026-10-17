@@ -309,7 +309,7 @@ function articleHtml(): string {
 </head><body><main><article>
 <h1>${articleTitle}</h1>
 <p>First paragraph of the fixture article. It carries enough prose for the extractor to treat this page as the main article rather than navigation or boilerplate around it.</p>
-<p><img src="${imageBase}/photo.png" alt="valid png"></p>
+<p><a href="${imageBase}/photo.png"><img src="${imageBase}/photo.png" alt="valid png"></a></p>
 <p>Second paragraph of the fixture article. It sits between the images and says a few more things about nothing in particular so the content stays substantial.</p>
 <p><img src="${imageBase}/photo.jpg" alt="valid jpeg"></p>
 <p><img src="${imageBase}/missing.png" alt="missing image"></p>
