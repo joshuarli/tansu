@@ -6,11 +6,9 @@ See [Configuration](docs/configuration.md) for storage paths.
 
 ## Get Tansu2
 
-Download the standalone binary for macOS arm64, Linux x86_64 musl, or Linux
-arm64 musl from the [latest GitHub release](https://github.com/joshuarli/tansu2/releases/latest).
-Each archive includes the web app. The `.sha256` files can verify downloads.
-Rename the extracted `tansu2-<target>` binary to `tansu2` and put it on your
-`PATH`.
+Standalone binaries, when available, are listed on the
+[GitHub releases page](https://github.com/joshuarli/tansu2/releases). Put the
+`tansu2` binary on your `PATH`.
 
 ## Run Tansu2
 
@@ -26,11 +24,6 @@ use
 [Deployment](docs/deployment.md) for remote access.
 
 Read [Migration](docs/migration.md) before opening an existing vault.
-
-## Loupe browser extension
-
-See [Loupe](docs/loupe.md) for the browser extension that reads pages and sends
-notes and images to Tansu.
 
 ## Help and license
 

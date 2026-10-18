@@ -2,89 +2,57 @@
 
 ## Server identity
 
-Authenticated mode requires an HTTPS external origin and a matching RP ID.
-Tansu2 checks `Host` on every request. If a request supplies `Origin`, Tansu2
-requires an exact match with the configured origin. State-changing requests
-must include that origin, a valid session, and its CSRF token. Login ceremonies
-and initial enrollment use server-side one-time tickets or the enrollment
-capability instead. `GET /api/v2/health` is public, but still checks `Host` and
-any supplied `Origin`. The server does not enable cross-origin access.
-
-App responses restrict scripts to same-origin files and permit WebAssembly
-compilation with `wasm-unsafe-eval` for the lazy-loaded pasted-image encoder.
-The policy does not permit JavaScript `eval`.
+Authenticated mode requires the configured HTTPS origin and RP ID. Tansu2
+checks `Host` on every request and requires an exact `Origin` match when the
+header is present. State-changing requests require the configured origin, a
+valid session, and its CSRF token, except for ticket-bound login and initial
+enrollment. Health is public but still checks `Host` and any supplied
+`Origin`. The server does not enable cross-origin access.
 
 WebAuthn credentials bind to the configured origin and RP ID. Changing either
-value clears credentials, sessions, enrollment capabilities, and pending
-ceremonies in one database transaction. Enroll credentials again after changing
-either value.
+clears credentials, sessions, enrollment capabilities, and pending ceremonies
+in one transaction. A non-increasing signature counter rejects single-device
+credentials and consumes the ceremony. Backup-eligible passkeys may complete a
+valid assertion; Tansu2 records the latest counter anomaly and never lowers the
+stored counter.
 
-For a non-increasing signature counter, Tansu2 rejects single-device
-credentials with the usual unauthorized response and consumes the ceremony.
-For backup-eligible passkeys, it accepts a cryptographically valid assertion,
-records the latest counter anomaly for that credential, and issues the session
-in one database transaction. The stored counter never decreases. See
-[RFC 0001](rfcs/0001-webauthn-counter-policy.md).
+App responses restrict scripts to same-origin files and permit WebAssembly
+compilation with `wasm-unsafe-eval` for the pasted-image encoder. JavaScript
+`eval` is not permitted.
 
 ## Extension import
 
 The page-side import receiver adds no server endpoint and no CORS access. It
-accepts only same-window, same-origin `postMessage` events, validates and caps
-the payload, and creates notes through the existing authenticated writes. See
-[extension import](extension-import.md).
+accepts only same-window, same-origin `postMessage` events. It treats their
+payloads as hostile, validates and caps them, then creates notes through the
+existing authenticated writes. See [extension import](extension-import.md).
 
 ## Enrollment and sessions
 
 The first credential requires a random, expiring enrollment capability. The
-server stores only its hash. Successful first registration consumes it. Later
-registrations require a recently verified owner session. Ceremony state expires
-and the server consumes it when a finish attempt succeeds or fails.
-
-Sessions use random opaque tokens stored as hashes. The session cookie is
-`__Host-tansu_session`, `HttpOnly`, `Secure`, and `SameSite=Strict`. The
-session-bound `__Host-tansu_csrf` cookie is also Secure and SameSite=Strict. It
-is scoped to `/` and readable by same-origin JavaScript so another tab or a
-reload can send its value as `X-Tansu-CSRF`. Tansu2 checks the header against the
-session's stored token hash. Logout revokes the session, clears both cookies,
-and closes its open event streams. Sessions and streams stop at expiry.
-
-`POST /api/v2/auth/login/options` and `/login/finish` perform passkey login.
-They check Host and Origin but ignore a stale session cookie so an expired
-session can log in again. `POST /api/v2/auth/enrollment/options` starts initial
-enrollment with the one-time capability or later registration with a recently
-verified owner session and CSRF token. Both enrollment finish routes require a
-single-use ceremony ID. `GET /api/v2/auth/session` returns the current session's
-verification and expiry times. `POST /api/v2/auth/logout` requires a valid
-session, configured Origin, and CSRF token.
-
-Auth data belongs in a private state directory outside search indexes and
-caches. The directory is restricted to its owner. The database is
-owner-readable and writable. Server configuration selects the directory.
+server stores only its hash and consumes it after successful registration.
+Later registrations require a recently verified owner session. Session tokens
+are random opaque values stored as hashes. The `__Host-tansu_session` cookie is
+HttpOnly, Secure, and SameSite=Strict. The session-bound CSRF cookie is Secure,
+SameSite=Strict, scoped to `/`, and readable by same-origin JavaScript. Logout
+revokes the session and closes its event streams; sessions and streams stop at
+expiry.
 
 ## Auth data
 
-On supported macOS and Linux targets, the server and local auth commands hold
-an exclusive OS file lock in the auth state directory. Stop the server before
-enrollment, backup, or restore. The lock rejects local auth commands while the
-server is running.
+Auth state is private, owner-only data outside search indexes and caches. On
+supported macOS and Linux targets, the server and local auth commands hold an
+exclusive OS file lock in the auth state directory. Stop the server before
+enrollment, backup, or restore.
 
-Backup uses SQLite's online backup API, which includes committed WAL data.
-Tansu2 checks the backup integrity and stages a mode-0600 file in the target
-directory. It publishes the file by rename and refuses to replace an existing
-path. The command opens the target parent directory once. It opens or publishes
-the final component relative to that directory without following symlinks.
+Backup uses SQLite's online backup API, verifies integrity, stages a mode-0600
+file, and refuses to replace an existing path. Restore rejects symlinks and
+non-regular files and validates the backup before changing the live database.
+It checkpoints the WAL, rejects symlinked WAL and SHM sidecars, and removes
+regular sidecars before replacement. Restore preserves credentials and their
+origin/RP binding while clearing sessions, enrollment capabilities, and pending
+ceremonies.
 
-Restore opens the supplied file relative to its opened parent directory. It
-rejects symlinks and non-regular files, then validates the backup before
-touching the live database. It checkpoints the current WAL before replacing the
-database. It rejects symlinked WAL and SHM sidecars before SQLite opens them and
-removes regular sidecars before replacement. Restore preserves credential
-records and the origin/RP binding. It clears sessions, enrollment capabilities,
-and pending ceremonies.
-
-Auth backups contain public credential records, not authenticator private
-keys. They do not contain vault notes, app history, or search indexes. Protect
-backup files as private credentials. See [Deployment](deployment.md) for
-enrollment and recovery procedures.
-
-For private remote access, see [Deployment](deployment.md).
+Auth backups contain public credential records, not authenticator private keys.
+They do not contain vault notes, app history, or search indexes. Protect backup
+files as private credentials. See [Deployment](deployment.md) for recovery.

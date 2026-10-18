@@ -15,11 +15,10 @@ uses buffered logging. Rust release builds disable the log hub.
 The server assigns a global sequence and timestamp when it accepts each event.
 Events have `seq`, `ts`, `source`, `level`, and `kind` fields, an optional
 `requestId`, and kind-specific fields. `requestId` links a browser API event to
-its server request. `seq` gives the canonical order.
-
-The log hub retains up to 100,000 events and 64 MiB. It truncates events over
-16 KiB and drops the oldest events when a retention limit is reached. Do not log
-note bodies, request or response bodies, pasted image bytes, or imported page content.
+its server request. `seq` gives the canonical order. The bounded log hub
+truncates oversized events and drops the oldest when full; its limits are in
+`src/logging.rs`. Never log note bodies, request or response bodies, pasted
+image bytes, or imported page content.
 
 ## Dev endpoints
 

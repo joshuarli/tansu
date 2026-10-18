@@ -3,7 +3,8 @@
 ## Set up
 
 Install the Rust toolchain in `rust-toolchain.toml`, Deno 2, Node 26 or later,
-and pnpm 12.13.0. `make dev` installs the locked frontend dependencies for you.
+and pnpm 12.13.0. `make dev` installs the locked frontend dependencies. Install
+Playwright Chromium and WebKit for browser tests:
 
 ```sh
 pnpm install --frozen-lockfile
@@ -13,131 +14,50 @@ deno task playwright:install
 The supported Rust targets are `aarch64-apple-darwin`,
 `x86_64-unknown-linux-musl`, and `aarch64-unknown-linux-musl`.
 
-## Run and validate
+## Run locally
 
 ```sh
 make dev
-make check
-make test
-make test-e2e-chromium
-make test-e2e-webkit
-make test-acceptance
-make loupe
-make test-loupe-browser
-make test-e2e-loupe
 ```
 
-`make dev` serves the app on port `3000` with one demo note and its WebP images.
-It creates isolated SQLite settings, data, and a copied vault under `.dev/`; it
-does not use your real vault configuration. See [Fixtures](fixtures.md) for fixture
-setup and [Logging](logging.md) for the dev and e2e log stream.
+The fixture app serves port `3000` with one demo note and its WebP images. It
+uses isolated settings, data, and a copied vault under `.dev/`. See
+[Fixtures](fixtures.md) for fixture setup and [Logging](logging.md) for the dev
+and e2e log stream.
 
-`make check` verifies generated types, TypeScript types, and Rust compilation. It
-also builds Loupe's WebAssembly parser from `../defuddle-rs`; see the Loupe
-prerequisites below.
-`make test` runs the TypeScript and Rust unit suites, including Loupe unit tests.
-The two e2e commands cover Chrome's and Safari's browser engines.
-
-See [Configuration](configuration.md) for server settings and
-[Deployment](deployment.md) for passkey administration, remote access, and
-backup and recovery procedures.
-
-## Acceptance suite
-
-`make test-acceptance` is the standing check for save and recovery behavior. It
-prints the git revision it ran against (with `-dirty` when the tree has
-uncommitted changes) when it starts and again when it passes, and the SHA-256 of
-the server binary the browser group ran against. Record the artifact hash in the
-release notes: it identifies what was tested, and the revision only says where
-it came from. The browser group fails if the binary changes while it runs.
-
-By default the suite builds and tests the debug binary. To test a release
-artifact, run `ACCEPTANCE_SERVER_BINARY=path/to/tansu2 make test-acceptance`; the
-printed hash must equal `node scripts/artifact-hash.mjs` of the file you ship.
-
-It runs two groups of tests:
-
-- Interleavings in `web/ts/app.test.ts` (`interleavings`). Injected services
-  delay or reject one response at a time while the test switches tabs, closes a
-  tab, expires auth, or finishes an image upload.
-- Persistence, recovery, and browser behavior in `web/ts/e2e/server.test.ts`
-  (`acceptance:`), against the real server in one browser:
-  - Exact Markdown bytes on disk after an edit closed immediately and read from
-    a second browser context, a save held in flight across a server restart, a
-    stale save whose conflict draft restores against the canonical revision, and
-    a save dropped twice by the network that is retried under one mutation id.
-  - Auth expiring during an image upload locks the app without a dangling image
-    link or lost text; a replayed stale event and a duplicated event stream do
-    not roll the note list back or move the resume cursor.
-  - A long session of opening, closing, and pasting leaves no live Worker, no
-    extra blob URL, and no second editor.
-  - Canonical light and dark screenshots of the note view and command palette.
-
-Screenshot baselines live in `web/ts/e2e/baselines/<browser>-<platform>/`.
-Fonts and text rendering differ across operating systems and browser builds, so
-a baseline is only valid for the browser and platform in its directory, and a
-platform without one fails the test. The comparison runs in the browser, ignores
-per-channel differences up to 8 and fails above 0.2% differing pixels. Create or
-refresh baselines after an intentional UI change with
-`TANSU2_UPDATE_BASELINES=1 TANSU2_E2E_BROWSER=chromium deno task test:browser -t "baselines"`
-and review the images in the diff. A failing run writes the actual image to
-`.work/tmp/baseline-actual-<name>.png`.
-
-`ACCEPTANCE_BROWSER=webkit make test-acceptance` runs the browser group in Safari's
-engine. The test named `saves an image inserted into a note after the user
-switched away` is marked `it.fails` because the defect is open; when it is fixed
-the suite fails until the marker is removed.
-
-## Loupe
-
-`make loupe` builds a production extension in `dist/extension-loupe`. On macOS,
-it opens Helium's extensions page when Helium is installed. Choose **Load
-unpacked** and select that folder.
-
-`make test-loupe-browser` runs the reader UI tests in Playwright Chromium.
-Install Chromium with `deno task playwright:install` first.
-
-`make test-e2e-loupe` builds Loupe and the Tansu frontend, then tests an import
-into a fixture Tansu server. It also needs Playwright Chromium.
-
-The Loupe build reads `../defuddle-rs` by default. Set `DEFUDDLE_RS_DIR` to use
-another checkout. Cargo uses that checkout's lockfile and does not update it.
-The build installs the matching `wasm-bindgen` CLI and
-`wasm32-unknown-unknown` target when needed. It also needs Binaryen's `wasm-opt`;
-on macOS the build installs Binaryen with Homebrew if it is missing. Set
-`WASM_BINDGEN` or `WASM_OPT` to select executable paths.
-
-The WASM build uses `.work/target-defuddle-wasm` unless `CARGO_TARGET_DIR` is
-set. It writes generated bindings under `extension-loupe/.generated/`.
+For server settings, see [Configuration](configuration.md). For passkey
+administration, remote access, and backup procedures, see
+[Deployment](deployment.md).
 
 ## Build
 
-`deno task build` uses Vite 8 to create fingerprinted frontend bundles and a
-manifest under `web/dist/`. That directory is generated and ignored. Cargo runs `build.rs`
-whenever it compiles the root package, and that script reads the manifest.
-`make check`, `make test`, `make types`, and `make types-check` build production
-assets first. `make dev` installs frontend dependencies, builds development
-assets, and generates API types before starting the server.
-Run `deno task build` before invoking Cargo directly. Cargo embeds the listed
-assets and does not run Node or Deno.
+`deno task build` creates fingerprinted frontend assets and a manifest under
+`web/dist/`. Cargo embeds those assets; run the frontend build before invoking
+Cargo directly. `make types` generates `web/ts/types.generated.ts` from
+`src/api_types.rs`; do not edit the generated file. The dev setup also
+generates ignored bindings under `bindings/`.
 
-Build the Linux server for musl with Docker:
+Build Linux musl binaries with Docker:
 
 ```sh
 make build-linux-musl-docker
 TARGET=aarch64-unknown-linux-musl make build-linux-musl-docker
 ```
 
-The Docker build links a static SQLite archive built by
+The Docker build links the static SQLite archive built by
 `scripts/build-sqlite-static.sh`.
 
-## Generated files
+## Loupe
 
-```sh
-make types
-make types-check
-```
+`make loupe` builds the production extension in `dist/extension-loupe`. On
+macOS, it opens Helium's extension page when Helium is installed. Choose
+**Load unpacked** and select that folder. See [Loupe](loupe.md) for extension
+behavior and permissions.
 
-`src/api_types.rs` generates `web/ts/types.generated.ts`. Do not edit that file.
-The dev setup also generates `.dev/` and `web/dist/`. The type generator writes
-ignored bindings under `bindings/`.
+The build reads `../defuddle-rs` by default; set `DEFUDDLE_RS_DIR` to use
+another checkout. It installs the matching `wasm-bindgen` CLI and
+`wasm32-unknown-unknown` target when needed. It also requires Binaryen's
+`wasm-opt`; on macOS the build installs Binaryen with Homebrew if missing. Set
+`WASM_BINDGEN` or `WASM_OPT` to select executable paths. The build uses
+`.work/target-defuddle-wasm` unless `CARGO_TARGET_DIR` is set and writes
+generated bindings under `extension-loupe/.generated/`.
