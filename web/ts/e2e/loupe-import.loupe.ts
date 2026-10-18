@@ -20,12 +20,15 @@ type ChromeApi = {
     sendMessage(tabId: number, message: unknown): Promise<unknown>;
     onActivated: { addListener(listener: (info: { tabId: number }) => void): void };
   };
+  scripting: {
+    executeScript(details: { target: { tabId: number }; files: string[] }): Promise<unknown>;
+  };
 };
 
 type NoteMeta = { noteId: string; path: string; title: string };
 type NoteDocument = { meta: NoteMeta; content: string };
 
-const extensionsDirectory = process.env["LOUPE_EXTENSIONS_DIR"] ?? "";
+const extensionPath = resolve(import.meta.dirname, "../../../build/extension-loupe");
 const articleTitle = "Loupe Import Fixture Article";
 const articlePath = "/article";
 const importedPathPrefix = "loupe-import-fixture-article";
@@ -43,13 +46,10 @@ let context: BrowserContext | undefined;
 let worker: Worker;
 const tansuOutput: string[] = [];
 
-describe.skipIf(extensionsDirectory === "")("loupe import into tansu", () => {
+describe("loupe import into tansu", () => {
   beforeAll(async () => {
-    const extensionPath = join(resolve(extensionsDirectory), "build", "extension-loupe");
     if (!existsSync(join(extensionPath, "manifest.json"))) {
-      throw new Error(
-        `Loupe is not built: ${extensionPath}/manifest.json is missing. Run "pnpm run build" in ${extensionsDirectory}.`,
-      );
+      throw new Error(`Loupe is not built: ${extensionPath}/manifest.json is missing. Run "make test-e2e-loupe".`);
     }
     if (!existsSync(chromium.executablePath())) {
       throw new Error(`Chromium is not installed: run "deno task playwright:install".`);

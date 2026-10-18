@@ -240,5 +240,18 @@ export default defineConfig({
         "vitest/prefer-called-with": "off",
       },
     },
+    {
+      files: ["extension-loupe/test/**/*.ts"],
+      rules: {
+        "eslint/no-script-url": "off",
+        "vitest/require-top-level-describe": "off",
+      },
+    },
+    {
+      files: ["extension-loupe/src/tansu-send.ts"],
+      rules: {
+        "unicorn/throw-new-error": "off",
+      },
+    },
   ],
 });

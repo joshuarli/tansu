@@ -1,0 +1,43 @@
+<div class="loupe-reader">
+  <div class="loupe-reader-progress"></div>
+  <div class="loupe-reader-toolbar">
+    <button
+      type="button"
+      class="loupe-reader-menu-toggle"
+      data-action="menu-toggle"
+      aria-label="Open reader actions"
+      aria-haspopup="menu"
+      aria-expanded="false"
+      aria-controls="loupe-reader-menu"
+    >
+      <span class="loupe-reader-menu-icon" aria-hidden="true">
+        <span></span>
+        <span></span>
+        <span></span>
+      </span>
+    </button>
+    <div class="loupe-reader-menu" id="loupe-reader-menu" role="menu" hidden>
+      <div class="loupe-reader-status" role="status" aria-live="polite" aria-atomic="true"></div>
+      <button type="button" class="loupe-reader-status-action" data-action="status-action" hidden></button>
+      <button type="button" role="menuitem" data-action="tansu">Send to Tansu</button>
+      <button type="button" role="menuitem" data-action="obsidian">Open in Obsidian</button>
+      <button type="button" role="menuitem" data-action="markdown">Copy Markdown</button>
+      <button type="button" role="menuitem" data-action="html">Copy HTML</button>
+      <button type="button" role="menuitem" data-action="download-fixtures">
+        Download Fixtures
+      </button>
+      <label class="loupe-reader-menu-label" for="loupe-reader-extractor">Extractor</label>
+      <select id="loupe-reader-extractor" data-action="extractor">
+        <option value="">Default</option>
+      </select>
+    </div>
+  </div>
+  <div class="loupe-reader-body">
+    <div class="loupe-reader-grid">
+      <nav class="loupe-reader-outline" aria-label="Article outline"></nav>
+      <div class="loupe-reader-content">
+        <article></article>
+      </div>
+    </div>
+  </div>
+</div>
