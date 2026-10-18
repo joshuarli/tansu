@@ -141,10 +141,3 @@ The Markdown files remain ordinary files, but restoring only the vault or only
 app data can pair different file contents and catalog state. A rollback cannot
 recover edits made after the backup unless those edits remain in another copy
 or in browser-local drafts.
-
-## Before distribution
-
-Confirm redistribution rights for the vendored WebAuthn source in
-[`crates/tansu-webauthn/UPSTREAM.md`](../crates/tansu-webauthn/UPSTREAM.md).
-Audit downstream use of the remaining public Rust API before distribution or
-further API removals. See [Rust API compatibility](api.md#rust-api-compatibility).

@@ -7,24 +7,15 @@ catalog and revision state in the XDG data path, keyed by stable vault ID. See
 
 ## Data integrity
 
-- `noteId` is durable identity. `path` is mutable metadata.
-- `path_key` is the normalized live-path uniqueness key.
-- Each accepted content-changing write has a full recoverable snapshot.
-- A stale save preserves canonical content and creates a conflict draft.
-- Mutations within one vault stay serialized by its operation mutex.
-- One server process owns a vault root at a time. Startup takes an exclusive
-  advisory lock on the root directory itself, so any path or config naming the
-  same directory collides. The lock is held from startup reconciliation until
-  the runtime drops or the process exits. A second owner fails startup with
-  `vault root ... is already owned by another Tansu2 server`.
-- Search is derived state. Indexing failure cannot fail an accepted write.
-- Backlinks, outgoing links, and previews are derived on request from live notes
-  and files by `src/links.rs`. No link index is persisted.
-- Watcher events request reconciliation instead of making semantic edits.
-- Bootstrap returns note metadata, not all note bodies.
-- Inactive restored tabs do not fetch content until selected.
-- Markdown files do not contain hidden Tansu IDs.
-- V1 `z-images/` assets are vault-local opaque files.
+`noteId` is durable identity; `path` is mutable metadata. Accepted writes,
+conflicts, reconciliation, and derived search state follow the contracts in
+[API](api.md). Markdown files contain no Tansu IDs, and V1 `z-images/` assets
+are vault-local opaque files.
+
+One server process owns a vault root at a time. Startup locks the root directory
+through reconciliation and runtime shutdown, so configs naming the same
+directory collide. Backlinks, outgoing links, and previews are derived from
+live notes and files in `src/links.rs`.
 
 ## Server runtime
 
@@ -39,26 +30,6 @@ Each `VaultRuntime` owns its search and watcher worker threads. Workers hold a
 `App::shutdown` stops and joins them; `serve_listener_with_shutdown` calls
 `App::shutdown` after the server stops. Shutdown aborts queued search jobs, and
 the next start rebuilds search from canonical content.
-
-## Ownership
-
-| Area                    | Files                                                     |
-| ----------------------- | --------------------------------------------------------- |
-| Startup/config/runtime  | `src/main.rs`, `src/app.rs`, `src/config.rs`              |
-| HTTP and route dispatch | `src/http.rs`, `src/api.rs`                               |
-| Generated API contract  | `src/api_types.rs`, `web/ts/types.generated.ts`           |
-| Paths and vault safety  | `src/paths.rs`, `src/config.rs`                           |
-| SQLite catalog          | `src/catalog.rs`                                          |
-| Snapshots and hashes    | `src/history.rs`                                          |
-| Reconciliation          | `src/reconcile.rs`                                        |
-| Search                  | `src/search.rs`                                           |
-| Link context            | `src/links.rs`, `src/vault.rs`                            |
-| Tags-only frontmatter   | `src/tags.rs`                                             |
-| Vault orchestration     | `src/vault.rs`                                            |
-| Frontend state/API      | `web/ts/app.ts`, `web/ts/app/v2-api.ts`, `web/ts/state.ts`, `web/ts/app/workspace-store.ts` |
-| Frontend DOM/visuals    | `web/ts/view.ts`, `web/ts/dom.ts`, `web/static/app.css`   |
-| Editor engine           | `web/ts/editor/`                                          |
-| Dev/e2e fixtures        | `scripts/dev-fixture.mjs`, `scripts/test-fixture.mjs`, `tests/fixtures/` |
 
 ## Writes and recovery
 
@@ -94,19 +65,10 @@ identity.
 
 ## Frontend state
 
-- `notes` is a `Map<noteId, V2NoteMeta>`.
-- The V2 API client validates network responses and scopes vault calls by stable
-  server and vault identities.
-- Workspace state stores tabs, closed tabs, selection, scroll position, mode,
-  pins, and recents in browser IndexedDB. IndexedDB is browser-local and is not
-  encrypted by Tansu2.
-- Saved-note drafts and local-note drafts use separate journal records in
-  browser IndexedDB. Recovery covers the latest successfully journaled
-  checkpoint, not every keystroke. Browser storage can be cleared or evicted.
-- The editor records its owning tab and session so a vault switch cannot sync
-  old editor content into a new tab with the same `noteId`.
+The frontend scopes API calls by server and vault identity. Workspace state,
+tabs, and draft checkpoints live in browser IndexedDB, which is not encrypted
+and may be cleared or evicted. Recovery covers the latest journaled checkpoint,
+not every keystroke.
 
-`web/ts/editor/` owns Markdown rendering, DOM serialization, selection, source
-mode, undo/redo, formatting, paste handling, and extensions. The app owns note
-lifecycle, persistence, assets, settings, tabs, and session state. See
-[Editor](editor.md) for editor-specific behavior.
+`web/ts/editor/` owns Markdown editing behavior. The app owns note lifecycle,
+persistence, assets, settings, tabs, and session state. See [Editor](editor.md).

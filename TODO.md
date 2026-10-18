@@ -138,12 +138,12 @@ Next: 83
 - **Fix with:** dead-code-archaeology
 - **Effort:** S
 
-### TNS-077 · P3 · Retire or delete the stale visual review script
+### TNS-077 · P3 · Fix or remove the stale visual review script
 
 - **Area:** Tests
-- **Where:** `bench/visual-review.mjs`, `docs/browser-support.md:15-17`
-- **Problem:** The 582-line script waits on `.quick-open-panel` and `.sidebar .note-row`, which no longer exist in `web/ts/view.ts`. It has no target and no assertion.
-- **Recommendation:** Delete it and the doc paragraph.
+- **Where:** `bench/visual-review.mjs`
+- **Problem:** The script waits on `.quick-open-panel` and `.sidebar .note-row`, which the current app does not emit. Its layout assertions and screenshots are not covered by a named test target.
+- **Recommendation:** Update its selectors and add a focused target, or delete it.
 - **Fix with:** dead-code-archaeology
 - **Effort:** S
 
@@ -159,7 +159,7 @@ Next: 83
 ### TNS-079 · P4 · Collapse speculative editor seams
 
 - **Area:** Architecture
-- **Where:** `web/ts/editor/tansu-extensions.ts`, `web/ts/editor/codemirror-adapter.ts:411-525`, `web/ts/editor/harness/`, `web/ts/editor/tests/large-note-bench.test.ts`, `docs/editor.md:174-181`
+- **Where:** `web/ts/editor/tansu-extensions.ts`, `web/ts/editor/codemirror-adapter.ts:411-525`, `web/ts/editor/harness/`, `web/ts/editor/tests/large-note-bench.test.ts`
 - **Problem:** The `EditorExtension` union has one configuration and the adapter filters and diffs it on every render. The harness is not wired to any target. The jsdom large-note timing is cited nowhere.
 - **Recommendation:** Replace the union with plain config fields and delete the harness and the bench test.
 - **Fix with:** api-surface-and-module-boundaries

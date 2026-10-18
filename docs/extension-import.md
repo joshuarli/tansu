@@ -45,18 +45,17 @@ the import continues.
 
 Tansu then creates the note through the local-draft promotion path, with a path
 derived from the title by the usual unique-path rule, and opens it as the active
-tab. The title is plain text, trimmed and capped at 200 characters. It falls
-back to the source URL's host, then to `Imported`.
+tab. The title is trimmed plain text. It falls back to the source URL's host,
+then to `Imported`.
 
 A vault switch or a lock while an import runs cancels it with an `ok: false`
 result.
 
 ## Limits
 
-Tansu rejects a request when Markdown exceeds 5 MB (UTF-8), a decoded image
-exceeds 10 MB, decoded images total more than 40 MB, there are more than 200
-images, `sourceUrl` or an image `url` is not an absolute http(s) URL, or any
-field has the wrong type.
+Tansu rejects malformed requests and enforces size, image-count, and URL bounds
+defined in [Loupe's schema](../extension-loupe/src/tansu-schemas.ts) and
+[Tansu's receiver](../web/ts/app/extension-import-receiver.ts).
 
 ## Security model
 

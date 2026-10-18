@@ -28,47 +28,14 @@ header. Authenticated deployments require a session for bootstrap and vault
 routes. `GET /api/v2/health` is public, but still validates `Host` and rejects
 a supplied `Origin` that differs from the configured origin.
 
-App settings use a separate SQLite database and are distinct from each vault's
-catalog settings. The first-run server binds to loopback and serves the setup
-page until app settings are saved. `PUT /api/v2/app/settings` responds with
-`restartRequired: true`; restart the server to apply changed vaults or auth
-policy. In authenticated mode, writing app settings requires a session and
-CSRF token.
+App settings use a separate SQLite database from each vault's catalog settings.
+The first-run server serves setup until app settings are saved.
+`PUT /api/v2/app/settings` responds with `restartRequired: true`; restart the
+server to apply changed vaults or auth policy. In authenticated mode, the write
+requires a session and CSRF token.
 
-| Method | Path | Purpose |
-| --- | --- | --- |
-| `GET` | `/api/v2/health` | Health |
-| `GET` | `/api/v2/bootstrap` | Server identity and vault list |
-| `GET` | `/api/v2/app/settings` | Read app-wide vault and authentication settings |
-| `PUT` | `/api/v2/app/settings` | Save app-wide settings; restart required |
-| `POST` | `/api/v2/auth/login/options` | Start passkey login |
-| `POST` | `/api/v2/auth/login/finish` | Finish the one-time login ceremony |
-| `POST` | `/api/v2/auth/enrollment/options` | Start initial enrollment or recent-owner credential registration |
-| `POST` | `/api/v2/auth/enrollment/finish` | Finish the one-time registration ceremony |
-| `GET` | `/api/v2/auth/session` | Read the authenticated session |
-| `POST` | `/api/v2/auth/logout` | Revoke the session |
-| `GET` | `/api/v2/vaults/:vaultId/bootstrap` | Vault metadata, note metadata, settings and search status |
-| `GET` | `/api/v2/vaults/:vaultId/notes` | List note metadata |
-| `GET` | `/api/v2/vaults/:vaultId/notes/:noteId` | Read source and metadata |
-| `POST` | `/api/v2/vaults/:vaultId/notes` | Create a note |
-| `PUT` | `/api/v2/vaults/:vaultId/notes/:noteId` | Save full source |
-| `PATCH` | `/api/v2/vaults/:vaultId/notes/:noteId` | Apply exact UTF-16 text edits |
-| `DELETE` | `/api/v2/vaults/:vaultId/notes/:noteId` | Delete a note |
-| `POST` | `/api/v2/vaults/:vaultId/notes/:noteId/rename` | Rename a path |
-| `GET` | `/api/v2/vaults/:vaultId/notes/:noteId/links` | Backlinks and outgoing links |
-| `GET` | `/api/v2/vaults/:vaultId/notes/:noteId/preview` | Hover preview text |
-| `GET` | `/api/v2/vaults/:vaultId/notes/:noteId/revisions` | List revisions |
-| `GET` | `/api/v2/vaults/:vaultId/notes/:noteId/revisions/:revision` | Read a revision |
-| `POST` | `/api/v2/vaults/:vaultId/notes/:noteId/revisions/:revision/restore` | Restore a revision |
-| `GET` | `/api/v2/vaults/:vaultId/notes/:noteId/conflicts/:draftId` | Read a conflict draft |
-| `POST` | `/api/v2/vaults/:vaultId/notes/:noteId/conflicts/:draftId/restore` | Restore a conflict draft |
-| `GET` | `/api/v2/vaults/:vaultId/settings` | Read vault settings |
-| `PUT` | `/api/v2/vaults/:vaultId/settings` | Write vault settings |
-| `POST` | `/api/v2/vaults/:vaultId/search` | Search canonical notes and supplied overlays |
-| `POST` | `/api/v2/vaults/:vaultId/quick-open` | Match note title, filename and path |
-| `POST` | `/api/v2/vaults/:vaultId/images` | Upload WebP bytes |
-| `GET` | `/api/v2/vaults/:vaultId/assets?name=...` | Read one vault-local image |
-| `GET` | `/api/v2/vaults/:vaultId/events?after=:eventVersion` | Subscribe to vault events |
+The current route and method list is in [HTTP dispatch](../src/http.rs). Request
+and response DTOs are in [API types](../src/api_types.rs).
 
 `/api/v2/bootstrap` returns only server identity and vault IDs. Workspace
 sessions, pins, and recents are stored in the browser's private workspace.
@@ -156,9 +123,9 @@ Note create, save, delta, rename, delete, and restore responses use
 `accepted` includes the resulting note metadata when applicable;
 `pendingMaterialization` includes an operation ID; `conflict` includes the
 canonical document and the preserved draft metadata.
-Settings writes return `V2SettingsResponse`. A settings write with a value outside the
-limits in [Configuration](configuration.md#vault-settings-limits) fails with
-`400 bad_request` before anything is persisted or a mutation ID is consumed.
+Settings writes return `V2SettingsResponse`. Invalid values fail with
+`400 bad_request` before persistence or mutation ID consumption. See
+[Configuration](configuration.md#settings) for validation ownership.
 Image uploads send raw WebP bytes
 with `Content-Type: image/webp` and `X-Tansu-Mutation-Id`. The server stores the
 asset under `z-images/`; `V2ImageUploadResponse` returns its vault-relative name
@@ -196,55 +163,39 @@ deleted, or unresolved `noteId` returns `note_not_found`.
 
 ### Search and quick-open
 
-Search is `POST` so dirty source stays out of URLs. A search request has a UTF-8
-query of at most 1,024 bytes, mode (`default` or `typo_only`), result limit from
-1 through 100, and optional overlay snapshots. Each saved-note overlay carries
-note identity, base revision and source hash, local revision, title, path, and
-whole-file source. A new-note overlay carries a client-local ID and the same
-local fields without a canonical base. The server considers overlays in request
-order, includes a prefix of at most 20 notes and 2 MiB of UTF-8 source, and
-skips that entry and all following entries when either limit would be exceeded;
-it does not split a note. If the limits exclude overlays, it reports
+Search is `POST` so dirty source stays out of URLs. A request has a query, mode
+(`default` or `typo_only`), result limit, and optional overlay snapshots.
+Request bounds and matching are enforced in `crates/tansu-search/`. Each
+saved-note overlay carries note identity, base revision and source hash, local
+revision, title, path, and whole-file source. A new-note overlay carries a
+client-local ID and the same local fields without a canonical base. The server
+considers overlays in request order and includes a prefix of whole notes. If
+the limits exclude overlays, it reports
 `overlayCoverage: { "status": "partial", "skippedNoteCount": n }`; canonical
 search still runs. Overlay source is request-scoped and is never written to an
 index, log, or URL. When a saved-note overlay matches, the stale canonical hit
 for that note is suppressed.
 
 All unquoted whitespace-separated terms are required. Quoted multiword phrases
-are ordered adjacency and keep repeated words; a single-word quote is a term,
-empty quotes are ignored, and an unclosed quote is treated as terms. Exact and
-prefix matches are tried first. Fuzzy expansion is used only when fewer than
-five results match exactly or by prefix; terms of three or fewer UTF-8 bytes
-are never expanded. Fuzzy matches rank below exact and prefix matches. Phrases
-are never fuzzy. `typo_only` returns fuzzy matches only. A term may match the
-title, path, headings, tags, or content; each field contributes a weight. The
-title, heading, tag, and content weights come from the vault settings
-`searchTitleWeight`, `searchHeadingWeight`, `searchTagWeight`, and
-`searchContentWeight`; the path weight is fixed at 7. The defaults are title 10,
-headings 5, tags 2, content 1, so a tag match scores above a single body mention
-of the same term, and an exact tag match scores above a tag that only shares the
-prefix. `recencyBoost` multiplies a hit's score by
-`1 + recencyBoost * 0.5^(age / 30 days)`, where age is the time since the note's
-`updatedAtMs`; the default 0 disables it. Weights are read at query time from
-the saved settings, so a settings change applies to the next search without
-reindexing. Recency reorders only the hits already selected by field score, up
-to the request limit.
-Search results do not include note bodies: each hit includes identity, revision/hash, title, path,
-score, a maximum 512-byte excerpt, excerpt-local half-open UTF-16 highlight
-ranges, and an optional half-open UTF-16 source range into the declared
-revision. Filename-only matches have no source range. These ranges are distinct
-types and coordinate spaces.
+match ordered adjacency and keep repeated words. Exact and prefix matches rank
+ahead of fuzzy matches; `typo_only` returns fuzzy matches only. Phrases are not
+fuzzy. Terms can match titles, paths, headings, tags, or content. Configured
+field weights are read at query time, so settings changes apply without
+reindexing. Recency only reorders hits already selected by field score. Search
+matching and scoring are implemented in `src/search.rs` and
+`crates/tansu-search/`.
+Search results do not include note bodies. Each hit includes identity,
+revision/hash, title, path, score, an excerpt, excerpt-local half-open UTF-16
+highlight ranges, and an optional half-open UTF-16 source range into the
+declared revision. Filename-only matches have no source range. These ranges are
+distinct types and coordinate spaces.
 
 Hits carry no tags; the client shows tag pills from the note metadata it already
 holds for the hit's `noteId`, so a new-note overlay hit shows none.
 
-Quick-open accepts a query of at most 1,024 UTF-8 bytes and a limit from 1
-through 100. It matches title, filename, and path with exact, then prefix, then
-subsequence priority. Ties use match score, path, then `noteId`. For an empty
-query it returns pinned notes then recent notes in the supplied order, followed
-by remaining notes; duplicate and missing IDs are ignored. It does not query
-Tantivy. Pinned and recent IDs are client-provided and are not stored by the
-server.
+Quick-open matches title, filename, and path. For an empty query it returns
+pinned and recent notes in the supplied order, followed by remaining notes.
+Pinned and recent IDs are client-provided and are not stored by the server.
 
 ### Events
 
@@ -284,22 +235,7 @@ app can determine whether to show login.
 
 ### Errors
 
-Errors use `V2ApiErrorResponse` and a `code` discriminator. Error fields use
-camel case. `api_version_unsupported` is returned for retired `/api/` routes;
-`not_implemented` marks an unknown route or method.
-
-| HTTP status | Codes |
-| --- | --- |
-| `400` | `bad_request`, `path_invalid`, `source_hash_mismatch` |
-| `408` | `bad_request` for a timed-out request body |
-| `401` | `auth_required` |
-| `403` | `forbidden`, `csrf_rejected`, `origin_rejected` |
-| `404` | `vault_not_found`, `note_not_found`, `revision_not_found`, `conflict_draft_not_found`, `asset_not_found` |
-| `409` | `api_version_unsupported`, `disk_hash_mismatch`, `path_collision`, `save_conflict`, `mutation_id_reuse`, `server_instance_mismatch`, `unresolved_note` |
-| `413` | `request_too_large` |
-| `429` | `rate_limited` |
-| `501` | `not_implemented` |
-| `500` | `internal` |
-
-`internal` contains a request ID, not an implementation error string. The client
-switches on the generated `V2ApiErrorKind` code.
+Errors use `V2ApiErrorResponse` and a `code` discriminator. Error kinds and
+status mapping are defined in `src/api_types.rs` and `src/http.rs`; the client
+switches on the generated `V2ApiErrorKind`. `internal` contains a request ID,
+not an implementation error string.
