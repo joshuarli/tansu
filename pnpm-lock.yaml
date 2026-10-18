@@ -222,12 +222,21 @@ importers:
         specifier: 2.4.0
         version: 2.4.0
     devDependencies:
+      '@types/chrome':
+        specifier: 0.2.2
+        version: 0.2.2
       '@types/node':
         specifier: 26.6.5
         version: 26.6.5
+      '@vitest/browser-playwright':
+        specifier: 5.0.4
+        version: 5.0.4(playwright@1.64.0)(vite@8.3.4(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.0))(vitest@5.0.4)
       '@vitest/coverage-v8':
         specifier: 5.0.4
         version: 5.0.4(@vitest/browser@5.0.4)(vitest@5.0.4)
+      effect:
+        specifier: 4.0.0
+        version: 4.0.0
       fake-indexeddb:
         specifier: 6.2.5
         version: 6.2.5
@@ -464,11 +473,23 @@ packages:
   '@types/chai@5.2.3':
     resolution: {integrity: sha512-Mw558oeA9fFbv65/y4mHtXDs9bPnFMZAL/jxdPFUpOHHIXX91mcgEHbS5Lahr+pwZFR8A7GQleRWeI6cGFC2UA==}
 
+  '@types/chrome@0.2.2':
+    resolution: {integrity: sha512-8rSMZ4cvo2xmaSyQg0sN5yRL7oiDkntLoiHxUhfwQnv1mvnkrdoZ25SlNrKWmYKaeP50WvrfWj1pmc02+U9KKw==}
+
   '@types/deep-eql@4.0.2':
     resolution: {integrity: sha512-c9h9dVVMigMPc4bwTvC5dxqtqJZwQPePsWjPlpSOnojbor6pGqdk541lfA7AqFQr5pB1BRdq0juY9db81BwyFw==}
 
   '@types/estree@1.0.9':
     resolution: {integrity: sha512-GhdPgy1el4/ImP05X05Uw4cw2/M93BCUmnEvWZNStlCzEKME4Fkk+YpoA5OiHNQmoS7Cafb8Xa3Pya8m1Qrzeg==}
+
+  '@types/filesystem@0.0.36':
+    resolution: {integrity: sha512-vPDXOZuannb9FZdxgHnqSwAG/jvdGM8Wq+6N4D/d80z+D4HWH+bItqsZaVRQykAn6WEVeEkLm2oQigyHtgb0RA==}
+
+  '@types/filewriter@0.0.33':
+    resolution: {integrity: sha512-xFU8ZXTw4gd358lb2jw25nxY9QAgqn2+bKKjKOYfNCzN4DKCFetK7sPtrlpg66Ywe3vWY9FNxprZawAh9wfJ3g==}
+
+  '@types/har-format@1.2.16':
+    resolution: {integrity: sha512-fluxdy7ryD3MV6h8pTfTYpy/xQzCFC7m89nOH9y94cNqJ1mDIDPut7MnRHI3F6qRmh/cT2fUjG1MLdCNb4hE9A==}
 
   '@types/node@26.6.5':
     resolution: {integrity: sha512-uMzsv9stDdofIZBx4UGh4Z9ZgXnGC9seRDscilBcTHAeOFk67MZg/k9bWVfO+bk4qZmG+l52hRnLwUiH2LnJTg==}
@@ -597,6 +618,9 @@ packages:
   detect-libc@2.1.2:
     resolution: {integrity: sha512-Btj2BOOO83o3WyH59e8MgXsxEQVcarkUOpEYrubB0urwnN10yQ364rsiByU11nZlqWYZm05i/of7io4mzihBtQ==}
     engines: {node: '>=8'}
+
+  effect@4.0.0:
+    resolution: {integrity: sha512-ooc1TG5t+FfzgYnFz2ff6BBKyZ7EwBRVXC7c4RhQUAD6/TZ2gTXXMeb4WX7a19ozQo4J73/QW+S00YAIresoMQ==}
 
   entities@7.0.1:
     resolution: {integrity: sha512-TWrgLOFUQTH994YUyl1yT4uyavY5nNB5muff+RtWaqNVCAK408b5ZnnbNAUEWLTCpum9w6arT70i1XdQ4UeOPA==}
@@ -959,8 +983,7 @@ snapshots:
 
   '@bcoe/v8-coverage@1.0.2': {}
 
-  '@blazediff/core@1.10.0':
-    optional: true
+  '@blazediff/core@1.10.0': {}
 
   '@codemirror/autocomplete@6.20.3':
     dependencies:
@@ -1143,8 +1166,7 @@ snapshots:
   '@oxlint/binding-linux-x64-musl@1.88.0':
     optional: true
 
-  '@polka/url@1.0.0-next.29':
-    optional: true
+  '@polka/url@1.0.0-next.29': {}
 
   '@rolldown/binding-darwin-arm64@1.2.13':
     optional: true
@@ -1165,9 +1187,22 @@ snapshots:
       '@types/deep-eql': 4.0.2
       assertion-error: 2.0.1
 
+  '@types/chrome@0.2.2':
+    dependencies:
+      '@types/filesystem': 0.0.36
+      '@types/har-format': 1.2.16
+
   '@types/deep-eql@4.0.2': {}
 
   '@types/estree@1.0.9': {}
+
+  '@types/filesystem@0.0.36':
+    dependencies:
+      '@types/filewriter': 0.0.33
+
+  '@types/filewriter@0.0.33': {}
+
+  '@types/har-format@1.2.16': {}
 
   '@types/node@26.6.5':
     dependencies:
@@ -1206,7 +1241,6 @@ snapshots:
       - msw
       - utf-8-validate
       - vite
-    optional: true
 
   '@vitest/browser@5.0.4(vite@8.3.4(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.0))(vitest@5.0.4)':
     dependencies:
@@ -1225,7 +1259,6 @@ snapshots:
       - msw
       - utf-8-validate
       - vite
-    optional: true
 
   '@vitest/coverage-v8@5.0.4(@vitest/browser@5.0.4)(vitest@5.0.4)':
     dependencies:
@@ -1259,7 +1292,6 @@ snapshots:
   '@vitest/pretty-format@5.0.4':
     dependencies:
       tinyrainbow: 3.2.0
-    optional: true
 
   '@vitest/spy@5.0.4': {}
 
@@ -1272,14 +1304,12 @@ snapshots:
       sirv: 3.0.2
       tinyrainbow: 3.2.0
       vitest: 5.0.4(@types/node@26.6.5)(@vitest/browser-playwright@5.0.4)(@vitest/coverage-v8@5.0.4)(@vitest/ui@5.0.4)(happy-dom@21.0.1)(vite@8.3.4(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.0))
-    optional: true
 
   '@vitest/utils@5.0.4':
     dependencies:
       '@vitest/pretty-format': 5.0.4
       convert-source-map: 2.0.0
       tinyrainbow: 3.2.0
-    optional: true
 
   acorn@8.19.0:
     optional: true
@@ -1304,12 +1334,13 @@ snapshots:
   commander@2.20.3:
     optional: true
 
-  convert-source-map@2.0.0:
-    optional: true
+  convert-source-map@2.0.0: {}
 
   crelt@1.0.7: {}
 
   detect-libc@2.1.2: {}
+
+  effect@4.0.0: {}
 
   entities@7.0.1: {}
 
@@ -1335,11 +1366,9 @@ snapshots:
     optionalDependencies:
       picomatch: 4.0.4
 
-  fflate@0.8.3:
-    optional: true
+  fflate@0.8.3: {}
 
-  flatted@3.4.4:
-    optional: true
+  flatted@3.4.4: {}
 
   fsevents@2.3.3:
     optional: true
@@ -1393,8 +1422,7 @@ snapshots:
       '@babel/types': 7.29.7
       source-map-js: 1.2.2
 
-  mrmime@2.0.1:
-    optional: true
+  mrmime@2.0.1: {}
 
   nanoid@3.3.20: {}
 
@@ -1416,8 +1444,7 @@ snapshots:
       '@oxlint/binding-linux-x64-musl': 1.88.0
       oxlint-tsgolint: 7.0.2004
 
-  pathe@2.0.3:
-    optional: true
+  pathe@2.0.3: {}
 
   picocolors@1.1.1: {}
 
@@ -1431,8 +1458,7 @@ snapshots:
     dependencies:
       playwright-core: 1.64.0
 
-  pngjs@7.0.0:
-    optional: true
+  pngjs@7.0.0: {}
 
   postcss@8.5.30:
     dependencies:
@@ -1455,7 +1481,6 @@ snapshots:
       '@polka/url': 1.0.0-next.29
       mrmime: 2.0.1
       totalist: 3.0.1
-    optional: true
 
   source-map-js@1.2.2: {}
 
@@ -1491,8 +1516,7 @@ snapshots:
 
   tinyrainbow@3.2.0: {}
 
-  totalist@3.0.1:
-    optional: true
+  totalist@3.0.1: {}
 
   typescript@7.0.2:
     optionalDependencies:

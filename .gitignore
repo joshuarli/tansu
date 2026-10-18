@@ -1,5 +1,8 @@
 target
 node_modules
+build/
+dist/
+extension-loupe/.generated/
 web/static/app.js
 web/static/app.js.map
 web/dist/

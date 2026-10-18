@@ -71,13 +71,22 @@ test-e2e-chromium:
 test-e2e-webkit:
 	TANSU2_E2E_BROWSER=webkit deno task test:browser
 
-LOUPE_EXTENSIONS_DIR ?= $(HOME)/d/extensions
+loupe:
+	mkdir -p "$(CURDIR)/.work/tmp"
+	TMPDIR="$(CURDIR)/.work/tmp" deno task loupe:dist
+	@if [ "$$(uname -s)" = "Darwin" ] && [ -d "/Applications/Helium.app" ]; then open -a "/Applications/Helium.app" "chrome://extensions"; fi
+	@echo "Load unpacked in your Chromium browser:"
+	@echo "  $(CURDIR)/dist/extension-loupe"
+
+test-loupe-browser:
+	mkdir -p "$(CURDIR)/.work/tmp"
+	TMPDIR="$(CURDIR)/.work/tmp" deno task loupe:browser
 
 test-e2e-loupe:
-	@if [ ! -d "$(LOUPE_EXTENSIONS_DIR)" ]; then echo "skipping test-e2e-loupe: $(LOUPE_EXTENSIONS_DIR) not found"; exit 0; fi; \
-	(cd "$(LOUPE_EXTENSIONS_DIR)" && pnpm run build) && \
-	deno task build:dev && \
-	LOUPE_EXTENSIONS_DIR="$(LOUPE_EXTENSIONS_DIR)" node_modules/.bin/vitest run --config vitest.loupe.config.ts
+	mkdir -p "$(CURDIR)/.work/tmp"
+	TMPDIR="$(CURDIR)/.work/tmp" deno task loupe:build
+	deno task build:dev
+	node_modules/.bin/vitest run --config vitest.loupe.config.ts
 
 test-rs:
 	cargo test -q --workspace
@@ -141,4 +150,4 @@ bench-full:
 	TMPDIR="$(CURDIR)/.work/tmp" MD_WYSIWYG_BENCH=1 deno task test web/ts/editor/tests/large-note-bench.test.ts
 	$(PERF_GATE_AFTER)
 
-.PHONY: auth-recovery-drill bench bench-full build-linux-musl-aarch64 build-linux-musl-docker build-linux-musl-x86_64 coverage coverage-html deploy dev dev-config check lint test-package types types-check types-generated ts test test-e2e-chromium test-e2e-webkit test-e2e-loupe test-rs test-sqlite-static test-acceptance
+.PHONY: auth-recovery-drill bench bench-full build-linux-musl-aarch64 build-linux-musl-docker build-linux-musl-x86_64 coverage coverage-html deploy dev dev-config check lint loupe test-loupe-browser test-package types types-check types-generated ts test test-e2e-chromium test-e2e-webkit test-e2e-loupe test-rs test-sqlite-static test-acceptance

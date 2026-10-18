@@ -1,0 +1,34 @@
+body {
+  color: #202124;
+  font:
+    14px system-ui,
+    sans-serif;
+  margin: 32px;
+  max-width: 560px;
+}
+
+label {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+input {
+  box-sizing: border-box;
+  padding: 8px;
+  width: 240px;
+}
+
+button {
+  margin-left: 8px;
+  padding: 8px 14px;
+}
+
+#status {
+  color: #188038;
+  margin-top: 12px;
+}
+
+#status.error {
+  color: #c5221f;
+}

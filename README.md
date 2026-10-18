@@ -27,6 +27,11 @@ use
 
 Read [Migration](docs/migration.md) before opening an existing vault.
 
+## Loupe browser extension
+
+See [Loupe](docs/loupe.md) for the browser extension that reads pages and sends
+notes and images to Tansu.
+
 ## Help and license
 
 See [Configuration](docs/configuration.md) for vault setup. This checkout does

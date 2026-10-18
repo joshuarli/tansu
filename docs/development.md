@@ -22,6 +22,9 @@ make test
 make test-e2e-chromium
 make test-e2e-webkit
 make test-acceptance
+make loupe
+make test-loupe-browser
+make test-e2e-loupe
 ```
 
 `make dev` serves the app on port `3000` with one demo note and its WebP images.
@@ -29,9 +32,11 @@ It creates isolated SQLite settings, data, and a copied vault under `.dev/`; it
 does not use your real vault configuration. See [Fixtures](fixtures.md) for fixture
 setup and [Logging](logging.md) for the dev and e2e log stream.
 
-`make check` verifies generated types, TypeScript types, and Rust compilation.
-`make test` runs the TypeScript and Rust unit suites. The two e2e commands cover
-Chrome's and Safari's browser engines.
+`make check` verifies generated types, TypeScript types, and Rust compilation. It
+also builds Loupe's WebAssembly parser from `../defuddle-rs`; see the Loupe
+prerequisites below.
+`make test` runs the TypeScript and Rust unit suites, including Loupe unit tests.
+The two e2e commands cover Chrome's and Safari's browser engines.
 
 See [Configuration](configuration.md) for server settings and
 [Deployment](deployment.md) for passkey administration, remote access, and
@@ -83,20 +88,27 @@ engine. The test named `saves an image inserted into a note after the user
 switched away` is marked `it.fails` because the defect is open; when it is fixed
 the suite fails until the marker is removed.
 
-## Loupe import test
+## Loupe
 
-`make test-e2e-loupe` runs an opt-in Chromium test of the Loupe extension
-importing a page into a fixture Tansu server. It is not part of `make test`,
-`make check`, or the default e2e commands, and it needs Chromium only because
-WebKit cannot load extensions.
+`make loupe` builds a production extension in `dist/extension-loupe`. On macOS,
+it opens Helium's extensions page when Helium is installed. Choose **Load
+unpacked** and select that folder.
 
-It needs a checkout of the extensions repository with its own prerequisites (see
-that repository's development guide). The target uses `~/d/extensions`; set
-`LOUPE_EXTENSIONS_DIR` to use another checkout. When the directory is missing the
-target prints a skip reason and exits 0. Otherwise it runs `pnpm run build` there,
-which writes the unpacked extension to `build/extension-loupe`, and then runs
-`web/ts/e2e/loupe-import.loupe.ts`. Running that file without
-`LOUPE_EXTENSIONS_DIR` skips it.
+`make test-loupe-browser` runs the reader UI tests in Playwright Chromium.
+Install Chromium with `deno task playwright:install` first.
+
+`make test-e2e-loupe` builds Loupe and the Tansu frontend, then tests an import
+into a fixture Tansu server. It also needs Playwright Chromium.
+
+The Loupe build reads `../defuddle-rs` by default. Set `DEFUDDLE_RS_DIR` to use
+another checkout. Cargo uses that checkout's lockfile and does not update it.
+The build installs the matching `wasm-bindgen` CLI and
+`wasm32-unknown-unknown` target when needed. It also needs Binaryen's `wasm-opt`;
+on macOS the build installs Binaryen with Homebrew if it is missing. Set
+`WASM_BINDGEN` or `WASM_OPT` to select executable paths.
+
+The WASM build uses `.work/target-defuddle-wasm` unless `CARGO_TARGET_DIR` is
+set. It writes generated bindings under `extension-loupe/.generated/`.
 
 ## Build
 

@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Loupe settings</title>
+    <link rel="stylesheet" href="./options.css" />
+  </head>
+  <body>
+    <h1>Loupe</h1>
+    <label for="tansu-url">Tansu URL</label>
+    <input id="tansu-url" type="url" placeholder="https://tansu.example.com" />
+    <button id="save">Save</button>
+    <p>Only the origin is stored. Loupe sends articles to the open Tansu tab at this address.</p>
+    <div id="status" role="status"></div>
+    <script type="module" src="./options.ts"></script>
+  </body>
+</html>

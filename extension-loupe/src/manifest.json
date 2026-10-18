@@ -1,0 +1,37 @@
+{
+  "manifest_version": 3,
+  "minimum_chrome_version": "150",
+  "name": "Loupe",
+  "version": "0.1.0",
+  "description": "Read web pages in a clean, responsive reader view.",
+  "permissions": ["activeTab", "scripting", "clipboardWrite", "downloads", "storage"],
+  "host_permissions": ["<all_urls>"],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'none'"
+  },
+  "background": {
+    "service_worker": "service-worker.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "Toggle Loupe reader"
+  },
+  "icons": {
+    "16": "loupe-extension-icon.svg",
+    "48": "loupe-extension-icon.svg",
+    "128": "loupe-extension-icon.svg"
+  },
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  },
+  "commands": {
+    "send-to-tansu": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+S",
+        "mac": "Command+Shift+S"
+      },
+      "description": "Send the page to Tansu"
+    }
+  }
+}

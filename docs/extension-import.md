@@ -4,6 +4,8 @@ The Loupe browser extension imports a page as a note. A content script that
 Loupe injects into the Tansu tab exchanges `window.postMessage` messages with the
 app. The server has no import endpoint, and nothing travels in the URL.
 
+See [Loupe](loupe.md) for the extension build, permissions, and page import flow.
+
 Every message has `channel: "tansu"` and `version: 1`.
 
 ## Messages
