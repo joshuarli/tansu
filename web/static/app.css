@@ -478,7 +478,6 @@ button {
   display: flex;
   flex: 0 0 auto;
   width: max-content;
-  gap: 5px;
   align-items: center;
   max-width: 360px;
   min-width: 0;
@@ -519,7 +518,7 @@ button {
   stroke-width: 1.7;
 }
 
-.tab span:first-child {
+.tab .tab-label {
   flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
@@ -528,10 +527,16 @@ button {
 }
 
 .tab .tab-close {
-  flex: 0 0 20px;
+  position: absolute;
+  z-index: 1;
+  top: 50%;
+  right: 8px;
+  flex: none;
   width: 20px;
   height: 20px;
+  border: 0;
   padding: 0;
+  transform: translateY(-50%);
   color: var(--color-danger);
   opacity: 0;
   pointer-events: none;
@@ -552,10 +557,26 @@ button {
   pointer-events: auto;
 }
 
-.tab:hover .tab-label,
-.tab:focus-within .tab-label {
-  -webkit-mask-image: radial-gradient(ellipse 24px 16px at calc(100% + 13px) 50%, transparent 0, #000 100%);
-  mask-image: radial-gradient(ellipse 24px 16px at calc(100% + 13px) 50%, transparent 0, #000 100%);
+.tab:has(.tab-close:hover) .tab-label,
+.tab:has(.tab-close:focus-visible) .tab-label {
+  -webkit-mask-image: radial-gradient(
+    ellipse 18px 14px at calc(100% - 10px) 50%,
+    transparent 0%,
+    transparent 34%,
+    rgb(0 0 0 / 0.05) 42%,
+    rgb(0 0 0 / 0.22) 66%,
+    rgb(0 0 0 / 0.62) 86%,
+    #000 100%
+  );
+  mask-image: radial-gradient(
+    ellipse 18px 14px at calc(100% - 10px) 50%,
+    transparent 0%,
+    transparent 34%,
+    rgb(0 0 0 / 0.05) 42%,
+    rgb(0 0 0 / 0.22) 66%,
+    rgb(0 0 0 / 0.62) 86%,
+    #000 100%
+  );
 }
 
 .tab .tab-close:hover {
@@ -1298,18 +1319,18 @@ button {
 }
 
 .outline-list.has-more-above.has-more-below {
-  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 24px, #000 calc(100% - 24px), transparent);
-  mask-image: linear-gradient(to bottom, transparent, #000 24px, #000 calc(100% - 24px), transparent);
+  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 72px, #000 calc(100% - 72px), transparent);
+  mask-image: linear-gradient(to bottom, transparent, #000 72px, #000 calc(100% - 72px), transparent);
 }
 
 .outline-list.has-more-above:not(.has-more-below) {
-  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 24px, #000 100%);
-  mask-image: linear-gradient(to bottom, transparent, #000 24px, #000 100%);
+  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 72px, #000 100%);
+  mask-image: linear-gradient(to bottom, transparent, #000 72px, #000 100%);
 }
 
 .outline-list.has-more-below:not(.has-more-above) {
-  -webkit-mask-image: linear-gradient(to bottom, #000 0, #000 calc(100% - 24px), transparent);
-  mask-image: linear-gradient(to bottom, #000 0, #000 calc(100% - 24px), transparent);
+  -webkit-mask-image: linear-gradient(to bottom, #000 0, #000 calc(100% - 72px), transparent);
+  mask-image: linear-gradient(to bottom, #000 0, #000 calc(100% - 72px), transparent);
 }
 
 .outline-list::-webkit-scrollbar { display: none; }
@@ -1324,27 +1345,32 @@ button {
 .outline-row[aria-current="location"] { font-weight: 520; }
 
 @media (min-width: 1280px) {
-  .main.has-article-layout > .workspace { transform: translate(-50px, 50px); }
-  .note-outline { transform: translateX(-190px); }
+  .main.has-article-layout { column-gap: 40px; }
+  .main.has-article-layout > .workspace { transform: translateX(clamp(24px, calc(11vw - 109px), 52px)); }
+  .note-outline { transform: translateX(calc(clamp(24px, calc(11vw - 109px), 52px) - 104px)); }
 }
 
 @media (min-width: 1280px) and (max-width: 1439.98px) {
-  .main.has-article-layout:has(.cm-editor.tansu-has-sidenotes) > .workspace { transform: translate(0, 50px); }
-  .main.has-article-layout:has(.cm-editor.tansu-has-sidenotes) > .note-outline { transform: translateX(-90px); }
+  .main.has-article-layout:has(.cm-editor.tansu-has-sidenotes) > .workspace {
+    transform: translateX(clamp(24px, calc(11vw - 109px), 52px));
+  }
+  .main.has-article-layout:has(.cm-editor.tansu-has-sidenotes) > .note-outline {
+    transform: translateX(calc(clamp(24px, calc(11vw - 109px), 52px) - 40px));
+  }
 }
 
 @media (min-width: 1100px) {
   .main.has-article-layout:has(.cm-editor.tansu-has-sidenotes) {
-    grid-template-columns: minmax(0, 1fr) 190px minmax(0, min(1018px, calc(100% - 300px))) minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr) 190px minmax(0, min(1018px, calc(100% - 310px))) minmax(0, 1fr);
   }
 }
 
 @media (min-width: 1100px) and (max-width: 1279.98px) {
-  .main.has-article-layout { column-gap: 24px; }
   .main.has-article-layout:has(.cm-editor.tansu-has-sidenotes) {
-    grid-template-columns: minmax(0, 1fr) 190px minmax(0, min(1018px, calc(100% - 268px))) minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr) 190px minmax(0, min(1018px, calc(100% - 286px))) minmax(0, 1fr);
   }
-  .main.has-article-layout:has(.cm-editor.tansu-has-sidenotes) > .note-outline { transform: translateX(-12px); }
+  .main.has-article-layout:has(.cm-editor.tansu-has-sidenotes) > .workspace { transform: translateX(12px); }
+  .main.has-article-layout:has(.cm-editor.tansu-has-sidenotes) > .note-outline { transform: none; }
 }
 
 .main {
@@ -1465,7 +1491,6 @@ button {
 }
 
 .tab {
-  gap: 5px;
   font-size: 13px;
   height: 22px;
   min-height: 22px;
@@ -1487,9 +1512,9 @@ button {
   background-image: linear-gradient(
     110deg,
     var(--color-text-muted) 0%,
-    var(--color-text-muted) 43%,
-    #fff 50%,
-    var(--color-text-muted) 57%,
+    var(--color-text-muted) 34%,
+    color-mix(in srgb, var(--color-text-muted) 40%, white) 50%,
+    var(--color-text-muted) 66%,
     var(--color-text-muted) 100%
   );
   background-size: 240% 100%;
@@ -1502,7 +1527,7 @@ button {
 
 @keyframes tab-unsaved-shimmer {
   0%, 100% { background-position: 100% 0; text-shadow: 0 0 0 transparent; }
-  50% { background-position: 0 0; text-shadow: 0 0 5px rgb(255 255 255 / 58%); }
+  50% { background-position: 0 0; text-shadow: 0 0 8px rgb(255 255 255 / 35%); }
 }
 
 .tab-label.pinned-tab-label {
@@ -1525,13 +1550,34 @@ button {
     opacity: 1;
     pointer-events: auto;
   }
+
+  .tab .tab-label {
+    -webkit-mask-image: radial-gradient(
+      ellipse 18px 14px at calc(100% - 10px) 50%,
+      transparent 0%,
+      transparent 34%,
+      rgb(0 0 0 / 0.05) 42%,
+      rgb(0 0 0 / 0.22) 66%,
+      rgb(0 0 0 / 0.62) 86%,
+      #000 100%
+    );
+    mask-image: radial-gradient(
+      ellipse 18px 14px at calc(100% - 10px) 50%,
+      transparent 0%,
+      transparent 34%,
+      rgb(0 0 0 / 0.05) 42%,
+      rgb(0 0 0 / 0.22) 66%,
+      rgb(0 0 0 / 0.62) 86%,
+      #000 100%
+    );
+  }
 }
 
 .editor-mount .cm-content {
   width: min(100%, var(--measure));
   max-width: var(--measure);
   margin: 0 auto;
-  padding: 62px 0 80px;
+  padding: 30px 0 80px;
   font-size: 17px;
   line-height: var(--font-body-leading);
   font-feature-settings: "kern", "liga", "calt";
@@ -1546,9 +1592,13 @@ button {
 }
 
 .editor-mount .cm-scroller {
+  scroll-padding-top: 48px;
   scrollbar-width: none;
-  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 16px, #000 calc(100% - 16px), transparent);
-  mask-image: linear-gradient(to bottom, transparent, #000 16px, #000 calc(100% - 16px), transparent);
+}
+
+.editor-mount .cm-scroller.has-more-above {
+  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 48px, #000 100%);
+  mask-image: linear-gradient(to bottom, transparent, #000 48px, #000 100%);
 }
 
 .editor-mount .cm-scroller::-webkit-scrollbar {
@@ -2027,7 +2077,7 @@ button {
 @media (max-width: 539px) {
   .new-note { margin-left: 3px; }
   .document-title { width: calc(100% - 40px); font-size: 23px; }
-  .editor-mount .cm-content { width: calc(100% - 40px); padding-top: 60px; }
+  .editor-mount .cm-content { width: calc(100% - 40px); padding-top: 28px; }
   .floating-controls { bottom: 12px; left: 12px; }
   .selection-toolbar-button { width: 34px; height: 34px; }
   .find-bar { right: 12px; width: min(348px, calc(100vw - 24px)); }
