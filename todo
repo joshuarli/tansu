@@ -1,0 +1,7 @@
+The images were being localized. Defuddle wraps Substack images in Markdown links, so Loupe replaced the image embed but left the link’s remote URL in the note. I matched this against the extracted format for the article you tested (https://newsletter.semianalysis.com/p/claude-code-is-the-inflection-point).
+
+Loupe now removes that wrapper when both URLs point to the same image, including Substack’s differently transformed CDN URLs. Links to other destinations stay intact. I mirrored the fix in the Obsidian WebP importer and documented the behavior in docs/loupe.md (/Users/josh/d/extensions/docs/loupe.md). docs/development.md is untouched.
+
+Verification passed: 30 Loupe unit tests, 37 Obsidian importer tests, and both Loupe browser integration tests. The browser test confirms a linked image becomes a WebP asset in z-images/ with no remote URL left in the note. The full Obsidian deno task check couldn’t run because its node_modules dependencies are missing; the changed source file typechecks directly.
+
+Reload the unpacked extension and the article tab before trying again. Images that fail to download or exceed the existing size limits will still remain remote. I also left the existing defuddle-rs/Cargo.lock modification untouched.

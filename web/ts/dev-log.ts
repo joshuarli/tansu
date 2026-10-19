@@ -9,7 +9,7 @@ type LogEventInput = {
   requestId?: string;
 } & Record<string, unknown>;
 
-const LOG_MODE = process.env["TANSU2_LOGS"] ?? "off";
+const LOG_MODE = process.env["TANSU_LOGS"] ?? "off";
 const FLUSH_DELAY_MS = 100;
 const MAX_BATCH_EVENTS = 32;
 

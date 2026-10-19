@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::Path;
 
-use tansu2::api_types::*;
+use tansu::api_types::*;
 use ts_rs::TS;
 
 fn main() {

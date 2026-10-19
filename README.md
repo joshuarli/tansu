@@ -1,22 +1,22 @@
-# Tansu2
+# Tansu
 
-Tansu2 stores notes as ordinary Markdown files in configured vaults. It keeps
+Tansu stores notes as ordinary Markdown files in configured vaults. It keeps
 the catalog, revision history, search index, and settings in app-managed data.
 See [Configuration](docs/configuration.md) for storage paths.
 
-## Get Tansu2
+## Get Tansu
 
 Standalone binaries, when available, are listed on the
-[GitHub releases page](https://github.com/joshuarli/tansu2/releases). Put the
-`tansu2` binary on your `PATH`.
+[GitHub releases page](https://github.com/joshuarli/tansu/releases). Put the
+`tansu` binary on your `PATH`.
 
-## Run Tansu2
+## Run Tansu
 
-Create a vault directory, run Tansu2, and open the first-run setup page:
+Create a vault directory, run Tansu, and open the first-run setup page:
 
 ```sh
 mkdir -p "$HOME/Documents/Notes"
-tansu2
+tansu
 ```
 
 Add `$HOME/Documents/Notes` in the setup page. The server listens on loopback;

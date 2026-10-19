@@ -21,7 +21,7 @@ Small synthetic vaults live under `tests/fixtures/test-vaults/` and are
 prepared by `scripts/test-fixture.mjs`:
 
 ```sh
-node scripts/test-fixture.mjs .work/tmp/tansu2-fixture
+node scripts/test-fixture.mjs .work/tmp/tansu-fixture
 ```
 
 Use the printed `configHome` as `XDG_CONFIG_HOME` and `dataHome` as

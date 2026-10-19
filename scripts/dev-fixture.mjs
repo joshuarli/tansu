@@ -47,7 +47,7 @@ for (const path of [configHome, dataHome, vaultRoot]) {
 await mkdir(configHome, { recursive: true });
 await mkdir(dataHome, { recursive: true });
 await cp(SOURCE_ROOT, vaultRoot, { recursive: true });
-execFileSync("cargo", ["run", "--quiet", "--bin", "tansu2", "--", "config", "init", "--vault", "Demo", vaultRoot], {
+execFileSync("cargo", ["run", "--quiet", "--bin", "tansu", "--", "config", "init", "--vault", "Demo", vaultRoot], {
   cwd: REPO_ROOT,
   env: { ...process.env, XDG_CONFIG_HOME: configHome, XDG_DATA_HOME: dataHome },
   stdio: "inherit",

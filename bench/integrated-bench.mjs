@@ -37,15 +37,15 @@ async function main() {
   execFileSync("deno", ["task", "build"], { cwd: REPO_ROOT, stdio: "inherit" });
   await mkdir(RESULTS_DIR, { recursive: true });
 
-  const root = await mkdtemp(join(tmpdir(), "tansu2-bench-"));
+  const root = await mkdtemp(join(tmpdir(), "tansu-bench-"));
   let server;
   try {
     const fixture = await createBenchmarkFixture(root);
     const largeNote = await createLargeNote(fixture.vaultOne);
     const port = await freePort();
     const baseUrl = `http://127.0.0.1:${port}`;
-    execFileSync("cargo", ["build", "--quiet", "--bin", "tansu2"], { cwd: REPO_ROOT, stdio: "inherit" });
-    const serverBinary = join(REPO_ROOT, "target", "debug", "tansu2");
+    execFileSync("cargo", ["build", "--quiet", "--bin", "tansu"], { cwd: REPO_ROOT, stdio: "inherit" });
+    const serverBinary = join(REPO_ROOT, "target", "debug", "tansu");
     const serverEnv = { ...process.env, XDG_CONFIG_HOME: fixture.configHome, XDG_DATA_HOME: fixture.dataHome };
     execFileSync(
       serverBinary,

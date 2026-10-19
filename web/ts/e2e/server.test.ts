@@ -70,7 +70,7 @@ describe("real server harness", () => {
   beforeAll(async () => {
     const scratchRoot = join(process.cwd(), ".work", "tmp");
     await mkdir(scratchRoot, { recursive: true });
-    const root = await mkdtemp(join(scratchRoot, "tansu2-e2e-"));
+    const root = await mkdtemp(join(scratchRoot, "tansu-e2e-"));
     fixtureRoot = root;
     fixture = JSON.parse(
       execFileSync(process.execPath, ["scripts/test-fixture.mjs", root, "--copy-vaults"], {
@@ -185,9 +185,9 @@ describe("real server harness", () => {
     const page = await newLoggedPage();
     await page.setViewportSize({ width: 600, height: 900 });
     await page.addInitScript(() => {
-      if (window.sessionStorage.getItem("tansu2-e2e-theme-reset") !== "done") {
-        window.localStorage.removeItem("tansu2.theme.v1");
-        window.sessionStorage.setItem("tansu2-e2e-theme-reset", "done");
+      if (window.sessionStorage.getItem("tansu-e2e-theme-reset") !== "done") {
+        window.localStorage.removeItem("tansu.theme.v1");
+        window.sessionStorage.setItem("tansu-e2e-theme-reset", "done");
       }
       window.open = (url) => {
         document.documentElement.dataset["openedLink"] = String(url);
@@ -1178,7 +1178,7 @@ describe("real server harness", () => {
         reducedMotion: "reduce",
         colorScheme: theme,
       });
-      await context.addInitScript((value) => window.localStorage.setItem("tansu2.theme.v1", value), theme);
+      await context.addInitScript((value) => window.localStorage.setItem("tansu.theme.v1", value), theme);
       const page = await context.newPage();
       await page.goto(baseUrl);
       await page.waitForSelector(".main");
@@ -1418,7 +1418,7 @@ describe("real server harness", () => {
 });
 
 function browserTypeFromEnv(): BrowserType {
-  switch (process.env["TANSU2_E2E_BROWSER"] ?? "chromium") {
+  switch (process.env["TANSU_E2E_BROWSER"] ?? "chromium") {
     case "chromium": {
       return chromium;
     }
@@ -1426,7 +1426,7 @@ function browserTypeFromEnv(): BrowserType {
       return webkit;
     }
     default: {
-      throw new Error(`Unsupported E2E browser: ${process.env["TANSU2_E2E_BROWSER"]}`);
+      throw new Error(`Unsupported E2E browser: ${process.env["TANSU_E2E_BROWSER"]}`);
     }
   }
 }
@@ -1452,25 +1452,25 @@ async function startFixtureServer(): Promise<void> {
   if (fixture === undefined) throw new Error("test fixture is not initialized");
   const environment = {
     ...process.env,
-    TANSU2_LOGS: "buffer",
+    TANSU_LOGS: "buffer",
     XDG_CONFIG_HOME: fixture.configHome,
     XDG_DATA_HOME: fixture.dataHome,
   };
   if (!serverBinaryBuilt) {
-    const supplied = process.env["TANSU2_E2E_SERVER_BINARY"];
+    const supplied = process.env["TANSU_E2E_SERVER_BINARY"];
     if (supplied === undefined || supplied === "") {
-      execFileSync("cargo", ["build", "--quiet", "--bin", "tansu2"], {
+      execFileSync("cargo", ["build", "--quiet", "--bin", "tansu"], {
         cwd: process.cwd(),
         env: environment,
         stdio: "pipe",
       });
       const targetDirectory = resolve(process.env["CARGO_TARGET_DIR"] ?? "target");
-      serverBinaryPath = join(targetDirectory, "debug", process.platform === "win32" ? "tansu2.exe" : "tansu2");
+      serverBinaryPath = join(targetDirectory, "debug", process.platform === "win32" ? "tansu.exe" : "tansu");
     } else {
       serverBinaryPath = resolve(supplied);
     }
     serverArtifactHash = artifactHash(serverBinaryPath);
-    const record = process.env["TANSU2_ACCEPTANCE_RECORD"];
+    const record = process.env["TANSU_ACCEPTANCE_RECORD"];
     if (record !== undefined && record !== "") {
       await writeFile(record, `${serverArtifactHash} ${serverBinaryPath}\n`);
     }
@@ -1556,7 +1556,7 @@ async function waitForReady(url: string): Promise<void> {
 }
 
 async function dumpUnifiedLogs(testName: string): Promise<void> {
-  const lines: string[] = [`\n--- tansu2 unified logs for failed test: ${testName} ---`];
+  const lines: string[] = [`\n--- tansu unified logs for failed test: ${testName} ---`];
   if (baseUrl !== "") {
     try {
       const snapshot = await fetch(`${baseUrl}/api/dev/logs`).then(
@@ -1573,7 +1573,7 @@ async function dumpUnifiedLogs(testName: string): Promise<void> {
     lines.push("--- server stdout/stderr fallback ---");
     lines.push(serverOutput.join(""));
   }
-  lines.push("--- end tansu2 unified logs ---");
+  lines.push("--- end tansu unified logs ---");
   console.error(lines.join("\n"));
 }
 
@@ -1776,18 +1776,18 @@ async function expectMatchesBaseline(page: Page, name: string): Promise<void> {
     "ts",
     "e2e",
     "baselines",
-    `${process.env["TANSU2_E2E_BROWSER"] ?? "chromium"}-${process.platform}`,
+    `${process.env["TANSU_E2E_BROWSER"] ?? "chromium"}-${process.platform}`,
   );
   const baselinePath = join(directory, `${name}.png`);
   const actual = await page.screenshot({ animations: "disabled", caret: "hide" });
-  if (process.env["TANSU2_UPDATE_BASELINES"] === "1") {
+  if (process.env["TANSU_UPDATE_BASELINES"] === "1") {
     await mkdir(directory, { recursive: true });
     await writeFile(baselinePath, actual);
     return;
   }
   const expected = await readFile(baselinePath).catch((error: NodeJS.ErrnoException) => {
     if (error.code === "ENOENT") {
-      throw new Error(`missing baseline ${baselinePath}; create it with TANSU2_UPDATE_BASELINES=1`);
+      throw new Error(`missing baseline ${baselinePath}; create it with TANSU_UPDATE_BASELINES=1`);
     }
     throw error;
   });

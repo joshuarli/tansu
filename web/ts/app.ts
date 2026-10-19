@@ -53,8 +53,8 @@ const COMMAND_SEARCH_DEBOUNCE_MS = 60;
 const COMMAND_SEARCH_LIMIT = 20;
 const ASSET_PREFETCH_CONCURRENCY = 4;
 const ASSET_CACHE_LIMIT = 64;
-const THEME_STORAGE_KEY = "tansu2.theme.v1";
-const LINK_RAIL_STORAGE_KEY = "tansu2.link-rail.v1";
+const THEME_STORAGE_KEY = "tansu.theme.v1";
+const LINK_RAIL_STORAGE_KEY = "tansu.link-rail.v1";
 const NOTE_LINKS_REFRESH_DELAY_MS = 400;
 
 type TabCloseReason = "user" | "deleted" | "materialized";

@@ -3,7 +3,7 @@
 Application settings live in SQLite at
 `$XDG_CONFIG_HOME/tansu/settings.sqlite3`, or
 `~/.config/tansu/settings.sqlite3` when `XDG_CONFIG_HOME` is unset. Without
-settings, Tansu2 serves the first-run setup page on loopback.
+settings, Tansu serves the first-run setup page on loopback.
 
 Setup stores the app-wide vault list and optional authentication policy. Saving
 settings requires a restart before those changes take effect. The first-run
@@ -13,7 +13,7 @@ For scripts and development fixtures, initialize settings from the command
 line:
 
 ```sh
-tansu2 config init --vault Notes "$HOME/Documents/Notes"
+tansu config init --vault Notes "$HOME/Documents/Notes"
 ```
 
 Repeat `--vault NAME PATH` for more vaults. Paths must be absolute; `~` and
@@ -52,7 +52,7 @@ external HTTPS origin, relying party ID, and relying party name in setup, or
 initialize from the command line:
 
 ```sh
-tansu2 config init \
+tansu config init \
   --vault Notes "$HOME/Documents/Notes" \
   --auth https://notes.example.com example.com Tansu
 ```

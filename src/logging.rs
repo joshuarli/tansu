@@ -21,7 +21,7 @@ pub enum LogMode {
 
 impl LogMode {
     pub fn from_env() -> Self {
-        match std::env::var("TANSU2_LOGS").as_deref() {
+        match std::env::var("TANSU_LOGS").as_deref() {
             Ok("buffer") => Self::Buffer,
             Ok("pretty") => Self::Pretty,
             Ok("json") => Self::Json,

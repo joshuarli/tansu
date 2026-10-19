@@ -1,6 +1,6 @@
-# Tansu2
+# Tansu
 
-Tansu2 is a local Markdown note app.
+Tansu is a local Markdown note app.
 Commands: frontend build `deno task build`, fixture app `make dev`, check `make check`, unit tests `make test`, browser e2e `make test-e2e-chromium` and `make test-e2e-webkit`.
 
 ## Invariants

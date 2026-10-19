@@ -62,7 +62,7 @@ form.addEventListener("submit", async (event) => {
       body: JSON.stringify(settings),
     });
     if (!response.ok) throw new Error(await response.text());
-    status.textContent = "Settings saved. Restart Tansu2 to open your vaults.";
+    status.textContent = "Settings saved. Restart Tansu to open your vaults.";
   } catch (error) {
     status.textContent = error instanceof Error ? error.message : String(error);
   }

@@ -266,7 +266,7 @@ describe("v2 desktop shell", () => {
   });
 
   it("cycles light, dark and paper themes and persists the choice", async () => {
-    window.localStorage.removeItem("tansu2.theme.v1");
+    window.localStorage.removeItem("tansu.theme.v1");
     configureVault([]);
     const { app, root } = mountApp();
     await app.boot();
@@ -274,14 +274,14 @@ describe("v2 desktop shell", () => {
     for (let index = 0; index < 3; index += 1) {
       root.querySelector<HTMLButtonElement>(".theme-toggle")!.click();
       themes.push(document.documentElement.dataset["theme"]);
-      expect(window.localStorage.getItem("tansu2.theme.v1")).toBe(document.documentElement.dataset["theme"]);
+      expect(window.localStorage.getItem("tansu.theme.v1")).toBe(document.documentElement.dataset["theme"]);
     }
     expect(themes).toStrictEqual(["light", "dark", "paper", "light"]);
 
-    window.localStorage.setItem("tansu2.theme.v1", "paper");
+    window.localStorage.setItem("tansu.theme.v1", "paper");
     mountApp();
     expect(document.documentElement.dataset["theme"]).toBe("paper");
-    window.localStorage.removeItem("tansu2.theme.v1");
+    window.localStorage.removeItem("tansu.theme.v1");
   });
 
   it("toggles focus mode from the shortcut, shows a hint, and exits with Escape", async () => {

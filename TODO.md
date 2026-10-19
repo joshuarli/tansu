@@ -1,4 +1,4 @@
-# Tansu2 TODO
+# Tansu TODO
 
 Prefix: TNS
 Next: 83

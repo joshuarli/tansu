@@ -64,7 +64,7 @@ export function renderAuthGate(state: State, actions: ViewActions): HTMLElement 
     "main",
     "auth-gate",
     el("div", "auth-card",
-      el("p", "eyebrow", "Tansu2 vault"),
+      el("p", "eyebrow", "Tansu vault"),
       el("h1", "auth-title", "Unlock your notes"),
       el("p", "auth-copy", "Use a passkey registered for this server."),
       state.authError === null ? el("span", "") : el("p", "auth-error", state.authError),

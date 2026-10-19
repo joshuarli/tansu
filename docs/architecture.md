@@ -1,6 +1,6 @@
 # Architecture
 
-Tansu2 is a Rust server, a static TypeScript frontend, and an in-repo Markdown
+Tansu is a Rust server, a static TypeScript frontend, and an in-repo Markdown
 editor. Markdown files remain ordinary files in each vault. The server stores
 catalog and revision state in the XDG data path, keyed by stable vault ID. See
 [Configuration](configuration.md).
@@ -43,10 +43,10 @@ Create, save, import, restore, delete, rename, and conflict recovery all keep
 history under `noteId`, not the current path.
 
 The server rechecks the visible file against the saved disk hash before a
-content-changing write. The vault mutex serializes Tansu2 operations, but the
+content-changing write. The vault mutex serializes Tansu operations, but the
 recheck and file replacement are not an atomic compare-and-swap. A process that
 writes the file between those steps, or through an open descriptor, can race
-Tansu2. Use one writer per vault when that race matters.
+Tansu. Use one writer per vault when that race matters.
 
 ## Reconciliation
 

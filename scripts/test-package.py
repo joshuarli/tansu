@@ -168,7 +168,7 @@ def run(binary):
             "TMPDIR": str(temp_home),
             "PATH": str(empty_path),
             "LANG": "C.UTF-8",
-            "TANSU2_LOGS": "off",
+            "TANSU_LOGS": "off",
         }
         subprocess.run(
             [str(binary), "config", "init", "--vault", "Package", str(vault)],
