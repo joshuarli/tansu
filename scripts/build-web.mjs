@@ -6,7 +6,7 @@ import { webpEncoderAssets, webpEncoderBaseUrl } from "./webp-encoder.mjs";
 const mode = process.argv[2] === "production" ? "production" : "development";
 const root = resolve("web");
 const dist = resolve(root, "dist");
-const logMode = process.env.TANSU2_LOGS ?? (mode === "production" ? "off" : "pretty");
+const logMode = process.env.TANSU_LOGS ?? (mode === "production" ? "off" : "pretty");
 const encoderBaseUrl = await webpEncoderBaseUrl();
 const encoderAssets = await webpEncoderAssets();
 
@@ -16,8 +16,8 @@ await build({
   base: "/",
   define: {
     "process.env.NODE_ENV": JSON.stringify(mode),
-    "process.env.TANSU2_LOGS": JSON.stringify(logMode),
-    "process.env.TANSU2_WEBP_ENCODER_URL": JSON.stringify(`${encoderBaseUrl}/encode.js`),
+    "process.env.TANSU_LOGS": JSON.stringify(logMode),
+    "process.env.TANSU_WEBP_ENCODER_URL": JSON.stringify(`${encoderBaseUrl}/encode.js`),
   },
   build: {
     outDir: dist,

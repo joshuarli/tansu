@@ -30,12 +30,12 @@ const env = {
   ...process.env,
   CARGO_TARGET_DIR: target,
   TMPDIR: resolve(".work/tmp"),
-  TANSU2_LOGS: "buffer",
+  TANSU_LOGS: "buffer",
   XDG_CONFIG_HOME: fixture.configHome,
   XDG_DATA_HOME: fixture.dataHome,
 };
-execFileSync("cargo", ["build", "--quiet", "--bin", "tansu2"], { env });
-execFileSync(join(target, "debug", "tansu2"), [
+execFileSync("cargo", ["build", "--quiet", "--bin", "tansu"], { env });
+execFileSync(join(target, "debug", "tansu"), [
   "config", "init", "--vault", "One", fixture.vaultOne,
   "--vault", "Two", fixture.vaultTwo,
   "--vault", "Empty", emptyVault,
@@ -43,7 +43,7 @@ execFileSync(join(target, "debug", "tansu2"), [
 const bundledWebAssets = join(work, "web-dist");
 await rm(bundledWebAssets, { recursive: true, force: true });
 await rename(resolve("web/dist"), bundledWebAssets);
-const server = spawn(join(target, "debug", "tansu2"), ["--port", String(port)], {
+const server = spawn(join(target, "debug", "tansu"), ["--port", String(port)], {
   env,
   stdio: ["ignore", "pipe", "pipe"],
 });

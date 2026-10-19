@@ -1,17 +1,17 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 describe("dev log client", () => {
-  const originalMode = process.env["TANSU2_LOGS"];
+  const originalMode = process.env["TANSU_LOGS"];
 
   afterEach(() => {
-    process.env["TANSU2_LOGS"] = originalMode;
+    process.env["TANSU_LOGS"] = originalMode;
     vi.useRealTimers();
     vi.unstubAllGlobals();
     vi.resetModules();
   });
 
   it("does nothing when logging is off", async () => {
-    process.env["TANSU2_LOGS"] = "off";
+    process.env["TANSU_LOGS"] = "off";
     const fetch = vi.fn();
     vi.stubGlobal("fetch", fetch);
     const { installClientLogCapture, logClientEvent, flushLogs } = await import("./dev-log.ts");
@@ -25,7 +25,7 @@ describe("dev log client", () => {
 
   it("batches enabled client events", async () => {
     vi.useFakeTimers();
-    process.env["TANSU2_LOGS"] = "buffer";
+    process.env["TANSU_LOGS"] = "buffer";
     const fetch = vi.fn(async () => ({ ok: true }));
     vi.stubGlobal("fetch", fetch);
     const { logClientEvent } = await import("./dev-log.ts");
@@ -50,7 +50,7 @@ describe("dev log client", () => {
   });
 
   it("disables sending after a transport failure", async () => {
-    process.env["TANSU2_LOGS"] = "buffer";
+    process.env["TANSU_LOGS"] = "buffer";
     const fetch = vi.fn(async () => {
       throw new Error("network down");
     });
@@ -68,7 +68,7 @@ describe("dev log client", () => {
   });
 
   it("disables sending after a rejected log response", async () => {
-    process.env["TANSU2_LOGS"] = "buffer";
+    process.env["TANSU_LOGS"] = "buffer";
     const fetch = vi.fn(async () => ({ ok: false, status: 400 }));
     vi.stubGlobal("fetch", fetch);
     const { logClientEvent, flushLogs } = await import("./dev-log.ts");
@@ -84,7 +84,7 @@ describe("dev log client", () => {
   });
 
   it("captures browser errors and sends pending logs with a beacon on unload", async () => {
-    process.env["TANSU2_LOGS"] = "buffer";
+    process.env["TANSU_LOGS"] = "buffer";
     const fetch = vi.fn(async () => ({ ok: true }));
     const sendBeacon = vi.spyOn(navigator, "sendBeacon").mockReturnValue(true);
     vi.stubGlobal("fetch", fetch);
@@ -114,7 +114,7 @@ describe("dev log client", () => {
   });
 
   it("flushes full batches and falls back to keepalive fetch when a beacon is declined", async () => {
-    process.env["TANSU2_LOGS"] = "buffer";
+    process.env["TANSU_LOGS"] = "buffer";
     vi.spyOn(navigator, "sendBeacon").mockReturnValue(false);
     const fetch = vi.fn(async () => ({ ok: true }));
     vi.stubGlobal("fetch", fetch);

@@ -1,17 +1,17 @@
-NAME := tansu2
+NAME := tansu
 DEV_DIR := $(CURDIR)/.dev
 DEV_CONFIG_HOME := $(DEV_DIR)/config
 DEV_DATA_HOME := $(DEV_DIR)/data
 DEPLOY_HOST ?= ubuntu@oracle
 SQLITE_STATIC_DIR ?= $(CURDIR)/.work/sqlite-static
-AUTH_DRILL_BIN ?= $(CURDIR)/.work/dist/x86_64-unknown-linux-musl/tansu2
+AUTH_DRILL_BIN ?= $(CURDIR)/.work/dist/x86_64-unknown-linux-musl/tansu
 
 dev:
 	pnpm install --frozen-lockfile
 	deno task build:dev
 	$(MAKE) types-generated
 	node scripts/dev-fixture.mjs "$(DEV_DIR)"
-	TANSU2_LOGS=pretty XDG_CONFIG_HOME="$(DEV_CONFIG_HOME)" XDG_DATA_HOME="$(DEV_DATA_HOME)" cargo run --bin $(NAME) -- --port 3000
+	TANSU_LOGS=pretty XDG_CONFIG_HOME="$(DEV_CONFIG_HOME)" XDG_DATA_HOME="$(DEV_DATA_HOME)" cargo run --bin $(NAME) -- --port 3000
 
 dev-config:
 	pnpm install --frozen-lockfile
@@ -66,10 +66,10 @@ test-ts:
 	deno task test
 
 test-e2e-chromium:
-	TANSU2_E2E_BROWSER=chromium deno task test:browser
+	TANSU_E2E_BROWSER=chromium deno task test:browser
 
 test-e2e-webkit:
-	TANSU2_E2E_BROWSER=webkit deno task test:browser
+	TANSU_E2E_BROWSER=webkit deno task test:browser
 
 loupe:
 	mkdir -p "$(CURDIR)/.work/tmp"
@@ -109,7 +109,7 @@ test-acceptance:
 	rev="$$(git rev-parse HEAD)$$(git diff --quiet HEAD -- || echo -dirty)"; \
 	echo "acceptance suite revision: $$rev"; \
 	node_modules/.bin/vitest run web/ts/app.test.ts -t interleavings && \
-	TANSU2_ACCEPTANCE_RECORD="$(ACCEPTANCE_RECORD)" TANSU2_E2E_SERVER_BINARY="$(ACCEPTANCE_SERVER_BINARY)" TANSU2_E2E_BROWSER=$(ACCEPTANCE_BROWSER) deno task test:browser -t "acceptance:" && \
+	TANSU_ACCEPTANCE_RECORD="$(ACCEPTANCE_RECORD)" TANSU_E2E_SERVER_BINARY="$(ACCEPTANCE_SERVER_BINARY)" TANSU_E2E_BROWSER=$(ACCEPTANCE_BROWSER) deno task test:browser -t "acceptance:" && \
 	echo "acceptance suite passed at revision: $$rev" && \
 	echo "acceptance suite passed against artifact: $$(cat "$(ACCEPTANCE_RECORD)")"
 

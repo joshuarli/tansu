@@ -57,7 +57,7 @@ describe("loupe import into tansu", () => {
 
     const scratchRoot = join(process.cwd(), ".work", "tmp");
     await mkdir(scratchRoot, { recursive: true });
-    fixtureRoot = await mkdtemp(join(scratchRoot, "tansu2-loupe-"));
+    fixtureRoot = await mkdtemp(join(scratchRoot, "tansu-loupe-"));
     const fixture = JSON.parse(
       execFileSync(process.execPath, ["scripts/test-fixture.mjs", fixtureRoot, "--copy-vaults"], {
         cwd: process.cwd(),
@@ -188,19 +188,19 @@ async function expectTansuTabInBackground(): Promise<void> {
 async function startTansu(fixture: { configHome: string; dataHome: string; vaultOne: string; vaultTwo: string }) {
   const environment = {
     ...process.env,
-    TANSU2_LOGS: "buffer",
+    TANSU_LOGS: "buffer",
     XDG_CONFIG_HOME: fixture.configHome,
     XDG_DATA_HOME: fixture.dataHome,
   };
-  const supplied = process.env["TANSU2_E2E_SERVER_BINARY"];
+  const supplied = process.env["TANSU_E2E_SERVER_BINARY"];
   let binary: string;
   if (supplied === undefined || supplied === "") {
-    execFileSync("cargo", ["build", "--quiet", "--bin", "tansu2"], {
+    execFileSync("cargo", ["build", "--quiet", "--bin", "tansu"], {
       cwd: process.cwd(),
       env: environment,
       stdio: "pipe",
     });
-    binary = join(resolve(process.env["CARGO_TARGET_DIR"] ?? "target"), "debug", "tansu2");
+    binary = join(resolve(process.env["CARGO_TARGET_DIR"] ?? "target"), "debug", "tansu");
   } else {
     binary = resolve(supplied);
   }
@@ -220,7 +220,7 @@ async function startTansu(fixture: { configHome: string; dataHome: string; vault
   tansuServer.stderr?.on("data", (chunk: Buffer) => tansuOutput.push(chunk.toString("utf8")));
   const deadline = Date.now() + 20_000;
   while (!(await fetch(`${tansuUrl}/api/v2/health`).then((response) => response.ok, () => false))) {
-    if (Date.now() > deadline) throw new Error(`tansu2 did not become ready\n${tansuOutput.join("")}`);
+    if (Date.now() > deadline) throw new Error(`tansu did not become ready\n${tansuOutput.join("")}`);
     await new Promise((done) => setTimeout(done, 100));
   }
 }

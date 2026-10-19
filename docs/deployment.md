@@ -1,9 +1,9 @@
 # Deployment
 
-Run one Tansu2 server per vault root. A second server, or a second config
+Run one Tansu server per vault root. A second server, or a second config
 naming the same directory, exits at startup with an "already owned" error.
 
-Tansu2 binds to `127.0.0.1` on port `3000` by default. Without authentication
+Tansu binds to `127.0.0.1` on port `3000` by default. Without authentication
 settings, the server uses loopback mode and passkey routes are disabled. Keep
 the default for local use.
 
@@ -14,17 +14,17 @@ tailnet devices HTTPS access to the loopback server. Configure HTTPS for your
 tailnet, then set the browser URL as the authenticated origin:
 
 Set authentication in the setup page or with
-`tansu2 config init --vault Notes /path/to/notes --auth https://laptop.example-tailnet.ts.net laptop.example-tailnet.ts.net Tansu`.
+`tansu config init --vault Notes /path/to/notes --auth https://laptop.example-tailnet.ts.net laptop.example-tailnet.ts.net Tansu`.
 
 Use the exact tailnet HTTPS hostname shown by Tailscale for
 `external_origin`. The RP ID must match that hostname or be one of its parent
 domains. See [Configuration](configuration.md) for the full path and validation
 rules.
 
-Start Tansu2, then publish its local port to your tailnet:
+Start Tansu, then publish its local port to your tailnet:
 
 ```sh
-tansu2
+tansu
 tailscale serve --bg 3000
 tailscale serve status
 ```
@@ -32,13 +32,13 @@ tailscale serve status
 Open the HTTPS URL shown by `tailscale serve status`. Tailscale Serve restricts
 access to your tailnet and its access controls. Do not run `tailscale funnel`;
 Funnel exposes the service to the public internet. Tailscale identity headers
-do not replace Tansu2 passkey authentication.
+do not replace Tansu passkey authentication.
 
 ## Deploy to Oracle
 
 Run `make deploy` from the repository root. The command builds a static Linux
 binary for Oracle's architecture, installs it as a systemd service, and keeps
-the config, vault, and app data under `/var/lib/tansu2/`.
+the config, vault, and app data under `/var/lib/tansu/`.
 
 Tailscale Serve exposes the app to your tailnet over HTTPS. The URL
 `http://oracle:3000` redirects to `https://oracle.<tailnet>.ts.net`, where the
@@ -51,9 +51,9 @@ passkey before editing notes. Stop the service, issue a one-time capability,
 then start the service again:
 
 ```sh
-ssh ubuntu@oracle 'sudo systemctl stop tansu2'
-ssh ubuntu@oracle 'sudo -u tansu2 env HOME=/var/lib/tansu2 XDG_CONFIG_HOME=/var/lib/tansu2/config XDG_DATA_HOME=/var/lib/tansu2/data /opt/tansu2/tansu2 auth enroll'
-ssh ubuntu@oracle 'sudo systemctl start tansu2'
+ssh ubuntu@oracle 'sudo systemctl stop tansu'
+ssh ubuntu@oracle 'sudo -u tansu env HOME=/var/lib/tansu XDG_CONFIG_HOME=/var/lib/tansu/config XDG_DATA_HOME=/var/lib/tansu/data /opt/tansu/tansu auth enroll'
+ssh ubuntu@oracle 'sudo systemctl start tansu'
 ```
 
 Enter the printed capability at the authenticated HTTPS URL and complete
@@ -64,9 +64,9 @@ passkey registration. The capability expires after ten minutes.
 Stop the server before running local auth commands. The exclusive auth-state
 lock rejects these commands while the server is running.
 
-1. Run `tansu2 auth enroll` and keep the printed capability private. It expires
+1. Run `tansu auth enroll` and keep the printed capability private. It expires
    after ten minutes and can enroll only the first credential.
-2. Start Tansu2 and open its configured HTTPS origin in a browser.
+2. Start Tansu and open its configured HTTPS origin in a browser.
 3. Complete the first passkey registration with the capability.
 4. Add a second passkey from a recently verified owner session. Keep access to
    both authenticators or to their credential manager's recovery process.
@@ -74,11 +74,11 @@ lock rejects these commands while the server is running.
 Back up the server's auth database while the server is stopped:
 
 ```sh
-tansu2 auth backup "$HOME/tansu-auth-backup.db"
+tansu auth backup "$HOME/tansu-auth-backup.db"
 ```
 
-Restore it with `tansu2 auth restore PATH`. Keep `external_origin` and `rp_id`
-set to the values used when you created the backup. Tansu2 clears credentials
+Restore it with `tansu auth restore PATH`. Keep `external_origin` and `rp_id`
+set to the values used when you created the backup. Tansu clears credentials
 when either value changes. Restore clears sessions, enrollment capabilities,
 and unfinished ceremonies. The backup contains the
 server's public credential records, not authenticator private keys. If every
@@ -105,9 +105,9 @@ backs up the restored database, and confirms that restore rejects a corrupt
 backup. The binary must run on the host, so run the drill on Linux for the musl
 artifact.
 
-## Back up and restore Tansu2 state
+## Back up and restore Tansu state
 
-Stop Tansu2 and other vault writers before copying state. Back up these items
+Stop Tansu and other vault writers before copying state. Back up these items
 together from one quiescent point:
 
 - Every configured vault, including Markdown files and `z-images/` assets.
@@ -122,11 +122,11 @@ and vault identities, catalogs, revision snapshots, conflict drafts, settings,
 and search indexes. Search indexes are derived and can be rebuilt from the
 vault and catalog data. Keep the vaults and app data from the same backup; the
 catalog tracks visible file hashes and revisions. Browser IndexedDB is separate
-from server state, is not encrypted by Tansu2, and is not included in a server
+from server state, is not encrypted by Tansu, and is not included in a server
 backup. Browser storage can be cleared or evicted, and a journal checkpoint may
 not include the most recent keystrokes.
 
-If you lose a search index, restart Tansu2 so startup can rebuild it. Do not
+If you lose a search index, restart Tansu so startup can rebuild it. Do not
 delete the catalog or revision data to rebuild search. Those files hold durable
 identity and recovery state.
 
@@ -134,7 +134,7 @@ identity and recovery state.
 
 Stop the server before restoring a backup. Restore the settings database, all vaults, and
 the full app data directory from the same point in time before starting an older
-binary. Tansu2 may update its SQLite schema when it opens app data. The project
+binary. Tansu may update its SQLite schema when it opens app data. The project
 does not guarantee that a newer catalog can be opened by an older binary.
 
 The Markdown files remain ordinary files, but restoring only the vault or only

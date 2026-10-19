@@ -1,7 +1,7 @@
 import type { V2NoteDocument, V2NoteMeta } from "../types.generated.ts";
 import { localDraftId, type DocumentIdentity, type LocalDraftId, type ServerIdentity, type WorkspaceId } from "./identity.ts";
 
-const DATABASE_NAME = "tansu2-client-state-v2";
+const DATABASE_NAME = "tansu-client-state-v2";
 const DATABASE_VERSION = 1;
 const CLEAN_NOTES = "cleanNotes";
 const WORKSPACES = "workspaces";
@@ -915,7 +915,7 @@ export async function clearTitleDraftCheckpoint(
 export function createWorkspaceId(storage?: Storage): WorkspaceId {
   try {
     const target = storage ?? globalThis.localStorage;
-    const key = "tansu2.workspace.v1";
+    const key = "tansu.workspace.v1";
     const existing = target.getItem(key);
     if (existing !== null) {
       return identityString(existing, "workspaceId") as WorkspaceId;

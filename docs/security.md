@@ -2,7 +2,7 @@
 
 ## Server identity
 
-Authenticated mode requires the configured HTTPS origin and RP ID. Tansu2
+Authenticated mode requires the configured HTTPS origin and RP ID. Tansu
 checks `Host` on every request and requires an exact `Origin` match when the
 header is present. State-changing requests require the configured origin, a
 valid session, and its CSRF token, except for ticket-bound login and initial
@@ -13,7 +13,7 @@ WebAuthn credentials bind to the configured origin and RP ID. Changing either
 clears credentials, sessions, enrollment capabilities, and pending ceremonies
 in one transaction. A non-increasing signature counter rejects single-device
 credentials and consumes the ceremony. Backup-eligible passkeys may complete a
-valid assertion; Tansu2 records the latest counter anomaly and never lowers the
+valid assertion; Tansu records the latest counter anomaly and never lowers the
 stored counter.
 
 App responses restrict scripts to same-origin files and permit WebAssembly

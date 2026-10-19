@@ -855,7 +855,7 @@ fn handle_auth_route_sync(
                 Ok(start) => start,
                 Err(error) => return auth_error(AuthError::InvalidRequest(error.to_string()), request_id),
             };
-            let (options, state) = match rp.start_registration("tansu2-owner-v1", "Tansu Owner") {
+            let (options, state) = match rp.start_registration("tansu-owner-v1", "Tansu Owner") {
                 Ok(options) => options,
                 Err(error) => return auth_error(AuthError::WebAuthn(error.to_string()), request_id),
             };
@@ -904,7 +904,7 @@ fn handle_auth_route_sync(
                 Ok(_) => return auth_error(AuthError::Unauthorized, request_id),
                 Err(error) => return auth_error(error, request_id),
             };
-            let (options, state) = match rp.start_authentication(&credentials, b"tansu2-owner-v1") {
+            let (options, state) = match rp.start_authentication(&credentials, b"tansu-owner-v1") {
                 Ok(options) => options,
                 Err(error) => return auth_error(AuthError::WebAuthn(error.to_string()), request_id),
             };
@@ -1718,7 +1718,7 @@ mod tests {
 
         let setup = route(&app, &request("GET", "/", &[]));
         assert_eq!(setup.status(), 200);
-        assert!(String::from_utf8_lossy(setup.body()).contains("Set up Tansu2"));
+        assert!(String::from_utf8_lossy(setup.body()).contains("Set up Tansu"));
 
         let initial = route(&app, &request("GET", "/api/v2/app/settings", &[]));
         let initial: serde_json::Value = serde_json::from_slice(initial.body()).unwrap();

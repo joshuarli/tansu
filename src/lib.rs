@@ -7,7 +7,7 @@
     )
 )))]
 compile_error!(
-    "tansu2 supports only aarch64-apple-darwin, x86_64-unknown-linux-musl, and aarch64-unknown-linux-musl"
+    "tansu supports only aarch64-apple-darwin, x86_64-unknown-linux-musl, and aarch64-unknown-linux-musl"
 );
 
 pub mod api;
@@ -62,7 +62,7 @@ impl std::fmt::Display for Error {
             }
             Self::VaultAlreadyOwned { root } => write!(
                 f,
-                "vault root {} is already owned by another Tansu2 server",
+                "vault root {} is already owned by another Tansu server",
                 root.display()
             ),
             Self::Io(error) => write!(f, "{error}"),

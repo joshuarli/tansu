@@ -19,10 +19,10 @@ class RedirectHandler(BaseHTTPRequestHandler):
     do_OPTIONS = redirect
 
 
-origin = os.environ["TANSU2_REDIRECT_ORIGIN"]
+origin = os.environ["TANSU_REDIRECT_ORIGIN"]
 parsed_origin = urlsplit(origin)
 if parsed_origin.scheme != "https" or not parsed_origin.netloc or parsed_origin.path:
-    raise ValueError("TANSU2_REDIRECT_ORIGIN must be an HTTPS origin")
+    raise ValueError("TANSU_REDIRECT_ORIGIN must be an HTTPS origin")
 
 server = HTTPServer(("127.0.0.1", 3002), RedirectHandler)
 server.origin = origin

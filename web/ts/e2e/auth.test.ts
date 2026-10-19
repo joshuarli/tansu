@@ -33,17 +33,17 @@ describe("authenticated Chromium server", () => {
     const environment = {
       ...process.env,
       TMPDIR: scratchRoot,
-      TANSU2_LOGS: "buffer",
+      TANSU_LOGS: "buffer",
       XDG_CONFIG_HOME: fixture.configHome,
       XDG_DATA_HOME: fixture.dataHome,
     };
-    execFileSync("cargo", ["build", "--quiet", "--bin", "tansu2"], {
+    execFileSync("cargo", ["build", "--quiet", "--bin", "tansu"], {
       cwd: process.cwd(),
       env: environment,
       stdio: "pipe",
     });
     const targetDirectory = resolve(process.env["CARGO_TARGET_DIR"] ?? "target");
-    const serverBinary = join(targetDirectory, "debug", process.platform === "win32" ? "tansu2.exe" : "tansu2");
+    const serverBinary = join(targetDirectory, "debug", process.platform === "win32" ? "tansu.exe" : "tansu");
     execFileSync(serverBinary, [
       "config", "init", "--vault", "One", fixture.vaultOne,
       "--vault", "Two", fixture.vaultTwo,

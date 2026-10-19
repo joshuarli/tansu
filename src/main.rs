@@ -3,15 +3,15 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use tansu2::app::App;
-use tansu2::api_types::{AppAuthSettings, AppSettings, AppVaultSettings};
-use tansu2::auth::{AuthError, AuthStore};
-use tansu2::config::{AuthConfig, Config, ConfigStore, prepare_auth_state_directory};
-use tansu2::http::{
+use tansu::app::App;
+use tansu::api_types::{AppAuthSettings, AppSettings, AppVaultSettings};
+use tansu::auth::{AuthError, AuthStore};
+use tansu::config::{AuthConfig, Config, ConfigStore, prepare_auth_state_directory};
+use tansu::http::{
     EventEnvelope, EventSource, EventSourceError, EventSubscription, EventSubscriptionStream,
     ServerServices, serve_setup, serve_with_services,
 };
-use tansu2::vault::{V2EventEnvelope, V2EventSubscription};
+use tansu::vault::{V2EventEnvelope, V2EventSubscription};
 
 const SESSION_TTL_SECS: u64 = 8 * 60 * 60;
 const OWNER_VERIFICATION_TTL_SECS: u64 = 5 * 60;
@@ -24,7 +24,7 @@ fn main() {
     }
 }
 
-fn run() -> tansu2::Result<()> {
+fn run() -> tansu::Result<()> {
     match parse_command(std::env::args_os().skip(1))? {
         Command::Serve { port } => {
             let store = ConfigStore::open_default()?;
@@ -41,7 +41,7 @@ fn run() -> tansu2::Result<()> {
         Command::Auth(command) => {
             let config = ConfigStore::open_default()?
                 .config()?
-                .ok_or_else(|| tansu2::Error::BadRequest("application settings are not configured".to_string()))?;
+                .ok_or_else(|| tansu::Error::BadRequest("application settings are not configured".to_string()))?;
             let output = run_auth_command(&config, command)?;
             match output {
                 AuthCommandOutput::EnrollmentCapability(capability) => println!("{capability}"),
@@ -52,11 +52,11 @@ fn run() -> tansu2::Result<()> {
     }
 }
 
-fn run_setup_server(store: ConfigStore, port: u16) -> tansu2::Result<()> {
+fn run_setup_server(store: ConfigStore, port: u16) -> tansu::Result<()> {
     serve_setup(App::setup_only(store), port)
 }
 
-fn run_server(config: Config, store: ConfigStore, port: u16) -> tansu2::Result<()> {
+fn run_server(config: Config, store: ConfigStore, port: u16) -> tansu::Result<()> {
     let auth_config = config.auth.clone();
     let app = App::from_settings(config, store)?;
     let auth = auth_config
@@ -102,7 +102,7 @@ enum AuthCommandOutput {
     Message(String),
 }
 
-fn parse_command(args: impl IntoIterator<Item = OsString>) -> tansu2::Result<Command> {
+fn parse_command(args: impl IntoIterator<Item = OsString>) -> tansu::Result<Command> {
     let args = args.into_iter().collect::<Vec<_>>();
     match args.as_slice() {
         [] => Ok(Command::Serve { port: 3000 }),
@@ -129,7 +129,7 @@ fn parse_command(args: impl IntoIterator<Item = OsString>) -> tansu2::Result<Com
     }
 }
 
-fn parse_settings_args(args: &[OsString]) -> tansu2::Result<AppSettings> {
+fn parse_settings_args(args: &[OsString]) -> tansu::Result<AppSettings> {
     let mut vaults = Vec::new();
     let mut auth = None;
     let mut index = 0;
@@ -158,17 +158,17 @@ fn parse_settings_args(args: &[OsString]) -> tansu2::Result<AppSettings> {
     Ok(AppSettings { vaults, auth })
 }
 
-fn usage_error() -> tansu2::Error {
-    tansu2::Error::BadRequest(
-        "usage: tansu2 [--port PORT] | tansu2 config init --vault NAME PATH [--vault NAME PATH] [--auth ORIGIN RP_ID RP_NAME] | tansu2 auth enroll | tansu2 auth backup PATH | tansu2 auth restore PATH".to_string(),
+fn usage_error() -> tansu::Error {
+    tansu::Error::BadRequest(
+        "usage: tansu [--port PORT] | tansu config init --vault NAME PATH [--vault NAME PATH] [--auth ORIGIN RP_ID RP_NAME] | tansu auth enroll | tansu auth backup PATH | tansu auth restore PATH".to_string(),
     )
 }
 
-fn run_auth_command(config: &Config, command: AuthCommand) -> tansu2::Result<AuthCommandOutput> {
+fn run_auth_command(config: &Config, command: AuthCommand) -> tansu::Result<AuthCommandOutput> {
     let auth_config = config
         .auth
         .as_ref()
-        .ok_or_else(|| tansu2::Error::BadRequest("authenticated mode is not configured".into()))?;
+        .ok_or_else(|| tansu::Error::BadRequest("authenticated mode is not configured".into()))?;
     prepare_auth_state_directory(auth_config)?;
     match command {
         AuthCommand::Enroll => create_initial_enrollment(auth_config),
@@ -183,7 +183,7 @@ fn run_auth_command(config: &Config, command: AuthCommand) -> tansu2::Result<Aut
     }
 }
 
-fn create_initial_enrollment(auth_config: &AuthConfig) -> tansu2::Result<AuthCommandOutput> {
+fn create_initial_enrollment(auth_config: &AuthConfig) -> tansu::Result<AuthCommandOutput> {
     let auth = AuthStore::open(
         auth_config.state_directory(),
         auth_config.policy().clone(),
@@ -194,7 +194,7 @@ fn create_initial_enrollment(auth_config: &AuthConfig) -> tansu2::Result<AuthCom
     let (capability, _) = match auth.create_enrollment_capability(unix_time_seconds()?, INITIAL_ENROLLMENT_TTL_SECS) {
         Ok(capability) => capability,
         Err(AuthError::InvalidRequest(message)) if message == "initial enrollment is already complete" => {
-            return Err(tansu2::Error::BadRequest(
+            return Err(tansu::Error::BadRequest(
                 "an owner credential already exists; sign in with a passkey before adding another".into(),
             ));
         }
@@ -203,15 +203,15 @@ fn create_initial_enrollment(auth_config: &AuthConfig) -> tansu2::Result<AuthCom
     Ok(AuthCommandOutput::EnrollmentCapability(capability))
 }
 
-fn unix_time_seconds() -> tansu2::Result<u64> {
+fn unix_time_seconds() -> tansu::Result<u64> {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_secs())
-        .map_err(|error| tansu2::Error::Internal(error.to_string()))
+        .map_err(|error| tansu::Error::Internal(error.to_string()))
 }
 
-fn auth_error(error: AuthError) -> tansu2::Error {
-    tansu2::Error::Internal(error.to_string())
+fn auth_error(error: AuthError) -> tansu::Error {
+    tansu::Error::Internal(error.to_string())
 }
 
 struct AppEventSource(App);
@@ -223,7 +223,7 @@ impl EventSource for AppEventSource {
         after_event_version: Option<u64>,
     ) -> std::result::Result<EventSubscription, EventSourceError> {
         let vault = self.0.vault_by_id(vault_id).map_err(|error| match error {
-            tansu2::Error::NotFound(_) => EventSourceError::VaultNotFound,
+            tansu::Error::NotFound(_) => EventSourceError::VaultNotFound,
             error => EventSourceError::Internal(error.to_string()),
         })?;
         let subscription = vault

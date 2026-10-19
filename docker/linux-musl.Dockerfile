@@ -43,17 +43,17 @@ COPY web/dist ./web/dist
 RUN rustup target add "${TARGET}"
 RUN CC=/usr/local/bin/tansu-clang scripts/build-sqlite-static.sh /opt/tansu-sqlite
 RUN if [ "${CARGO_PROFILE}" = "release" ]; then \
-    cargo build --locked --release --target "${TARGET}" --bin tansu2; \
+    cargo build --locked --release --target "${TARGET}" --bin tansu; \
   else \
-    cargo build --locked --target "${TARGET}" --bin tansu2; \
+    cargo build --locked --target "${TARGET}" --bin tansu; \
   fi
 RUN set -eu; \
-  if [ "${CARGO_PROFILE}" = "release" ]; then bin="target/${TARGET}/release/tansu2"; else bin="target/${TARGET}/debug/tansu2"; fi; \
+  if [ "${CARGO_PROFILE}" = "release" ]; then bin="target/${TARGET}/release/tansu"; else bin="target/${TARGET}/debug/tansu"; fi; \
   dynamic_section="$(llvm-readelf -d "$bin")" || exit 1; \
   printf '%s\n' "$dynamic_section"; \
   if printf '%s\n' "$dynamic_section" | grep NEEDED; then exit 1; fi; \
   if [ "${CARGO_PROFILE}" = "release" ]; then llvm-strip "$bin"; fi; \
-  mkdir -p /out && cp "$bin" /out/tansu2
+  mkdir -p /out && cp "$bin" /out/tansu
 
 FROM scratch AS artifact
-COPY --from=build /out/tansu2 /tansu2
+COPY --from=build /out/tansu /tansu

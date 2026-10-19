@@ -35,7 +35,7 @@ describe("native command palette definitions", () => {
     expect(commandItems(state).find((item) => item.id === "focus")?.label).toBe("Exit focus mode");
   });
 
-  it("includes Tansu2 actions in the default command list", () => {
+  it("includes Tansu actions in the default command list", () => {
     const state = createState(vaultId("vault-a"));
     expect(commandItems(state).some((item) => item.id === "settings")).toBeTruthy();
   });

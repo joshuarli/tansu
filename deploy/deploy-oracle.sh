@@ -34,12 +34,12 @@ esac
 
 mkdir -p "$repo_root/.work/tmp"
 TMPDIR="$repo_root/.work/tmp" make -C "$repo_root" "$make_target"
-artifact="$repo_root/.work/dist/$rust_target/tansu2"
+artifact="$repo_root/.work/dist/$rust_target/tansu"
 test -s "$artifact"
 
-remote_stage=$(ssh -o BatchMode=yes "$deploy_host" 'mkdir -p "$HOME/.cache/tansu2" && chmod 700 "$HOME/.cache/tansu2" && mktemp -d "$HOME/.cache/tansu2/deploy.XXXXXXXX"')
+remote_stage=$(ssh -o BatchMode=yes "$deploy_host" 'mkdir -p "$HOME/.cache/tansu" && chmod 700 "$HOME/.cache/tansu" && mktemp -d "$HOME/.cache/tansu/deploy.XXXXXXXX"')
 case "$remote_stage" in
-  /home/*/.cache/tansu2/deploy.*) ;;
+  /home/*/.cache/tansu/deploy.*) ;;
   *) printf 'unexpected remote staging path: %s\n' "$remote_stage" >&2; exit 1 ;;
 esac
 
@@ -47,12 +47,12 @@ cleanup() {
   ssh -o BatchMode=yes "$deploy_host" bash -s -- "$remote_stage" <<'CLEANUP' >/dev/null 2>&1 || true
 set -euo pipefail
 stage=$1
-rm -f "$stage/tansu2" "$stage/http-redirect.py"
+rm -f "$stage/tansu" "$stage/http-redirect.py"
 rmdir "$stage"
 CLEANUP
 }
 trap cleanup EXIT
 
-scp -q "$artifact" "$deploy_host:$remote_stage/tansu2"
+scp -q "$artifact" "$deploy_host:$remote_stage/tansu"
 scp -q "$repo_root/deploy/http-redirect.py" "$deploy_host:$remote_stage/http-redirect.py"
 ssh -o BatchMode=yes "$deploy_host" sudo bash -s -- "$tailnet_dns_name" "$remote_stage" < "$repo_root/deploy/install-oracle.sh"

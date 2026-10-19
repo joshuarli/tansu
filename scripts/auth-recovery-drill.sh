@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-bin="${1:?usage: auth-recovery-drill.sh PATH_TO_TANSU2_BINARY}"
+bin="${1:?usage: auth-recovery-drill.sh PATH_TO_TANSU_BINARY}"
 drill_dir="${AUTH_RECOVERY_DRILL_DIR:-.work/tmp/auth-recovery-drill}"
 
 case "$bin" in

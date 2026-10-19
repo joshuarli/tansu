@@ -17,7 +17,7 @@ Install browser dependencies with `deno task playwright:install`; see
 
 `make test-acceptance` first runs app interleaving tests, then the browser group
 tagged `acceptance:`. Set `ACCEPTANCE_BROWSER=webkit` to use WebKit. Set
-`ACCEPTANCE_SERVER_BINARY=path/to/tansu2` to test a specific server binary.
+`ACCEPTANCE_SERVER_BINARY=path/to/tansu` to test a specific server binary.
 The integration suite uses isolated fixtures under `.work/tmp/`.
 
 Browser screenshot baselines are specific to the browser and platform. A
@@ -25,7 +25,7 @@ platform without a baseline fails the baseline test. After an intentional UI
 change, generate Chromium baselines with:
 
 ```sh
-TANSU2_UPDATE_BASELINES=1 TANSU2_E2E_BROWSER=chromium deno task test:browser -t "baselines"
+TANSU_UPDATE_BASELINES=1 TANSU_E2E_BROWSER=chromium deno task test:browser -t "baselines"
 ```
 
 Review the generated images in the diff. A failing run writes the actual image
