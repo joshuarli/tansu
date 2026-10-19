@@ -4,6 +4,7 @@ import { isAbsolute, join, relative, resolve, sep } from "node:path";
 
 const REPO_ROOT = resolve(import.meta.dirname, "..");
 const SOURCE_ROOT = join(REPO_ROOT, "tests", "fixtures", "demo-vault");
+const FIELD_NOTES_SOURCE_ROOT = join(REPO_ROOT, "tests", "fixtures", "demo-vault-field-notes");
 
 function isWithin(root, candidate) {
   const fromRoot = relative(root, candidate);
@@ -38,19 +39,24 @@ await assertNoSymlinkPath(allowedRoot, fixtureRoot);
 
 const configHome = join(fixtureRoot, "config");
 const dataHome = join(fixtureRoot, "data");
-const vaultRoot = join(fixtureRoot, "vault");
-for (const path of [configHome, dataHome, vaultRoot]) {
+const vaults = [
+  { name: "Demo", source: SOURCE_ROOT, root: join(fixtureRoot, "vault") },
+  { name: "Field Notes", source: FIELD_NOTES_SOURCE_ROOT, root: join(fixtureRoot, "vault-field-notes") },
+];
+for (const path of [configHome, dataHome, ...vaults.map((vault) => vault.root)]) {
   await assertNoSymlinkPath(fixtureRoot, path);
   await rm(path, { recursive: true, force: true });
 }
 
 await mkdir(configHome, { recursive: true });
 await mkdir(dataHome, { recursive: true });
-await cp(SOURCE_ROOT, vaultRoot, { recursive: true });
-execFileSync("cargo", ["run", "--quiet", "--bin", "tansu", "--", "config", "init", "--vault", "Demo", vaultRoot], {
+for (const vault of vaults) await cp(vault.source, vault.root, { recursive: true });
+const initializeArgs = ["run", "--quiet", "--bin", "tansu", "--", "config", "init"];
+for (const vault of vaults) initializeArgs.push("--vault", vault.name, vault.root);
+execFileSync("cargo", initializeArgs, {
   cwd: REPO_ROOT,
   env: { ...process.env, XDG_CONFIG_HOME: configHome, XDG_DATA_HOME: dataHome },
   stdio: "inherit",
 });
 
-console.log(JSON.stringify({ configHome, dataHome, vaultRoot }));
+console.log(JSON.stringify({ configHome, dataHome, vaults: vaults.map(({ name, root }) => ({ name, root })) }));

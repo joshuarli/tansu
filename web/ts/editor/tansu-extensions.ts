@@ -14,12 +14,7 @@ export type EditorConfig = {
   imageWebpQuality?: number;
   className?: string;
   noteTitle?: string;
-  noteTags?: {
-    tags: readonly string[];
-    status: "editable" | "read-only" | "locked";
-    onAddTag: () => void;
-    onRemoveTag: (tag: string) => void;
-  };
+  onNoteTitleCommit?: (request: { title: string; intent: "rename" | "submit" }) => Promise<boolean>;
   currentNotePath?: () => string;
   wikiNotes?: () => readonly WikiNote[];
   onWikiNoteOpen?: (noteId: string) => void;

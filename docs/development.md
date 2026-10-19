@@ -25,6 +25,9 @@ uses isolated settings, data, and a copied vault under `.dev/`. See
 [Fixtures](fixtures.md) for fixture setup and [Logging](logging.md) for the dev
 and e2e log stream.
 
+`make dev` watches the frontend source and rebuilds it after changes. CSS changes
+apply without reloading the page. TypeScript changes reload the page.
+
 For server settings, see [Configuration](configuration.md). For passkey
 administration, remote access, and backup procedures, see
 [Deployment](deployment.md).

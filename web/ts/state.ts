@@ -60,8 +60,6 @@ export type LocalDraftTab = TabFields & {
 export type Tab = SavedTab | LocalDraftTab;
 
 export type NoteDialog =
-  | { kind: "rename"; noteId: NoteId; title: string }
-  | { kind: "tag"; value: string }
   | { kind: "delete"; noteId: NoteId };
 
 export type ContextMenuState = {

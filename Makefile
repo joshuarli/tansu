@@ -8,10 +8,13 @@ AUTH_DRILL_BIN ?= $(CURDIR)/.work/dist/x86_64-unknown-linux-musl/tansu
 
 dev:
 	pnpm install --frozen-lockfile
-	deno task build:dev
+	TANSU_WEB_HMR=1 deno task build:dev
 	$(MAKE) types-generated
 	node scripts/dev-fixture.mjs "$(DEV_DIR)"
-	TANSU_LOGS=pretty XDG_CONFIG_HOME="$(DEV_CONFIG_HOME)" XDG_DATA_HOME="$(DEV_DATA_HOME)" cargo run --bin $(NAME) -- --port 3000
+	@deno run --allow-read --allow-write --allow-run --allow-env scripts/dev-hmr.mjs & \
+	watcher=$$!; \
+	trap 'kill -TERM "$$watcher" 2>/dev/null; wait "$$watcher" 2>/dev/null' EXIT INT TERM; \
+	TANSU_WEB_HMR=1 TANSU_LOGS=pretty XDG_CONFIG_HOME="$(DEV_CONFIG_HOME)" XDG_DATA_HOME="$(DEV_DATA_HOME)" cargo run --bin $(NAME) -- --port 3000
 
 dev-config:
 	pnpm install --frozen-lockfile

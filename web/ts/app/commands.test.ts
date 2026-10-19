@@ -21,7 +21,6 @@ describe("native command palette definitions", () => {
       ["reopen", "Reopen Last Closed Note", "⌘⇧T"],
       ["reading", "Reading mode", undefined],
       ["focus", "Focus mode", "⌘⇧Enter / Ctrl+Shift+Enter"],
-      ["tag", "Add Tag", undefined],
       ["revisions", "Revisions", undefined],
       ["restore", "Restore Version", undefined],
       ["settings", "Settings", undefined],
@@ -60,7 +59,7 @@ describe("omnibox modes", () => {
   it("parses prefixes into modes and round-trips them", () => {
     expect(parsePaletteQuery("hello")).toStrictEqual({ mode: "notes", text: "hello" });
     expect(parsePaletteQuery("> save")).toStrictEqual({ mode: "actions", text: "save" });
-    expect(parsePaletteQuery("#work")).toStrictEqual({ mode: "tags", text: "work" });
+    expect(parsePaletteQuery("#work")).toStrictEqual({ mode: "notes", text: "#work" });
     expect(paletteRawQuery("actions", "save")).toBe(">save");
     expect(paletteRawQuery("notes", "a>b")).toBe("a>b");
   });
@@ -80,16 +79,6 @@ describe("omnibox modes", () => {
     const entries = paletteEntries(state, commandItems(state));
     expect(entries.slice(0, 2).map((entry) => entry.kind === "note" && entry.note.noteId)).toStrictEqual(["a", "b"]);
     expect(entries[2]?.kind).toBe("command");
-  });
-
-  it("filters notes by tag in tag mode", () => {
-    const state = createState(vaultId("vault-a"));
-    state.notes.set("a", noteMeta("a", "Alpha", ["work"], 1));
-    state.notes.set("b", noteMeta("b", "Beta", ["home"], 2));
-    state.notes.set("c", noteMeta("c", "Gamma", [], 3));
-    state.commandFilter = "#wo";
-    const entries = paletteEntries(state, commandItems(state));
-    expect(entries.map((entry) => entry.kind === "note" && entry.note.noteId)).toStrictEqual(["a"]);
   });
 
   it("matches note titles locally until search hits arrive", () => {

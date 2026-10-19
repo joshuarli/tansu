@@ -12,12 +12,20 @@ make it dirty; selection and mode changes do not. The app marks a session saved
 only when the saved revision is still current. Clean reloads replace the state
 and clear its undo history; dirty sessions are not replaced.
 
-Source mode shows the full document in the same editor. Live mode folds
-frontmatter by default and renders Markdown decorations without changing source.
-The frontmatter control reveals the source for editing. Tag controls update only
-the top-level `tags` field, preserve other frontmatter, and lock when that
-frontmatter is malformed or uses unsupported tag syntax. Tansu reads tags only
-from frontmatter.
+Source mode shows Markdown source in the same editor. Live mode renders Markdown
+decorations without changing source. Frontmatter stays folded and cannot be
+created or edited through the editor in either mode. The UI does not display
+frontmatter-derived tags. Tansu preserves frontmatter in the Markdown source and
+continues to read tags from it.
+
+Click the note title to edit its name in place. Leaving the field attempts the
+rename; failures show a notification and restore the prior name. Successful
+renames update the tab and briefly flash the title green.
+For a new note, Enter submits the title and creates the note.
+
+Clicking rendered Markdown link text opens the destination in a new tab without
+moving the editor cursor into the link. Shift-click selects the visible link
+label without opening it or selecting the destination URL.
 
 Read-only sessions reject every document-changing transaction, including
 extension-dispatched changes, while allowing selection changes. Editor controls

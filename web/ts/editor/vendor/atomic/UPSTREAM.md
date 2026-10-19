@@ -13,8 +13,10 @@ uses `markdown({ codeLanguages: [] })`.
 
 Local patches: `image-blocks.ts` resolves standard Markdown image URLs through
 the configured vault asset resolver. `inline-preview.ts` checks the read-only
-facet before a task checkbox can dispatch a source edit and maps existing
-whole-document decorations across syntax-safe edits in plain paragraphs and caches the paragraph-gap line scan per document and syntax tree.
+facet before a task checkbox can dispatch a source edit, excludes frontmatter
+from live-preview decorations, maps existing whole-document decorations across
+syntax-safe edits in plain paragraphs, and caches the paragraph-gap line scan
+per document and syntax tree.
 `table-widget.ts` resolves the edited cell's current source span and replaces
 only that span. `wiki-links.ts` skips `[[...]]` inside `![[...]]` image syntax.
 The included source files also use explicit type assertions and overrides

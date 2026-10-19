@@ -208,13 +208,12 @@
   text-decoration: underline;
   text-decoration-thickness: 1px;
   text-underline-offset: 0.15em;
-  /* No pointer cursor on the link text — the text is editable like
-   * any other content. The pointer cursor is scoped to the trailing
-   * icon below, which is the actual open-in-new-tab affordance. */
+  transition: filter 120ms ease-out;
 }
 
 .cm-atomic-link:hover {
-  color: var(--atomic-editor-link-hover, #a5b4fc);
+  filter: brightness(0.72);
+  cursor: pointer;
 }
 
 /* External-link icon. In prose it's a `::after` pseudo-element; inside
@@ -258,7 +257,6 @@
   content: none;
 }
 
-.cm-atomic-link:hover::after,
 .cm-atomic-link-icon:hover {
   background-color: color-mix(in srgb, var(--atomic-editor-link-hover, #a5b4fc) 84%, white 16%);
   opacity: 1;
@@ -318,6 +316,7 @@
  * reading-width column). Smaller images render at their own size,
  * left-aligned. Aspect ratio preserved by `height: auto`. */
 .cm-atomic-image {
+  max-width: 100%;
   padding: 0.35em 0;
 }
 
