@@ -1447,29 +1447,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "tansu-search"
-version = "0.1.0"
-dependencies = [
- "nucleo-matcher",
- "regex",
- "tantivy",
- "tempfile",
- "thiserror",
- "unicode-normalization",
-]
-
-[[package]]
-name = "tansu-webauthn"
-version = "0.1.0"
-dependencies = [
- "base64ct",
- "ciborium",
- "graviola",
- "serde",
- "serde_json",
-]
-
-[[package]]
 name = "tansu"
 version = "0.1.0"
 dependencies = [
@@ -1503,6 +1480,29 @@ dependencies = [
  "tantivy",
  "tempfile",
  "ts-rs",
+]
+
+[[package]]
+name = "tansu-search"
+version = "0.1.0"
+dependencies = [
+ "nucleo-matcher",
+ "regex",
+ "tantivy",
+ "tempfile",
+ "thiserror",
+ "unicode-normalization",
+]
+
+[[package]]
+name = "tansu-webauthn"
+version = "0.1.0"
+dependencies = [
+ "base64ct",
+ "ciborium",
+ "graviola",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

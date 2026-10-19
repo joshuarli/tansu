@@ -1,27 +1,25 @@
-import type { EditorState } from "@codemirror/state";
+import type { EditorState, Text } from "@codemirror/state";
 
-export type FrontmatterRange = {
-  from: number;
-  to: number;
-  foldTo: number;
-  closingLine: number;
-};
+export type FrontmatterRange =
+  | { from: number; to: number; foldTo: number; kind: "closed" }
+  | { from: number; to: number; foldTo: number; kind: "unterminated" };
 
-export function frontmatterRange(state: EditorState): FrontmatterRange | null {
-  const firstLine = state.doc.line(1);
+export function frontmatterRange(source: EditorState | Text): FrontmatterRange | null {
+  const doc = "doc" in source ? source.doc : source;
+  const firstLine = doc.line(1);
   if (firstLine.text !== "---" && firstLine.text !== "\uFEFF---") return null;
 
-  let closingLine = 0;
-  for (let number = 2; number <= state.doc.lines; number++) {
-    if (state.doc.line(number).text === "---") {
+  let closingLine: number | null = null;
+  for (let number = 2; number <= doc.lines; number++) {
+    if (doc.line(number).text === "---") {
       closingLine = number;
       break;
     }
   }
-  if (closingLine === 0) return null;
-
-  const foldTo = state.doc.line(closingLine).to;
+  const foldTo = closingLine === null ? doc.length : doc.line(closingLine).to;
   let to = foldTo;
-  while (to < state.doc.length && state.doc.sliceString(to, to + 1) === "\n") to++;
-  return { from: firstLine.from, to, foldTo, closingLine };
+  while (to < doc.length && doc.sliceString(to, to + 1) === "\n") to++;
+  return closingLine === null
+    ? { from: firstLine.from, to, foldTo, kind: "unterminated" }
+    : { from: firstLine.from, to, foldTo, kind: "closed" };
 }

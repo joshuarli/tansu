@@ -7,7 +7,7 @@ import { dirtySnapshot, DocumentControllers } from "./app/document-controller.ts
 import { JournalHandle } from "./app/journal-handle.ts";
 import { LocalDraftSession } from "./app/local-draft-session.ts";
 import { defaultServices, type AppServices } from "./app/services.ts";
-import { localDraftId, noteId, serverInstanceId, vaultId, type DocumentIdentity, type LocalDraftId, type ServerIdentity, type WorkspaceId } from "./app/identity.ts";
+import { localDraftId, noteId, serverInstanceId, vaultId, type DocumentIdentity, type LocalDraftId, type NoteId, type ServerIdentity, type WorkspaceId } from "./app/identity.ts";
 import { sameTabIdentity, toTabKey, type TabIdentity } from "./app/tab-identity.ts";
 import { logClientEvent } from "./dev-log.ts";
 import { V2ApiError } from "./app/v2-api.ts";
@@ -17,10 +17,8 @@ import { createNoteLinksLoader, createNotePreviewCache, type NoteLinksOutcome } 
 import { linksRailNoteId } from "./links-rail.ts";
 import type { EditorHandle, EditorSession, EditorSnapshot } from "./editor/codemirror-adapter.ts";
 import { createCalloutExtension, createWikiImageExtension, createWikiLinkExtension, type EditorConfig } from "./editor/tansu-extensions.ts";
-import { canMutateTags } from "./editor/tag-source.ts";
 import { convertImageToWebp } from "./editor/image-webp.ts";
 import { resolveWikiTarget } from "./editor/wiki-target.ts";
-import { normalizeTag } from "./markdown-tags.ts";
 import { canonicalSourceHash } from "./source-hash.ts";
 import {
   activeTab,
@@ -41,7 +39,7 @@ import {
   type State,
   type Tab,
 } from "./state.ts";
-import { disposeAppView, renderApp, renderAuthGate, renderLoading, renderNoVaultConfigured, updateAppView, updateStatusBar, type ViewActions } from "./view.ts";
+import { disposeAppView, renderApp, renderAuthGate, renderLoading, renderNoVaultConfigured, syncNoteOutlineFade, updateAppView, updateStatusBar, type ViewActions } from "./view.ts";
 import type { V2BootstrapResponse, V2MutationResponse, V2NoteDocument, V2NoteMeta, V2SearchHit, V2SearchOverlay, V2ServerEvent } from "./types.generated.ts";
 import type { DraftJournalRecord, WorkspaceState } from "./app/workspace-store.ts";
 import type { OutlineHeading } from "./editor/source-navigation.js";
@@ -107,15 +105,11 @@ export class TansuApp {
   private activeOutlineHeadingFrom: number | null = null;
   private attachedEditor: { tab: Tab; session: EditorSession } | null = null;
   private readonly editorMount = document.createElement("div");
-  private readonly addEditorTag = (): void => this.dispatch({ type: "note.addTag" });
-  private readonly removeEditorTag = (tag: string): void => {
-    const tab = activeTab(this.state);
-    if (tab?.kind !== "saved" || tab.doc === null) return;
-    this.dispatch({ type: "tags.update", tags: tab.doc.meta.tags.filter((item) => item !== tag) });
-  };
   private readonly documents = new DocumentControllers();
   private editorCaptureTimer: number | undefined;
   private readonly inFlightActions = new Set<Promise<unknown>>();
+  private readonly pendingRenames = new Set<NoteId>();
+  private readonly onNoteTitleCommit = (request: { title: string; intent: "rename" | "submit" }): Promise<boolean> => this.commitActiveNoteTitle(request);
   private readonly assetScope = new Map<string, string>();
   private assetScopeRevision = 0;
   private readonly globalEventCleanups: Array<() => void> = [];
@@ -351,6 +345,7 @@ export class TansuApp {
       const shortcut = keyboardShortcutFor(event);
       if (shortcut === undefined) return;
       event.preventDefault();
+      event.stopPropagation();
       if (shortcut.action === "command.open") {
         this.dispatch({ type: "command.open" });
       } else if (shortcut.action === "help.open") {
@@ -400,7 +395,7 @@ export class TansuApp {
       if (this.editor?.scrollByWheel(event)) event.preventDefault();
     };
     window.addEventListener("beforeunload", onBeforeUnload);
-    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keydown", onKeyDown, true);
     window.addEventListener("click", onClick);
     this.root.addEventListener("wheel", onWheel, { passive: false });
     this.editorMount.addEventListener("click", onWikiLinkClick, true);
@@ -422,7 +417,7 @@ export class TansuApp {
     this.globalEventCleanups.push(
       () => extensionImport.dispose(),
       () => window.removeEventListener("beforeunload", onBeforeUnload),
-      () => window.removeEventListener("keydown", onKeyDown),
+      () => window.removeEventListener("keydown", onKeyDown, true),
       () => window.removeEventListener("click", onClick),
       () => this.root.removeEventListener("wheel", onWheel),
       () => this.editorMount.removeEventListener("click", onWikiLinkClick, true),
@@ -536,7 +531,9 @@ export class TansuApp {
     const result = tab.session.reconcile(document);
     tab.doc = document;
     const sessionState = tab.session.state;
-    if ("titleDraft" in sessionState && sessionState.titleDraft !== null) tab.title = sessionState.titleDraft;
+    if (!this.pendingRenames.has(tab.noteId) && "titleDraft" in sessionState && sessionState.titleDraft !== null) {
+      tab.title = sessionState.titleDraft;
+    }
     tab.path = document.meta.path;
     if (result === "reloaded" && this.activeEditorKey === tab.key && tab.editorSession !== null) {
       this.editor?.reloadIfClean(tab.editorSession, document.content);
@@ -610,9 +607,13 @@ export class TansuApp {
       placeholder.replaceWith(this.editorMount);
     }
     updateAppView(this.root, view);
+    syncNoteOutlineFade(this.root);
     if (this.state.boot !== null && !this.state.authRequired) {
       this.ensureEditor();
-      this.attachActiveEditor();
+      if (this.attachActiveEditor()) {
+        this.render();
+        return;
+      }
       this.scheduleWorkspaceSave();
     }
   }
@@ -638,7 +639,6 @@ export class TansuApp {
     const client = this.vaultClient;
     const cached = this.cachedEditorConfig;
     const sameVault = cached !== null && cached.generation === generation && cached.identity === serverIdentity && cached.client === client;
-    const noteTags = this.editorNoteTags();
     if (sameVault && cached !== null && cached.assetScopeRevision === this.assetScopeRevision) {
       return this.editorConfigForActiveNote(cached.config);
     }
@@ -657,7 +657,7 @@ export class TansuApp {
       extensions,
       ...this.editorSettings(),
       noteTitle: activeTab(this.state)?.title ?? "",
-      ...(noteTags === undefined ? {} : { noteTags }),
+      onNoteTitleCommit: this.onNoteTitleCommit,
       currentNotePath: () => activeTab(this.state)?.path ?? "",
       wikiNotes: () => this.wikiNotes(),
       onWikiNoteOpen: (id) => {
@@ -734,43 +734,24 @@ export class TansuApp {
   }
 
   private editorConfigForActiveNote(config: EditorConfig): EditorConfig {
-    const { noteTags: _cachedNoteTags, ...baseConfig } = config;
-    const noteTags = this.editorNoteTags();
     return {
-      ...baseConfig,
+      ...config,
       ...this.editorSettings(),
       noteTitle: activeTab(this.state)?.title ?? "",
-      ...(noteTags === undefined ? {} : { noteTags }),
+      onNoteTitleCommit: this.onNoteTitleCommit,
     };
   }
 
-  private editorNoteTags(): NonNullable<EditorConfig["noteTags"]> | undefined {
-    const tab = activeTab(this.state);
-    if (tab?.kind !== "saved" || tab.doc === null) return undefined;
-    const content = tab.draft ?? tab.doc.content;
-    const status = !canMutateTags(content)
-      ? "locked"
-      : this.state.readingMode || this.transitioningVault
-      ? "read-only"
-      : "editable";
-    return {
-      tags: tab.doc.meta.tags,
-      status,
-      onAddTag: this.addEditorTag,
-      onRemoveTag: this.removeEditorTag,
-    };
-  }
-
-  private attachActiveEditor(): void {
+  private attachActiveEditor(): boolean {
     const tab = activeTab(this.state);
     if (tab === undefined || loadedDraft(tab) === null) {
       if (this.editor !== null && this.attachedEditor !== null) this.editor.detachSession();
       this.activeEditorKey = null;
       this.attachedEditor = null;
       this.setEditorMountVisible(false);
-      return;
+      return false;
     }
-    if (this.editor === null) return;
+    if (this.editor === null) return false;
     const currentKey = tab.key;
     const attached = this.attachedEditor;
     if (attached?.tab !== tab || attached.session !== tab.editorSession) {
@@ -790,10 +771,13 @@ export class TansuApp {
       if (tab.selection !== null) this.editor.revealSelection(tab.selection);
       this.editor.updateConfiguration({ ...this.editorConfig(), mode: tab.sourceMode ? "source" : "live", readOnly: this.transitioningVault || this.state.readingMode || (tab.kind === "local-draft" && tab.session?.state.promotionPending === true) });
       void this.prefetchAssets(tab, loadedDraft(tab) ?? "");
+      this.setEditorMountVisible(true);
+      return true;
     } else {
       this.editor.updateConfiguration({ ...this.editorConfig(), mode: tab.sourceMode ? "source" : "live", readOnly: this.transitioningVault || this.state.readingMode || (tab.kind === "local-draft" && tab.session?.state.promotionPending === true) });
     }
     this.setEditorMountVisible(true);
+    return false;
   }
 
   private setEditorMountVisible(visible: boolean): void {
@@ -983,7 +967,7 @@ export class TansuApp {
     tab.dirty = snapshot.dirty;
     tab.saving = snapshot.saving;
     tab.conflict = snapshot.conflict;
-    if (snapshot.title !== undefined) tab.title = snapshot.title;
+    if (snapshot.title !== undefined && !this.pendingRenames.has(tab.noteId)) tab.title = snapshot.title;
     if (snapshot.path !== undefined) tab.path = snapshot.path;
     if (value.status === "auth-locked") {
       this.runAsync(this.lockForAuthentication(), "Local recovery storage failed", false);
@@ -1369,6 +1353,7 @@ export class TansuApp {
     await this.loadLocalDraft(tab);
     if (this.disposed || !this.state.tabs.includes(tab)) return;
     this.render();
+    this.editorMount.querySelector<HTMLElement>(".note-header .document-title")?.focus();
   }
 
   private scheduleDraftPromotion(tab: Extract<Tab, { kind: "local-draft" }>): void {
@@ -1467,6 +1452,8 @@ export class TansuApp {
     this.cacheDocument(document);
     this.state.noteDialog = null;
     this.render();
+    const active = activeTab(this.state);
+    if (active?.kind === "saved" && active.noteId === document.meta.noteId) this.flashRenamedTitle();
     return document.meta;
   }
 
@@ -1488,42 +1475,134 @@ export class TansuApp {
     return session;
   }
 
-  private async submitNoteDialog(value?: string): Promise<void> {
+  private async submitNoteDialog(): Promise<void> {
     const dialog = this.state.noteDialog;
     if (dialog === null) return;
-    if (dialog.kind === "rename") {
-      const tab = tabById(this.state, dialog.noteId);
-      const title = (value ?? dialog.title).trim();
-      if (tab?.session === null || tab === undefined || title === "") return;
-      const session = tab.session;
+    if (dialog.kind === "delete") await this.deleteNote(dialog.noteId);
+  }
+
+  private async commitActiveNoteTitle(request: { title: string; intent: "rename" | "submit" }): Promise<boolean> {
+    const tab = activeTab(this.state);
+    const title = request.title.trim();
+    const submit = request.intent === "submit";
+    if (tab?.kind === "local-draft") {
+      if (tab.session === null || tab.session.state.promotionPending) {
+        this.notify("Rename failed: note is not ready");
+        return false;
+      }
+      if (submit && title === "") {
+        this.notify("Create failed: note name cannot be empty");
+        return false;
+      }
+      tab.session.editTitle(title);
+      if (submit) {
+        try {
+          const created = await this.promoteLocalDraft(tab, title, uniqueNotePath(title, this.state.notes.values()));
+          if (created === null) return false;
+        } catch (error) {
+          this.notify(`Create failed: ${errorSummary(error)}`);
+          return false;
+        }
+      }
+      return true;
+    }
+    const identity = this.identity;
+    const client = this.vaultClient;
+    if (tab?.kind !== "saved" || tab.session === null || identity === null || client === null) {
+      this.notify("Rename failed: note is not ready");
+      return false;
+    }
+    if (title === "") {
+      this.notify("Rename failed: note name cannot be empty");
+      return false;
+    }
+    if (title === tab.title) return true;
+
+    const session = tab.session;
+    const before = session.state;
+    if (!("base" in before)) {
+      this.notify("Rename failed: note is not ready");
+      return false;
+    }
+
+    this.pendingRenames.add(tab.noteId);
+    let accepted: V2NoteMeta | null = null;
+    try {
       session.editTitle(title);
-      const status = session.state;
-      if (!("base" in status) || status.titleMutationId === null) return;
+      const pending = session.state;
+      if (!("base" in pending) || pending.titleMutationId === null) {
+        this.pendingRenames.delete(tab.noteId);
+        return true;
+      }
       const path = renamedPath(tab.path, title, this.state.notes.values(), tab.noteId);
-      const response = await this.vaultClient!.renameNote(tab.noteId, {
-        mutationId: status.titleMutationId,
-        precondition: { baseRevision: status.base.revision, baseSourceHash: status.base.sourceHash, baseDiskHash: status.base.diskHash },
+      const response = await client.renameNote(tab.noteId, {
+        mutationId: pending.titleMutationId,
+        precondition: {
+          baseRevision: pending.base.revision,
+          baseSourceHash: pending.base.sourceHash,
+          baseDiskHash: pending.base.diskHash,
+        },
         path,
       });
-      if (response.outcome.state !== "accepted" || response.outcome.result === null) throw new Error("Rename was not accepted");
-      await session.acceptRename(response.outcome.result, status.titleRevision, status.titleMutationId);
+      if (!this.isCurrentTab(tab, identity, client)) {
+        this.pendingRenames.delete(tab.noteId);
+        return false;
+      }
+      if (response.outcome.state !== "accepted" || response.outcome.result === null) {
+        throw new Error("Rename was not accepted");
+      }
+      accepted = response.outcome.result;
       tab.title = title;
-      tab.path = response.outcome.result.path;
-      tab.doc = { ...tab.doc!, meta: response.outcome.result };
-      this.state.notes.set(tab.noteId, response.outcome.result);
-      this.state.noteDialog = null;
+      tab.path = accepted.path;
+      if (tab.doc !== null) tab.doc = { ...tab.doc, meta: accepted };
+      this.state.notes.set(tab.noteId, accepted);
+      this.pendingRenames.delete(tab.noteId);
+      await session.acceptRename(accepted, pending.titleRevision, pending.titleMutationId);
+      tab.title = title;
+      tab.path = accepted.path;
       this.persistWorkspace();
       this.scheduleNoteLinksRefresh();
       this.render();
-    } else if (dialog.kind === "tag") {
-      const tab = activeTab(this.state);
-      const tag = normalizeTag(value ?? dialog.value);
-      if (tab?.kind === "saved" && tag !== null) this.editor?.updateTags([...new Set([...(tab.doc?.meta.tags ?? []), tag])]);
-      this.state.noteDialog = null;
+      this.flashRenamedTitle();
+      return true;
+    } catch (error) {
+      this.pendingRenames.delete(tab.noteId);
+      if (accepted === null) {
+        try {
+          if (tab.session === session) session.editTitle(null);
+        } catch (cleanupError) {
+          logClientEvent("error", "client.error", { error: errorSummary(cleanupError), message: "Could not restore the previous note name" });
+        }
+        this.render();
+        this.notify(`Rename failed: ${errorSummary(error)}`);
+        return false;
+      }
+      tab.title = title;
+      tab.path = accepted.path;
+      if (tab.doc !== null) tab.doc = { ...tab.doc, meta: accepted };
+      this.state.notes.set(tab.noteId, accepted);
+      this.persistWorkspace();
+      this.scheduleNoteLinksRefresh();
       this.render();
-    } else {
-      await this.deleteNote(dialog.noteId);
+      this.flashRenamedTitle();
+      this.notify(`Rename succeeded, but local recovery cleanup failed: ${errorSummary(error)}`);
+      return true;
+    } finally {
+      this.pendingRenames.delete(tab.noteId);
     }
+  }
+
+  private flashRenamedTitle(): void {
+    const title = this.editorMount.querySelector<HTMLElement>(".document-title");
+    if (title === null) return;
+    const successColor = getComputedStyle(document.documentElement).getPropertyValue("--color-success").trim();
+    const originalColor = getComputedStyle(title).color;
+    title.animate([
+      { color: originalColor, offset: 0 },
+      { color: successColor, offset: 0.28 },
+      { color: successColor, offset: 0.62 },
+      { color: originalColor, offset: 1 },
+    ], { duration: 850, easing: "ease-out" });
   }
 
   private async deleteNote(id: ReturnType<typeof toNoteId>): Promise<void> {
@@ -1543,13 +1622,6 @@ export class TansuApp {
     this.render();
     await this.services.workspace.deleteCachedNoteBodies({ ...this.identity!, noteId: id });
     await this.closeTab({ kind: "saved", noteId: id }, "deleted");
-  }
-
-  private async renameDialog(id: ReturnType<typeof toNoteId>): Promise<void> {
-    const tab = tabById(this.state, id);
-    if (tab === undefined) return;
-    this.state.noteDialog = { kind: "rename", noteId: id, title: tab.title };
-    this.render();
   }
 
   private async togglePin(id: ReturnType<typeof toNoteId>): Promise<void> {
@@ -1852,16 +1924,8 @@ export class TansuApp {
         this.executeCommand(event.id);
         return;
       }
-      case "dialog.input": {
-        const dialog = this.state.noteDialog;
-        if (dialog?.kind === "rename") {
-          dialog.title = event.value;
-          tabById(this.state, dialog.noteId)?.session?.editTitle(event.value);
-        } else if (dialog?.kind === "tag") dialog.value = event.value;
-        return;
-      }
       case "dialog.submit": {
-        this.runAsync(this.submitNoteDialog(event.value), "Action failed");
+        this.runAsync(this.submitNoteDialog(), "Action failed");
         return;
       }
       case "settings.submit": {
@@ -1902,12 +1966,6 @@ export class TansuApp {
         this.runAsync(this.openLocalDraft(event.localDraftId), "Open failed");
         return;
       }
-      case "note.rename": {
-        const current = activeTab(this.state);
-        const id = event.noteId ?? (current?.kind === "saved" ? current.noteId : undefined);
-        if (id !== undefined) this.runAsync(this.renameDialog(id), "Rename failed");
-        return;
-      }
       case "note.delete": {
         const current = activeTab(this.state);
         const id = event.noteId ?? (current?.kind === "saved" ? current.noteId : undefined);
@@ -1918,15 +1976,6 @@ export class TansuApp {
         const current = activeTab(this.state);
         const id = event.noteId ?? (current?.kind === "saved" ? current.noteId : undefined);
         if (id !== undefined) this.runAsync(this.togglePin(id), "Pin failed");
-        return;
-      }
-      case "note.addTag": {
-        this.state.noteDialog = { kind: "tag", value: "" };
-        this.render();
-        return;
-      }
-      case "tags.update": {
-        this.editor?.updateTags(event.tags);
         return;
       }
       case "reading.toggle": {
@@ -2011,7 +2060,7 @@ export class TansuApp {
       }
       case "rename": {
         const tab = activeTab(this.state);
-        if (tab?.kind === "saved") this.runAsync(this.renameDialog(tab.noteId), "Rename failed");
+        if (tab?.kind === "saved") this.editorMount.querySelector<HTMLElement>(".document-title")?.click();
         break;
       }
       case "close": {
@@ -2053,10 +2102,6 @@ export class TansuApp {
       case "revisions":
       case "restore": {
         this.runAsync(this.commandRevisions(), "Revisions failed");
-        break;
-      }
-      case "tag": {
-        if (activeTab(this.state)?.kind === "saved") this.dispatch({ type: "note.addTag" });
         break;
       }
       case "settings": {
@@ -2300,8 +2345,6 @@ export class TansuApp {
   }
 
   private async closeOverlays(): Promise<void> {
-    const dialog = this.state.noteDialog;
-    if (dialog?.kind === "rename") tabById(this.state, dialog.noteId)?.session?.editTitle(null);
     this.clearFindHighlights();
     this.state.commandOpen = false;
     this.state.searchOpen = false;
@@ -2314,7 +2357,6 @@ export class TansuApp {
     this.state.contextMenu = null;
     this.render();
     this.restoreOverlayReturn();
-    if (dialog?.kind === "rename") await this.journal.flushAll();
   }
 
   private hasOverlay(): boolean {

@@ -36,7 +36,11 @@ Let’s dig deeper into Anthropic’s Crown jewel: Claude Code.
 
 ## Claude Code and the Agentic Future
 
+### Agents as the New Interface
+
 Agents will be the primary method of how organic intelligence (humans) interact with artificial intelligence (AI). But Claude Code also is also a demonstration of the reverse: showing how agents interact with humans.
+
+### From Token Calls to Orchestration
 
 We believe the future of AI will be about the orchestration of tokens, not just selling tokens at base cost. With history as a guide, we view the OpenAI ChatGPT API as the call and response of tokens, akin to Web 1.0 with TCP/IP connecting users to static websites hosted on the Internet. While TCP/IP is a foundational technology, this communication protocol became just the means to the end of enabling the Internet during Web 2.0, and the shift to dynamic web pages. Today, the internet uses TCP/IP packets to organize much larger sets of information than a static website. The protocol matters, but it was the applications built on top of this protocol that created trillions in value.
 
@@ -51,6 +55,8 @@ Each moment expanded what AI could do. GPT-3 proved scale worked. Stable diffusi
 ## What is Claude Code?
 
 Claude Code is a terminal-native AI agent that is not focused on IDE or a chatbot sidebar like Cursor. Claude Code is a CLI (command line interface) tool that reads your codebase, plans multi-step tasks, and then executes these tasks. It might be incorrect to think of Claude Code only as focused on Code, but rather as Claude Computer. With full access to your computer,[^permissions] Claude can understand its environment, make a plan, and iteratively complete this plan, the whole-time taking direction from the user.
+
+### From Coding Agent to Computer Agent
 
 Claude Code does more than just code and is the best example of an AI Agent. You can interact with a computer with natural language to describe objectives and outcomes rather than implementation details. Provide Claude (the CLI) an input such as a spreadsheet, a codebase, a link to a webpage and then ask it to achieve an objective. It then makes a plan, verifies details, and then executes it.
 
@@ -105,6 +111,8 @@ Opus 4.5 is the engine that makes this all possible, and what is important in li
 
 Coding was once the most valuable work of all, with programmers in hot demand during the 2020 era of software engineering. Coding is now a beachhead in terms of the disruption that agentic information processing has, and the larger 15 trillion-dollar information work economy is now at risk. There are 1b+ information workers, or roughly 1/3 <sup>rd</sup> of the global 3.6 billion workforce per ILO.
 
+### Information Work Follows a Repeatable Loop
+
 Every single workflow in the information work category is often similar and shares a workflow that Claude Code proves works for software. READ (ingest unstructured information), THINK (apply domain knowledge), WRITE (produce structured output) and then VERIFY (check against standards). This is large swathes of most information workers (including research!) and if Agents can eat software, what labor pool can they not touch?
 
 Our view is quite a few, and with the rise of Claude Code (and Cowork) the total addressable market of agents is much larger than just LLMs. Niche markets like customer support and software development will start to address the larger financial services, legal, consulting, and other industries. This is the core focus of the [SemiAnalysis Tokenomics Model](https://semianalysis.com/tokenomics-model/).
@@ -124,6 +132,8 @@ What really makes larger parts of the pie available for disruption is longer tas
 Source: METR, SemiAnalysis Tokenomics Team
 
 Each doubling unlocks more of the total pie. At 30 minutes you can auto-complete code snippets, at 4.8 hours you can refactor a module. Multi-day tasks you can automate an entire audit. And it’s clear Anthropic sees this too.
+
+### Cowork Extends the Pattern Beyond Code
 
 On January 12, 2026, Anthropic launched Cowork—”Claude Code for general computing.” Four engineers built it in 10 days. Most of the code was written by Claude Code itself.[^cowork] Same architecture: Claude Agent SDK, MCP, sub-agents. It creates spreadsheets from receipts, organizes files by content, and drafts reports from scattered notes. It’s Claude Code minus the terminal, plus a desktop.
 

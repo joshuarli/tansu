@@ -753,28 +753,14 @@ function makeCell(
   // link-open handlers below.
   if (!readOnly) attachCellEditing(view, cell, source);
 
-  // Link open. The external-link icon is rendered as a real
-  // `.cm-atomic-link-icon` element (see `renderCellToken`), not a CSS
-  // `::after` pseudo — a pseudo-element has no event target, so clicking
-  // its painted region dispatched no pointer event and the link never
-  // opened. We open on `click` (a proper popup-activation gesture, so
-  // `window.open` isn't blocked) and block the caret on `pointerdown`.
-  //
-  // In read-only mode there's no editable link text to protect, so the
-  // whole link (`.cm-atomic-link-wrap`) is the open target — matching
-  // the outer editor. In edit mode the open stays scoped to the
-  // trailing icon so the text itself remains clickable-to-edit.
   const openTargetFromEvent = (event: Event): HTMLElement | null => {
     const target = event.target;
     if (!(target instanceof Element)) return null;
-    const selector = readOnly ? '.cm-atomic-link-wrap' : '.cm-atomic-link-icon';
-    return target.closest<HTMLElement>(selector);
+    return target.closest<HTMLElement>('.cm-atomic-link-wrap');
   };
 
   source.addEventListener('pointerdown', (event) => {
     if (event.button !== 0) return;
-    // Block focus / caret placement when pressing the open target; the
-    // open happens on the following `click`.
     if (openTargetFromEvent(event)) event.preventDefault();
   });
 
@@ -1372,8 +1358,8 @@ const tableField = StateField.define<DecorationSet>({
 
 export interface TablesConfig {
   /**
-   * Called when the user clicks the external-link icon on a link
-   * rendered inside a table cell. Defaults to `window.open(url,
+   * Called when the user clicks a rendered link inside a table cell.
+   * Defaults to `window.open(url,
    * '_blank', 'noopener,noreferrer')`.
    */
   onLinkClick?: (url: string) => void;

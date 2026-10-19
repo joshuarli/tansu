@@ -3,6 +3,7 @@ use std::convert::Infallible;
 use std::future::{pending, Future};
 use std::io;
 use std::net::TcpListener;
+use std::path::{Component, Path, PathBuf};
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
@@ -54,6 +55,21 @@ const API_BUILD_ID: &str = concat!(env!("CARGO_PKG_NAME"), "-", env!("CARGO_PKG_
 type HttpBody = UnsyncBoxBody<Bytes, Infallible>;
 type ConnectionError = Box<dyn std::error::Error + Send + Sync>;
 type ConnectionTaskResult = std::result::Result<Option<ConnectionError>, Box<dyn Any + Send>>;
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DevAssetManifest {
+    files: Vec<DevAsset>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DevAsset {
+    url: String,
+    file: String,
+    content_type: String,
+    immutable: bool,
+}
 
 #[derive(Debug, Clone)]
 pub struct HttpRequest {
@@ -683,7 +699,10 @@ async fn handle_request_inner(request: Request<Incoming>, state: ServerState) ->
 
     let is_api = path.starts_with("/api/");
     if !is_api {
-        return serve_static_response(&parts.uri.to_string()).into_hyper();
+        if parts.uri.path() == "/__dev/hmr" {
+            return serve_dev_hmr_response().into_hyper();
+        }
+        return serve_static_response(parts.uri.path()).into_hyper();
     }
 
     let Some(worker_slot) = state.blocking_requests.try_acquire_arc() else {
@@ -1395,6 +1414,9 @@ fn sse_resync_event(event_version: u64) -> Bytes {
 }
 
 fn route(app: &App, request: &HttpRequest) -> HttpResponse {
+    if request.path == "/__dev/hmr" {
+        return serve_dev_hmr_response();
+    }
     if request.path == "/api/v2/app/settings" {
         return handle_app_settings(app, request).with_no_store();
     }
@@ -1473,6 +1495,9 @@ fn serve_static_response(path: &str) -> HttpResponse {
 }
 
 fn serve_static_path(path: &str) -> Result<HttpResponse> {
+    if dev_hmr_enabled() {
+        return serve_dev_static_path(path);
+    }
     let asset = embedded_assets::get(path).ok_or_else(|| Error::NotFound(path.to_string()))?;
     let cache_control = if asset.immutable {
         "public, max-age=31536000, immutable"
@@ -1481,6 +1506,55 @@ fn serve_static_path(path: &str) -> Result<HttpResponse> {
     };
     Ok(HttpResponse::bytes(200, asset.content_type, asset.body.to_vec())
         .with_header("Cache-Control", cache_control))
+}
+
+fn dev_hmr_enabled() -> bool {
+    cfg!(debug_assertions) && std::env::var_os("TANSU_WEB_HMR").is_some_and(|value| value == "1")
+}
+
+fn serve_dev_hmr_response() -> HttpResponse {
+    if !dev_hmr_enabled() {
+        return HttpResponse::text(404, "not found");
+    }
+    let manifest_path = dev_dist_path().join("manifest.json");
+    let id = match std::fs::metadata(&manifest_path)
+        .and_then(|metadata| metadata.modified())
+        .and_then(|modified| modified.duration_since(UNIX_EPOCH).map_err(std::io::Error::other))
+    {
+        Ok(modified) => modified.as_nanos().to_string(),
+        Err(error) => return HttpResponse::text(503, &format!("development assets unavailable: {error}")),
+    };
+    HttpResponse::json(200, &serde_json::json!({ "id": id }))
+        .unwrap_or_else(|error| HttpResponse::text(500, &format!("HMR response serialization failed: {error}")))
+}
+
+fn serve_dev_static_path(path: &str) -> Result<HttpResponse> {
+    let root = dev_dist_path();
+    let manifest_bytes = std::fs::read(root.join("manifest.json"))
+        .map_err(|error| Error::Internal(format!("read development asset manifest: {error}")))?;
+    let manifest: DevAssetManifest = serde_json::from_slice(&manifest_bytes)
+        .map_err(|error| Error::Internal(format!("decode development asset manifest: {error}")))?;
+    let asset = manifest.files.into_iter().find(|asset| asset.url == path)
+        .ok_or_else(|| Error::NotFound(path.to_string()))?;
+    let relative = Path::new(&asset.file);
+    if relative.components().any(|component| !matches!(component, Component::Normal(_))) {
+        return Err(Error::Internal("development asset path is not confined".to_string()));
+    }
+    let canonical_root = std::fs::canonicalize(&root)
+        .map_err(|error| Error::Internal(format!("resolve development asset directory: {error}")))?;
+    let canonical_asset = std::fs::canonicalize(root.join(relative))
+        .map_err(|error| Error::Internal(format!("resolve development asset: {error}")))?;
+    if !canonical_asset.starts_with(&canonical_root) {
+        return Err(Error::Internal("development asset escaped web/dist".to_string()));
+    }
+    let body = std::fs::read(&canonical_asset)
+        .map_err(|error| Error::Internal(format!("read development asset: {error}")))?;
+    let cache_control = if asset.immutable { "public, max-age=31536000, immutable" } else { "no-cache" };
+    Ok(HttpResponse::bytes(200, &asset.content_type, body).with_header("Cache-Control", cache_control))
+}
+
+fn dev_dist_path() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("web/dist")
 }
 
 fn log_request(

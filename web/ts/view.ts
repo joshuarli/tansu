@@ -16,7 +16,6 @@ import { excludedFoldersProblem, normalizeSettings, SETTINGS_LIMITS } from "./ap
 import { KEYBOARD_SHORTCUTS } from "./app/keyboard-shortcuts.ts";
 import { sameTabIdentity, type TabIdentity } from "./app/tab-identity.ts";
 import { renderLinksRail } from "./links-rail.ts";
-import { createTagPill } from "./tag-pill.ts";
 import { paletteEntries, paletteRawQuery, parsePaletteQuery, type PaletteEntry, type PaletteMode } from "./app/commands.ts";
 import type { V2OverlayCoverage, V2SearchHit } from "./types.generated.ts";
 import type { FindMatch, Outline } from "./editor/source-navigation.js";
@@ -111,6 +110,31 @@ export function updateAppView(root: HTMLElement, regions: HTMLElement[]): void {
     closeVaultOptionsIn(obsolete);
     obsolete.remove();
   }
+}
+
+const outlineScrollListeners = new WeakSet<HTMLElement>();
+let outlineResizeListenerInstalled = false;
+
+export function syncNoteOutlineFade(root: ParentNode): void {
+  const outlineList = root.querySelector<HTMLElement>(".outline-list");
+  if (outlineList === null) return;
+  if (!outlineScrollListeners.has(outlineList)) {
+    outlineList.addEventListener("scroll", () => updateNoteOutlineFade(outlineList), { passive: true });
+    outlineScrollListeners.add(outlineList);
+  }
+  updateNoteOutlineFade(outlineList);
+  if (!outlineResizeListenerInstalled) {
+    window.addEventListener("resize", () => {
+      document.querySelectorAll<HTMLElement>(".outline-list").forEach(updateNoteOutlineFade);
+    });
+    outlineResizeListenerInstalled = true;
+  }
+}
+
+function updateNoteOutlineFade(outlineList: HTMLElement): void {
+  const maxScrollTop = outlineList.scrollHeight - outlineList.clientHeight;
+  outlineList.classList.toggle("has-more-above", outlineList.scrollTop > 1);
+  outlineList.classList.toggle("has-more-below", maxScrollTop - outlineList.scrollTop > 1);
 }
 
 export function disposeAppView(root: HTMLElement): void {
@@ -325,6 +349,7 @@ function renderNoteOutline(state: State, actions: ViewActions): HTMLElement | nu
       "outline-row",
     );
     item.style.setProperty("--outline-level", String(heading.level));
+    item.dataset["key"] = `outline:${heading.from}:${heading.level}:${heading.text}`;
     item.dataset["headingFrom"] = String(heading.from);
     if (heading.from === actions.activeHeadingFrom) item.setAttribute("aria-current", "location");
     outlineList.append(item);
@@ -385,6 +410,7 @@ function renderMain(state: State, actions: ViewActions): HTMLElement {
       .filter(Boolean)
       .join(" "),
   );
+  if (active !== undefined) main.classList.add("has-article-layout");
   const tabs = el("div", "tabs");
   for (const tab of state.tabs) {
     const identity = tabIdentity(tab);
@@ -396,9 +422,14 @@ function renderMain(state: State, actions: ViewActions): HTMLElement {
       active ? "tab active" : "tab",
     );
     tabEl.dataset["key"] = `tab:${tab.key}`;
+    if (tabIsDirty(tab)) tabEl.classList.add("tab-dirty");
+    const closeHint = span("x to close", "tab-close-tooltip");
+    closeHint.setAttribute("aria-hidden", "true");
+    const hideCloseHint = bindTabCloseHint(tabEl, closeHint, identity, actions);
     if (tab.kind === "saved") {
       tabEl.addEventListener("contextmenu", (event) => {
         event.preventDefault();
+        hideCloseHint();
         actions.dispatch({
           type: "context.open",
           noteId: tab.noteId,
@@ -407,28 +438,25 @@ function renderMain(state: State, actions: ViewActions): HTMLElement {
         });
       });
     }
-    const closeHint = span("x to close", "tab-close-tooltip");
-    closeHint.setAttribute("aria-hidden", "true");
-    const hideCloseHint = bindTabCloseHint(tabEl, closeHint, identity, actions);
     const tabLabel = span("", "tab-label");
     const isPinned = tab.kind === "saved" && state.pinned.has(tab.noteId);
     if (isPinned) tabLabel.classList.add("pinned-tab-label");
     tabLabel.append(document.createTextNode(tab.title));
     const tabContent = [tabLabel];
     if (isPinned) tabContent.push(span("📌", "tab-pinned"));
-    if (tabIsDirty(tab)) tabContent.push(span("•"));
-    if (tab.saving) tabContent.push(span("Saving", "tab-saving"));
     if (tab.conflict) tabContent.push(span("!", "tab-conflict"));
     tabContent.push(closeButton(identity, actions, hideCloseHint), closeHint);
     tabEl.append(...tabContent);
     tabs.append(tabEl);
   }
   const create = button(
-    "+",
+    "",
     "New note",
     () => actions.dispatch({ type: "command.run", id: "create" }),
     "icon-button new-note",
   );
+  create.setAttribute("aria-label", "New note");
+  create.append(controlIcon(["M12 5v14", "M5 12h14"]));
   const topbar = el("div", "topbar", el("div", "tab-strip", tabs, create));
   const findBar = state.findOpen ? renderFindBar(state, actions) : null;
   const workspace = el("section", "workspace");
@@ -536,7 +564,6 @@ function renderMain(state: State, actions: ViewActions): HTMLElement {
   main.append(renderFloatingControls(state, actions));
   const outline = renderNoteOutline(state, actions);
   if (outline !== null) {
-    main.classList.add("has-note-outline");
     main.append(outline);
   }
   const linksRail = renderLinksRail(state, actions.dispatch);
@@ -647,7 +674,6 @@ function renderOverlays(state: State, actions: ViewActions): HTMLElement {
         });
         row.append(searchResultHeading(note.title, note.updatedAtMs));
         row.append(span(actions.recentPreview(note.noteId) ?? note.path, "recent-note-detail"));
-        appendResultTags(row, note.tags);
         list.append(row);
       }
       if (recentNotes.length === 0) list.append(span("No notes in this vault yet.", "search-status"));
@@ -718,14 +744,12 @@ function renderOverlays(state: State, actions: ViewActions): HTMLElement {
 }
 
 const PALETTE_PLACEHOLDERS: Readonly<Record<PaletteMode, string>> = {
-  notes: "Search notes · > actions · # tags",
+  notes: "Search notes · > actions",
   actions: "Run an action",
-  tags: "Filter by tag",
 };
 
 const PALETTE_MODE_GLYPHS: Readonly<Record<Exclude<PaletteMode, "notes">, string>> = {
   actions: ">",
-  tags: "#",
 };
 
 function renderCommandPalette(state: State, actions: ViewActions): HTMLElement {
@@ -740,7 +764,7 @@ function renderCommandPalette(state: State, actions: ViewActions): HTMLElement {
   input.placeholder = PALETTE_PLACEHOLDERS[mode];
   input.setAttribute("aria-label", "Command palette");
   input.addEventListener("input", () => {
-    const current = input.dataset["mode"] === "actions" || input.dataset["mode"] === "tags" ? input.dataset["mode"] : "notes";
+    const current: PaletteMode = input.dataset["mode"] === "actions" ? "actions" : "notes";
     actions.dispatch({ type: "command.filter", query: paletteRawQuery(current, input.value) });
   });
   input.addEventListener("keydown", (event) => {
@@ -1006,91 +1030,32 @@ function numericValue(inputEl: HTMLInputElement): number {
 
 function renderNoteDialog(state: State, actions: ViewActions): HTMLElement {
   const dialog = state.noteDialog;
-  const isDelete = dialog?.kind === "delete";
-  const isRename = dialog?.kind === "rename";
-  const title = isRename ? "Rename note" : dialog?.kind === "tag" ? "Add Tag" : "Delete Note";
-  const inputEl =
-    dialog !== null && dialog.kind !== "delete"
-      ? input(title, dialog.kind === "tag" ? dialog.value : dialog.title)
-      : null;
-  if (inputEl !== null) inputEl.dataset["key"] = `note-dialog-input:${dialog?.kind ?? "delete"}`;
-  const isTag = dialog?.kind === "tag";
-  if (inputEl !== null && isTag) inputEl.placeholder = "Add tag";
   const panel = el(
     "form",
-    `modal-panel note-dialog-panel${isTag ? " is-create" : ""}${isTag ? " is-tag" : ""}${isRename ? " is-rename" : ""}`,
-    ...(isTag
-      ? []
-      : [el(
-        "div",
-        "modal-header",
-        span(title),
-      )]),
+    "modal-panel note-dialog-panel",
+    el("div", "modal-header", span("Delete Note")),
   );
-  const dialogKey = dialog === null
-    ? "delete"
-    : dialog.kind === "rename" || dialog.kind === "delete"
-    ? `${dialog.kind}:${dialog.noteId}`
-    : "tag";
-  panel.dataset["key"] = `modal:note:${dialogKey}`;
-  if (isDelete) {
-    const note = state.notes.get(dialog.noteId);
-    panel.append(
-      el("p", "dialog-copy", `Move ${note?.path ?? "this note"} to trash?`),
-      el(
-        "div",
-        "modal-actions",
-        button(
-          "Cancel",
-          "Cancel",
-          () => actions.dispatch({ type: "overlay.close" }),
-          "text-button",
-        ),
-        button(
-          "Delete",
-          "Delete note",
-          () => actions.dispatch({ type: "dialog.submit" }),
-          "danger-button",
-        ),
+  panel.dataset["key"] = dialog === null ? "modal:note:delete" : `modal:note:delete:${dialog.noteId}`;
+  const note = dialog === null ? undefined : state.notes.get(dialog.noteId);
+  panel.append(
+    el("p", "dialog-copy", `Move ${note?.path ?? "this note"} to trash?`),
+    el(
+      "div",
+      "modal-actions",
+      button(
+        "Cancel",
+        "Cancel",
+        () => actions.dispatch({ type: "overlay.close" }),
+        "text-button",
       ),
-    );
-  } else if (inputEl !== null && isTag) {
-    inputEl.setAttribute("aria-label", "Tag");
-    inputEl.addEventListener("input", () => {
-      actions.dispatch({ type: "dialog.input", value: inputEl.value });
-    });
-    panel.append(el("div", "note-dialog-field", inputEl));
-    panel.addEventListener("submit", (event) => {
-      event.preventDefault();
-      actions.dispatch({ type: "dialog.submit", value: inputEl.value });
-    });
-    focusOnOpen(inputEl);
-  } else if (inputEl !== null) {
-    const label = el("label", "field-label rename-field-label", span("Title"));
-    inputEl.id = "rename-note-title";
-    label.htmlFor = inputEl.id;
-    inputEl.addEventListener("input", () => {
-      actions.dispatch({ type: "dialog.input", value: inputEl.value });
-    });
-    const cancel = button(
-      "Cancel",
-      "Cancel",
-      () => actions.dispatch({ type: "overlay.close" }),
-      "rename-cancel-button",
-    );
-    const submit = button(
-      "Rename",
-      title,
-      () => actions.dispatch({ type: "dialog.submit", value: inputEl.value }),
-      "primary-button rename-submit-button",
-    );
-    panel.append(label, inputEl, el("div", "modal-actions rename-actions", cancel, submit));
-    panel.addEventListener("submit", (event) => {
-      event.preventDefault();
-      actions.dispatch({ type: "dialog.submit", value: inputEl.value });
-    });
-    focusOnOpen(inputEl, true);
-  }
+      button(
+        "Delete",
+        "Delete note",
+        () => actions.dispatch({ type: "dialog.submit" }),
+        "danger-button",
+      ),
+    ),
+  );
   return panel;
 }
 
@@ -1105,15 +1070,6 @@ function renderContextMenu(state: State, actions: ViewActions): HTMLElement {
   menu.style.top = `${context.y}px`;
   const pinned = state.pinned.has(context.noteId);
   menu.append(
-    button(
-      "Rename",
-      "Rename note",
-      () => {
-        actions.dispatch({ type: "note.rename", noteId: toNoteId(context.noteId) });
-        actions.dispatch({ type: "context.close" });
-      },
-      "context-menu-item",
-    ),
     button(
       pinned ? "Unpin" : "Pin",
       pinned ? "Unpin note" : "Pin note",
@@ -1159,20 +1115,7 @@ function searchHitRow(hit: V2SearchHit, actions: ViewActions, state: State): HTM
   row.dataset["key"] = `search:${identity.kind}:${identity.noteId}`;
   row.append(searchResultHeading(hit.title, updatedAtMs), span(hit.path, "search-result-path"));
   row.append(renderScore(hit), renderSnippet(hit));
-  appendResultTags(row, searchHitTags(identity, state));
   return row;
-}
-
-function searchHitTags(identity: Exclude<V2SearchHit["identity"], { kind: "newLocalDraft" }>, state: State): readonly string[] {
-  const tab = state.tabs.find((candidate) => candidate.kind === "saved" && candidate.noteId === identity.noteId);
-  return state.notes.get(identity.noteId)?.tags ?? tab?.doc?.meta.tags ?? [];
-}
-
-function appendResultTags(row: HTMLElement, tags: readonly string[]): void {
-  if (tags.length === 0) return;
-  const list = el("span", "search-result-tags");
-  for (const tag of tags) list.append(createTagPill(tag, "span"));
-  row.append(list);
 }
 
 function searchHitUpdatedAtMs(identity: V2SearchHit["identity"], state: State): number {
@@ -1360,8 +1303,8 @@ function recentNoteIds(state: State): string[] {
 }
 
 function closeButton(tab: TabIdentity, actions: ViewActions, beforeClose?: () => void): HTMLElement {
-  return button(
-    "×",
+  const close = button(
+    "",
     "Close",
     (event) => {
       event.stopPropagation();
@@ -1370,6 +1313,8 @@ function closeButton(tab: TabIdentity, actions: ViewActions, beforeClose?: () =>
     },
     "tab-close",
   );
+  close.append(controlIcon(["M6 6l12 12", "M18 6 6 18"]));
+  return close;
 }
 
 function bindTabCloseHint(

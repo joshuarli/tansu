@@ -21,6 +21,7 @@ import {
 } from '@codemirror/view';
 import { treeGrowthEffect, treeProgressPlugin } from './tree-progress';
 import { readOnlyFacet } from './read-only';
+import { frontmatterRange } from '../../frontmatter.js';
 
 // Inline preview — the Obsidian "Live Preview" model.
 //
@@ -84,46 +85,12 @@ const previewFrozenField = StateField.define<boolean>({
   },
 });
 
-function linkIconHitTarget(event: MouseEvent, root?: HTMLElement): HTMLElement | null {
-  const target = event.target;
-  if (!(target instanceof Element)) return null;
-  const linkEl = target.closest<HTMLElement>('.cm-atomic-link');
-  if (!linkEl || (root && !root.contains(linkEl))) return null;
-
-  // The icon is a `::after` pseudo-element, so it doesn't have its own
-  // event target. Compute the same trailing hit-zone used by the click
-  // opener and treat pointerdown in that zone as "on the icon", not
-  // "inside editable link text".
-  const rects = Array.from(linkEl.getClientRects());
-  if (rects.length === 0) return null;
-  const lastRect = rects[rects.length - 1];
-  if (!lastRect) return null;
-  const emSize = parseFloat(window.getComputedStyle(linkEl).fontSize);
-  const iconZone = emSize * 1.25;
-  const onIcon =
-    event.clientX >= lastRect.right - iconZone &&
-    event.clientX <= lastRect.right &&
-    event.clientY >= lastRect.top &&
-    event.clientY <= lastRect.bottom;
-
-  return onIcon ? linkEl : null;
-}
-
-// Whole-link hit test, used in read-only mode where the entire link
-// (text + icon) is the open affordance. Mirrors `linkIconHitTarget`'s
-// containment check but without the trailing-icon zone restriction.
 function linkElementFromEvent(event: MouseEvent, root?: HTMLElement): HTMLElement | null {
   const target = event.target;
   if (!(target instanceof Element)) return null;
   const linkEl = target.closest<HTMLElement>('.cm-atomic-link');
   if (!linkEl || (root && !root.contains(linkEl))) return null;
   return linkEl;
-}
-
-function linkHitRect(link: HTMLElement, x: number, y: number): DOMRect | null {
-  const rects = Array.from(link.getClientRects());
-  return rects.find((rect) => x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) ??
-    rects[rects.length - 1] ?? null;
 }
 
 function linkUrlFromElement(view: EditorView, linkEl: HTMLElement): string | null {
@@ -142,107 +109,26 @@ function linkUrlFromElement(view: EditorView, linkEl: HTMLElement): string | nul
   return view.state.doc.sliceString(urlNode.from, urlNode.to) || null;
 }
 
-function makeLinkPopup(onLinkClick: (url: string) => void): Extension {
-  return ViewPlugin.fromClass(
-    class {
-      private popup: HTMLButtonElement | null = null;
-      private anchor: HTMLElement | null = null;
-      private hideTimer: number | null = null;
+function linkLabelRange(view: EditorView, linkEl: HTMLElement): { from: number; to: number } | null {
+  const pos = view.posAtDOM(linkEl);
+  if (pos < 0) return null;
 
-      constructor(private readonly view: EditorView) {
-        view.dom.addEventListener('pointerover', this.onPointerOver);
-        view.dom.addEventListener('pointerout', this.onPointerOut);
-        window.addEventListener('scroll', this.close, true);
-        window.addEventListener('resize', this.close);
-      }
+  const tree = syntaxTree(view.state);
+  let node: SyntaxNode | null = tree.resolveInner(pos, 1);
+  let visibleUrl: SyntaxNode | null = null;
+  while (node && node.name !== 'Link') {
+    if (node.name === 'URL') visibleUrl = node;
+    node = node.parent;
+  }
+  if (!node) return visibleUrl ? { from: visibleUrl.from, to: visibleUrl.to } : null;
 
-      update(update: ViewUpdate) {
-        if (update.docChanged || update.view.state.facet(readOnlyFacet)) this.close();
-      }
-
-      destroy() {
-        this.close();
-        this.view.dom.removeEventListener('pointerover', this.onPointerOver);
-        this.view.dom.removeEventListener('pointerout', this.onPointerOut);
-        window.removeEventListener('scroll', this.close, true);
-        window.removeEventListener('resize', this.close);
-      }
-
-      private readonly onPointerOver = (event: PointerEvent) => {
-        if (this.view.state.facet(readOnlyFacet)) return;
-        const link = linkElementFromEvent(event, this.view.contentDOM);
-        if (!link) return;
-        const url = linkUrlFromElement(this.view, link);
-        const rect = linkHitRect(link, event.clientX, event.clientY);
-        if (url && rect) this.show(url, link, rect);
-      };
-
-      private readonly onPointerOut = (event: PointerEvent) => {
-        const link = linkElementFromEvent(event, this.view.contentDOM);
-        if (link !== this.anchor) return;
-        const related = event.relatedTarget;
-        if (related instanceof Node && (this.anchor?.contains(related) || this.popup?.contains(related))) return;
-        this.scheduleClose();
-      };
-
-      private readonly onPopupPointerEnter = () => this.clearHideTimer();
-      private readonly onPopupPointerLeave = () => this.scheduleClose();
-      private readonly close = () => {
-        this.clearHideTimer();
-        this.popup?.remove();
-        this.popup = null;
-        this.anchor = null;
-      };
-
-      private show(url: string, anchor: HTMLElement, rect: DOMRect) {
-        this.clearHideTimer();
-        if (this.popup?.dataset['url'] === url) {
-          this.anchor = anchor;
-          this.position(rect);
-          return;
-        }
-        this.popup?.remove();
-        const popup = document.createElement('button');
-        popup.type = 'button';
-        popup.className = 'article-link-pill';
-        popup.dataset['url'] = url;
-        popup.textContent = url;
-        popup.setAttribute('aria-label', `Open ${url}`);
-        popup.addEventListener('pointerenter', this.onPopupPointerEnter);
-        popup.addEventListener('pointerleave', this.onPopupPointerLeave);
-        popup.addEventListener('click', () => {
-          onLinkClick(url);
-          this.close();
-        });
-        document.body.append(popup);
-        this.popup = popup;
-        this.anchor = anchor;
-        this.position(rect);
-      }
-
-      private position(rect: DOMRect) {
-        const popup = this.popup;
-        if (!popup) return;
-        const width = popup.getBoundingClientRect().width;
-        const height = popup.getBoundingClientRect().height;
-        const left = Math.max(8, Math.min(rect.left, window.innerWidth - width - 8));
-        popup.style.left = `${left}px`;
-        const below = rect.bottom + 6;
-        popup.style.top = `${below + height <= window.innerHeight - 8 ? below : Math.max(8, rect.top - height - 6)}px`;
-      }
-
-      private scheduleClose() {
-        this.clearHideTimer();
-        this.hideTimer = window.setTimeout(this.close, 350);
-      }
-
-      private clearHideTimer() {
-        if (this.hideTimer === null) return;
-        window.clearTimeout(this.hideTimer);
-        this.hideTimer = null;
-      }
-    },
+  const marks = node.getChildren('LinkMark');
+  const opening = marks.find((mark) => view.state.doc.sliceString(mark.from, mark.to) === '[');
+  if (!opening) return null;
+  const closing = marks.find((mark) =>
+    mark.from >= opening.to && view.state.doc.sliceString(mark.from, mark.to) === ']'
   );
+  return closing ? { from: opening.to, to: closing.from } : null;
 }
 
 // Tracks mouse state on the editor and drives the freeze flag. We listen
@@ -255,8 +141,7 @@ const freezeMousePlugin = ViewPlugin.fromClass(
     private releaseTimer: number | null = null;
     private readonly onDown = (event: PointerEvent) => {
       if (event.button !== 0) return;
-      // Read-only never reveals, so there's nothing to freeze. Bail
-      // before any of the selection/icon plumbing runs.
+      // Read-only never reveals, so there's nothing to freeze.
       if (this.view.state.facet(readOnlyFacet)) return;
       // Only freeze when the pointerdown lands inside the content. The
       // scrollbar (on the outer .cm-scroller) would otherwise engage the
@@ -268,11 +153,7 @@ const freezeMousePlugin = ViewPlugin.fromClass(
       if (!(target instanceof Node) || !this.view.contentDOM.contains(target)) {
         return;
       }
-      if (linkIconHitTarget(event, this.view.contentDOM)) {
-        // Let the follow-up click open the link, but stop CM6 from
-        // interpreting the icon press as a text-editing click. Without
-        // this, pointerdown moves the selection into the Link node and
-        // reveals `[label](url)` before the click handler opens it.
+      if (linkElementFromEvent(event, this.view.contentDOM)) {
         event.preventDefault();
         event.stopImmediatePropagation();
         return;
@@ -554,6 +435,7 @@ function buildInlineDecorations(view: EditorView): DecorationSet {
 
   const tree =
     ensureSyntaxTree(state, state.doc.length, 200) ?? syntaxTree(state);
+  const frontmatter = frontmatterRange(state);
 
   // `from` positions of Link nodes whose range overlaps a selection.
   // Link children (LinkMark/URL/LinkTitle) hide unless their parent
@@ -578,7 +460,8 @@ function buildInlineDecorations(view: EditorView): DecorationSet {
   // traversal — meaningful because this runs on every cursor move and
   // its cost scales with document size.)
   tree.iterate({
-    enter: (node) => {
+    enter: (node): boolean | void => {
+      if (node.name !== 'Document' && frontmatter !== null && node.from < frontmatter.foldTo) return false;
       if (node.name === 'HeaderMark' && node.from < node.to) {
         const lineNumber = doc.lineAt(node.from).number;
         if (!readOnly && activeLines.has(lineNumber)) {
@@ -1322,16 +1205,19 @@ function insertTightListItem(view: EditorView): boolean {
 function makeLinkClickHandler(onLinkClick: (url: string) => void): Extension {
   return EditorView.domEventHandlers({
     click: (event, view) => {
-      if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return false;
       if (event.button !== 0) return false;
-      // In read-only mode there's no editable link text to protect, so
-      // a click anywhere on the link opens it. In edit mode the open
-      // affordance stays scoped to the trailing icon hit-zone so the
-      // text itself remains clickable-to-edit.
-      const linkEl = view.state.facet(readOnlyFacet)
-        ? linkElementFromEvent(event, view.contentDOM)
-        : linkIconHitTarget(event, view.contentDOM);
+      const linkEl = linkElementFromEvent(event, view.contentDOM);
       if (!linkEl) return false;
+
+      if (event.shiftKey && !event.metaKey && !event.ctrlKey && !event.altKey) {
+        const range = linkLabelRange(view, linkEl);
+        if (!range) return false;
+        event.preventDefault();
+        event.stopPropagation();
+        view.dispatch({ selection: EditorSelection.range(range.from, range.to) });
+        return true;
+      }
+      if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return false;
 
       const url = linkUrlFromElement(view, linkEl);
       if (!url) return false;
@@ -1359,7 +1245,6 @@ export function inlinePreview(config: InlinePreviewConfig = {}): Extension {
     fencedCodeSelectionPlugin,
     freezeMousePlugin,
     treeProgressPlugin,
-    makeLinkPopup(onLinkClick),
     makeLinkClickHandler(onLinkClick),
     // Prec.highest to beat @codemirror/lang-markdown's own Enter
     // handler, which is registered internally by the `markdown()`

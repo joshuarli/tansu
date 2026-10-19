@@ -134,65 +134,15 @@ describe("CodeMirror editor sessions", () => {
     expect(editor.getSnapshot()?.mode).toBe("live");
   });
 
-  it("renders header tags as removable pills that disable with the tag status", () => {
-    const onRemoveTag = vi.fn();
-    const noteTags = (status: "editable" | "locked") => ({
-      tags: ["alpha", "beta"],
-      status,
-      onAddTag: vi.fn(),
-      onRemoveTag,
-    });
-    const editable = mountEditor("# Body\n", { noteTitle: "Note", noteTags: noteTags("editable") });
-    const pills = [...editable.container.querySelectorAll<HTMLButtonElement>(".tag-row .tag-pill")];
-
-    expect(pills.map((pill) => pill.textContent)).toStrictEqual(["#alpha", "#beta"]);
-    expect(pills.map((pill) => pill.getAttribute("aria-label"))).toStrictEqual(["Remove alpha", "Remove beta"]);
-    expect(pills.every((pill) => pill.style.getPropertyValue("--tag-hue") !== "")).toBeTruthy();
-    expect(pills.some((pill) => pill.disabled)).toBeFalsy();
-    pills[1]!.click();
-    expect(onRemoveTag).toHaveBeenCalledWith("beta");
-
-    const locked = mountEditor("# Body\n", { noteTitle: "Note", noteTags: noteTags("locked") }, "locked-note");
-    expect([...locked.container.querySelectorAll<HTMLButtonElement>(".tag-row .tag-pill")].every((pill) => pill.disabled)).toBeTruthy();
-    expect(locked.container.querySelector<HTMLButtonElement>(".tag-add")?.disabled).toBeTruthy();
-  });
-
-  it("skips header tags that normalize to empty instead of failing the header render", () => {
-    const { container } = mountEditor("# Body\n", {
-      noteTitle: "Note",
-      noteTags: { tags: ["#", "alpha", "  "], status: "editable", onAddTag: vi.fn(), onRemoveTag: vi.fn() },
-    });
-
-    expect(container.querySelector(".document-title")?.textContent).toBe("Note");
-    expect([...container.querySelectorAll(".tag-row .tag-pill")].map((pill) => pill.textContent)).toStrictEqual(["#alpha"]);
-  });
-
-  it("folds frontmatter in live mode until the header control reveals it", () => {
+  it("keeps frontmatter hidden and uneditable in both editor modes", () => {
     const source = "---\ntags:\n  - alpha\n---\n\n# Body\n";
-    const { container, editor } = mountEditor(source, { noteTitle: "Note" });
-    const button = container.querySelector<HTMLButtonElement>(".tag-frontmatter-toggle");
+    const { container, editor, view } = mountEditor(source, { noteTitle: "Note" });
 
-    expect(button).not.toBeNull();
-    expect(button?.hidden).toBeFalsy();
-    expect(button?.getAttribute("aria-expanded")).toBe("false");
+    expect(container.querySelector(".tag-row")).toBeNull();
+    expect(container.querySelector(".tag-frontmatter-toggle")).toBeNull();
     expect(container.querySelector(".cm-content")?.textContent).not.toContain("tags:");
     expect(editor.getSnapshot()).toMatchObject({ source, mode: "live", revision: 0, dirty: false });
 
-    button?.click();
-
-    expect(button?.getAttribute("aria-expanded")).toBe("true");
-    expect(container.querySelector(".cm-content")?.textContent).toContain("tags:");
-    editor.revealSelection({ anchor: source.indexOf("tags:") + 2, head: source.indexOf("tags:") + 2 });
-    button?.click();
-
-    expect(button?.getAttribute("aria-expanded")).toBe("false");
-    expect(container.querySelector(".cm-content")?.textContent).not.toContain("tags:");
-    expect(editor.getSnapshot()).toMatchObject({
-      source,
-      selection: { anchor: source.indexOf("# Body"), head: source.indexOf("# Body") },
-      revision: 0,
-      dirty: false,
-    });
     editor.revealSelection({ anchor: source.indexOf("tags:") + 2, head: source.indexOf("tags:") + 2 });
     expect(container.querySelector(".cm-content")?.textContent).not.toContain("tags:");
     expect(editor.getSnapshot()?.selection).toStrictEqual({
@@ -201,30 +151,23 @@ describe("CodeMirror editor sessions", () => {
     });
 
     editor.setMode("source");
-    expect(container.querySelector(".cm-content")?.textContent).toContain("tags:");
-    expect(button?.hidden).toBeTruthy();
-    editor.setMode("live");
     expect(container.querySelector(".cm-content")?.textContent).not.toContain("tags:");
+    view.dispatch({
+      changes: { from: source.indexOf("tags:"), to: source.indexOf("tags:") + 4, insert: "name" },
+    });
+    expect(editor.getSnapshot()?.source).toBe(source);
   });
 
   it("keeps the first body line out of the folded frontmatter line", () => {
     const body = "First paragraph after the metadata.";
     const source = `---\ntags:\n  - alpha\n---\n\n${body}\n`;
     const { container, editor } = mountEditor(source, { noteTitle: "Note" });
-    const button = container.querySelector<HTMLButtonElement>(".tag-frontmatter-toggle");
     const bodyLine = () => [...container.querySelectorAll<HTMLElement>(".cm-line")].find((line) =>
       line.textContent?.includes(body)
     );
 
-    expect(button?.getAttribute("aria-expanded")).toBe("false");
-    expect(bodyLine()?.classList.contains("cm-frontmatter-line")).toBe(false);
+    expect(container.querySelector(".cm-content")?.textContent).not.toContain("tags:");
     expect(bodyLine()?.querySelector(".cm-foldPlaceholder")).toBeNull();
-
-    button?.click();
-    expect(bodyLine()?.classList.contains("cm-frontmatter-line")).toBe(false);
-
-    button?.click();
-    expect(bodyLine()?.classList.contains("cm-frontmatter-line")).toBe(false);
     expect(bodyLine()?.querySelector(".cm-foldPlaceholder")).toBeNull();
     expect(editor.getSnapshot()).toMatchObject({ source, revision: 0, dirty: false });
   });

@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import { createCodeMirrorEditor } from "../codemirror-adapter.js";
 import { createCalloutExtension, createWikiImageExtension, createWikiLinkExtension } from "../tansu-extensions.js";
 import { findLiteral } from "../source-navigation.js";
-import { tagsSourceEdit } from "../tag-source.js";
 import { resolveWikiTarget, suggestWikiTargets, type WikiNote } from "../wiki-target.js";
 
 function mounted(source: string, config: Parameters<typeof createCodeMirrorEditor>[1] = {}) {
@@ -26,32 +25,6 @@ function mounted(source: string, config: Parameters<typeof createCodeMirrorEdito
 }
 
 describe("source-preserving Markdown operations", () => {
-  it("offers a movable link pill over links while editing", () => {
-    const opened: string[] = [];
-    const { container, dispose } = mounted("[article link](https://example.test/article)", {
-      onLinkOpen: (url) => opened.push(url),
-    });
-    try {
-      const link = container.querySelector<HTMLElement>(".cm-atomic-link");
-      expect(link).not.toBeNull();
-      Object.defineProperty(link, "getClientRects", {
-        value: () => [{ left: 0, right: 100, top: 0, bottom: 20 }],
-      });
-      link!.dispatchEvent(new Event("pointerover", { bubbles: true }));
-
-      const pill = document.querySelector<HTMLButtonElement>(".article-link-pill");
-      expect(pill?.textContent).toBe("https://example.test/article");
-      link!.dispatchEvent(new MouseEvent("pointerout", { bubbles: true, relatedTarget: pill }));
-      pill!.dispatchEvent(new Event("pointerenter"));
-      expect(document.querySelector(".article-link-pill")).toBe(pill);
-      pill!.click();
-      expect(opened).toStrictEqual(["https://example.test/article"]);
-      expect(document.querySelector(".article-link-pill")).toBeNull();
-    } finally {
-      dispose();
-    }
-  });
-
   it("opens read-only links directly", () => {
     const opened: string[] = [];
     const { container, dispose } = mounted("[article link](https://example.test/article)", {
@@ -63,32 +36,9 @@ describe("source-preserving Markdown operations", () => {
       expect(link).not.toBeNull();
       link!.dispatchEvent(new MouseEvent("click", { bubbles: true, button: 0 }));
       expect(opened).toStrictEqual(["https://example.test/article"]);
-      expect(document.querySelector(".article-link-pill")).toBeNull();
     } finally {
       dispose();
     }
-  });
-
-  it("adds and removes tags without changing body bytes or source outside frontmatter", () => {
-    const source = "\uFEFF---\ntags:\n  - old\n---\n\n# Body\n\n";
-    const edit = tagsSourceEdit(source, ["#alpha", "two words", "alpha"]);
-    expect(edit).not.toBeNull();
-    const changed = source.slice(0, edit!.from) + edit!.insert + source.slice(edit!.to);
-    expect(changed).toBe("\uFEFF---\ntags:\n  - alpha\n  - \"two words\"\n---\n\n# Body\n\n");
-    const clear = tagsSourceEdit(changed, []);
-    expect(clear).not.toBeNull();
-    expect(changed.slice(0, clear!.from) + clear!.insert + changed.slice(clear!.to)).toBe(
-      "\uFEFF\n\n# Body\n\n",
-    );
-  });
-
-  it("inserts tags after a BOM without changing authored source", () => {
-    const source = "\uFEFF# Body\n";
-    const edit = tagsSourceEdit(source, ["alpha"]);
-    expect(edit).toStrictEqual({ from: 1, to: 1, insert: "---\ntags:\n  - alpha\n---\n\n" });
-    expect(source.slice(0, edit!.from) + edit!.insert + source.slice(edit!.to)).toBe(
-      "\uFEFF---\ntags:\n  - alpha\n---\n\n# Body\n",
-    );
   });
 
   it("finds literal text with smartcase and UTF-16 source offsets", () => {

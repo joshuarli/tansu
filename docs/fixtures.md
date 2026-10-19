@@ -1,7 +1,9 @@
 # Fixtures
 
-The dev app copies `tests/fixtures/demo-vault/` to `.dev/vault` and initializes
-isolated SQLite settings and data under `.dev/`.
+The dev app copies `tests/fixtures/demo-vault/` to `.dev/vault` and
+`tests/fixtures/demo-vault-field-notes/` to `.dev/vault-field-notes`. It
+registers them as `Demo` and `Field Notes` and initializes isolated SQLite
+settings and data under `.dev/`.
 
 ## Dev state
 

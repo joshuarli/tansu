@@ -17,7 +17,6 @@ export type CommandId =
   | "search"
   | "revisions"
   | "restore"
-  | "tag"
   | "settings"
   | "find"
   | "source";
@@ -58,8 +57,7 @@ export type ViewEvent =
   | { type: "command.filter"; query: string }
   | { type: "command.move"; delta: -1 | 1 }
   | { type: "command.run"; id: CommandId }
-  | { type: "dialog.input"; value: string }
-  | { type: "dialog.submit"; value?: string }
+  | { type: "dialog.submit" }
   | { type: "settings.submit"; settings: SettingsFormValue }
   | { type: "overlay.close" }
   | { type: "context.close" }
@@ -69,11 +67,8 @@ export type ViewEvent =
   | { type: "note.open"; noteId: NoteId }
   | { type: "note.retry"; noteId: NoteId }
   | { type: "localDraft.open"; localDraftId: LocalDraftId }
-  | { type: "note.rename"; noteId?: NoteId }
   | { type: "note.delete"; noteId?: NoteId }
   | { type: "note.pin"; noteId?: NoteId }
-  | { type: "note.addTag" }
-  | { type: "tags.update"; tags: string[] }
   | { type: "reading.toggle" }
   | { type: "focus.toggle" }
   | { type: "theme.toggle" }

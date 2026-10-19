@@ -190,8 +190,8 @@ highlight ranges, and an optional half-open UTF-16 source range into the
 declared revision. Filename-only matches have no source range. These ranges are
 distinct types and coordinate spaces.
 
-Hits carry no tags; the client shows tag pills from the note metadata it already
-holds for the hit's `noteId`, so a new-note overlay hit shows none.
+Hits carry no tags, and the client does not display tag metadata from hits or
+notes.
 
 Quick-open matches title, filename, and path. For an empty query it returns
 pinned and recent notes in the supplied order, followed by remaining notes.

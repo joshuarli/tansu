@@ -181,9 +181,8 @@ describe("real server harness", () => {
     await page.close();
   });
 
-  it("shows a clickable pill when hovering a rendered link in live mode", async () => {
+  it("opens rendered links in read-only mode and preserves theme preference", async () => {
     const page = await newLoggedPage();
-    await page.setViewportSize({ width: 600, height: 900 });
     await page.addInitScript(() => {
       if (window.sessionStorage.getItem("tansu-e2e-theme-reset") !== "done") {
         window.localStorage.removeItem("tansu.theme.v1");
@@ -201,49 +200,18 @@ describe("real server harness", () => {
       response.request().method() === "PUT" && response.status() === 200
     );
     await page.locator("#editor-mount .cm-content").fill(
-      "# Link Hover\n\nOpen [the destination label wraps across several visible line fragments in this narrow article column](https://example.test/article).",
+      "# Link Hover\n\nOpen [the destination label](https://example.test/article).",
     );
     await page.keyboard.press(`${shortcutModifier()}+s`);
     await saved;
-
     const link = page.locator("#editor-mount .cm-atomic-link");
     await expect.poll(() => link.isVisible()).toBeTruthy();
-    const fragments = await link.evaluate((element) =>
-      Array.from(element.getClientRects(), ({ x, y, width, height }) => ({ x, y, width, height }))
-    );
-    expect(fragments.length).toBeGreaterThan(1);
-    const hoverFragment = fragments[fragments.length - 1]!;
-    const hoverX = hoverFragment.x + Math.min(4, hoverFragment.width / 2);
-    const hoverY = hoverFragment.y + hoverFragment.height / 2;
-    await page.mouse.move(hoverX, hoverY);
-    const pill = page.locator(".article-link-pill");
-    await expect.poll(() => pill.isVisible()).toBeTruthy();
-    const pillBox = await pill.boundingBox();
-    if (pillBox === null) throw new Error("link pill has no visible bounds");
-    const expectedLeft = await page.evaluate(({ x, width }) =>
-      Math.max(8, Math.min(x, window.innerWidth - width - 8)),
-    { x: hoverFragment.x, width: pillBox.width });
-    expect(pillBox.x).toBeCloseTo(expectedLeft, 0);
-    expect(pillBox.y).toBeCloseTo(hoverFragment.y + hoverFragment.height + 6, 0);
-    await pill.hover();
-    await expect.poll(() => pill.isVisible()).toBeTruthy();
-    await page.mouse.move(10, 10);
-    await expect.poll(() => pill.count()).toBe(0);
-    await page.mouse.move(hoverX, hoverY);
-    await expect.poll(() => pill.isVisible()).toBeTruthy();
-    await pill.hover();
-    await pill.click();
-    await expect.poll(() => page.locator("html").getAttribute("data-opened-link"))
-      .toBe("https://example.test/article");
-
     await runPaletteCommand(page, "reading");
     const readOnlyFragment = await link.evaluate((element) => {
       const rect = element.getClientRects()[0];
       return rect === undefined ? null : { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
     });
     if (readOnlyFragment === null) throw new Error("read-only link has no visible bounds");
-    await page.mouse.move(readOnlyFragment.x + 3, readOnlyFragment.y + readOnlyFragment.height / 2);
-    await expect.poll(() => pill.count()).toBe(0);
     await page.locator("html").evaluate((element) => element.removeAttribute("data-opened-link"));
     await page.mouse.click(readOnlyFragment.x + 3, readOnlyFragment.y + readOnlyFragment.height / 2);
     await expect.poll(() => page.locator("html").getAttribute("data-opened-link"))
@@ -372,49 +340,36 @@ describe("real server harness", () => {
     }
     await page.setViewportSize({ width: 1100, height: 900 });
     await expect.poll(() => marginNote.evaluate((element) => getComputedStyle(element).position))
-      .toBe("static");
+      .toBe("absolute");
+    const compact = await page.evaluate(() => {
+      const article = document.querySelector<HTMLElement>(".editor-mount .cm-content")!.getBoundingClientRect();
+      const note = document.querySelector<HTMLElement>(".tansu-sidenote-card")!.getBoundingClientRect();
+      const workspace = document.querySelector<HTMLElement>(".workspace")!.getBoundingClientRect();
+      return { articleRight: article.right, noteLeft: note.left, noteRight: note.right, workspaceRight: workspace.right };
+    });
+    expect(compact.noteLeft).toBeGreaterThan(compact.articleRight);
+    expect(compact.noteRight).toBeLessThan(compact.workspaceRight);
     await page.close();
   });
 
-  it("folds frontmatter until revealed and places clicks on the selected line", async () => {
-    const page = await newLoggedPage();
-    await page.goto(baseUrl);
-    await page.waitForSelector(".main");
-    await createCodeMirrorNote(page, "Frontmatter Layout");
-    const source = ["---", "tags:", "  - alpha", "---", "", "# Body", ""].join("\n");
-    const save = page.waitForResponse((response) =>
-      response.request().method() === "PUT" && response.url().includes("/notes/") && response.status() === 200
-    );
-    await page.locator("#editor-mount .cm-content").fill(source);
-    await page.keyboard.press(`${shortcutModifier()}+s`);
-    await save;
-
-    const content = page.locator("#editor-mount .cm-content");
-    const disclosure = page.locator("#editor-mount .tag-frontmatter-toggle");
-    await expect.poll(() =>
-      page.locator("#editor-mount .cm-scroller").evaluate((scroller) => getComputedStyle(scroller).scrollbarWidth)
-    ).toBe("none");
-    await expect.poll(() => disclosure.isVisible()).toBe(true);
-    await expect.poll(() => disclosure.getAttribute("aria-expanded")).toBe("true");
-    await disclosure.click();
-    await expect.poll(() => content.textContent()).not.toContain("tags:");
-    await expect.poll(() => disclosure.getAttribute("aria-expanded")).toBe("false");
-    await disclosure.click();
-    await expect.poll(() => content.textContent()).toContain("tags:");
-    const metadataLine = page.locator("#editor-mount .cm-line.cm-frontmatter-line").filter({ hasText: "tags:" });
-    const lineBox = await metadataLine.boundingBox();
-    if (lineBox === null) throw new Error("frontmatter line is not visible after reveal");
-    await page.mouse.click(lineBox.x + 24, lineBox.y + lineBox.height / 2);
-    await expect.poll(() => page.locator("#editor-mount .cm-line.cm-activeLine").textContent()).toContain("tags:");
-    await expect.poll(async () => {
-      const caret = await page.locator("#editor-mount .cm-cursor").first().boundingBox();
-      return caret !== null && caret.y >= lineBox.y && caret.y + caret.height <= lineBox.y + lineBox.height;
-    }).toBe(true);
-    const caretBox = await page.locator("#editor-mount .cm-cursor").first().boundingBox();
-    if (caretBox === null) throw new Error("editor caret is not visible after click");
-    expect(caretBox.y).toBeGreaterThanOrEqual(lineBox.y);
-    expect(caretBox.y + caretBox.height).toBeLessThanOrEqual(lineBox.y + lineBox.height);
-    await page.close();
+  it("keeps frontmatter hidden in the editor", async () => {
+    const source = "---\ntags:\n  - alpha\n---\n\n# Body\n";
+    const path = "frontmatter-ui.md";
+    await writeFile(join(vaultOnePath, path), source);
+    try {
+      await waitForNoteByPath(path);
+      const page = await newLoggedPage();
+      await page.goto(baseUrl);
+      await page.waitForSelector(".main");
+      await openSearchNote(page, "frontmatter ui");
+      const content = page.locator("#editor-mount .cm-content");
+      await expect.poll(() => content.textContent()).toContain("Body");
+      await expect.poll(() => content.textContent()).not.toContain("tags:");
+      await expect(page.locator("#editor-mount .tag-row, #editor-mount .tag-frontmatter-toggle").count()).resolves.toBe(0);
+      await page.close();
+    } finally {
+      await rm(join(vaultOnePath, path), { force: true });
+    }
   });
 
   it("locks in command, search, and note management UX", async () => {
@@ -447,7 +402,7 @@ describe("real server harness", () => {
     await page.locator(".tab.active").click({ button: "right" });
     await page.waitForSelector(".context-menu");
     const menuText = await page.locator(".context-menu").textContent();
-    expect(menuText).toContain("Rename");
+    expect(menuText).not.toContain("Rename");
     expect(menuText).toContain("Pin");
     expect(menuText).toContain("Delete");
 
@@ -455,15 +410,13 @@ describe("real server harness", () => {
     await page.waitForSelector(".context-menu", { state: "detached" });
     await expect.poll(() => page.locator(".tab.active .tab-pinned").count()).toBe(1);
 
-    await page.locator(".tab.active").click({ button: "right" });
-    await page.locator(".context-menu", { hasText: "Rename" }).getByText("Rename").click();
-    await page.locator(".note-dialog-panel input").fill("Renamed Note");
+    await page.locator(".document-title").click();
+    await page.locator('.document-title[contenteditable="true"]').fill("Renamed Note");
     const renameResponse = page.waitForResponse(
       (response) => response.url().includes("/rename") && response.status() === 200,
     );
-    await page.locator(".note-dialog-panel .primary-button").click();
+    await page.locator('.document-title[contenteditable="true"]').press("Tab");
     await renameResponse;
-    await page.waitForSelector(".note-dialog-panel", { state: "detached" });
 
     await page.locator(".tab.active").click({ button: "right" });
     await page.locator(".context-menu", { hasText: "Delete" }).getByText("Delete").click();
@@ -602,7 +555,7 @@ describe("real server harness", () => {
     await page.close();
   });
 
-  it("shows tag pills in the note header, search rows, and recent list and ranks tag matches first", async () => {
+  it("hides frontmatter tags in recent search, search results, and the editor", async () => {
     const tagsDir = join(vaultOnePath, "tags");
     await cp(resolve("tests", "fixtures", "demo-vault", "tags"), tagsDir, { recursive: true });
     try {
@@ -618,12 +571,7 @@ describe("real server harness", () => {
 
       const recentRow = panel.locator('.recent-search-result[title="tags/pantry-inventory.md"]');
       await recentRow.waitFor({ state: "visible" });
-      await expect(recentRow.locator(".tag-pill-label").allTextContents()).resolves.toEqual([
-        "#baking",
-        "#Recipes",
-        "#pantry",
-      ]);
-      await expect(recentRow.locator(".search-result-tags-overflow").textContent()).resolves.toBe("+3");
+      await expect(recentRow.locator(".tag-pill, .search-result-tags").count()).resolves.toBe(0);
       const recentBoxes = await panel.locator(".recent-search-result").evaluateAll((nodes) =>
         nodes.map((node) => {
           const row = node.getBoundingClientRect();
@@ -639,18 +587,16 @@ describe("real server harness", () => {
         }
       }
 
-      await panel.locator(".command-input").fill("zephyr");
+      await panel.locator(".command-input").fill("Storm log");
       const rows = panel.locator(".search-result-row");
-      await expect.poll(() => rows.count()).toBe(2);
-      await expect(rows.first().locator(".tag-pill-label").allTextContents()).resolves.toEqual(["#zephyr"]);
+      await expect.poll(() => rows.count()).toBeGreaterThan(0);
+      await expect(rows.first().locator(".tag-pill, .search-result-tags").count()).resolves.toBe(0);
       await expect(rows.first().textContent()).resolves.toContain("Storm log");
-      await expect(rows.nth(1).textContent()).resolves.toContain("Field journal");
-      await expect(rows.nth(1).locator(".tag-pill").count()).resolves.toBe(0);
 
       await rows.first().click();
       await panel.waitFor({ state: "detached" });
-      await expect.poll(() => page.locator("#editor-mount .tag-row .tag-pill-label").allTextContents())
-        .toEqual(["#zephyr"]);
+      await expect(page.locator("#editor-mount .tag-row, #editor-mount .tag-frontmatter-toggle").count()).resolves.toBe(0);
+      await expect(page.locator("#editor-mount .cm-content").textContent()).resolves.not.toContain("tags:");
       await page.close();
     } finally {
       await rm(tagsDir, { recursive: true, force: true });
@@ -928,15 +874,13 @@ describe("real server harness", () => {
     await page.keyboard.press("Escape");
     await page.waitForSelector(".search-panel", { state: "detached" });
 
-    await page.locator(".tab.active").click({ button: "right" });
-    await page.locator(".context-menu", { hasText: "Rename" }).getByText("Rename").click();
-    await page.locator(".note-dialog-panel input").fill("Cross Engine Renamed");
+    await page.locator(".document-title").click();
+    await page.locator('.document-title[contenteditable="true"]').fill("Cross Engine Renamed");
     const renamed = page.waitForResponse(
       (response) => response.url().includes("/rename") && response.status() === 200,
     );
-    await page.locator(".note-dialog-panel .primary-button").click();
+    await page.locator('.document-title[contenteditable="true"]').press("Tab");
     await renamed;
-    await page.waitForSelector(".note-dialog-panel", { state: "detached" });
 
     const note = await loadNoteByPath(vaultOneId, "cross-engine-renamed.md");
     const winningContent = "# Cross Engine Renamed\n\ncanonical after restart\n";

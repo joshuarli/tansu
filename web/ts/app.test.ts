@@ -802,12 +802,7 @@ describe("v2 desktop shell", () => {
     editorMock.instances[0]!.simulateEdit("# Changed\n");
     expect(root.querySelector(".statusbar")?.textContent).toContain("Unsaved");
 
-    tab.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }));
-    root.querySelector<HTMLButtonElement>('[title="Rename note"]')?.click();
-    const title = root.querySelector<HTMLInputElement>(".note-dialog-panel input")!;
-    title.value = "Renamed";
-    title.dispatchEvent(new Event("input", { bubbles: true }));
-    root.querySelector<HTMLButtonElement>(".note-dialog-panel .primary-button")?.click();
+    await (editorMock.instances[0]!.config["onNoteTitleCommit"] as (request: { title: string; intent: "rename" }) => Promise<boolean>)({ title: "Renamed", intent: "rename" });
     await flushAsync();
     await openSearch(root);
 
@@ -1156,12 +1151,7 @@ describe("v2 desktop shell", () => {
     root.querySelector<HTMLButtonElement>('[title="Pin note"]')?.click();
     await flushAsync();
     expect(root.querySelector(".tab.active")?.textContent).toContain("One");
-    root.querySelector<HTMLButtonElement>(".tab.active")?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }));
-    root.querySelector<HTMLButtonElement>('[title="Rename note"]')?.click();
-    const title = root.querySelector<HTMLInputElement>(".note-dialog-panel input")!;
-    title.value = "Renamed";
-    title.dispatchEvent(new Event("input", { bubbles: true }));
-    root.querySelector<HTMLButtonElement>(".note-dialog-panel .primary-button")?.click();
+    await (editorMock.instances[0]!.config["onNoteTitleCommit"] as (request: { title: string; intent: "rename" }) => Promise<boolean>)({ title: "Renamed", intent: "rename" });
     await flushAsync();
     expect(client.renameNote).toHaveBeenCalledWith(note.noteId, expect.objectContaining({ path: "renamed.md", precondition: { baseRevision: 1, baseSourceHash: HASH_A, baseDiskHash: DISK_HASH } }));
     root.querySelector<HTMLButtonElement>(".tab.active")?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }));
@@ -1187,45 +1177,12 @@ describe("v2 desktop shell", () => {
     const { app, root } = mountApp(services);
     await app.boot();
 
-    await runCommand(root, "rename");
-    const title = root.querySelector<HTMLInputElement>(".note-dialog-panel input")!;
-    title.value = "Renamed";
-    title.dispatchEvent(new Event("input", { bubbles: true }));
-    root.querySelector<HTMLButtonElement>(".note-dialog-panel .primary-button")?.click();
-    await until(() => root.textContent?.includes("Action failed") === true);
+    const renamedSuccessfully = await (editorMock.instances[0]!.config["onNoteTitleCommit"] as (request: { title: string; intent: "rename" }) => Promise<boolean>)({ title: "Renamed", intent: "rename" });
+    expect(renamedSuccessfully).toBe(true);
 
     expect(client.renameNote).toHaveBeenCalledTimes(1);
     expect(root.querySelector<HTMLButtonElement>(".tab.active")?.title).toBe("Renamed");
     expect(memory.savedDrafts.get(note.noteId)?.titleDraft).toBe("Renamed");
-  });
-
-  it("cancels a rename on Escape and clears its pending title checkpoint", async () => {
-    vi.useFakeTimers();
-    const note = noteMeta("note-1", "one.md", "One");
-    const client = configureVault([note], workspaceSeed([
-      { noteId: note.noteId, title: note.title, path: note.path, cursorOffset: null, sourceMode: false },
-    ], note.noteId));
-    client.openNote.mockResolvedValue(documentFor(note, "# One\n"));
-    const { app, root } = mountApp();
-    app.bindGlobalEvents();
-    await app.boot();
-    await until(() => editorMock.instances[0]?.getSnapshot()?.source === "# One\n");
-
-    await runCommand(root, "rename");
-    const title = root.querySelector<HTMLInputElement>(".note-dialog-panel input")!;
-    title.value = "Uncommitted title";
-    title.dispatchEvent(new Event("input", { bubbles: true }));
-    await vi.advanceTimersByTimeAsync(250);
-    await until(() => memory.savedDrafts.get(note.noteId)?.titleDraft === "Uncommitted title");
-    expect(root.querySelector<HTMLButtonElement>(".tab.active")?.title).toBe("Uncommitted title");
-
-    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
-    await until(() => root.querySelector(".note-dialog-panel") === null);
-    await flushAsync();
-
-    expect(root.querySelector<HTMLButtonElement>(".tab.active")?.title).toBe("One");
-    expect(memory.savedDrafts.get(note.noteId)?.titleDraft).toBeNull();
-    expect(client.renameNote).not.toHaveBeenCalled();
   });
 
   it("persists and recovers a dirty closed tab through its workspace and journal", async () => {
@@ -1501,7 +1458,7 @@ describe("v2 desktop shell", () => {
     expect(memory.savedDrafts.has(note.noteId)).toBeFalsy();
   });
 
-  it("clamps settings, retains non-finite values, and updates tags in the editor", async () => {
+  it("clamps settings and retains non-finite values", async () => {
     const note = noteMeta("note-1", "one.md", "One", ["alpha"]);
     const client = configureVault([note], workspaceSeed([
       { noteId: note.noteId, title: note.title, path: note.path, cursorOffset: null, sourceMode: false },
@@ -1522,13 +1479,6 @@ describe("v2 desktop shell", () => {
     root.querySelector<HTMLButtonElement>(".settings-panel .primary-button")?.click();
     await flushAsync();
     expect(client.saveSettings.mock.calls[1]?.[0].settings).toMatchObject({ autosaveDelayMs: 150, undoStackMax: 20, imageWebpQuality: 1 });
-    (editorMock.instances[0]!.config["noteTags"] as EditorConfig["noteTags"])?.onAddTag();
-    const input = root.querySelector<HTMLInputElement>(".note-dialog-panel input")!;
-    input.value = "beta";
-    input.dispatchEvent(new Event("input", { bubbles: true }));
-    root.querySelector<HTMLFormElement>(".note-dialog-panel")?.dispatchEvent(new Event("submit", { cancelable: true }));
-    await flushAsync();
-    expect(editorMock.instances[0]?.updateTags).toHaveBeenCalledWith(["alpha", "beta"]);
   });
 
   it("clamps settings to the server's upper bounds before saving", async () => {
@@ -2574,7 +2524,6 @@ function createFakeEditor(initialConfig?: EditorConfig): FakeEditor {
       ),
     })),
     formatSelection: vi.fn(),
-    updateTags: vi.fn(() => true),
     undo: vi.fn(() => true),
     redo: vi.fn(() => true),
     simulateInactiveEdit(noteKey: string, source: string) {
