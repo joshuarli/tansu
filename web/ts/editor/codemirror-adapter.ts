@@ -955,15 +955,23 @@ export function createCodeMirrorEditor(container: HTMLElement, initialConfig: Ed
     return Math.min(96, Math.max(24, scroller.clientHeight * 0.18));
   }
 
+  function syncScrollFade(): void {
+    const scroller = view.scrollDOM;
+    scroller.classList.toggle("has-more-above", scroller.scrollTop > 1);
+  }
+
   function scheduleActiveHeadingSync(): void {
     if (activeHeadingFrame !== null) return;
     activeHeadingFrame = requestAnimationFrame(() => {
       activeHeadingFrame = null;
+      syncScrollFade();
       syncActiveHeading();
     });
   }
 
   view.scrollDOM.addEventListener("scroll", scheduleActiveHeadingSync, { passive: true });
+  window.addEventListener("resize", scheduleActiveHeadingSync, { passive: true });
+  scheduleActiveHeadingSync();
 
   function ensureActive(): SessionData | null {
     if (disposed) throw new TypeError("Editor has been disposed");
@@ -1210,7 +1218,9 @@ export function createCodeMirrorEditor(container: HTMLElement, initialConfig: Ed
       view.dom.removeEventListener("pointerdown", onEditorPointerDown);
       window.removeEventListener("pointerup", onPointerUp);
       window.removeEventListener("resize", scheduleToolbarSync);
+      window.removeEventListener("resize", scheduleActiveHeadingSync);
       window.removeEventListener("scroll", scheduleToolbarSync);
+      view.scrollDOM.removeEventListener("scroll", scheduleActiveHeadingSync);
       view.scrollDOM.removeEventListener("scroll", scheduleToolbarSync);
       selectionToolbar.remove();
       view.destroy();
