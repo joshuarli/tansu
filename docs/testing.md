@@ -4,7 +4,7 @@ The main targets are in the root `Makefile`:
 
 | Command | Coverage |
 | --- | --- |
-| `make check` | Generated API types, TypeScript type checking, and Rust compilation |
+| `make check` | Generated API types, TypeScript checking with tsrs, and Rust compilation |
 | `make test` | TypeScript and Rust unit tests |
 | `make test-e2e-chromium` | Browser end-to-end tests in Playwright Chromium |
 | `make test-e2e-webkit` | Browser end-to-end tests in Playwright WebKit |
