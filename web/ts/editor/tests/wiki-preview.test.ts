@@ -39,15 +39,14 @@ function hover(container: HTMLElement, target: string): HTMLElement {
   return link;
 }
 
-beforeEach(() => vi.useFakeTimers());
-
-afterEach(() => {
-  while (disposers.length > 0) disposers.pop()!();
-  document.querySelectorAll(".tansu-wiki-preview").forEach((card) => card.remove());
-  vi.useRealTimers();
-});
-
 describe("wiki link hover preview", () => {
+  beforeEach(() => vi.useFakeTimers());
+
+  afterEach(() => {
+    while (disposers.length > 0) disposers.pop()!();
+    document.querySelectorAll(".tansu-wiki-preview").forEach((card) => card.remove());
+    vi.useRealTimers();
+  });
   it("loads the resolved note after the hover delay and shows the card", async () => {
     const load = vi.fn(async () => "Preview body");
     const container = mounted("See [[root]]", load);
@@ -90,7 +89,7 @@ describe("wiki link hover preview", () => {
     await vi.advanceTimersByTimeAsync(300);
     link.dispatchEvent(new PointerEvent("pointerout", { bubbles: true }));
     await vi.advanceTimersByTimeAsync(350);
-    expect(signal?.aborted).toBe(true);
+    expect(signal?.aborted).toBeTruthy();
     finish("late");
     await settle();
     expect(document.querySelector(".tansu-wiki-preview")).toBeNull();

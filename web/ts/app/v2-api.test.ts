@@ -422,11 +422,12 @@ describe("v2 API client", () => {
       backlinks: [{ note: { noteId: "n2", path: "two.md", title: "Two" }, mentions: ["See [[One]]"] }],
       outgoing: [{ noteId: "n3", path: "three.md", title: "Three" }],
     };
+    // oxlint-disable-next-line vitest/prefer-strict-equal -- Compare decoded JSON without requiring object prototypes to match.
     await expect(vaultWithResponse(links).noteLinks("n1")).resolves.toEqual(links);
     await expect(vaultWithResponse({ ...links, outgoing: "x" }).noteLinks("n1"))
       .rejects.toBeInstanceOf(V2ProtocolError);
     await expect(vaultWithResponse({ noteId: "n1", preview: "Hello" }).notePreview("n1"))
-      .resolves.toEqual({ noteId: "n1", preview: "Hello" });
+      .resolves.toStrictEqual({ noteId: "n1", preview: "Hello" });
     await expect(vaultWithResponse({ noteId: "n9", preview: "Hello" }).notePreview("n1"))
       .rejects.toBeInstanceOf(V2ProtocolError);
   });

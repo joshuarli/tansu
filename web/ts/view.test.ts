@@ -390,8 +390,8 @@ describe("view rendering", () => {
     state.searchOpen = true;
     state.searchOverlayQuery = "no matching note";
     state.noteDialog = { kind: "delete", noteId: toNoteId("n1") };
-    let actions = actionSpies();
-    let root = render(state, actions);
+    const actions = actionSpies();
+    const root = render(state, actions);
     expect(root.querySelector(".search-result-row")).toBeNull();
     root.querySelector<HTMLButtonElement>(".danger-button")!.click();
     expectDispatched(actions, { type: "dialog.submit" });

@@ -12,6 +12,11 @@ The main targets are in the root `Makefile`:
 | `make test-loupe-browser` | Loupe reader UI tests in Playwright Chromium |
 | `make test-e2e-loupe` | Loupe-to-Tansu import integration in a fixture server |
 
+`make test` installs the locked frontend dependencies before building and
+running tests. Install the required Rust, Deno, Node, and npm toolchains first.
+For direct `deno task build` use, run `make setup` once. See [Development](development.md)
+for the setup steps and browser dependencies.
+
 Install browser dependencies with `deno task playwright:install`; see
 [Development](development.md) for toolchain setup.
 

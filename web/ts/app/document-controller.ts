@@ -60,7 +60,7 @@ export class DocumentController {
 
   track<T>(mutation: Promise<T>): Promise<T> {
     const tracked = mutation.finally(() => this.mutations.delete(tracked));
-    tracked.catch(() => {});
+    tracked.catch(() => undefined);
     this.mutations.add(tracked);
     return tracked;
   }
@@ -85,7 +85,7 @@ export class DocumentController {
       session.close();
       return Promise.resolve();
     }
-    return this.track(session.save().finally(() => session.close())).then(() => {});
+    return this.track(session.save().finally(() => session.close())).then(() => undefined);
   }
 
   ensureLoaded(start: () => Promise<void>): Promise<void> {

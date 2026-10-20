@@ -1,5 +1,5 @@
 import type { Extension } from "@codemirror/state";
-import { EditorView, ViewPlugin, type ViewUpdate } from "@codemirror/view";
+import { ViewPlugin, type EditorView, type ViewUpdate } from "@codemirror/view";
 import type { WikiNote } from "./wiki-target.js";
 
 const HOVER_DELAY_MS = 300;
@@ -90,10 +90,14 @@ export function wikiPreviewCards(options: WikiPreviewOptions): Extension {
       private open(note: WikiNote, anchor: HTMLElement) {
         const controller = new AbortController();
         this.controller = controller;
-        options.load(note.noteId, controller.signal).then((preview) => {
-          if (controller.signal.aborted || this.anchor !== anchor) return;
-          this.render(note, preview, anchor);
-        }, () => undefined);
+        // oxlint-disable-next-line promise/catch-or-return, promise/prefer-catch -- Keep load rejection separate from render errors.
+        void options.load(note.noteId, controller.signal).then(
+          (preview) => {
+            if (controller.signal.aborted || this.anchor !== anchor) return;
+            this.render(note, preview, anchor);
+          },
+          () => undefined,
+        );
       }
 
       private render(note: WikiNote, preview: string, anchor: HTMLElement) {

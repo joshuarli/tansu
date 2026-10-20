@@ -1,6 +1,6 @@
 import { syntaxTree } from "@codemirror/language";
 import { Prec, StateEffect, StateField, type EditorState, type Extension } from "@codemirror/state";
-import { EditorView, ViewPlugin, keymap, type ViewUpdate } from "@codemirror/view";
+import { ViewPlugin, keymap, type EditorView, type ViewUpdate } from "@codemirror/view";
 import { frontmatterRange } from "./frontmatter.js";
 import { readOnlyFacet } from "./vendor/atomic/read-only.js";
 
@@ -44,7 +44,7 @@ export const SLASH_BLOCKS: readonly SlashBlock[] = [
     cursor: 2,
     separatedFromParagraph: false,
   },
-  { id: "divider", label: "Divider", keywords: "hr rule line", markdown: "---\n", cursor: 4, separatedFromParagraph: true },
+  { id: "divider", label: "Divider", keywords: "hr rule line", markdown: "***\n", cursor: 4, separatedFromParagraph: true },
 ];
 
 export function filterSlashBlocks(query: string): SlashBlock[] {

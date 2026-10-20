@@ -89,6 +89,6 @@ function recentNotes(state: State): V2NoteMeta[] {
     }
   }
   const rest = [...state.notes.values()].filter((note) => !seen.has(note.noteId))
-    .sort((left, right) => right.updatedAtMs - left.updatedAtMs);
+    .toSorted((left, right) => right.updatedAtMs - left.updatedAtMs);
   return [...notes, ...rest];
 }

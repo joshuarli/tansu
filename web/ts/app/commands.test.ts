@@ -68,7 +68,7 @@ describe("omnibox modes", () => {
     const state = createState(vaultId("vault-a"));
     state.commandFilter = ">revis";
     expect(commandItems(state).map((item) => item.id)).toStrictEqual(["revisions"]);
-    expect(paletteEntries(state, commandItems(state)).every((entry) => entry.kind === "command")).toBe(true);
+    expect(paletteEntries(state, commandItems(state)).every((entry) => entry.kind === "command")).toBeTruthy();
   });
 
   it("shows recent notes before actions when the query is empty", () => {

@@ -1178,7 +1178,7 @@ describe("v2 desktop shell", () => {
     await app.boot();
 
     const renamedSuccessfully = await (editorMock.instances[0]!.config["onNoteTitleCommit"] as (request: { title: string; intent: "rename" }) => Promise<boolean>)({ title: "Renamed", intent: "rename" });
-    expect(renamedSuccessfully).toBe(true);
+    expect(renamedSuccessfully).toBeTruthy();
 
     expect(client.renameNote).toHaveBeenCalledTimes(1);
     expect(root.querySelector<HTMLButtonElement>(".tab.active")?.title).toBe("Renamed");
@@ -1706,7 +1706,7 @@ describe("v2 desktop shell", () => {
       { noteId: note.noteId, title: note.title, path: note.path, cursorOffset: null, sourceMode: false },
     ], note.noteId));
     const imageCount = 12;
-    client.openNote.mockResolvedValue(documentFor(note, Array.from({ length: imageCount }, (_, index) => `![[z-images/p${index}.webp]]`).join("\n") + "\n"));
+    client.openNote.mockResolvedValue(documentFor(note, `${Array.from({ length: imageCount }, (_, index) => `![[z-images/p${index}.webp]]`).join("\n")}\n`));
     let inFlight = 0;
     let maxInFlight = 0;
     client.loadAsset.mockImplementation(async () => {
@@ -1750,7 +1750,7 @@ describe("v2 desktop shell", () => {
     await until(() => created.length === 3);
     await flushAsync();
     await app.dispose();
-    expect(revoked.sort()).toEqual([...created].sort());
+    expect(revoked.toSorted()).toStrictEqual([...created].toSorted());
   });
 
   it("uploads pasted images through the current vault and reports status", async () => {
@@ -1836,8 +1836,8 @@ describe("v2 desktop shell", () => {
     await vi.advanceTimersByTimeAsync(150);
     await flushAsync();
 
-    expect(root.querySelector('.tab[title="One"]')?.textContent).toContain("•");
-    expect(root.querySelector('.tab[title="Two"]')?.textContent).not.toContain("•");
+    expect(root.querySelector('.tab[title="One"]')?.classList.contains("tab-dirty")).toBeTruthy();
+    expect(root.querySelector('.tab[title="Two"]')?.classList.contains("tab-dirty")).toBeFalsy();
     await vi.advanceTimersByTimeAsync(900);
     await flushAsync();
     expect(client.saveNote).toHaveBeenCalledTimes(1);
@@ -2147,8 +2147,8 @@ describe("v2 desktop shell", () => {
       });
       await until(() => wikiLink(root)?.classList.contains("cm-atomic-wiki-link-missing") === true);
       const [oldName, newName] = [...root.querySelectorAll<HTMLElement>("[data-wiki-link-target]")];
-      expect(oldName!.classList.contains("cm-atomic-wiki-link-missing")).toBe(true);
-      expect(newName!.classList.contains("cm-atomic-wiki-link-resolved")).toBe(true);
+      expect(oldName!.classList.contains("cm-atomic-wiki-link-missing")).toBeTruthy();
+      expect(newName!.classList.contains("cm-atomic-wiki-link-resolved")).toBeTruthy();
 
       click(oldName!);
       await flushAsync();
@@ -2763,12 +2763,12 @@ describe("extension import", () => {
     });
     await until(() => postedMessages(post, "import.result").length === 1);
 
-    expect(order).toEqual(["upload", "create"]);
+    expect(order).toStrictEqual(["upload", "create"]);
     expect(client.createNote.mock.calls[0]?.[0]).toMatchObject({
       path: "imported.md",
       content: "# Imported\n\n![[a.webp]]\n![c](https://example.com/1.webp)\n",
     });
-    expect(postedMessages(post, "import.result")[0]).toEqual({
+    expect(postedMessages(post, "import.result")[0]).toStrictEqual({
       channel: "tansu",
       version: 1,
       type: "import.result",
@@ -2860,7 +2860,7 @@ describe("asset url cache", () => {
     const resolveUrl = (name: string): string | null => {
       const editor = editorMock.instances[0]!;
       const configs = [editor.config, ...vi.mocked(editor.updateConfiguration).mock.calls.map((call) => call[0] as Record<string, unknown>)];
-      const extensions = configs.reverse().find((config) => Array.isArray(config["extensions"]))!["extensions"] as
+      const extensions = configs.toReversed().find((config) => Array.isArray(config["extensions"]))!["extensions"] as
         { kind: string; resolveUrl?: (name: string) => string | null }[];
       return extensions.find((extension) => extension.kind === "wiki-images")!.resolveUrl!(name);
     };
@@ -2888,7 +2888,7 @@ describe("asset url cache", () => {
   });
 
   it("evicts past 64 entries without leaving a revoked url resolvable", async () => {
-    const many = Array.from({ length: 70 }, (_, index) => `![[z-images/p${index}.webp]]`).join("\n") + "\n";
+    const many = `${Array.from({ length: 70 }, (_, index) => `![[z-images/p${index}.webp]]`).join("\n")}\n`;
     const { created, revoked, resolveUrl, switchTo } = await mountTwoTabs("![[z-images/a.webp]]\n", many);
     await until(() => resolveUrl("z-images/a.webp") !== null);
 
@@ -2932,7 +2932,7 @@ describe("saved tab load completions", () => {
     await oldBoot;
     await flushAsync();
 
-    expect(memory.cached.has(first.noteId)).toBe(false);
+    expect(memory.cached.has(first.noteId)).toBeFalsy();
     expect(root.textContent).not.toContain("Old vault body");
     expect(root.querySelector('.tab[title="First"]')).toBeNull();
   });
@@ -2955,7 +2955,7 @@ describe("saved tab load completions", () => {
     await booting;
     await flushAsync();
 
-    expect(memory.cached.has(first.noteId)).toBe(false);
+    expect(memory.cached.has(first.noteId)).toBeFalsy();
     expect(root.querySelector('.tab[title="First"]')).toBeNull();
   });
 

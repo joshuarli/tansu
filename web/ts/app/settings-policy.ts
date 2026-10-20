@@ -8,7 +8,7 @@ export const SETTINGS_LIMITS = {
   searchWeight: { min: 0, max: 1000 },
 } as const;
 
-const SINGLE_FOLDER_NAME_MESSAGE = "Excluded folders must be single folder names separated by commas, without /, \\, or . and .. entries.";
+const SINGLE_FOLDER_NAME_MESSAGE = String.raw`Excluded folders must be single folder names separated by commas, without /, \, or . and .. entries.`;
 
 function clampedOr(fallback: number, value: number, { min, max }: { min: number; max: number }): number {
   return Number.isFinite(value) ? Math.min(max, Math.max(min, value)) : fallback;

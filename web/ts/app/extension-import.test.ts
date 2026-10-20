@@ -40,13 +40,14 @@ describe("decodeImportMessage", () => {
     expect(decodeImportMessage(null)).toBeNull();
     expect(decodeImportMessage({ channel: "other", type: "import.request" })).toBeNull();
     expect(decodeImportMessage(request({ requestId: 3 }))).toBeNull();
-    expect(decodeImportMessage({ channel: "tansu", type: "import.ping" })).toEqual({ kind: "ping" });
+    expect(decodeImportMessage({ channel: "tansu", type: "import.ping" })).toStrictEqual({ kind: "ping" });
   });
 
   it.each([
     ["version", { version: 2 }],
     ["title", { title: 1 }],
     ["markdown", { markdown: null }],
+    // oxlint-disable-next-line eslint/no-script-url -- This invalid scheme is the input the decoder must reject.
     ["sourceUrl scheme", { sourceUrl: "javascript:alert(1)" }],
     ["images shape", { images: {} }],
     ["image id", { images: [{ ...image(0), id: 5 }] }],
@@ -71,9 +72,9 @@ describe("decodeImportMessage", () => {
 describe("isTrustedSender", () => {
   const page = { location: { origin: "https://tansu.test" } };
   it("requires the same window and origin", () => {
-    expect(isTrustedSender({ source: page, origin: "https://tansu.test" }, page)).toBe(true);
-    expect(isTrustedSender({ source: {}, origin: "https://tansu.test" }, page)).toBe(false);
-    expect(isTrustedSender({ source: page, origin: "https://evil.test" }, page)).toBe(false);
+    expect(isTrustedSender({ source: page, origin: "https://tansu.test" }, page)).toBeTruthy();
+    expect(isTrustedSender({ source: {}, origin: "https://tansu.test" }, page)).toBeFalsy();
+    expect(isTrustedSender({ source: page, origin: "https://evil.test" }, page)).toBeFalsy();
   });
 });
 
@@ -146,15 +147,15 @@ describe("localizeImages", () => {
 
   it("treats conversion and upload errors as per-image failures but propagates aborts", async () => {
     const failing = host({ convertToWebp: vi.fn(async () => { throw new Error("no"); }) });
-    expect(await localizeImages([image(0, png)], failing, new AbortController().signal)).toEqual([null]);
+    await expect(localizeImages([image(0, png)], failing, new AbortController().signal)).resolves.toStrictEqual([null]);
     const controller = new AbortController();
     const aborting = host({ uploadImage: vi.fn(async () => { controller.abort(); throw new Error("aborted"); }) });
-    await expect(localizeImages([image(0, png)], aborting, controller.signal)).rejects.toThrow();
+    await expect(localizeImages([image(0, png)], aborting, controller.signal)).rejects.toThrow("aborted");
   });
 
   it("rejects an upload result that is not a WebP asset", async () => {
     const bad = host({ uploadImage: vi.fn(async () => ({ name: "elsewhere/a.png", markdown: "![[a.png]]" })) });
-    expect(await localizeImages([image(0, png)], bad, new AbortController().signal)).toEqual([null]);
+    await expect(localizeImages([image(0, png)], bad, new AbortController().signal)).resolves.toStrictEqual([null]);
   });
 });
 
