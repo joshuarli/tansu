@@ -621,6 +621,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "gen-api-types"
+version = "0.1.0"
+dependencies = [
+ "tansu-api-types",
+ "ts-rs",
+]
+
+[[package]]
 name = "getrandom"
 version = "0.3.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1475,10 +1483,20 @@ dependencies = [
  "rustix",
  "serde",
  "serde_json",
+ "tansu-api-types",
  "tansu-search",
  "tansu-webauthn",
  "tantivy",
  "tempfile",
+ "ts-rs",
+]
+
+[[package]]
+name = "tansu-api-types"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "tansu-search-policy",
  "ts-rs",
 ]
 
@@ -1488,11 +1506,16 @@ version = "0.1.0"
 dependencies = [
  "nucleo-matcher",
  "regex",
+ "tansu-search-policy",
  "tantivy",
  "tempfile",
  "thiserror",
  "unicode-normalization",
 ]
+
+[[package]]
+name = "tansu-search-policy"
+version = "0.1.0"
 
 [[package]]
 name = "tansu-webauthn"

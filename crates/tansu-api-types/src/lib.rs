@@ -89,7 +89,8 @@ pub struct Settings {
 pub const AUTOSAVE_DELAY_MS_RANGE: RangeInclusive<u64> = 150..=3_600_000;
 pub const UNDO_STACK_MAX_RANGE: RangeInclusive<usize> = 20..=10_000;
 pub const IMAGE_WEBP_QUALITY_RANGE: RangeInclusive<f32> = 0.1..=1.0;
-pub const SEARCH_WEIGHT_RANGE: RangeInclusive<f32> = 0.0..=tansu_search::SearchWeights::MAX;
+pub const SEARCH_WEIGHT_RANGE: RangeInclusive<f32> =
+    0.0..=tansu_search_policy::SearchWeightPolicy::MAX;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InvalidSettings(String);
@@ -214,14 +215,14 @@ pub struct V2AppSettingsResponse {
 
 impl Default for Settings {
     fn default() -> Self {
-        let weights = tansu_search::SearchWeights::default();
+        let weights = tansu_search_policy::SearchWeightPolicy::DEFAULT;
         Self {
             excluded_folders: Vec::new(),
-            search_title_weight: weights.title(),
-            search_heading_weight: weights.headings(),
-            search_tag_weight: weights.tags(),
-            search_content_weight: weights.content(),
-            recency_boost: weights.recency_boost(),
+            search_title_weight: weights.title,
+            search_heading_weight: weights.headings,
+            search_tag_weight: weights.tags,
+            search_content_weight: weights.content,
+            recency_boost: weights.recency_boost,
             autosave_delay_ms: 900,
             undo_stack_max: 200,
             image_webp_quality: 0.85,

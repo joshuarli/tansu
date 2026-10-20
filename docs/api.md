@@ -1,6 +1,6 @@
 # API
 
-Rust DTOs in `src/api_types.rs` are the source of truth. Generate TypeScript with
+Rust DTOs in `crates/tansu-api-types/src/lib.rs` are the source of truth. Generate TypeScript with
 `make types`; never edit `web/ts/types.generated.ts` by hand.
 The transport accepts HTTP/1 and cleartext HTTP/2 prior knowledge; it
 does not support h2c upgrades.
@@ -35,7 +35,7 @@ server to apply changed vaults or auth policy. In authenticated mode, the write
 requires a session and CSRF token.
 
 The current route and method list is in [HTTP dispatch](../src/http.rs). Request
-and response DTOs are in [API types](../src/api_types.rs).
+and response DTOs are in [API types](../crates/tansu-api-types/src/lib.rs).
 
 `/api/v2/bootstrap` returns only server identity and vault IDs. Workspace
 sessions, pins, and recents are stored in the browser's private workspace.
@@ -236,6 +236,6 @@ app can determine whether to show login.
 ### Errors
 
 Errors use `V2ApiErrorResponse` and a `code` discriminator. Error kinds and
-status mapping are defined in `src/api_types.rs` and `src/http.rs`; the client
+status mapping are defined in `crates/tansu-api-types/src/lib.rs` and `src/http.rs`; the client
 switches on the generated `V2ApiErrorKind`. `internal` contains a request ID,
 not an implementation error string.
