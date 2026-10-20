@@ -6,8 +6,10 @@ DEPLOY_HOST ?= ubuntu@oracle
 SQLITE_STATIC_DIR ?= $(CURDIR)/.work/sqlite-static
 AUTH_DRILL_BIN ?= $(CURDIR)/.work/dist/x86_64-unknown-linux-musl/tansu
 
-dev:
-	pnpm install --frozen-lockfile
+setup:
+	npm exec --yes --package=pnpm@12.13.0 -- pnpm install --frozen-lockfile
+
+dev: setup
 	TANSU_WEB_HMR=1 deno task build:dev
 	$(MAKE) types-generated
 	node scripts/dev-fixture.mjs "$(DEV_DIR)"
@@ -16,8 +18,7 @@ dev:
 	trap 'kill -TERM "$$watcher" 2>/dev/null; wait "$$watcher" 2>/dev/null' EXIT INT TERM; \
 	TANSU_WEB_HMR=1 TANSU_LOGS=pretty XDG_CONFIG_HOME="$(DEV_CONFIG_HOME)" XDG_DATA_HOME="$(DEV_DATA_HOME)" cargo run --bin $(NAME) -- --port 3000
 
-dev-config:
-	pnpm install --frozen-lockfile
+dev-config: setup
 	deno task build:dev
 	node scripts/dev-fixture.mjs "$(DEV_DIR)"
 
@@ -52,7 +53,7 @@ types:
 	deno task build
 	cargo run --quiet --bin gen-api-types
 
-types-check:
+types-check: setup
 	deno task build
 	cargo run --quiet --bin gen-api-types -- --check
 
@@ -65,7 +66,7 @@ ts: types
 
 test: types-check test-ts test-rs
 
-test-ts:
+test-ts: setup
 	deno task test
 
 test-e2e-chromium:
@@ -153,4 +154,4 @@ bench-full:
 	TMPDIR="$(CURDIR)/.work/tmp" MD_WYSIWYG_BENCH=1 deno task test web/ts/editor/tests/large-note-bench.test.ts
 	$(PERF_GATE_AFTER)
 
-.PHONY: auth-recovery-drill bench bench-full build-linux-musl-aarch64 build-linux-musl-docker build-linux-musl-x86_64 coverage coverage-html deploy dev dev-config check lint loupe test-loupe-browser test-package types types-check types-generated ts test test-e2e-chromium test-e2e-webkit test-e2e-loupe test-rs test-sqlite-static test-acceptance
+.PHONY: auth-recovery-drill bench bench-full build-linux-musl-aarch64 build-linux-musl-docker build-linux-musl-x86_64 coverage coverage-html deploy dev dev-config check lint loupe setup test-loupe-browser test-package types types-check types-generated ts test test-e2e-chromium test-e2e-webkit test-e2e-loupe test-rs test-sqlite-static test-acceptance

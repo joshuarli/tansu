@@ -1,6 +1,6 @@
 import { syntaxTree } from "@codemirror/language";
 import type { EditorState, Extension, Range } from "@codemirror/state";
-import { Decoration, EditorView, ViewPlugin, WidgetType, type DecorationSet, type ViewUpdate } from "@codemirror/view";
+import { Decoration, ViewPlugin, WidgetType, type DecorationSet, type EditorView, type ViewUpdate } from "@codemirror/view";
 import { frontmatterRange } from "./frontmatter.js";
 import { readOnlyFacet } from "./vendor/atomic/read-only.js";
 

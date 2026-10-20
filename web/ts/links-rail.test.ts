@@ -83,7 +83,7 @@ describe("links rail", () => {
 
     state.noteLinks = { noteId: "n1", phase: "ready", links };
     const collapsed = renderLinksRail(state, vi.fn())!;
-    expect(collapsed.classList.contains("collapsed")).toBe(true);
+    expect(collapsed.classList.contains("collapsed")).toBeTruthy();
     expect(collapsed.querySelector(".link-rail-toggle")?.textContent).toBe("Links · 2");
     expect(collapsed.querySelector(".link-card")).toBeNull();
 

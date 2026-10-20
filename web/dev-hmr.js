@@ -1,3 +1,4 @@
+(() => {
 let buildId;
 
 function assetUrls(document, selector) {
@@ -71,3 +72,4 @@ async function checkBuild() {
 }
 
 checkBuild();
+})();

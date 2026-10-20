@@ -66,7 +66,7 @@ describe("applySettingsForm", () => {
     expect(next.searchTitleWeight).toBe(3);
   });
 
-  it.each(["a/b", "a\\b", "..", ".", "ok, nested/dir", "a\0b"])("rejects the excluded folder entry %j", (text) => {
+  it.each(["a/b", String.raw`a\b`, "..", ".", "ok, nested/dir", "a\0b"])("rejects the excluded folder entry %j", (text) => {
     expect(excludedFoldersProblem(text)).toMatch(/single folder name/);
     expect(() => applySettingsForm(current, { ...form, excludedFoldersText: text })).toThrow(/single folder name/);
   });

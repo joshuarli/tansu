@@ -106,14 +106,14 @@ describe("real server harness", () => {
     } finally {
       try {
         await stopFixtureServer();
-        if (serverArtifactHash !== "" && artifactHash(serverBinaryPath) !== serverArtifactHash) {
-          throw new Error(`server artifact changed while the suite ran: ${serverBinaryPath}`);
-        }
       } finally {
         if (fixtureRoot !== undefined) {
           await rm(fixtureRoot, { recursive: true, force: true });
         }
       }
+    }
+    if (serverArtifactHash !== "" && artifactHash(serverBinaryPath) !== serverArtifactHash) {
+      throw new Error(`server artifact changed while the suite ran: ${serverBinaryPath}`);
     }
   });
 
@@ -1009,7 +1009,7 @@ describe("real server harness", () => {
     await expect.poll(() => otherContext.locator("#editor-mount .cm-content").textContent()).toContain(
       "written just before the tab closed",
     );
-    expect(await readVaultFile("acceptance-close-tab.md")).toBe(content);
+    await expect(readVaultFile("acceptance-close-tab.md")).resolves.toBe(content);
     await otherContext.close();
     await page.close();
   });
@@ -1024,7 +1024,7 @@ describe("real server harness", () => {
 
     await page.locator("#editor-mount .cm-content").fill(content);
     const route = await heldSave;
-    expect(await readVaultFile("acceptance-restart.md")).not.toBe(content);
+    await expect(readVaultFile("acceptance-restart.md")).resolves.not.toBe(content);
     await stopFixtureServer();
     await startFixtureServer();
     const saved = page.waitForResponse((response) =>
@@ -1073,7 +1073,7 @@ describe("real server harness", () => {
     expect(rejection.outcome.state).toBe("conflict");
     expect(rejection.outcome.draft?.draftId).toBeDefined();
     await page.waitForSelector(".conflict-banner");
-    expect(await readVaultFile("acceptance-conflict.md")).toBe(winningContent);
+    await expect(readVaultFile("acceptance-conflict.md")).resolves.toBe(winningContent);
 
     await page.locator('.conflict-banner [title="View conflict draft"]').click();
     await expect.poll(() => page.locator(".revisions-panel .diff-preview").textContent()).toBe(draftContent);
@@ -1262,15 +1262,15 @@ describe("real server harness", () => {
     expireNow();
 
     await page.waitForSelector(".auth-gate");
-    expect(await readVaultFile("acceptance-auth-upload.md")).not.toContain("![[");
+    await expect(readVaultFile("acceptance-auth-upload.md")).resolves.not.toContain("![[");
     expired = false;
     await page.reload();
     await page.waitForSelector(".main");
     await expect.poll(() => page.locator("#editor-mount .cm-content").textContent()).toContain(
       "typed during the upload",
     );
-    expect(await page.locator("#editor-mount .cm-content").textContent()).not.toContain("![[");
-    expect(await readVaultFile("acceptance-auth-upload.md")).not.toContain("![[");
+    await expect(page.locator("#editor-mount .cm-content").textContent()).resolves.not.toContain("![[");
+    await expect(readVaultFile("acceptance-auth-upload.md")).resolves.not.toContain("![[");
     await page.close();
   }, 120_000);
 

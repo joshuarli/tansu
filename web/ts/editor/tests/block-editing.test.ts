@@ -35,14 +35,13 @@ function press(view: EditorView, key: string): void {
   view.contentDOM.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
 }
 
-afterEach(() => {
-  while (disposers.length > 0) disposers.pop()!();
-});
-
 describe("block reorder", () => {
+  afterEach(() => {
+    while (disposers.length > 0) disposers.pop()!();
+  });
   it("moves a paragraph down past a heading in one undoable transaction", () => {
     const { view, editor, session } = mounted("alpha\n\n# Title\n\nbeta\n");
-    expect(moveBlock(view, 0, 2)).toBe(true);
+    expect(moveBlock(view, 0, 2)).toBeTruthy();
     expect(editor.getSessionSnapshot(session).source).toBe("# Title\n\nalpha\n\nbeta\n");
     undo(view);
     expect(editor.getSessionSnapshot(session).source).toBe("alpha\n\n# Title\n\nbeta\n");
@@ -50,33 +49,33 @@ describe("block reorder", () => {
 
   it("moves the last block to the top and a block to the end", () => {
     const { view, editor, session } = mounted("one\n\ntwo\n\nthree");
-    expect(moveBlock(view, 2, 0)).toBe(true);
+    expect(moveBlock(view, 2, 0)).toBeTruthy();
     expect(editor.getSessionSnapshot(session).source).toBe("three\n\none\n\ntwo");
-    expect(moveBlock(view, 0, 3)).toBe(true);
+    expect(moveBlock(view, 0, 3)).toBeTruthy();
     expect(editor.getSessionSnapshot(session).source).toBe("one\n\ntwo\n\nthree");
   });
 
   it("reorders list items and code blocks as units", () => {
     const { view, editor, session } = mounted("- a\n- b\n  - nested\n- c\n\n```ts\nx\n```\n");
-    expect(moveBlock(view, 1, 3)).toBe(true);
+    expect(moveBlock(view, 1, 3)).toBeTruthy();
     expect(editor.getSessionSnapshot(session).source).toBe("- a\n- c\n- b\n  - nested\n\n```ts\nx\n```\n");
-    expect(moveBlock(view, 3, 0)).toBe(true);
-    expect(editor.getSessionSnapshot(session).source.startsWith("```ts\nx\n```\n\n- a")).toBe(true);
+    expect(moveBlock(view, 3, 0)).toBeTruthy();
+    expect(editor.getSessionSnapshot(session).source.startsWith("```ts\nx\n```\n\n- a")).toBeTruthy();
   });
 
   it("leaves frontmatter in place and ignores a drop onto the block's own edges", () => {
     const source = "---\ntags: [a]\n---\n\none\n\ntwo\n";
     const { view, editor, session } = mounted(source);
-    expect(moveBlock(view, 0, 0)).toBe(false);
-    expect(moveBlock(view, 0, 1)).toBe(false);
-    expect(moveBlock(view, 1, 0)).toBe(true);
+    expect(moveBlock(view, 0, 0)).toBeFalsy();
+    expect(moveBlock(view, 0, 1)).toBeFalsy();
+    expect(moveBlock(view, 1, 0)).toBeTruthy();
     expect(editor.getSessionSnapshot(session).source).toBe("---\ntags: [a]\n---\n\ntwo\n\none\n");
   });
 
   it("refuses to reorder and shows no handle in a read-only session", () => {
     const source = "one\n\ntwo\n";
     const { view, editor, session, container } = mounted(source, true);
-    expect(moveBlock(view, 0, 2)).toBe(false);
+    expect(moveBlock(view, 0, 2)).toBeFalsy();
     expect(editor.getSessionSnapshot(session).source).toBe(source);
     view.contentDOM.dispatchEvent(new MouseEvent("mousemove", { bubbles: true, clientX: 5, clientY: 5 }));
     expect(container.querySelector(".tansu-block-grip.is-visible")).toBeNull();
@@ -84,6 +83,9 @@ describe("block reorder", () => {
 });
 
 describe("slash menu", () => {
+  afterEach(() => {
+    while (disposers.length > 0) disposers.pop()!();
+  });
   it("opens at line start, filters, and inserts the selected block", () => {
     const { view, container, editor, session } = mounted("");
     type(view, "/");
@@ -112,7 +114,7 @@ describe("slash menu", () => {
       callout: "> [!note]\n> ",
       "code block": "```\n\n```",
       table: "| Column | Column |\n| --- | --- |\n|  |  |",
-      divider: "---\n",
+      divider: "***\n",
     };
     for (const [query, markdown] of Object.entries(expected)) {
       const { view, editor, session } = mounted("");
@@ -127,7 +129,7 @@ describe("slash menu", () => {
     view.dispatch({ selection: { anchor: 5 } });
     type(view, "/divider");
     press(view, "Enter");
-    expect(editor.getSessionSnapshot(session).source).toBe("text\n\n---\n");
+    expect(editor.getSessionSnapshot(session).source).toBe("text\n\n***\n");
   });
 
   it("escape closes the menu and leaves the typed slash", () => {

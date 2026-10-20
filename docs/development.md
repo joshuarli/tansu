@@ -3,13 +3,18 @@
 ## Set up
 
 Install the Rust toolchain in `rust-toolchain.toml`, Deno 2, Node 26 or later,
-and pnpm 12.13.0. `make dev` installs the locked frontend dependencies. Install
-Playwright Chromium and WebKit for browser tests:
+and npm. Install the locked frontend dependencies and Playwright Chromium and
+WebKit for browser tests:
 
 ```sh
-pnpm install --frozen-lockfile
+make setup
 deno task playwright:install
 ```
+
+`make setup` runs pnpm 12.13.0 through npm and installs the frozen lockfile.
+Run it before `deno task build` or other direct Deno tasks that use
+`node_modules`. `make test`, `make dev`, and `make dev-config` run this setup
+automatically.
 
 The supported Rust targets are `aarch64-apple-darwin`,
 `x86_64-unknown-linux-musl`, and `aarch64-unknown-linux-musl`.

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { cp, mkdtemp, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { describe, it } from "vitest";
 
@@ -9,6 +9,7 @@ const REPO_ROOT = resolve(import.meta.dirname, "..");
 const VENDOR_ROOT = resolve(REPO_ROOT, "web/ts/editor/vendor/jsquash-webp");
 
 async function vendorTree(changes) {
+  await mkdir(join(REPO_ROOT, ".work", "tmp"), { recursive: true });
   const root = await mkdtemp(join(REPO_ROOT, ".work", "tmp", "webp-encoder-"));
   await cp(VENDOR_ROOT, root, { recursive: true });
   for (const [name, content] of Object.entries(changes)) {

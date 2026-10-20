@@ -11,14 +11,6 @@ const PARAGRAPHS = 200;
 
 const views: EditorView[] = [];
 
-afterEach(() => {
-  for (const view of views.splice(0)) {
-    view.destroy();
-    view.dom.remove();
-  }
-  vi.restoreAllMocks();
-});
-
 function paragraphs(count: number): string {
   return Array.from({ length: count }, (_, index) => `Paragraph ${index} with *emphasis* and text.`).join("\n\n");
 }
@@ -36,7 +28,7 @@ function countPreviewWork(run: () => void): { blankLineScans: number } {
   const work = { blankLineScans: 0 };
   const resolveInner = Tree.prototype.resolveInner;
   vi.spyOn(Tree.prototype, "resolveInner").mockImplementation(function (this: Tree, ...args: Parameters<Tree["resolveInner"]>) {
-    if ((new Error().stack ?? "").includes("inline-preview.ts")) work.blankLineScans++;
+    if ((new Error("count preview work").stack ?? "").includes("inline-preview.ts")) work.blankLineScans++;
     return resolveInner.apply(this, args);
   });
   run();
@@ -44,6 +36,14 @@ function countPreviewWork(run: () => void): { blankLineScans: number } {
 }
 
 describe("inline preview caching", () => {
+  afterEach(() => {
+    for (const view of views.splice(0)) {
+      view.destroy();
+      view.dom.remove();
+    }
+    vi.restoreAllMocks();
+  });
+
   it("does not rescan blank lines when only the selection changes", () => {
     const source = paragraphs(PARAGRAPHS);
     const view = mountView(source);

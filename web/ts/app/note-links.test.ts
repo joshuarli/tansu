@@ -29,7 +29,7 @@ describe("note links loader", () => {
 
     loader.load("a");
     loader.load("b");
-    expect(signals.get("a")!.aborted).toBe(true);
+    expect(signals.get("a")!.aborted).toBeTruthy();
     requests.get("a")!.resolve(empty);
     requests.get("b")!.resolve(empty);
     await Promise.resolve();

@@ -18,7 +18,8 @@ export function createNoteLinksLoader(
       pending?.abort();
       const controller = new AbortController();
       pending = controller;
-      fetchLinks(noteId, controller.signal).then(
+      // oxlint-disable-next-line promise/catch-or-return, promise/prefer-catch -- Keep callback errors out of the fetch rejection handler.
+      void fetchLinks(noteId, controller.signal).then(
         (links) => {
           if (pending === controller) onOutcome({ noteId, phase: "ready", links });
         },

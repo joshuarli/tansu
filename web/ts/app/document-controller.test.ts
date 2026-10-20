@@ -104,7 +104,7 @@ describe("DocumentController session subscription", () => {
     second.emit(loadingState);
 
     expect(first.listeners.size).toBe(0);
-    expect(seen).toEqual(["second"]);
+    expect(seen).toStrictEqual(["second"]);
   });
 
   it("release and disposeAll unsubscribe the session", () => {
@@ -127,7 +127,7 @@ describe("dirtySnapshot", () => {
   function session(): DocumentSession {
     const services: DocumentSessionServices = {
       createMutationId: () => "mutation-1",
-      sourceHash: async () => "sha256-v2:" + "0".repeat(64),
+      sourceHash: async () => `sha256-v2:${"0".repeat(64)}`,
       save: () => new Promise(() => {}),
       retryable: () => false,
       wait: async () => {},
@@ -142,8 +142,8 @@ describe("dirtySnapshot", () => {
         title: "A",
         tags: [],
         revision: 1,
-        sourceHash: "sha256-v2:" + "0".repeat(64),
-        diskHash: "sha256:" + "0".repeat(64),
+        sourceHash: `sha256-v2:${"0".repeat(64)}`,
+        diskHash: `sha256:${"0".repeat(64)}`,
         sourceHashFormatVersion: 2,
         diskHashFormatVersion: 1,
         updatedAtMs: 1,

@@ -35,8 +35,10 @@ also check the read-only state before dispatching edits.
 
 The live editor reveals Markdown syntax on the active line. It supports a
 selection toolbar and a `/` block menu for headings, lists, quotes, callouts,
-code blocks, tables, and dividers. Moving a top-level block rewrites its full
-source span as one undoable edit; frontmatter cannot be moved.
+code blocks, tables, and dividers. Dividers use `***` so a divider at the start
+of a document cannot be read as an opening frontmatter delimiter. Moving a
+top-level block rewrites its full source span as one undoable edit; frontmatter
+cannot be moved.
 
 Wiki links resolve against notes in the active vault. `/` starts at the vault
 root; `./` and `../` resolve from the current note's directory. A bare basename
