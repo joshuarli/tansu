@@ -64,8 +64,13 @@ behavior and permissions.
 
 The build reads `../defuddle-rs` by default; set `DEFUDDLE_RS_DIR` to use
 another checkout. It installs the matching `wasm-bindgen` CLI and
-`wasm32-unknown-unknown` target when needed. It also requires Binaryen's
-`wasm-opt`; on macOS the build installs Binaryen with Homebrew if missing. Set
-`WASM_BINDGEN` or `WASM_OPT` to select executable paths. The build uses
+`wasm32-unknown-unknown` target when needed. On macOS arm64 and x86_64, and
+Linux arm64 and x86_64, the build downloads a checksum-verified CLI release
+when one is available. It caches the executable under
+`$CARGO_HOME/wasm-bindgen-cli/<version>/<target>`. Other platforms and CLI
+versions use `cargo install` into the same versioned cache. Binaryen's
+`wasm-opt` is also required. On macOS, the build installs Binaryen with
+Homebrew if missing. Set `WASM_BINDGEN` or `WASM_OPT` to select executable
+paths. The build uses
 `.work/target-defuddle-wasm` unless `CARGO_TARGET_DIR` is set and writes
 generated bindings under `extension-loupe/.generated/`.
