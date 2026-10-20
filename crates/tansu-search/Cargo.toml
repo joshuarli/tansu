@@ -9,6 +9,7 @@ regex = "1"
 tantivy = { version = "0.26", default-features = false, features = ["mmap", "lz4-compression"] }
 thiserror = "2"
 unicode-normalization = "0.1"
+tansu-search-policy = { path = "../tansu-search-policy" }
 
 [dev-dependencies]
 tempfile = "3"

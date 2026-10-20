@@ -1,0 +1,8 @@
+[package]
+name = "gen-api-types"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+tansu-api-types = { path = "../tansu-api-types" }
+ts-rs = "12.0"

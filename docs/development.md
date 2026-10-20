@@ -42,7 +42,7 @@ administration, remote access, and backup procedures, see
 `deno task build` creates fingerprinted frontend assets and a manifest under
 `web/dist/`. Cargo embeds those assets; run the frontend build before invoking
 Cargo directly. `make types` generates `web/ts/types.generated.ts` from
-`src/api_types.rs`; do not edit the generated file. The dev setup also
+`crates/tansu-api-types/src/lib.rs`; do not edit the generated file. The dev setup also
 generates ignored bindings under `bindings/`.
 
 Build Linux musl binaries with Docker:

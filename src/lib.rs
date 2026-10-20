@@ -11,7 +11,7 @@ compile_error!(
 );
 
 pub mod api;
-pub mod api_types;
+pub use tansu_api_types as api_types;
 pub mod auth;
 pub mod app;
 pub mod catalog;

@@ -25,7 +25,7 @@ rejected. Existing TOML files are not imported.
 App-wide settings contain registered vault names and paths, plus optional
 authentication settings. Per-vault settings live in each vault's SQLite
 catalog and include excluded folders, search weights, autosave delay, undo
-history size, and image quality. Server limits are in `src/api_types.rs`; the
+history size, and image quality. Server limits are in `crates/tansu-api-types/src/lib.rs`; the
 client policy is in `web/ts/app/settings-policy.ts`, and
 `web/ts/app/settings-policy.test.ts` checks that their ranges agree. Invalid
 settings are rejected before persistence by both HTTP and Rust callers.

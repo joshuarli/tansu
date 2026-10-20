@@ -51,14 +51,14 @@ coverage-html: types-check
 
 types:
 	deno task build
-	cargo run --quiet --bin gen-api-types
+	cargo run --quiet -p gen-api-types
 
 types-check: setup
 	deno task build
-	cargo run --quiet --bin gen-api-types -- --check
+	cargo run --quiet -p gen-api-types -- --check
 
 types-generated:
-	cargo run --quiet --bin gen-api-types
+	cargo run --quiet -p gen-api-types
 
 ts: types
 	deno task build:dev

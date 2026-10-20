@@ -206,7 +206,7 @@ pub struct SearchWeights {
 }
 
 impl SearchWeights {
-    pub const MAX: f32 = 1000.0;
+    pub const MAX: f32 = tansu_search_policy::SearchWeightPolicy::MAX;
     pub(crate) const PATH: f32 = 7.0;
 
     pub fn new(
@@ -259,12 +259,13 @@ impl SearchWeights {
 
 impl Default for SearchWeights {
     fn default() -> Self {
+        let defaults = tansu_search_policy::SearchWeightPolicy::DEFAULT;
         Self {
-            title: 10.0,
-            headings: 5.0,
-            tags: 2.0,
-            content: 1.0,
-            recency_boost: 0.0,
+            title: defaults.title,
+            headings: defaults.headings,
+            tags: defaults.tags,
+            content: defaults.content,
+            recency_boost: defaults.recency_boost,
         }
     }
 }

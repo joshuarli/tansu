@@ -78,17 +78,17 @@ describe("applySettingsForm", () => {
 });
 
 describe("SETTINGS_LIMITS", () => {
-  const rust = readFileSync(resolve(import.meta.dirname, "../../../src/api_types.rs"), "utf8")
+  const rust = readFileSync(resolve(import.meta.dirname, "../../../crates/tansu-api-types/src/lib.rs"), "utf8")
     .replace(
-      "tansu_search::SearchWeights::MAX",
-      /impl SearchWeights \{[^}]*?pub const MAX: f32 = ([0-9_.]+);/s.exec(
-        readFileSync(resolve(import.meta.dirname, "../../../crates/tansu-search/src/types.rs"), "utf8"),
+      "tansu_search_policy::SearchWeightPolicy::MAX",
+      /pub const MAX: f32 = ([0-9_.]+);/s.exec(
+        readFileSync(resolve(import.meta.dirname, "../../../crates/tansu-search-policy/src/lib.rs"), "utf8"),
       )?.[1] ?? "unresolved",
     );
 
   function rustRange(name: string): { min: number; max: number } {
     const match = new RegExp(`pub const ${name}: RangeInclusive<\\w+> = ([0-9_.]+)\\.\\.=([0-9_.]+);`).exec(rust);
-    if (match === null) throw new Error(`${name} not found in src/api_types.rs`);
+    if (match === null) throw new Error(`${name} not found in crates/tansu-api-types/src/lib.rs`);
     return { min: Number(match[1]!.replaceAll("_", "")), max: Number(match[2]!.replaceAll("_", "")) };
   }
 
