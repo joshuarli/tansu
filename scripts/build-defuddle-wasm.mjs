@@ -1,5 +1,15 @@
+import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  statSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
 
@@ -28,6 +38,51 @@ const repositoryRoot = resolve(import.meta.dirname, ".."),
     "/usr/local/opt/binaryen/bin/wasm-opt",
   ].filter((wasmOptCandidate) => wasmOptCandidate);
 
+const prebuiltWasmBindgenReleases = {
+  "0.2.129": {
+    "aarch64-apple-darwin": "81d4a23d56b3c3eb8187658329116d50e0b228a93b343825fb71f70179051cd1",
+    "x86_64-apple-darwin": "7e028879a68ec53dae14048b55cc5215f6df75b17a9c1426fac8fa086d3202fd",
+    "aarch64-unknown-linux-musl": "2ed4351c35dd9440308bbb02767d47ea278efe851a52465300f3c94f5b6c2a87",
+    "x86_64-unknown-linux-musl": "82d12bb940e2d4e72e0d5605387fc1b8ca179044e012b620f0ce4e7440e8320e",
+  },
+};
+
+function prebuiltWasmBindgenTarget() {
+  const hostArchitecture =
+    process.arch === "arm64" ? "aarch64" : process.arch === "x64" ? "x86_64" : undefined;
+  if (!hostArchitecture) {
+    return undefined;
+  }
+  if (process.platform === "darwin") {
+    return `${hostArchitecture}-apple-darwin`;
+  }
+  if (process.platform === "linux") {
+    return `${hostArchitecture}-unknown-linux-musl`;
+  }
+  return undefined;
+}
+
+function wasmBindgenHostTarget() {
+  return prebuiltWasmBindgenTarget() || `${process.platform}-${process.arch}`;
+}
+
+function wasmBindgenCacheDirectory(version, target) {
+  return resolve(cargoHome, "wasm-bindgen-cli", version, target);
+}
+
+function cachedWasmBindgen(version, target) {
+  const assetDirectory = `wasm-bindgen-${version}-${target}`;
+  return resolve(wasmBindgenCacheDirectory(version, target), assetDirectory, "wasm-bindgen");
+}
+
+function cargoInstallWasmBindgenRoot(version, target) {
+  return resolve(wasmBindgenCacheDirectory(version, target), "cargo-install");
+}
+
+function cachedCargoInstallWasmBindgen(version, target) {
+  return resolve(cargoInstallWasmBindgenRoot(version, target), "bin", "wasm-bindgen");
+}
+
 if (!existsSync(defuddleRepositoryRoot)) {
   throw new Error(
     `Could not find defuddle-rs at ${defuddleRepositoryRoot}. Set DEFUDDLE_RS_DIR to its path.`,
@@ -54,10 +109,84 @@ function readWasmBindgenVersion(candidate) {
 }
 
 function findWasmBindgen(crateVersion) {
-  return wasmBindgenCandidates.find((candidate) => {
+  const candidates = [...wasmBindgenCandidates];
+  const version = crateVersion || "unlocked",
+    target = wasmBindgenHostTarget();
+  candidates.push(cachedCargoInstallWasmBindgen(version, target));
+  if (crateVersion && prebuiltWasmBindgenTarget()) {
+    candidates.push(cachedWasmBindgen(crateVersion, target));
+  }
+  return candidates.find((candidate) => {
     const version = readWasmBindgenVersion(candidate);
     return crateVersion ? version === crateVersion : version;
   });
+}
+
+function installPrebuiltWasmBindgen(version) {
+  const target = prebuiltWasmBindgenTarget(),
+    checksum = prebuiltWasmBindgenReleases[version]?.[target];
+  if (!target || !checksum) {
+    return undefined;
+  }
+
+  const asset = `wasm-bindgen-${version}-${target}.tar.gz`,
+    cacheDirectory = wasmBindgenCacheDirectory(version, target),
+    assetDirectory = asset.slice(0, -".tar.gz".length),
+    cacheParent = resolve(cacheDirectory, ".."),
+    releaseUrl = `https://github.com/wasm-bindgen/wasm-bindgen/releases/download/${version}/${asset}`;
+  mkdirSync(cacheParent, { recursive: true, mode: 0o700 });
+  if (existsSync(cacheDirectory)) {
+    const cached = cachedWasmBindgen(version, target);
+    if (readWasmBindgenVersion(cached) === version) {
+      return cached;
+    }
+    rmSync(cacheDirectory, { force: true, recursive: true });
+  }
+
+  const stagingDirectory = mkdtempSync(resolve(cacheParent, `${target}-`));
+  try {
+    const archivePath = resolve(stagingDirectory, asset);
+    execFileSync(
+      "curl",
+      ["--fail", "--location", "--silent", "--show-error", "--output", archivePath, releaseUrl],
+      { cwd: repositoryRoot, stdio: "inherit" },
+    );
+    chmodSync(archivePath, 0o600);
+    const archive = readFileSync(archivePath),
+      actualChecksum = createHash("sha256").update(archive).digest("hex");
+    if (actualChecksum !== checksum) {
+      throw new Error(
+        `Checksum mismatch for ${asset}: expected ${checksum}, received ${actualChecksum}`,
+      );
+    }
+
+    execFileSync("tar", ["-xzf", archivePath, "-C", stagingDirectory], {
+      cwd: repositoryRoot,
+      stdio: "inherit",
+    });
+    rmSync(archivePath);
+
+    const stagedBinary = resolve(stagingDirectory, assetDirectory, "wasm-bindgen");
+    chmodSync(stagedBinary, 0o755);
+    if (readWasmBindgenVersion(stagedBinary) !== version) {
+      throw new Error(`Downloaded ${asset} does not contain wasm-bindgen ${version}.`);
+    }
+
+    try {
+      renameSync(stagingDirectory, cacheDirectory);
+    } catch (error) {
+      const cached = cachedWasmBindgen(version, target);
+      if (readWasmBindgenVersion(cached) !== version) {
+        throw error;
+      }
+      rmSync(stagingDirectory, { force: true, recursive: true });
+      return cached;
+    }
+    return cachedWasmBindgen(version, target);
+  } catch (error) {
+    rmSync(stagingDirectory, { force: true, recursive: true });
+    throw error;
+  }
 }
 
 function ensureWasmBindgen() {
@@ -67,12 +196,30 @@ function ensureWasmBindgen() {
     return installed;
   }
 
-  const installArgs = ["install", "wasm-bindgen-cli", "--force"];
+  if (crateVersion) {
+    console.log(
+      `Compatible wasm-bindgen ${crateVersion} not found. Checking for a verified prebuilt release.`,
+    );
+    const prebuilt = installPrebuiltWasmBindgen(crateVersion);
+    if (prebuilt) {
+      return prebuilt;
+    }
+  }
+
+  const cacheVersion = crateVersion || "unlocked",
+    hostTarget = wasmBindgenHostTarget(),
+    installArgs = [
+      "install",
+      "wasm-bindgen-cli",
+      "--force",
+      "--root",
+      cargoInstallWasmBindgenRoot(cacheVersion, hostTarget),
+    ];
   if (crateVersion) {
     installArgs.push("--version", crateVersion);
   }
   console.log(
-    `Compatible wasm-bindgen${crateVersion ? ` ${crateVersion}` : ""} not found. Installing with: cargo ${installArgs.join(" ")}`,
+    `No verified prebuilt wasm-bindgen release is available. Installing with: cargo ${installArgs.join(" ")}`,
   );
   try {
     execFileSync("cargo", installArgs, { cwd: repositoryRoot, stdio: "inherit" });
