@@ -16,6 +16,9 @@ Run it before `deno task build` or other direct Deno tasks that use
 `node_modules`. `make test`, `make dev`, and `make dev-config` run this setup
 automatically.
 
+`make check` runs `tsrs` for TypeScript type checking. On macOS, use an arm64
+machine; `tsrs` does not provide an Intel macOS binary.
+
 The supported Rust targets are `aarch64-apple-darwin`,
 `x86_64-unknown-linux-musl`, and `aarch64-unknown-linux-musl`.
 
