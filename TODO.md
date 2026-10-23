@@ -32,17 +32,6 @@ Next: 84
 - **Fix with:** lifecycle-concurrency
 - **Effort:** M
 
-### TNS-082 · P3 · Add vault-local ambient intelligence
-
-- **Area:** Architecture
-- **Where:** `src/search.rs`, `src/tags.rs`, `web/ts/app.ts`
-- **Problem:** No tag suggestions, related notes, long-note summaries, or ask-your-vault chat. Any of them sends note content to a model, which needs a privacy design before code: what leaves the machine, opt-in, and per-vault scope. Indexing and model failures must not affect accepted writes.
-- **Recommendation:** Write an RFC for the privacy and model-hosting boundary, then ship in order: related notes (derived from the search index, no model), tag suggestions, catch-me-up summary, vault chat with notes cited as clickable chips.
-- **Design:** `docs/rfcs/TNS-082-vault-intelligence.md`
-- **Blocked:** The privacy RFC is draft. Model requests require an owner decision on hosting, disclosure, and credential storage. Resume implementation after that design is accepted.
-- **Fix with:** none
-- **Effort:** L
-
 ## Next
 
 ### TNS-083 · P3 · Investigate the intermittent app boot fixture failure
