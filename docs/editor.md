@@ -61,6 +61,12 @@ resized and are rewritten as wiki-image syntax; remote HTTP images cannot be
 resized. A resize preview does not change source until release, which writes
 one undoable edit. Cancellation leaves source unchanged.
 
+The app enables wiki links with `wikiLinks`. `resolveAssetUrl` enables wiki
+image rendering and resolves local Markdown image paths. Updating the resolver
+refreshes both image types. Without a resolver, wiki image syntax remains source
+and standard Markdown image URLs pass through unchanged. Live callouts use
+default icons. `calloutIcons` overrides individual types.
+
 Image paste keeps WebP clipboard bytes and converts other image files to WebP
 using the configured quality. It previews the image immediately and passes an
 abort signal to the upload callback. Returned Markdown is inserted only into
@@ -83,8 +89,9 @@ or undo history. The outline reads headings from the Markdown syntax tree.
 
 The editor boundary owns Markdown rendering, selection, source mode, undo,
 formatting, paste handling, and editor extensions. The app owns note lifecycle,
-persistence, assets, and session state. Focused adapter tests are listed in
-[Testing](testing.md); they live under `web/ts/editor/tests/`.
+persistence, assets, and session state. Focused editor tests live under
+`web/ts/editor/tests/` and run with `deno task test web/ts/editor/tests`.
+Integrated browser measurements run with `make bench` and `make bench-full`.
 
 Vendored editor code and licenses live under `web/ts/editor/vendor/`. Read the
 upstream and license files there before changing a vendored dependency.

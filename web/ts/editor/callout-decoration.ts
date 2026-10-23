@@ -5,6 +5,31 @@ type CalloutOptions = {
   icons: Readonly<Record<string, string>>;
 };
 
+const DEFAULT_CALLOUT_ICONS: Readonly<Record<string, string>> = {
+  note: "📝",
+  info: "ℹ️",
+  tip: "💡",
+  hint: "💡",
+  important: "❗",
+  warning: "⚠️",
+  caution: "⚠️",
+  danger: "🚨",
+  bug: "🐛",
+  example: "📋",
+  quote: "🗨️",
+  abstract: "📄",
+  summary: "📄",
+  todo: "✅",
+  question: "❓",
+  faq: "❓",
+  success: "✅",
+  check: "✅",
+  done: "✅",
+  failure: "❌",
+  fail: "❌",
+  missing: "❌",
+};
+
 const PLAIN_TEXT_EDIT = /^[\p{L}\p{N}\p{M} ]+$/u;
 
 class CalloutTitle extends WidgetType {
@@ -62,7 +87,7 @@ function calloutDecorations(state: EditorState, options: CalloutOptions): Decora
       ranges.push(
         Decoration.line({ attributes: { class: `tansu-callout tansu-callout-${type}` } }).range(line.from),
         Decoration.replace({
-          widget: new CalloutTitle(type, displayTitle, options.icons[type] ?? ""),
+          widget: new CalloutTitle(type, displayTitle, options.icons[type] ?? DEFAULT_CALLOUT_ICONS[type] ?? ""),
         }).range(line.from + marker, line.from + marker + header[1]!.length + 3),
       );
       calloutType = type;

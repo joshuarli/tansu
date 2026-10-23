@@ -2860,10 +2860,13 @@ describe("asset url cache", () => {
     await mounted.app.boot();
     const resolveUrl = (name: string): string | null => {
       const editor = editorMock.instances[0]!;
-      const configs = [editor.config, ...vi.mocked(editor.updateConfiguration).mock.calls.map((call) => call[0] as Record<string, unknown>)];
-      const extensions = configs.toReversed().find((config) => Array.isArray(config["extensions"]))!["extensions"] as
-        { kind: string; resolveUrl?: (name: string) => string | null }[];
-      return extensions.find((extension) => extension.kind === "wiki-images")!.resolveUrl!(name);
+      const configs: Partial<EditorConfig>[] = [
+        editor.config as Partial<EditorConfig>,
+        ...vi.mocked(editor.updateConfiguration).mock.calls.map((call) => call[0]),
+      ];
+      const resolveAssetUrl = configs.toReversed().find((item) => item.resolveAssetUrl !== undefined)?.resolveAssetUrl;
+      if (resolveAssetUrl === undefined) throw new Error("Editor asset resolver was not configured");
+      return resolveAssetUrl(name);
     };
     const switchTo = async (title: string) => {
       mounted.root.querySelector<HTMLButtonElement>(`.tab[title="${title}"]`)!.click();

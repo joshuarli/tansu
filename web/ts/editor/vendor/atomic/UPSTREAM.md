@@ -26,4 +26,4 @@ document-changing transaction while read-only.
 
 To update, check out the recorded commit, compare each imported path, copy the
 closure and license, reapply the read-only, table-span, and wiki-image patches,
-and run the editor tests and fixture harness.
+and run the editor tests. Use `make bench` for integrated browser measurements.

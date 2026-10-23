@@ -175,7 +175,7 @@ describe("CodeMirror editor sessions", () => {
   it("rejects editor, extension, task, table, paste, and resize changes while read-only", () => {
     const source = "- [ ] task\n\n| A | B |\n| --- | --- |\n| x | y |\n\n![[photo]]";
     const { container, editor, view } = mountEditor(source, {
-      extensions: [{ kind: "wiki-images", resolveUrl: () => "/z-images/photo" }],
+      resolveAssetUrl: () => "/z-images/photo",
     }, "locked", true);
     const before = editor.getSnapshot()!.source;
 

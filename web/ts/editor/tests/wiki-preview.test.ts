@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createCodeMirrorEditor } from "../codemirror-adapter.js";
-import { createWikiLinkExtension } from "../tansu-extensions.js";
 import type { WikiNote } from "../wiki-target.js";
 
 const notes: WikiNote[] = [
@@ -15,7 +14,7 @@ function mounted(source: string, loadNotePreview: (id: string, signal: AbortSign
   const container = document.createElement("div");
   document.body.append(container);
   const editor = createCodeMirrorEditor(container, {
-    extensions: [createWikiLinkExtension()],
+    wikiLinks: true,
     currentNotePath: () => "current.md",
     wikiNotes: () => notes,
     loadNotePreview,
