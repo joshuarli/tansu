@@ -114,7 +114,7 @@ describe("v2 desktop shell", () => {
     await openRecentNote(root);
     await flushAsync();
     expect(client.openNote).toHaveBeenCalledTimes(1);
-    expect(client.openNote).toHaveBeenCalledWith(note.noteId);
+    expect(client.openNote).toHaveBeenCalledWith(note.noteId, expect.any(AbortSignal));
     load.resolve(documentFor(note, "# One\n"));
     await flushAsync();
     expect(root.textContent).toContain("One");
@@ -537,7 +537,7 @@ describe("v2 desktop shell", () => {
     await app.boot();
     await openRecentNote(root);
     await until(() => editorMock.instances[0]?.getSnapshot()?.source === "# Cached recent\n");
-    expect(client.openNote).toHaveBeenCalledWith(note.noteId);
+    expect(client.openNote).toHaveBeenCalledWith(note.noteId, expect.any(AbortSignal));
     load.resolve(documentFor(note, "# Cached recent\n"));
     await flushAsync();
   });
@@ -750,7 +750,7 @@ describe("v2 desktop shell", () => {
     await until(() => cachedBodyRead.mock.calls.length === 1);
     expect(oldClient.openNote).not.toHaveBeenCalled();
     await app.boot("vault-2");
-    expect(newClient.openNote).toHaveBeenCalledWith(second.noteId);
+    expect(newClient.openNote).toHaveBeenCalledWith(second.noteId, expect.any(AbortSignal));
     pendingCache.resolve({
       formatVersion: 2,
       serverInstanceId: "server-1",
@@ -1128,7 +1128,7 @@ describe("v2 desktop shell", () => {
     expect(client.search).toHaveBeenCalledTimes(2);
     root.querySelector<HTMLButtonElement>(".search-result-row")?.click();
     await until(() => editorMock.instances[0]?.getSnapshot()?.source === "# Cached\n");
-    expect(client.openNote).toHaveBeenCalledWith(note.noteId);
+    expect(client.openNote).toHaveBeenCalledWith(note.noteId, expect.any(AbortSignal));
     load.resolve(documentFor(note, source));
   });
 
@@ -1264,6 +1264,7 @@ describe("v2 desktop shell", () => {
       precondition: { baseRevision: 1, baseSourceHash: HASH_A, baseDiskHash: DISK_HASH },
     }));
     expect(editorMock.instances[0]?.getSnapshot()?.source).toBe("# Restored\n");
+    expect(root.querySelector(".tab.active")?.classList.contains("tab-dirty")).toBe(false);
     expect(root.textContent).not.toContain("Save conflict");
     await until(async () => (await cachedBody(restored))?.content === "# Restored\n");
     expect((await cachedBody(restored))?.content).toBe("# Restored\n");
@@ -1303,6 +1304,56 @@ describe("v2 desktop shell", () => {
     expect(root.querySelector(".toast")).toBeNull();
   });
 
+  it("applies an accepted dirty revision restore before flushing a closed tab", async () => {
+    useFakeTimers();
+    const note = noteMeta("note-1", "one.md", "One");
+    const restoredSourceHash = await canonicalSourceHash("# Restored\n");
+    const restored = noteMeta(note.noteId, note.path, note.title, [], 2, restoredSourceHash);
+    const revision = { noteId: note.noteId, revision: 4, kind: "save" as const, source: "user" as const, sourceHash: restoredSourceHash, createdAtMs: 5 };
+    const client = configureVault([note], workspaceSeed([
+      { noteId: note.noteId, title: note.title, path: note.path, cursorOffset: null, sourceMode: false },
+    ], note.noteId));
+    client.openNote.mockResolvedValueOnce(documentFor(note, "# One\n"));
+    client.listRevisions.mockResolvedValue([revision]);
+    client.openRevision.mockResolvedValue({ revision, content: "# Restored\n" });
+    const restore = deferred<V2MutationResponse>();
+    client.restoreRevision.mockReturnValue(restore.promise);
+    client.saveNote.mockImplementation(async (_id, request) => ({
+      mutationId: request.mutationId,
+      outcome: { state: "conflict", current: documentFor(restored, "# Restored\n"), draft: conflictDraft(note.noteId) },
+    }));
+    const { app, root } = mountApp();
+    await app.boot();
+    editorMock.instances[0]!.simulateEdit("# Local draft\n");
+    await vi.advanceTimersByTimeAsync(150);
+    await flushAsync();
+    await vi.advanceTimersByTimeAsync(200);
+    await flushAsync();
+    await until(async () => (await savedCheckpoint(note.noteId))?.source === "# Local draft\n");
+
+    await runCommand(root, "revisions");
+    root.querySelector<HTMLButtonElement>(".revision-row")?.click();
+    await flushAsync();
+    root.querySelector<HTMLButtonElement>(".revisions-panel .primary-button")?.click();
+    await until(() => client.restoreRevision.mock.calls.length === 1);
+    root.querySelector<HTMLElement>(".overlay-backdrop")?.click();
+    await flushAsync();
+    root.querySelector<HTMLButtonElement>(".tab.active .tab-close")?.click();
+    await until(() => root.querySelector(".tab") === null);
+    await openRecentNote(root, "One");
+    expect(client.openNote).toHaveBeenCalledTimes(1);
+
+    client.openNote.mockResolvedValue(documentFor(restored, "# Restored\n"));
+    restore.resolve(accepted(client.restoreRevision.mock.calls[0]![2].mutationId, restored));
+    await until(() => client.openNote.mock.calls.length === 2 &&
+      editorMock.instances.at(-1)?.getSnapshot()?.source === "# Restored\n");
+
+    expect(client.saveNote).not.toHaveBeenCalled();
+    expect(root.textContent).not.toContain("Save conflict");
+    expect(await savedCheckpoint(note.noteId)).toBeNull();
+    await app.dispose();
+  });
+
   it("holds a vault switch until an in-flight revision restore settles in its own vault", async () => {
     const oldNote = noteMeta("shared", "old.md", "Old");
     const newNote = noteMeta("shared", "new.md", "New", [], 1, `blake3-v3:${"d".repeat(64)}`);
@@ -1332,7 +1383,7 @@ describe("v2 desktop shell", () => {
     restore.resolve(accepted(oldClient.restoreRevision.mock.calls[0]![2].mutationId, restored));
     await switching;
 
-    expect(oldClient.openNote).toHaveBeenCalledTimes(2);
+    expect(oldClient.openNote).toHaveBeenCalledTimes(1);
     expect(newClient.openNote).toHaveBeenCalledTimes(1);
     expect(root.textContent).toContain("New");
     expect(editorMock.instances[0]?.getSnapshot()).toMatchObject({ noteId: "saved:shared", source: "# New\n" });
@@ -1476,6 +1527,51 @@ describe("v2 desktop shell", () => {
     expect(await savedCheckpoint(note.noteId)).toBeNull();
   });
 
+  it("clears a restored conflict checkpoint after its tab closes", async () => {
+    useFakeTimers();
+    const note = noteMeta("note-1", "one.md", "One");
+    const remote = noteMeta(note.noteId, note.path, note.title, [], 2, await canonicalSourceHash("# Remote\n"));
+    const restored = noteMeta(note.noteId, note.path, note.title, [], 3, await canonicalSourceHash("# Draft\n"));
+    const draft = { ...conflictDraft(note.noteId), sourceHash: restored.sourceHash };
+    const client = configureVault([note], workspaceSeed([
+      { noteId: note.noteId, title: note.title, path: note.path, cursorOffset: null, sourceMode: false },
+    ], note.noteId));
+    client.openNote.mockResolvedValue(documentFor(note, "# One\n"));
+    client.saveNote.mockImplementation(async (_id, request) => ({
+      mutationId: request.mutationId,
+      outcome: { state: "conflict", current: documentFor(remote, "# Remote\n"), draft },
+    }));
+    client.openConflictDraft.mockResolvedValue({ draft, content: "# Draft\n" });
+    const restore = deferred<V2MutationResponse>();
+    client.restoreConflictDraft.mockReturnValue(restore.promise);
+    const { app, root } = mountApp();
+    await app.boot();
+    editorMock.instances[0]!.simulateEdit("# Draft\n");
+    await vi.advanceTimersByTimeAsync(150);
+    await flushAsync();
+    await vi.advanceTimersByTimeAsync(200);
+    await flushAsync();
+    await runCommand(root, "save");
+    await until(() => root.textContent?.includes("Save conflict") === true);
+    await until(async () => (await savedCheckpoint(note.noteId))?.source === "# Draft\n");
+    root.querySelector<HTMLButtonElement>('[title="View conflict draft"]')?.click();
+    await flushAsync();
+    root.querySelector<HTMLButtonElement>('[title="Restore conflict draft"]')?.click();
+    await until(() => client.restoreConflictDraft.mock.calls.length === 1);
+    root.querySelector<HTMLElement>(".overlay-backdrop")?.click();
+    await flushAsync();
+    root.querySelector<HTMLButtonElement>(".tab.active .tab-close")?.click();
+    await until(() => root.querySelector(".tab") === null);
+
+    expect((await savedCheckpoint(note.noteId))?.source).toBe("# Draft\n");
+    restore.resolve(accepted(client.restoreConflictDraft.mock.calls[0]![2].mutationId, restored));
+    await until(async () => await savedCheckpoint(note.noteId) === null);
+
+    expect(client.saveNote).toHaveBeenCalledTimes(1);
+    expect(await savedCheckpoint(note.noteId)).toBeNull();
+    await app.dispose();
+  });
+
   it("clamps settings and retains non-finite values", async () => {
     const note = noteMeta("note-1", "one.md", "One", ["alpha"]);
     const client = configureVault([note], workspaceSeed([
@@ -1593,7 +1689,7 @@ describe("v2 desktop shell", () => {
     await runCommand(root, "reopen");
     await until(() => editorMock.instances[0]?.getSnapshot()?.noteId === "saved:closed");
     expect(editorMock.instances[0]?.getSnapshot()?.mode).toBe("source");
-    expect(client.openNote).toHaveBeenCalledWith(closed.noteId);
+    expect(client.openNote).toHaveBeenCalledWith(closed.noteId, expect.any(AbortSignal));
   });
 
   it("creates an extension-imported note through a V2 local draft and preserves source mode", async () => {
@@ -2893,6 +2989,39 @@ describe("asset url cache", () => {
     expect(revoked).toHaveLength(0);
   });
 
+  it("drops an image completion after its tab stops being active", async () => {
+    const client = configureVault([noteA, noteB], workspaceSeed([
+      { noteId: noteA.noteId, title: noteA.title, path: noteA.path, cursorOffset: null, sourceMode: false },
+      { noteId: noteB.noteId, title: noteB.title, path: noteB.path, cursorOffset: null, sourceMode: false },
+    ], noteA.noteId));
+    client.openNote.mockImplementation(async (id) => id === noteA.noteId
+      ? documentFor(noteA, "![[z-images/late.webp]]\n")
+      : documentFor(noteB, "# B\n"));
+    const late = deferred<Blob>();
+    client.loadAsset.mockReturnValue(late.promise);
+    const created: string[] = [];
+    vi.spyOn(URL, "createObjectURL").mockImplementation(() => {
+      const url = `blob:image-${created.length}`;
+      created.push(url);
+      return url;
+    });
+    const { app, root } = mountApp();
+    await app.boot();
+    await until(() => client.loadAsset.mock.calls.length === 1);
+    const signal = (client.loadAsset.mock.calls[0] as unknown as [string, AbortSignal])[1];
+    const editor = editorMock.instances[0]!;
+    root.querySelector<HTMLButtonElement>('.tab[title="B"]')!.click();
+    await until(() => root.querySelector<HTMLButtonElement>(".tab.active")?.title === "B");
+    const configurationCount = vi.mocked(editor.updateConfiguration).mock.calls.length;
+
+    expect(signal.aborted).toBe(true);
+    late.resolve(new Blob(["late image"], { type: "image/webp" }));
+    await flushAsync();
+
+    expect(created).toHaveLength(0);
+    expect(vi.mocked(editor.updateConfiguration).mock.calls.length).toBe(configurationCount);
+  });
+
   it("evicts past 64 entries without leaving a revoked url resolvable", async () => {
     const many = `${Array.from({ length: 70 }, (_, index) => `![[z-images/p${index}.webp]]`).join("\n")}\n`;
     const { created, revoked, resolveUrl, switchTo } = await mountTwoTabs("![[z-images/a.webp]]\n", many);
@@ -2943,6 +3072,34 @@ describe("saved tab load completions", () => {
     expect(root.querySelector('.tab[title="First"]')).toBeNull();
   });
 
+  it("cancels a watcher reconciliation when its tab closes", async () => {
+    const client = configureVault([first], workspaceSeed([
+      { noteId: first.noteId, title: first.title, path: first.path, cursorOffset: null, sourceMode: false },
+    ], first.noteId));
+    const updated = noteMeta(first.noteId, "first.md", "Updated", [], 2, HASH_B);
+    const late = deferred<V2NoteDocument>();
+    client.openNote.mockResolvedValueOnce(documentFor(first, "# First\n")).mockReturnValueOnce(late.promise);
+    const { app, root } = mountApp();
+    await app.boot();
+    client.eventHandlers?.onEvent({
+      eventVersion: 1,
+      resyncRequired: false,
+      update: { kind: "noteChanged", note: updated },
+    });
+    await until(() => client.openNote.mock.calls.length === 2);
+    const signal = (client.openNote.mock.calls[1] as unknown as [string, AbortSignal])[1];
+    expect(signal).toBeInstanceOf(AbortSignal);
+
+    root.querySelector<HTMLButtonElement>(".tab.active .tab-close")!.click();
+    await until(() => root.querySelector(".tab") === null);
+    expect(signal.aborted).toBe(true);
+    late.resolve(documentFor(updated, "# Late reconciliation\n"));
+    await flushAsync();
+
+    expect(root.querySelector('.tab[title="Updated"]')).toBeNull();
+    await app.dispose();
+  });
+
   it("neither caches nor resurrects a note whose tab closed while it loaded", async () => {
     const other = noteMeta("other", "other.md", "Other");
     const client = configureVault([first, other], workspaceSeed([
@@ -2986,10 +3143,141 @@ describe("saved tab load completions", () => {
     expect(root.querySelector('.tab[title="First"]')).toBeNull();
     expect(root.querySelector(".unavailable-state")).toBeNull();
   });
+
+  it("cancels a recovered-note retry when its tab closes", async () => {
+    const client = configureVault([first], workspaceSeed([
+      { noteId: first.noteId, title: first.title, path: first.path, cursorOffset: null, sourceMode: false },
+    ], first.noteId));
+    await storeSavedCheckpoint({
+      formatVersion: 1,
+      serverInstanceId: "server-1",
+      vaultId: DEFAULT_VAULT,
+      workspaceId: WORKSPACE_ID,
+      noteId: first.noteId,
+      baseRevision: 1,
+      baseSourceHash: HASH_A,
+      baseDiskHash: DISK_HASH,
+      localRevision: 2,
+      mutationId: "recovered-mutation",
+      source: "# Recovered\n",
+      titleDraft: null,
+      selection: null,
+      checkpointedAtMs: 1,
+    });
+    const retry = deferred<V2NoteDocument>();
+    client.openNote.mockRejectedValueOnce(new Error("offline")).mockReturnValueOnce(retry.promise);
+    const { app, root } = mountApp();
+    await app.boot();
+    await until(() => root.querySelector('[title="Retry note load"]') !== null);
+
+    root.querySelector<HTMLButtonElement>('[title="Retry note load"]')!.click();
+    await until(() => client.openNote.mock.calls.length === 2);
+    const signal = (client.openNote.mock.calls[1] as unknown as [string, AbortSignal])[1];
+    expect(signal).toBeInstanceOf(AbortSignal);
+
+    root.querySelector<HTMLButtonElement>(".tab.active .tab-close")!.click();
+    await until(() => root.querySelector(".tab") === null);
+    expect(signal.aborted).toBe(true);
+    retry.resolve(documentFor(first, "# Late retry\n"));
+    await flushAsync();
+
+    expect(root.querySelector('.tab[title="First"]')).toBeNull();
+    await app.dispose();
+  });
 });
 
 describe("document controller outlives its tab", () => {
   useShellFixtures();
+
+  it("waits for a pending rename before reopening the note", async () => {
+    const note = noteMeta("note-1", "one.md", "One");
+    const renamed = noteMeta(note.noteId, "renamed.md", "Renamed", [], 2, HASH_A);
+    const client = configureVault([note], workspaceSeed([
+      { noteId: note.noteId, title: note.title, path: note.path, cursorOffset: null, sourceMode: false },
+    ], note.noteId));
+    let canonical = documentFor(note, "# One\n");
+    client.openNote.mockImplementation(async () => canonical);
+    client.saveNote.mockImplementation(async (_id, request) => {
+      const precondition = request.precondition;
+      if (precondition.baseRevision !== renamed.revision || precondition.baseSourceHash !== renamed.sourceHash ||
+        precondition.baseDiskHash !== renamed.diskHash) {
+        return {
+          mutationId: request.mutationId,
+          outcome: { state: "conflict", current: canonical, draft: conflictDraft(note.noteId) },
+        };
+      }
+      canonical = documentFor(
+        noteMeta(note.noteId, renamed.path, renamed.title, [], renamed.revision + 1, request.sourceHash),
+        request.content,
+      );
+      return accepted(request.mutationId, canonical.meta);
+    });
+    const rename = deferred<V2MutationResponse>();
+    client.renameNote.mockReturnValue(rename.promise);
+    const { app, root } = mountApp();
+    await app.boot();
+    editorMock.instances[0]!.simulateEdit("# Edited\n");
+    await flushEditorCapture();
+    const commit = editorMock.instances[0]!.config["onNoteTitleCommit"] as (request: { title: string; intent: "rename" }) => Promise<boolean>;
+    const renaming = commit({ title: "Renamed", intent: "rename" });
+    await until(() => client.renameNote.mock.calls.length === 1);
+
+    root.querySelector<HTMLButtonElement>(".tab.active .tab-close")!.click();
+    await until(() => root.querySelector(".tab") === null);
+    await runCommand(root, "reopen");
+    await flushAsync();
+
+    expect(client.openNote).toHaveBeenCalledTimes(1);
+
+    rename.resolve(accepted(client.renameNote.mock.calls[0]![1].mutationId, renamed));
+    await renaming;
+    await until(() => client.openNote.mock.calls.length === 2);
+    await until(() => root.querySelector<HTMLButtonElement>(".tab.active")?.title === "Renamed");
+
+    expect(root.querySelector<HTMLButtonElement>(".tab.active")?.title).toBe("Renamed");
+    expect(editorMock.instances.at(-1)?.getSnapshot()).toMatchObject({ noteId: `saved:${note.noteId}`, source: "# Edited\n" });
+    expect(client.saveNote).toHaveBeenCalledWith(note.noteId, expect.objectContaining({
+      content: "# Edited\n",
+      precondition: { baseRevision: 2, baseSourceHash: HASH_A, baseDiskHash: DISK_HASH },
+    }));
+    await app.dispose();
+  });
+
+  it("drains a pending rename before switching away and back to its vault", async () => {
+    const note = noteMeta("note-1", "one.md", "One");
+    const renamed = noteMeta(note.noteId, "renamed.md", "Renamed", [], 2, HASH_B);
+    const other = noteMeta("other", "other.md", "Other");
+    const oldClient = configureVault([note], workspaceSeed([
+      { noteId: note.noteId, title: note.title, path: note.path, cursorOffset: null, sourceMode: false },
+    ], note.noteId));
+    const nextClient = configureVault([other], workspaceSeed([
+      { noteId: other.noteId, title: other.title, path: other.path, cursorOffset: null, sourceMode: false },
+    ], other.noteId), "vault-2");
+    oldClient.openNote.mockResolvedValueOnce(documentFor(note, "# One\n"))
+      .mockResolvedValue(documentFor(renamed, "# One\n"));
+    nextClient.openNote.mockResolvedValue(documentFor(other, "# Other\n"));
+    const rename = deferred<V2MutationResponse>();
+    oldClient.renameNote.mockReturnValue(rename.promise);
+    const { app, root } = mountApp();
+    await app.boot();
+    const commit = editorMock.instances[0]!.config["onNoteTitleCommit"] as (request: { title: string; intent: "rename" }) => Promise<boolean>;
+    const renaming = commit({ title: "Renamed", intent: "rename" });
+    await until(() => oldClient.renameNote.mock.calls.length === 1);
+
+    const switchingAway = app.boot("vault-2");
+    await until(() => nextClient.bootstrap.mock.calls.length === 1);
+    const switchingBack = app.boot(DEFAULT_VAULT);
+    await flushAsync();
+    expect(oldClient.openNote).toHaveBeenCalledTimes(1);
+
+    rename.resolve(accepted(oldClient.renameNote.mock.calls[0]![1].mutationId, renamed));
+    await Promise.all([switchingAway, switchingBack, renaming]);
+    await until(() => root.querySelector<HTMLButtonElement>(".tab.active")?.title === "Renamed");
+
+    expect(root.querySelector<HTMLButtonElement>(".tab.active")?.title).toBe("Renamed");
+    expect(oldClient.openNote).toHaveBeenCalledTimes(2);
+    await app.dispose();
+  });
 
   it("loads a reopened note only after the closing save settles", async () => {
     useFakeTimers();

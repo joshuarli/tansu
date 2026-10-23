@@ -69,11 +69,29 @@ describe("DocumentControllers", () => {
     void controllers.for(noteId("a")).ensureLoaded(start);
     expect(start).toHaveBeenCalledTimes(1);
   });
+
+  it("waits for mutations across active document controllers", async () => {
+    const controllers = new DocumentControllers();
+    let finishMutation = (): void => {};
+    controllers.for(noteId("a")).track(new Promise<void>((resolve) => { finishMutation = resolve; }));
+    expect(controllers.hasPendingMutations()).toBe(true);
+    let settled = false;
+    const draining = controllers.settled().then(() => { settled = true; });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+
+    finishMutation();
+    await draining;
+
+    expect(settled).toBe(true);
+    expect(controllers.hasPendingMutations()).toBe(false);
+  });
 });
 
-function fakeSource() {
+function fakeSource(identity = loadingState.identity) {
   const listeners = new Set<(state: DocumentSessionState) => void>();
   const source: SessionSource = {
+    identity,
     subscribe: (listener) => {
       listeners.add(listener);
       return () => listeners.delete(listener);
@@ -107,17 +125,41 @@ describe("DocumentController session subscription", () => {
     expect(seen).toStrictEqual(["second"]);
   });
 
+  it("aborts a request and rejects its completion when its session is replaced", () => {
+    const controller = new DocumentControllers().for(noteId("a"));
+    const first = fakeSource({ serverInstanceId: serverInstanceId("s"), vaultId: vaultId("v1"), noteId: noteId("a") });
+    const second = fakeSource({ serverInstanceId: serverInstanceId("s"), vaultId: vaultId("v2"), noteId: noteId("a") });
+    controller.attachSession(first.source, () => {});
+    const request = controller.beginTask(first.source);
+    const accepted = vi.fn();
+
+    expect(request.deliver(accepted)).toBe(true);
+    expect(accepted).toHaveBeenCalledTimes(1);
+
+    controller.attachSession(second.source, () => {});
+
+    expect(request.signal.aborted).toBe(true);
+    expect(request.deliver(accepted)).toBe(false);
+    expect(accepted).toHaveBeenCalledTimes(1);
+    request.finish();
+  });
+
   it("release and disposeAll unsubscribe the session", () => {
     const controllers = new DocumentControllers();
     const released = fakeSource();
-    const disposed = fakeSource();
+    const disposed = fakeSource({ serverInstanceId: serverInstanceId("s"), vaultId: vaultId("v"), noteId: noteId("b") });
     controllers.for(noteId("a")).attachSession(released.source, () => {});
     controllers.for(noteId("b")).attachSession(disposed.source, () => {});
+    const releaseTask = controllers.for(noteId("a")).beginTask(released.source);
+    const request = controllers.for(noteId("b")).beginTask(disposed.source);
 
     controllers.release(noteId("a"));
     expect(released.listeners.size).toBe(0);
+    expect(releaseTask.signal.aborted).toBe(true);
     controllers.disposeAll();
     expect(disposed.listeners.size).toBe(0);
+    expect(request.signal.aborted).toBe(true);
+    expect(request.deliver(() => {})).toBe(false);
   });
 });
 
@@ -187,6 +229,27 @@ describe("dirtySnapshot", () => {
 });
 
 describe("DocumentControllers close", () => {
+  it("waits for tracked mutations before flushing a close", async () => {
+    const controllers = new DocumentControllers();
+    let finishMutation = (): void => {};
+    const controller = controllers.for(noteId("a"));
+    const mutation = controller.track(new Promise<void>((resolve) => { finishMutation = resolve; }));
+    const save = vi.fn(() => Promise.resolve());
+    const close = vi.fn();
+    const closing = controllers.close(noteId("a"), { save, close }, "flush");
+    await Promise.resolve();
+
+    expect(save).not.toHaveBeenCalled();
+    expect(close).not.toHaveBeenCalled();
+
+    finishMutation();
+    await mutation;
+    await closing;
+
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
   it("keeps the controller until a flushing close settles and delays a new load behind it", async () => {
     const controllers = new DocumentControllers();
     let finish = (): void => {};
