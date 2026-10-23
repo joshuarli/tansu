@@ -75,15 +75,6 @@ Next: 83
 - **Fix with:** renovate-tests
 - **Effort:** S
 
-### TNS-070 · P4 · Check tab currency before fetching in handleMutation
-
-- **Area:** Concurrency
-- **Where:** `web/ts/app.ts`
-- **Problem:** `handleMutation` calls `client.openNote` before checking the tab is still open, so a restore for a closed tab makes one wasted fetch. An existing test relies on the call count.
-- **Recommendation:** Check currency first, and update the test to assert no fetch.
-- **Fix with:** lifecycle-concurrency
-- **Effort:** S
-
 ### TNS-071 · P3 · Drop legacy hash formats and one-time state migrations
 
 - **Area:** Dead code

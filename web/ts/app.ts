@@ -1724,6 +1724,7 @@ export class TansuApp {
     const { identity, client, tab } = target;
     if (response.outcome.state === "accepted") {
       if (response.outcome.result === null) throw new Error("Accepted restore response omitted note metadata");
+      if (!this.isCurrentTab(tab, identity, client)) return;
       const document = await client.openNote(tab.noteId);
       if (!this.isCurrentTab(tab, identity, client)) return;
       tab.doc = document;
