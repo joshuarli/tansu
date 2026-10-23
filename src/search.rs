@@ -341,7 +341,7 @@ mod tests {
             title: note_id.to_owned(),
             tags: Vec::new(),
             seq: 1,
-            content_hash: "sha256:fixture".to_owned(),
+            content_hash: "blake3-v3:fixture".to_owned(),
             updated_at_ms: 0,
         }
     }
@@ -354,13 +354,13 @@ mod tests {
         std::fs::write(state_root.join("search"), "unavailable").unwrap();
         let mut search = SearchIndex::open(&state_root);
         let accepted = NoteMeta {
-            content_hash: "sha256:accepted".to_owned(),
+            content_hash: "blake3-v3:accepted".to_owned(),
             ..note_meta("accepted")
         };
         assert!(search
             .try_index_note(accepted.clone(), "accepted source")
             .is_err());
-        assert_eq!(accepted.content_hash, "sha256:accepted");
+        assert_eq!(accepted.content_hash, "blake3-v3:accepted");
         assert!(search.search_status().dirty);
         assert!(search.search_status().degraded);
     }

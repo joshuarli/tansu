@@ -661,7 +661,7 @@ mod tests {
             title.into(),
             tags.iter().map(|tag| (*tag).to_owned()).collect(),
             revision,
-            format!("sha256-v2:{revision}"),
+            format!("blake3-v3:{revision}"),
         )
         .unwrap();
         DocumentInput::new(identity, content.into(), headings.into()).unwrap()
@@ -791,7 +791,7 @@ mod tests {
         assert_eq!(hit.path, "folder/a.md");
         assert_eq!(hit.title, "Title");
         assert_eq!(hit.revision, 7);
-        assert_eq!(hit.source_hash, "sha256-v2:7");
+        assert_eq!(hit.source_hash, "blake3-v3:7");
         assert!(!hit.excerpt.is_empty());
     }
 

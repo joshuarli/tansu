@@ -1218,10 +1218,8 @@ function version(value: unknown, expected: number, name: string): void {
 
 function sourceHash(value: unknown, name: string, family: "source" | "disk"): string {
   const result = text(value, name);
-  const prefixes = family === "source"
-    ? ["blake3-v3:", "sha256-v2:", "sha256:"]
-    : ["blake3-v2:", "sha256:"];
-  if (!prefixes.some((prefix) => new RegExp(`^${prefix}[0-9a-f]{64}$`).test(result))) {
+  const prefix = family === "source" ? "blake3-v3:" : "blake3-v2:";
+  if (!new RegExp(`^${prefix}[0-9a-f]{64}$`).test(result)) {
     throw corrupt(`${name} uses an unsupported hash format`);
   }
   return result;
@@ -1229,10 +1227,9 @@ function sourceHash(value: unknown, name: string, family: "source" | "disk"): st
 
 function hashVersion(hash: string, value: unknown, family: "source" | "disk"): number {
   const result = safeInteger(value, `${family} hash format version`);
-  const prefix = family === "source"
-    ? result === 1 ? "sha256:" : result === 2 ? "sha256-v2:" : result === 3 ? "blake3-v3:" : null
-    : result === 1 ? "sha256:" : result === 2 ? "blake3-v2:" : null;
-  if (prefix === null || !hash.startsWith(prefix)) {
+  const expected = family === "source" ? 3 : 2;
+  const prefix = family === "source" ? "blake3-v3:" : "blake3-v2:";
+  if (result !== expected || !hash.startsWith(prefix)) {
     throw corrupt(`${family} hash format version does not match its value`);
   }
   return result;

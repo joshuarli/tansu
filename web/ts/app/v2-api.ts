@@ -1079,20 +1079,17 @@ function assertMutationIdValue(value: string): void {
 
 function hash(value: unknown, name: string, family: "source" | "disk"): string {
   const result = string(value, name);
-  const prefixes = family === "source"
-    ? ["blake3-v3:", "sha256-v2:", "sha256:"]
-    : ["blake3-v2:", "sha256:"];
-  if (!prefixes.some((prefix) => new RegExp(`^${prefix}[0-9a-f]{64}$`).test(result))) {
+  const prefix = family === "source" ? "blake3-v3:" : "blake3-v2:";
+  if (!new RegExp(`^${prefix}[0-9a-f]{64}$`).test(result)) {
     throw new V2ProtocolError(`${name} is not a supported hash`);
   }
   return result;
 }
 
 function hashVersion(hash: string, version: number, family: "source" | "disk"): number {
-  const prefix = family === "source"
-    ? version === 1 ? "sha256:" : version === 2 ? "sha256-v2:" : version === 3 ? "blake3-v3:" : null
-    : version === 1 ? "sha256:" : version === 2 ? "blake3-v2:" : null;
-  if (prefix === null || !hash.startsWith(prefix)) {
+  const expected = family === "source" ? 3 : 2;
+  const prefix = family === "source" ? "blake3-v3:" : "blake3-v2:";
+  if (version !== expected || !hash.startsWith(prefix)) {
     throw new V2ProtocolError("Hash format version does not match its value");
   }
   return version;

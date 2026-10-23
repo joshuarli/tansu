@@ -72,7 +72,7 @@ fn port_matches_the_pinned_reference_candidate_golden() {
                 note.title.into(),
                 note.tags.iter().map(|tag| (*tag).into()).collect(),
                 1,
-                "sha256:fixture".into(),
+                "blake3-v3:fixture".into(),
             )
             .unwrap()
         })

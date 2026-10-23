@@ -228,67 +228,20 @@ fn validate_mutation_id(mutation_id: &str) -> V2Result<()> {
     Ok(())
 }
 
-struct V2PayloadHashes {
-    current: String,
-    legacy: String,
-}
-
-impl V2PayloadHashes {
-    fn matches(&self, hash: &str) -> bool {
-        self.current == hash || self.legacy == hash
-    }
-}
-
-fn v2_request_hash<T: serde::Serialize>(kind: &str, target: Option<&str>, request: &T) -> V2Result<V2PayloadHashes> {
+fn v2_request_hash<T: serde::Serialize>(kind: &str, target: Option<&str>, request: &T) -> V2Result<String> {
     let bytes = serde_json::to_vec(&(kind, target, request))?;
-    Ok(V2PayloadHashes {
-        current: history::disk_hash(&bytes),
-        legacy: history::legacy_disk_hash(&bytes),
-    })
-}
-
-fn v2_request_hash_for_source<T: serde::Serialize>(
-    kind: &str,
-    target: Option<&str>,
-    request: &T,
-    content: &str,
-) -> V2Result<V2PayloadHashes> {
-    let bytes = serde_json::to_vec(&(kind, target, request))?;
-    let current_source_hash = serde_json::to_string(&history::source_hash(content))?;
-    let legacy_source_hash = serde_json::to_string(&history::legacy_source_hash_v2(content))?;
-    let current_field = format!("\"sourceHash\":{current_source_hash}");
-    let legacy_field = format!("\"sourceHash\":{legacy_source_hash}");
-    let serialized = std::str::from_utf8(&bytes)
-        .map_err(|_| Error::Internal("serialized mutation payload is not UTF-8".to_string()))?
-        .to_string();
-    let mut matches = serialized.match_indices(&current_field);
-    let Some((start, _)) = matches.next() else {
-        return Err(Error::Internal("mutation payload has no sourceHash field".to_string()).into());
-    };
-    if matches.next().is_some() {
-        return Err(Error::Internal("mutation payload has duplicate sourceHash fields".to_string()).into());
-    }
-    let mut legacy_bytes = serialized;
-    legacy_bytes.replace_range(start..start + current_field.len(), &legacy_field);
-    Ok(V2PayloadHashes {
-        current: history::disk_hash(&bytes),
-        legacy: history::legacy_disk_hash(legacy_bytes.as_bytes()),
-    })
-}
-
-fn v2_legacy_request_hash<T: serde::Serialize>(kind: &str, target: Option<&str>, request: &T) -> V2Result<String> {
-    Ok(history::legacy_disk_hash(&serde_json::to_vec(&(kind, target, request))?))
+    Ok(history::disk_hash(&bytes))
 }
 
 fn v2_existing_result<T: DeserializeOwned>(
     catalog: &mut Catalog,
     mutation_id: &str,
-    payload_hash: &V2PayloadHashes,
+    payload_hash: &str,
 ) -> V2Result<Option<T>> {
     let Some(record) = catalog.mutation(mutation_id)? else {
         return Ok(None);
     };
-    if !payload_hash.matches(&record.payload_hash) {
+    if payload_hash != record.payload_hash {
         return Err(V2VaultError::Api(V2ApiErrorKind::MutationIdReuse {
             mutation_id: mutation_id.to_string(),
         }));
@@ -318,12 +271,12 @@ fn v2_existing_mutation(
     state_root: &Path,
     catalog: &mut Catalog,
     mutation_id: &str,
-    payload_hash: &V2PayloadHashes,
+    payload_hash: &str,
 ) -> V2Result<Option<V2MutationResponse>> {
     let Some(mut record) = catalog.mutation(mutation_id)? else {
         return Ok(None);
     };
-    if !payload_hash.matches(&record.payload_hash) {
+    if payload_hash != record.payload_hash {
         return Err(V2VaultError::Api(V2ApiErrorKind::MutationIdReuse {
             mutation_id: mutation_id.to_string(),
         }));
@@ -519,7 +472,7 @@ fn repair_pending_mutation(
                 .disk_hash
                 .as_deref()
                 .ok_or_else(|| Error::Internal("pending mutation has no disk hash".to_string()))?;
-            if !history::disk_hash_matches(expected_disk_hash, &bytes) {
+            if history::disk_hash(&bytes) != expected_disk_hash {
                 return Err(Error::Internal(format!(
                     "pending mutation {} snapshot disk hash mismatch",
                     mutation.mutation_id
@@ -586,7 +539,7 @@ fn repair_pending_mutation(
                 Error::Internal("pending delete has no expected disk hash".to_string())
             })?;
             if let Some(bytes) = read_optional_visible_bytes(root, path)? {
-                if !history::disk_hash_matches(expected, &bytes) {
+                if history::disk_hash(&bytes) != expected {
                     return Err(Error::Internal(format!(
                         "pending delete {} found unexpected file bytes",
                         mutation.mutation_id
@@ -655,7 +608,7 @@ fn materialize_pending_file(
             sync_visible_note_parent(root, path)
         }
         Some(bytes) => {
-            if expected_before.is_none_or(|hash| !history::disk_hash_matches(hash, &bytes)) {
+            if expected_before.is_none_or(|hash| history::disk_hash(&bytes) != hash) {
                 return Err(Error::Internal(format!(
                     "pending mutation found unexpected bytes at {path}"
                 )));
@@ -678,14 +631,14 @@ fn move_pending_file(
     let old_bytes = read_optional_visible_bytes(root, old_path)?;
     let new_bytes = read_optional_visible_bytes(root, new_path)?;
     if let Some(bytes) = &new_bytes {
-        if !history::disk_hash_matches(expected_hash, bytes) {
+        if history::disk_hash(bytes) != expected_hash {
             return Err(Error::Internal(format!(
                 "pending rename found unexpected bytes at {new_path}"
             )));
         }
     }
     if let Some(bytes) = &old_bytes {
-        if !history::disk_hash_matches(expected_hash, bytes) {
+        if history::disk_hash(bytes) != expected_hash {
             return Err(Error::Internal(format!(
                 "pending rename found unexpected bytes at {old_path}"
             )));
@@ -934,7 +887,7 @@ impl VaultRuntime {
     pub fn open(index: usize, config: &VaultConfig, logs: LogHub) -> Result<Self> {
         fs::create_dir_all(&config.path)?;
         let owner_lock = VaultOwnerLock::acquire(&config.path)?;
-        initialize_state_dir(&config.path, &config.state_path)?;
+        fs::create_dir_all(&config.state_path)?;
         let vault_id = config
             .state_path
             .file_name()
@@ -1319,7 +1272,7 @@ impl VaultRuntime {
         }
         catalog.prepare_mutation(MutationIntent {
             mutation_id: &request.mutation_id,
-            payload_hash: &payload_hash.current,
+            payload_hash: &payload_hash,
             kind: "settings",
             note_id: None,
             path: None,
@@ -1360,13 +1313,11 @@ impl VaultRuntime {
             }));
         }
         let body_hash = history::disk_hash(bytes);
-        let mut payload_hash = v2_request_hash("image_upload", None, &body_hash)?;
-        let legacy_body_hash = history::legacy_disk_hash(bytes);
-        payload_hash.legacy = v2_legacy_request_hash("image_upload", None, &legacy_body_hash)?;
+        let payload_hash = v2_request_hash("image_upload", None, &body_hash)?;
         let _op = self.lock_op();
         let mut catalog = self.lock_catalog();
         if let Some(record) = catalog.mutation(mutation_id)? {
-            if !payload_hash.matches(&record.payload_hash) {
+            if payload_hash != record.payload_hash {
                 return Err(V2VaultError::Api(V2ApiErrorKind::MutationIdReuse {
                     mutation_id: mutation_id.to_string(),
                 }));
@@ -1419,7 +1370,7 @@ impl VaultRuntime {
         let name = format!("z-images/image-{digest_hex}.webp");
         catalog.prepare_mutation(MutationIntent {
             mutation_id,
-            payload_hash: &payload_hash.current,
+            payload_hash: &payload_hash,
             kind: "image_upload",
             note_id: None,
             path: Some(&name),
@@ -1565,7 +1516,7 @@ impl VaultRuntime {
                 received: request.source_hash,
             }));
         }
-        let payload_hash = v2_request_hash_for_source("save", Some(note_id), &request, &content)?;
+        let payload_hash = v2_request_hash("save", Some(note_id), &request)?;
         self.v2_save_source(
             note_id,
             &request.mutation_id,
@@ -1620,7 +1571,7 @@ impl VaultRuntime {
                 received: request.source_hash,
             }));
         }
-        let payload_hash = v2_request_hash_for_source("save_delta", Some(note_id), &request, &content)?;
+        let payload_hash = v2_request_hash("save_delta", Some(note_id), &request)?;
         self.v2_save_source(
             note_id,
             &request.mutation_id,
@@ -1719,7 +1670,7 @@ impl VaultRuntime {
         precondition: &V2NotePrecondition,
         content: &str,
         submitted_hash: &str,
-        payload_hash: &V2PayloadHashes,
+        payload_hash: &str,
         kind: &str,
     ) -> V2Result<V2MutationResponse> {
         let _op = self.lock_op();
@@ -1788,7 +1739,7 @@ impl VaultRuntime {
         let current = row.meta.clone();
         catalog.prepare_mutation(MutationIntent {
             mutation_id,
-            payload_hash: &payload_hash.current,
+            payload_hash: payload_hash,
             kind,
             note_id: Some(note_id),
             path: Some(&current.path),
@@ -1837,7 +1788,7 @@ impl VaultRuntime {
             })?;
             catalog.prepare_mutation(MutationIntent {
                 mutation_id,
-                payload_hash: &payload_hash.current,
+                payload_hash: &payload_hash,
                 kind,
                 note_id: Some(note_id),
                 path: Some(&latest.meta.path),
@@ -1920,7 +1871,7 @@ impl VaultRuntime {
         let path = normalize_note_path(&request.path).map_err(|reason| {
             V2VaultError::Api(V2ApiErrorKind::PathInvalid { reason })
         })?;
-        let payload_hash = v2_request_hash_for_source("create", None, &request, &content)?;
+        let payload_hash = v2_request_hash("create", None, &request)?;
         let _op = self.lock_op();
         let mut catalog = self.lock_catalog();
         if let Some(response) =
@@ -1943,7 +1894,7 @@ impl VaultRuntime {
         let disk_hash = history::disk_hash(disk_bytes);
         catalog.prepare_mutation(MutationIntent {
             mutation_id: &request.mutation_id,
-            payload_hash: &payload_hash.current,
+            payload_hash: &payload_hash,
             kind: "create",
             note_id: Some(&note_id),
             path: Some(&path),
@@ -2049,7 +2000,7 @@ impl VaultRuntime {
             );
             catalog.prepare_mutation(MutationIntent {
                 mutation_id: &request.mutation_id,
-                payload_hash: &payload_hash.current,
+                payload_hash: &payload_hash,
                 kind: "rename",
                 note_id: Some(note_id),
                 path: Some(&path),
@@ -2106,7 +2057,7 @@ impl VaultRuntime {
         }
         catalog.prepare_mutation(MutationIntent {
             mutation_id: &request.mutation_id,
-            payload_hash: &payload_hash.current,
+            payload_hash: &payload_hash,
             kind: "rename",
             note_id: Some(note_id),
             path: Some(&path),
@@ -2222,7 +2173,7 @@ impl VaultRuntime {
         )?;
         catalog.prepare_mutation(MutationIntent {
             mutation_id: &request.mutation_id,
-            payload_hash: &payload_hash.current,
+            payload_hash: &payload_hash,
             kind: "delete",
             note_id: Some(note_id),
             path: None,
@@ -2987,141 +2938,6 @@ fn utf16_character_to_byte_offset(line: &str, character: usize) -> Result<usize>
     }
 }
 
-fn initialize_state_dir(root: &Path, state_root: &Path) -> Result<()> {
-    let legacy = root.join(".tansu");
-    let should_copy_legacy = legacy.join("vault.db").exists()
-        && !state_root.join("vault.db").exists()
-        && (!state_root.exists() || state_dir_is_empty(state_root)?);
-    if should_copy_legacy {
-        copy_dir_recursive(&legacy, state_root)?;
-    } else {
-        fs::create_dir_all(state_root)?;
-    }
-    Ok(())
-}
-
-fn state_dir_is_empty(path: &Path) -> Result<bool> {
-    match fs::read_dir(path) {
-        Ok(mut entries) => Ok(entries.next().is_none()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(true),
-        Err(error) => Err(Error::Io(error)),
-    }
-}
-
-#[cfg(any(target_os = "linux", target_os = "macos"))]
-fn copy_dir_recursive(from: &Path, to: &Path) -> Result<()> {
-    use rustix::fs::{Mode, OFlags, open, openat};
-
-    let flags = OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC;
-    let parent = from
-        .parent()
-        .ok_or_else(|| Error::BadRequest("legacy state has no parent directory".to_string()))?;
-    let name = from
-        .file_name()
-        .ok_or_else(|| Error::BadRequest("legacy state has no directory name".to_string()))?;
-    let parent = File::from(open(parent, flags, Mode::empty()).map_err(|error| Error::Io(error.into()))?);
-    let source = File::from(
-        openat(&parent, name, flags, Mode::empty())
-            .map_err(|error| Error::Io(error.into()))?,
-    );
-    fs::create_dir_all(to)?;
-    let destination = File::from(
-        open(to, flags, Mode::empty()).map_err(|error| Error::Io(error.into()))?,
-    );
-    match copy_legacy_directory_contents(&source, &destination, from) {
-        Ok(()) => Ok(()),
-        Err(error) => match fs::remove_dir_all(to) {
-            Ok(()) => Err(error),
-            Err(cleanup_error)
-                if cleanup_error.kind() == std::io::ErrorKind::NotFound =>
-            {
-                Err(error)
-            }
-            Err(cleanup_error) => Err(Error::Internal(format!(
-                "legacy state migration failed: {error}; destination cleanup failed: {cleanup_error}"
-            ))),
-        },
-    }
-}
-
-#[cfg(any(target_os = "linux", target_os = "macos"))]
-fn copy_legacy_directory_contents(
-    source: &File,
-    destination: &File,
-    source_path: &Path,
-) -> Result<()> {
-    use rustix::fs::{AtFlags, FileType, Mode, OFlags, mkdirat, openat, statat};
-    use std::io;
-
-    for entry in fs::read_dir(source_path)? {
-        let name = entry?.file_name();
-        let metadata = statat(source, &name, AtFlags::SYMLINK_NOFOLLOW)
-            .map_err(|error| Error::Io(error.into()))?;
-        let kind = FileType::from_raw_mode(metadata.st_mode);
-        if kind.is_symlink() {
-            return Err(Error::BadRequest(
-                "legacy state cannot contain symlinks".to_string(),
-            ));
-        }
-        if kind.is_dir() {
-            mkdirat(destination, &name, Mode::RUSR | Mode::WUSR | Mode::XUSR)
-                .map_err(|error| Error::Io(error.into()))?;
-            let flags = OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC;
-            let source_child = File::from(
-                openat(source, &name, flags, Mode::empty())
-                    .map_err(|error| Error::Io(error.into()))?,
-            );
-            let destination_child = File::from(
-                openat(destination, &name, flags, Mode::empty())
-                    .map_err(|error| Error::Io(error.into()))?,
-            );
-            copy_legacy_directory_contents(
-                &source_child,
-                &destination_child,
-                &source_path.join(&name),
-            )?;
-            destination_child.sync_all()?;
-        } else if kind.is_file() {
-            let source_file = File::from(
-                openat(
-                    source,
-                    &name,
-                    OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC | OFlags::NONBLOCK,
-                    Mode::empty(),
-                )
-                .map_err(|error| Error::Io(error.into()))?,
-            );
-            if !source_file.metadata()?.is_file() {
-                return Err(Error::BadRequest(
-                    "legacy state contains a non-regular file".to_string(),
-                ));
-            }
-            let mut destination_file = File::from(
-                openat(
-                    destination,
-                    &name,
-                    OFlags::WRONLY
-                        | OFlags::CREATE
-                        | OFlags::EXCL
-                        | OFlags::NOFOLLOW
-                        | OFlags::CLOEXEC,
-                    Mode::RUSR | Mode::WUSR,
-                )
-                .map_err(|error| Error::Io(error.into()))?,
-            );
-            let mut source_file = source_file;
-            io::copy(&mut source_file, &mut destination_file)?;
-            destination_file.sync_all()?;
-        } else {
-            return Err(Error::BadRequest(
-                "legacy state contains a special file".to_string(),
-            ));
-        }
-    }
-    destination.sync_all()?;
-    Ok(())
-}
-
 fn normalize_asset_path(path: &str) -> Result<PathBuf> {
     let raw = Path::new(path);
     if raw.is_absolute() {
@@ -3636,23 +3452,9 @@ mod tests {
             fs::read(vault.root.join("A.md")).unwrap(),
             created_content.as_bytes()
         );
-        let legacy_payload = v2_request_hash_for_source("create", None, &create, created_content).unwrap();
-        let mut legacy_result = serde_json::to_value(&created).unwrap();
-        legacy_result["outcome"]["result"]["sourceHash"] =
-            history::legacy_source_hash_v2(created_content).into();
-        legacy_result["outcome"]["result"]["sourceHashFormatVersion"] = 2.into();
-        legacy_result["outcome"]["result"]["diskHash"] =
-            history::legacy_disk_hash(created_content.as_bytes()).into();
-        legacy_result["outcome"]["result"]["diskHashFormatVersion"] = 1.into();
-        let connection = rusqlite::Connection::open(vault.state_root.join("vault.db")).unwrap();
-        connection.execute(
-            "UPDATE mutation_operations SET payload_hash=?2, result_json=?3 WHERE mutation_id=?1",
-            rusqlite::params!["create-1", legacy_payload.legacy, serde_json::to_string(&legacy_result).unwrap()],
-        ).unwrap();
-        drop(connection);
         let retried = vault.v2_create_note(create.clone()).unwrap();
         assert_eq!(
-            legacy_result,
+            serde_json::to_value(&created).unwrap(),
             serde_json::to_value(&retried).unwrap()
         );
 
@@ -4418,10 +4220,7 @@ mod tests {
                 &vault.state_root,
                 &mut catalog,
                 "retry-pending-save",
-                &V2PayloadHashes {
-                    current: "payload".to_string(),
-                    legacy: "payload".to_string(),
-                },
+                "payload",
             )
             .unwrap()
             .unwrap()
@@ -4758,7 +4557,7 @@ mod tests {
         catalog
             .prepare_mutation(MutationIntent {
                 mutation_id,
-                payload_hash: &payload_hash.current,
+                payload_hash: &payload_hash,
                 kind: "image_upload",
                 note_id: None,
                 path: Some(&name),
@@ -4788,116 +4587,27 @@ mod tests {
     }
 
     #[test]
-    fn state_lives_outside_vault_and_legacy_dot_tansu_is_copied() {
+    fn configured_state_survives_restart_outside_vault() {
         let dir = tempfile::tempdir().unwrap().keep();
-        let legacy_state = dir.join(".tansu");
         fs::write(dir.join("A.md"), "# A\n").unwrap();
-        let mut catalog = Catalog::open(&legacy_state.join("vault.db")).unwrap();
-        reconcile_vault(&dir, &legacy_state, &mut catalog, &[]).unwrap();
-        let legacy_note = catalog.live_notes().unwrap().remove(0);
-        drop(catalog);
-
-        let state_path = dir.join("state");
+        let config = config_for(&dir, dir.join("state"));
         let vault = VaultRuntime::open(
             0,
-            &VaultConfig {
-                name: "Test".to_string(),
-                path: dir.clone(),
-                state_path: state_path.clone(),
+            &config,
+            LogHub::new(crate::logging::LogMode::Off),
+        )
+        .unwrap();
+        let first_note_id = vault.v2_vault_bootstrap().unwrap().notes[0].note_id.clone();
+        drop(vault);
 
-            },
+        let reopened = VaultRuntime::open(
+            0,
+            &config,
             LogHub::new(crate::logging::LogMode::Off),
         )
         .unwrap();
 
-        assert!(state_path.join("vault.db").exists());
-        assert!(state_path.join("history").exists());
-        assert_eq!(
-            vault.v2_vault_bootstrap().unwrap().notes[0].note_id,
-            legacy_note.note_id
-        );
-    }
-
-    #[test]
-    fn legacy_state_migration_rejects_symlinked_children() {
-        use std::os::unix::fs::symlink;
-
-        let dir = tempfile::tempdir().unwrap();
-        let outside = tempfile::tempdir().unwrap();
-        let legacy_state = dir.path().join(".tansu");
-        let state_path = dir.path().join("state");
-        fs::create_dir_all(&legacy_state).unwrap();
-        let mut catalog = Catalog::open(&legacy_state.join("vault.db")).unwrap();
-        reconcile_vault(dir.path(), &legacy_state, &mut catalog, &[]).unwrap();
-        drop(catalog);
-        fs::write(outside.path().join("secret"), b"outside").unwrap();
-        symlink(
-            outside.path().join("secret"),
-            legacy_state.join("linked-file"),
-        )
-        .unwrap();
-        symlink(outside.path(), legacy_state.join("linked-directory")).unwrap();
-
-        let result = VaultRuntime::open(
-            0,
-            &VaultConfig {
-                name: "Test".to_string(),
-                path: dir.path().to_path_buf(),
-                state_path: state_path.clone(),
-
-            },
-            LogHub::new(crate::logging::LogMode::Off),
-        );
-
-        assert!(result.is_err());
-        assert!(!state_path.join("vault.db").exists());
-        assert!(!state_path.join("linked-file").exists());
-        assert!(!state_path.join("linked-directory/secret").exists());
-
-        let retry = VaultRuntime::open(
-            0,
-            &VaultConfig {
-                name: "Test".to_string(),
-                path: dir.path().to_path_buf(),
-                state_path: state_path.clone(),
-
-            },
-            LogHub::new(crate::logging::LogMode::Off),
-        );
-
-        assert!(retry.is_err());
-        assert!(!state_path.join("vault.db").exists());
-    }
-
-    #[test]
-    fn legacy_state_migration_rejects_symlinked_root() {
-        use std::os::unix::fs::symlink;
-
-        let dir = tempfile::tempdir().unwrap();
-        let outside = tempfile::tempdir().unwrap();
-        let external_legacy_state = outside.path().join("legacy");
-        let legacy_state = dir.path().join(".tansu");
-        let state_path = dir.path().join("state");
-        fs::create_dir_all(&external_legacy_state).unwrap();
-        let mut catalog = Catalog::open(&external_legacy_state.join("vault.db")).unwrap();
-        reconcile_vault(dir.path(), &external_legacy_state, &mut catalog, &[]).unwrap();
-        drop(catalog);
-        symlink(&external_legacy_state, &legacy_state).unwrap();
-
-        let result = VaultRuntime::open(
-            0,
-            &VaultConfig {
-                name: "Test".to_string(),
-                path: dir.path().to_path_buf(),
-                state_path: state_path.clone(),
-
-            },
-            LogHub::new(crate::logging::LogMode::Off),
-        );
-
-        assert!(result.is_err());
-        assert!(!state_path.join("vault.db").exists());
-        assert!(external_legacy_state.join("vault.db").exists());
+        assert_eq!(reopened.v2_vault_bootstrap().unwrap().notes[0].note_id, first_note_id);
     }
 
     fn config_for(root: &Path, state_path: PathBuf) -> VaultConfig {

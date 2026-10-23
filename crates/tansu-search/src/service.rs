@@ -698,7 +698,7 @@ mod tests {
             note_id.into(),
             vec![],
             revision,
-            format!("sha256-v2:{revision}"),
+            format!("blake3-v3:{revision}"),
         )
         .unwrap();
         DocumentInput::new(identity, content.into(), String::new()).unwrap()

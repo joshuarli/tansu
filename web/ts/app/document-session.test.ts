@@ -733,9 +733,9 @@ function metadata(revision: number, content: string, hashNumber: number): V2Note
     tags: [],
     revision,
     sourceHash: hash(content.length),
-    diskHash: `sha256:${String(hashNumber).padStart(64, "0")}`,
-    sourceHashFormatVersion: 2,
-    diskHashFormatVersion: 1,
+    diskHash: `blake3-v2:${String(hashNumber).padStart(64, "0")}`,
+    sourceHashFormatVersion: 3,
+    diskHashFormatVersion: 2,
     updatedAtMs: revision,
   };
 }
@@ -745,7 +745,7 @@ function accepted(mutationId: string, result: V2NoteMeta | null): V2MutationResp
 }
 
 function hash(number: number): string {
-  return `sha256-v2:${String(number).padStart(64, "0")}`;
+  return `blake3-v3:${String(number).padStart(64, "0")}`;
 }
 
 function draftRecord(baseRevision: number, source: string): DraftJournalRecord {
@@ -757,7 +757,7 @@ function draftRecord(baseRevision: number, source: string): DraftJournalRecord {
     noteId: identity.noteId,
     baseRevision,
     baseSourceHash: hash(baseRevision),
-    baseDiskHash: `sha256:${String(baseRevision).padStart(64, "0")}`,
+    baseDiskHash: `blake3-v2:${String(baseRevision).padStart(64, "0")}`,
     localRevision: 2,
     mutationId: "mutation-recovered",
     source,

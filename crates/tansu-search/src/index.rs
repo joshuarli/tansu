@@ -402,7 +402,7 @@ mod tests {
             path.rsplit('/').next().unwrap_or(path).trim_end_matches(".md").to_owned(),
             vec!["tag".to_owned()],
             revision,
-            format!("sha256-v2:{revision}"),
+            format!("blake3-v3:{revision}"),
         )
         .unwrap()
     }

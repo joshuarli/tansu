@@ -169,7 +169,7 @@ describe("dirtySnapshot", () => {
   function session(): DocumentSession {
     const services: DocumentSessionServices = {
       createMutationId: () => "mutation-1",
-      sourceHash: async () => `sha256-v2:${"0".repeat(64)}`,
+      sourceHash: async () => `blake3-v3:${"0".repeat(64)}`,
       save: () => new Promise(() => {}),
       retryable: () => false,
       wait: async () => {},
@@ -184,10 +184,10 @@ describe("dirtySnapshot", () => {
         title: "A",
         tags: [],
         revision: 1,
-        sourceHash: `sha256-v2:${"0".repeat(64)}`,
-        diskHash: `sha256:${"0".repeat(64)}`,
-        sourceHashFormatVersion: 2,
-        diskHashFormatVersion: 1,
+        sourceHash: `blake3-v3:${"0".repeat(64)}`,
+        diskHash: `blake3-v2:${"0".repeat(64)}`,
+        sourceHashFormatVersion: 3,
+        diskHashFormatVersion: 2,
         updatedAtMs: 1,
       },
       content: "# A\n",

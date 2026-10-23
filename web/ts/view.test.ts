@@ -573,10 +573,10 @@ function note(noteId: string, path: string, title: string, tags: string[] = []):
     title,
     tags,
     revision: 1,
-    sourceHash: `sha256-v2:${"a".repeat(64)}`,
-    diskHash: `sha256:${"b".repeat(64)}`,
-    sourceHashFormatVersion: 2,
-    diskHashFormatVersion: 1,
+    sourceHash: `blake3-v3:${"a".repeat(64)}`,
+    diskHash: `blake3-v2:${"b".repeat(64)}`,
+    sourceHashFormatVersion: 3,
+    diskHashFormatVersion: 2,
     updatedAtMs: 1,
   };
 }
@@ -599,7 +599,7 @@ function revisionMeta(revision: number): V2RevisionMeta {
     noteId: "n1",
     kind: "save",
     source: "user",
-    sourceHash: `sha256-v2:${"c".repeat(64)}`,
+    sourceHash: `blake3-v3:${"c".repeat(64)}`,
     createdAtMs: 1,
   };
 }
@@ -610,8 +610,8 @@ function conflictDocument(noteId: string): V2ConflictDraftDocument {
       draftId: 7,
       noteId,
       baseRevision: 1,
-      baseSourceHash: `sha256-v2:${"a".repeat(64)}`,
-      sourceHash: `sha256-v2:${"d".repeat(64)}`,
+      baseSourceHash: `blake3-v3:${"a".repeat(64)}`,
+      sourceHash: `blake3-v3:${"d".repeat(64)}`,
       createdAtMs: 1,
     },
     content: "# Draft\n",

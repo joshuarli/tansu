@@ -1462,7 +1462,6 @@ dependencies = [
  "futures-lite",
  "futures-util",
  "getrandom 0.3.4",
- "graviola",
  "http-body-util",
  "laputa-hyper-futures-lite",
  "lz4_flex 0.14.0",

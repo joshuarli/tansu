@@ -6,7 +6,6 @@ use std::io::{ErrorKind, Write};
 use std::path::{Path, PathBuf};
 
 use blake3::hash as blake3_hash;
-use graviola::hashing::{Hash, Sha256};
 use lz4_flex::{compress_prepend_size, decompress_size_prepended};
 
 use crate::{Error, Result};
@@ -176,37 +175,9 @@ pub fn disk_hash(bytes: &[u8]) -> String {
     format!("blake3-v2:{}", digest(bytes))
 }
 
-pub fn legacy_disk_hash(bytes: &[u8]) -> String {
-    format!("sha256:{}", sha256_digest(bytes))
-}
-
-pub fn legacy_source_hash_v2(content: &str) -> String {
-    format!("sha256-v2:{}", sha256_digest(normalize_lf(content).as_bytes()))
-}
-
-pub fn legacy_content_hash(content: &str) -> String {
-    let normalized = normalize_lf(content);
-    let canonical = normalized.replace('\n', "\r\n");
-    format!("sha256:{}", sha256_digest(canonical.as_bytes()))
-}
-
-pub fn source_hash_matches(expected: &str, content: &str) -> bool {
-    expected == source_hash(content)
-        || expected == legacy_source_hash_v2(content)
-        || expected == legacy_content_hash(content)
-}
-
-pub fn disk_hash_matches(expected: &str, bytes: &[u8]) -> bool {
-    expected == disk_hash(bytes) || expected == legacy_disk_hash(bytes)
-}
-
 pub fn source_hash_format_version(hash: &str) -> Result<u16> {
     if valid_hash(hash, "blake3-v3:") {
         Ok(3)
-    } else if valid_hash(hash, "sha256-v2:") {
-        Ok(2)
-    } else if valid_hash(hash, "sha256:") {
-        Ok(1)
     } else {
         Err(Error::Internal("catalog source hash uses an unsupported format".to_string()))
     }
@@ -215,8 +186,6 @@ pub fn source_hash_format_version(hash: &str) -> Result<u16> {
 pub fn disk_hash_format_version(hash: &str) -> Result<u16> {
     if valid_hash(hash, "blake3-v2:") {
         Ok(2)
-    } else if valid_hash(hash, "sha256:") {
-        Ok(1)
     } else {
         Err(Error::Internal("catalog disk hash uses an unsupported format".to_string()))
     }
@@ -228,11 +197,6 @@ fn normalize_lf(content: &str) -> String {
 
 fn digest(bytes: &[u8]) -> String {
     hex(blake3_hash(bytes).as_bytes())
-}
-
-fn sha256_digest(bytes: &[u8]) -> String {
-    let hash = Sha256::hash(bytes);
-    hex(hash.as_ref())
 }
 
 fn hex(bytes: &[u8]) -> String {
@@ -319,14 +283,7 @@ pub(crate) fn read_snapshot_bytes_for_reconciliation(
         .map_err(|_| SnapshotReadError::Corrupt(hash.to_string()))?;
     let document = SourceDocument::from_disk(&bytes)
         .map_err(|_| SnapshotReadError::Corrupt(hash.to_string()))?;
-    let matches = if hash.starts_with("blake3-v3:") {
-        source_hash(&document.source) == hash
-    } else if hash.starts_with("sha256-v2:") {
-        legacy_source_hash_v2(&document.source) == hash
-    } else {
-        legacy_content_hash(&document.source) == hash
-    };
-    if !matches {
+    if source_hash(&document.source) != hash {
         return Err(SnapshotReadError::Corrupt(hash.to_string()));
     }
     Ok(bytes)
@@ -364,7 +321,7 @@ pub fn read_conflict_draft(
     let bytes = decompress_size_prepended(&compressed)
         .map_err(|_| Error::Internal("corrupt conflict draft".to_string()))?;
     let content = validate_and_canonicalize(&bytes)?;
-    if !source_hash_matches(expected_hash, &content) {
+    if source_hash(&content) != expected_hash {
         return Err(Error::Internal("conflict draft hash mismatch".to_string()));
     }
     Ok(content)
@@ -474,9 +431,7 @@ fn hash_filename(hash: &str) -> String {
 }
 
 fn valid_snapshot_hash(hash: &str) -> bool {
-    ["blake3-v3:", "sha256-v2:", "sha256:"]
-        .iter()
-        .any(|prefix| valid_hash(hash, prefix))
+    valid_hash(hash, "blake3-v3:")
 }
 
 fn validate_note_id(note_id: &str) -> Result<()> {
@@ -535,51 +490,6 @@ mod tests {
             let source = SourceDocument::from_disk(bytes).unwrap();
             assert_eq!(source.disk_bytes_for_source(&source.source).unwrap(), bytes);
         }
-    }
-
-    #[test]
-    fn versioned_snapshot_reader_keeps_legacy_hashes_and_bytes_readable() {
-        let dir = tempfile::tempdir().unwrap();
-        let legacy_bytes = b"hello\r\n";
-        let legacy_hash = legacy_content_hash("hello\n");
-        let legacy_path = dir
-            .path()
-            .join("history/snapshots/note")
-            .join(hash_filename(&legacy_hash));
-        fs::create_dir_all(legacy_path.parent().unwrap()).unwrap();
-        fs::write(
-            &legacy_path,
-            compress_prepend_size(legacy_bytes),
-        )
-        .unwrap();
-
-        assert_eq!(
-            read_snapshot_bytes(dir.path(), "note", &legacy_hash).unwrap(),
-            legacy_bytes
-        );
-        assert_eq!(
-            read_snapshot(dir.path(), "note", &legacy_hash).unwrap(),
-            "hello\n"
-        );
-        assert_eq!(fs::read(legacy_path).unwrap(), compress_prepend_size(legacy_bytes));
-    }
-
-    #[test]
-    fn snapshot_reader_keeps_previous_lf_source_hashes_readable() {
-        let dir = tempfile::tempdir().unwrap();
-        let source_hash = "sha256-v2:5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03";
-        let path = dir
-            .path()
-            .join("history/snapshots/note")
-            .join(hash_filename(source_hash));
-        fs::create_dir_all(path.parent().unwrap()).unwrap();
-        fs::write(&path, compress_prepend_size(b"hello\r\n")).unwrap();
-
-        assert_eq!(
-            read_snapshot_bytes(dir.path(), "note", source_hash).unwrap(),
-            b"hello\r\n"
-        );
-        assert_eq!(fs::read(path).unwrap(), compress_prepend_size(b"hello\r\n"));
     }
 
     #[test]

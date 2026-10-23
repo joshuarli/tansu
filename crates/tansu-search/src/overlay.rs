@@ -75,13 +75,13 @@ mod tests {
             note_id.into(),
             vec![],
             4,
-            "sha256-v2:base".into(),
+            "blake3-v3:base".into(),
         )
         .unwrap();
         DirtyNoteSnapshot::new(
             identity,
             4,
-            "sha256-v2:base".into(),
+            "blake3-v3:base".into(),
             local_revision,
             source.into(),
             String::new(),
@@ -105,7 +105,7 @@ mod tests {
         assert_eq!(result.result.hits.len(), 1);
         assert_eq!(result.result.hits[0].note_id, "draft");
         assert_eq!(result.result.hits[0].local_revision, Some(7));
-        assert_eq!(result.result.hits[0].source_hash, "sha256-v2:base");
+        assert_eq!(result.result.hits[0].source_hash, "blake3-v3:base");
     }
 
     #[test]

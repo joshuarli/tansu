@@ -512,7 +512,7 @@ mod tests {
             "note".into(),
             vec![],
             1,
-            "sha256-v2:abc".into()
+            "blake3-v3:abc".into()
         )
         .unwrap();
         assert!(DocumentInput::new(identity, "line\n".into(), String::new()).is_ok());
@@ -522,7 +522,7 @@ mod tests {
             "note".into(),
             vec![],
             1,
-            "sha256-v2:abc".into(),
+            "blake3-v3:abc".into(),
         )
         .unwrap();
         assert!(matches!(

@@ -21,7 +21,6 @@ futures-io = "0.3"
 futures-lite = { version = "2.6", default-features = false, features = ["std"] }
 futures-util = { version = "0.3", default-features = false, features = ["async-await", "std"] }
 getrandom = "0.3"
-graviola = "0.4"
 http-body-util = "0.1"
 hyper = { package = "laputa-hyper-futures-lite", git = "https://github.com/joshuarli/hyper-futures-lite", rev = "770427abdcafc516531dd275423ceee0c0b1fb2e", version = "=1.12.0-beta.0", default-features = false, features = ["server", "http1", "http2"] }
 lz4_flex = "0.14"

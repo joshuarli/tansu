@@ -69,11 +69,9 @@ it leaves `sourceHash` unchanged.
 `sourceHash` is `blake3-v3:<64 lowercase hex characters>` over the UTF-8 editor
 source with CRLF and CR normalized to LF. Its `sourceHashFormatVersion` is `3`.
 `diskHash` is `blake3-v2:<64 lowercase hex characters>` over the exact visible
-file bytes. Its `diskHashFormatVersion` is `2`. The server reads prior
-`sha256:` source hashes (version 1), `sha256-v2:` source hashes (version 2),
-and `sha256:` disk hashes (version 1); it upgrades catalog hashes during
-reconciliation without adding a note revision. Client workspace journals
-also accept those prior formats.
+file bytes. Its `diskHashFormatVersion` is `2`. The server and client workspace
+journals use only these formats. Tansu does not migrate earlier catalog or
+journal hashes.
 
 Existing-note mutations send `precondition` with the base revision,
 `baseSourceHash`, and `baseDiskHash`. Full and delta saves include the candidate

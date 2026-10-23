@@ -100,10 +100,10 @@ function note(noteId: string, path: string, title: string): V2NoteMeta {
     title,
     tags: [],
     revision: 1,
-    sourceHash: `sha256-v2:${"a".repeat(64)}`,
-    diskHash: `sha256:${"b".repeat(64)}`,
-    sourceHashFormatVersion: 2,
-    diskHashFormatVersion: 1,
+    sourceHash: `blake3-v3:${"a".repeat(64)}`,
+    diskHash: `blake3-v2:${"b".repeat(64)}`,
+    sourceHashFormatVersion: 3,
+    diskHashFormatVersion: 2,
     updatedAtMs: 1,
   };
 }
