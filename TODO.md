@@ -90,6 +90,7 @@ Next: 83
 - **Where:** `src/history.rs:167-253`, `src/reconcile.rs:271-390`, `src/catalog.rs:196-240`, `src/catalog.rs:350-368`, `src/vault.rs:233-282`, `src/vault.rs` `.tansu` legacy state copy, `src/auth.rs:18,290-306`, `docs/api.md`, `docs/migration.md`
 - **Problem:** Three source-hash generations and two disk-hash generations are stored and compared, and idempotent retry hashes each payload twice. The `.tansu/` state copy, the search-weights migration, and the token-hash `user_version` migration each serve one past layout. The repo is months old at 0.1.0. Removing them breaks or resets any catalog written before blake3-v3, so it needs the owner to confirm no installed state predates the current formats.
 - **Recommendation:** After confirming, delete the legacy hash functions, `migrate_current_hashes`, the `.tansu` copy with its tests, and both migrations.
+- **Blocked:** The owner must confirm that no installed state predates the current hash and catalog formats. Repository age and version do not establish that fact.
 - **Fix with:** dead-code-archaeology
 - **Effort:** M
 
@@ -160,7 +161,7 @@ Next: 83
 
 - **Area:** Architecture
 - **Where:** `web/ts/editor/tansu-extensions.ts`, `web/ts/editor/codemirror-adapter.ts:411-525`, `web/ts/editor/harness/`, `web/ts/editor/tests/large-note-bench.test.ts`
-- **Problem:** The `EditorExtension` union has one configuration and the adapter filters and diffs it on every render. The harness is not wired to any target. The jsdom large-note timing is cited nowhere.
+- **Problem:** The `EditorExtension` union represents three extension variants, but the app supplies one fixed set. The adapter filters and diffs that set on every render. The standalone harness has a build script but no named target. The happy-dom large-note timing runs in `make bench` and `make bench-full`, but it does not measure browser layout.
 - **Recommendation:** Replace the union with plain config fields and delete the harness and the bench test.
 - **Fix with:** api-surface-and-module-boundaries
 - **Effort:** S
@@ -178,8 +179,8 @@ Next: 83
 
 - **Area:** Architecture
 - **Where:** `src/history.rs`, `web/ts/app/document-session.ts`, `web/ts/editor/`
-- **Problem:** Every accepted content-changing write has a recoverable snapshot, but the UI offers no way to browse, diff, restore, or branch from one. Conflict drafts are separate notes with no side-by-side merge.
-- **Recommendation:** Add a timeline slider on the editor edge over a note's snapshots, with a live diff (inserted text green, removed text fading), restore, and branch-from-here. Render conflict drafts as a two-pane merge. Needs a snapshot-list API first; surface it in `docs/api.md`.
+- **Problem:** The revisions panel already lists snapshots, shows a text diff, and restores them through the existing revision API. It has no timeline scrubber or branch-from-here action. The conflict panel previews and restores a draft but has no editable two-pane merge.
+- **Recommendation:** Extend the existing history UI with a timeline slider, a live diff (inserted text green, removed text fading), and branch-from-here. Add an editable two-pane conflict merge while preserving canonical revision preconditions and unsaved edits. Reuse the existing snapshot-list and restore APIs; document any new contracts in `docs/api.md`.
 - **Fix with:** none
 - **Effort:** L
 
@@ -189,5 +190,7 @@ Next: 83
 - **Where:** `src/search.rs`, `src/tags.rs`, `web/ts/app.ts`
 - **Problem:** No tag suggestions, related notes, long-note summaries, or ask-your-vault chat. Any of them sends note content to a model, which needs a privacy design before code: what leaves the machine, opt-in, and per-vault scope. Indexing and model failures must not affect accepted writes.
 - **Recommendation:** Write an RFC for the privacy and model-hosting boundary, then ship in order: related notes (derived from the search index, no model), tag suggestions, catch-me-up summary, vault chat with notes cited as clickable chips.
+- **Design:** `docs/rfcs/TNS-082-vault-intelligence.md`
+- **Blocked:** The privacy RFC is draft. Model requests require an owner decision on hosting, disclosure, and credential storage. Resume implementation after that design is accepted.
 - **Fix with:** none
 - **Effort:** L
