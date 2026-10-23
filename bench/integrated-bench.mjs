@@ -140,7 +140,7 @@ async function runBrowserBenchmarks(browser, baseUrl, fixture, identity, first, 
       const document = await vaultJson(baseUrl, identity, `/notes/${encodeURIComponent(first.noteId)}`);
       await saveNote(baseUrl, identity, first.noteId, document.meta, `${document.content}\nbench ${randomUUID()}\n`);
     });
-    await page.keyboard.press("Control+Shift+f");
+    await page.keyboard.press("Control+/");
     const searchInput = page.locator(".search-panel input");
     const searchTiming = await measureSearchPaint(page, searchInput, SEARCH_QUERY, SEARCH_RESULT_PATH);
     out.searchPainted = searchTiming.paintedMs;
@@ -285,7 +285,7 @@ async function runBrowserBenchmarks(browser, baseUrl, fixture, identity, first, 
 }
 
 async function openNoteThroughSearch(page, title) {
-  await page.keyboard.press("Control+Shift+f");
+  await page.keyboard.press("Control+/");
   const panel = page.locator(".search-panel");
   await panel.waitFor({ state: "visible" });
   await panel.locator(".command-input").fill(title);
