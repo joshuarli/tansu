@@ -85,15 +85,6 @@ Next: 83
 - **Fix with:** lifecycle-concurrency
 - **Effort:** M
 
-### TNS-075 · P3 · Remove the API version and build-id scheme
-
-- **Area:** Architecture
-- **Where:** `src/api.rs:12`, `src/http.rs:598-647`, `src/http.rs:1414-1422`, `web/ts/app/v2-api.ts`, `docs/api.md`
-- **Problem:** No V1 client exists, yet three places still return `api_version_unsupported`, the version is stated four times, and the build id is checked only for being non-empty. Server and client ship as one embedded build.
-- **Recommendation:** Delete the dead `API_VERSION`, the unreachable branch at `http.rs:1414`, and then the headers, the typed error, and the client check.
-- **Fix with:** api-surface-and-module-boundaries
-- **Effort:** S
-
 ### TNS-076 · P3 · Remove tooling nothing names
 
 - **Area:** Build

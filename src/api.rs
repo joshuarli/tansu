@@ -9,7 +9,6 @@ use crate::http::{HttpRequest, HttpResponse};
 use crate::vault::V2VaultError;
 use crate::{Error, Result};
 
-pub const API_VERSION: u32 = 1;
 
 pub fn handle_v2_api(app: &App, request: &HttpRequest, request_id: &str) -> HttpResponse {
     match dispatch_v2_api(app, request) {
