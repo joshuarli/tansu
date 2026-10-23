@@ -9,13 +9,13 @@ supportedArchitectures:
     - x64
     - arm64
   libc:
+    - glibc
     - musl
 ignoredOptionalDependencies:
   - "@esbuild/linux-arm"
   - "*aix*"
   - "*android*"
   - "*freebsd*"
-  - "*linux-*-gnu*"
   - "*linux-arm-*"
   - "*linux-ia32*"
   - "*linux-loong64*"

@@ -67,6 +67,18 @@ test-e2e-chromium:
 test-e2e-webkit:
 	TANSU_E2E_BROWSER=webkit deno task test:browser
 
+update-e2e-baselines-linux: setup build-linux-musl-x86_64
+	mkdir -p "$(CURDIR)/.work/tmp/linux-e2e-node_modules"
+	docker build --platform linux/amd64 -f docker/linux-e2e-baselines.Dockerfile --tag tansu-linux-e2e-baselines .
+	docker run --rm --platform linux/amd64 \
+		--volume "$(CURDIR):/work" \
+		--volume "$(CURDIR)/.work/tmp/linux-e2e-node_modules:/work/node_modules" \
+		--workdir /work \
+		--env TANSU_E2E_SERVER_BINARY=/work/.work/dist/x86_64-unknown-linux-musl/tansu \
+		--env TMPDIR=/work/.work/tmp \
+		tansu-linux-e2e-baselines \
+		sh -c 'set -eu; npm exec --yes --package=pnpm@12.13.0 -- pnpm install --frozen-lockfile; for browser in chromium webkit; do TANSU_UPDATE_BASELINES=1 TANSU_E2E_BROWSER=$$browser node_modules/.bin/vitest run --config vitest.e2e.config.ts -t baselines; TANSU_E2E_BROWSER=$$browser node_modules/.bin/vitest run --config vitest.e2e.config.ts -t baselines; done'
+
 loupe:
 	mkdir -p "$(CURDIR)/.work/tmp"
 	TMPDIR="$(CURDIR)/.work/tmp" deno task loupe:dist
@@ -137,4 +149,4 @@ bench-full:
 	TMPDIR="$(CURDIR)/.work/tmp" node bench/integrated-bench.mjs --browser=chromium,webkit --warmups=5 --runs=20
 	$(PERF_GATE_AFTER)
 
-.PHONY: auth-recovery-drill bench bench-full build-linux-musl-aarch64 build-linux-musl-docker build-linux-musl-x86_64 deploy dev dev-config check lint loupe setup test-loupe-browser types types-check types-generated ts test test-e2e-chromium test-e2e-webkit test-e2e-loupe test-rs test-sqlite-static test-acceptance
+.PHONY: auth-recovery-drill bench bench-full build-linux-musl-aarch64 build-linux-musl-docker build-linux-musl-x86_64 deploy dev dev-config check lint loupe setup test-loupe-browser types types-check types-generated ts test test-e2e-chromium test-e2e-webkit update-e2e-baselines-linux test-e2e-loupe test-rs test-sqlite-static test-acceptance

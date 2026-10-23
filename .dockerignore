@@ -5,6 +5,7 @@
 !build.rs
 !docker/
 !docker/linux-musl.Dockerfile
+!docker/linux-e2e-baselines.Dockerfile
 !src/
 !src/**
 !crates/

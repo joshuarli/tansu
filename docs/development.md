@@ -58,6 +58,24 @@ TARGET=aarch64-unknown-linux-musl make build-linux-musl-docker
 The Docker build links the static SQLite archive built by
 `scripts/build-sqlite-static.sh`.
 
+## Linux screenshot baselines
+
+Generate and verify Linux Chromium and WebKit screenshot baselines with:
+
+```sh
+make update-e2e-baselines-linux
+```
+
+The target uses the Playwright `v1.64.0-noble` image and Node `26.12.0` on
+`linux/amd64`. It writes four screenshots under each of
+`web/ts/e2e/baselines/chromium-linux/` and
+`web/ts/e2e/baselines/webkit-linux/`. The target sets
+`TANSU_UPDATE_BASELINES=1` to write them, then reruns the test without the
+variable. Review the generated PNG files before committing them.
+
+The image runs Ubuntu with glibc, so the workspace lock includes glibc
+variants of the existing Linux optional packages alongside the musl variants.
+
 ## Loupe
 
 `make loupe` builds the production extension in `dist/extension-loupe`. On
