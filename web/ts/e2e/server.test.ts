@@ -1198,7 +1198,10 @@ describe("real server harness", () => {
         return image?.complete === true && image.naturalWidth > 0;
       });
       await openSearchNote(page, "search");
-      for (const _tab of [0, 1]) await page.locator(".tab.active .tab-close").click();
+      for (const _tab of [0, 1]) {
+        await page.locator(".tab.active").hover();
+        await page.locator(".tab.active .tab-close").click();
+      }
       await page.waitForSelector(".tab", { state: "detached" });
     };
 
@@ -1215,6 +1218,7 @@ describe("real server harness", () => {
       await uploaded;
       await expect.poll(() => page.locator(".tansu-pasted-image-preview").count()).toBe(0);
     }
+    await page.locator(".tab.active").hover();
     await page.locator(".tab.active .tab-close").click();
     await page.waitForSelector(".tab", { state: "detached" });
     const warm = await leaks();
