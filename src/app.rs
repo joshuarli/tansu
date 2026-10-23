@@ -160,4 +160,43 @@ mod tests {
         assert!(!subscription.resync_required);
         assert!(app.subscribe_v2_events("missing", None).is_err());
     }
+
+    #[test]
+    fn a_later_vault_open_failure_releases_earlier_vault_ownership() {
+        let root = tempfile::tempdir().unwrap();
+        let first_root = root.path().join("first-notes");
+        let second_root = root.path().join("second-notes");
+        std::fs::create_dir_all(&first_root).unwrap();
+        std::fs::create_dir_all(&second_root).unwrap();
+        let legacy_state = root.path().join("legacy-state");
+        let second_legacy_state = legacy_state.join("second");
+        std::fs::create_dir_all(&second_legacy_state).unwrap();
+        std::fs::write(second_legacy_state.join("vault.db"), b"invalid sqlite database").unwrap();
+        let config = Config {
+            vaults: vec![
+                crate::config::VaultConfig {
+                    name: "First".to_string(),
+                    path: first_root,
+                    state_path: legacy_state.join("first"),
+                },
+                crate::config::VaultConfig {
+                    name: "Second".to_string(),
+                    path: second_root,
+                    state_path: second_legacy_state,
+                },
+            ],
+            auth: None,
+        };
+        let config_to_resolve = config.clone();
+
+        assert!(App::from_config(config, LogHub::new(LogMode::Off), None).is_err());
+        let (_, resolved_vaults) = initialize_state_layout(&config_to_resolve.vaults).unwrap();
+        let reopened = VaultRuntime::open(
+            0,
+            &resolved_vaults[0],
+            LogHub::new(LogMode::Off),
+        )
+        .unwrap();
+        drop(reopened);
+    }
 }
