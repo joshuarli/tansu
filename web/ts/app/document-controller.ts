@@ -73,14 +73,13 @@ export class DocumentController {
     const identityKey = documentIdentityKey(session.identity);
     const controller = new AbortController();
     let active = true;
-    let task: ControllerTask;
     const end = (cancel: boolean) => {
       if (!active) return;
       active = false;
       this.tasks.delete(task);
       if (cancel) controller.abort();
     };
-    task = {
+    const task: ControllerTask = {
       signal: controller.signal,
       deliver: (completion) => {
         if (!active || controller.signal.aborted || this.session !== session ||

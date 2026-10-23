@@ -74,17 +74,17 @@ describe("DocumentControllers", () => {
     const controllers = new DocumentControllers();
     let finishMutation = (): void => {};
     controllers.for(noteId("a")).track(new Promise<void>((resolve) => { finishMutation = resolve; }));
-    expect(controllers.hasPendingMutations()).toBe(true);
+    expect(controllers.hasPendingMutations()).toBeTruthy();
     let settled = false;
     const draining = controllers.settled().then(() => { settled = true; });
     await Promise.resolve();
-    expect(settled).toBe(false);
+    expect(settled).toBeFalsy();
 
     finishMutation();
     await draining;
 
-    expect(settled).toBe(true);
-    expect(controllers.hasPendingMutations()).toBe(false);
+    expect(settled).toBeTruthy();
+    expect(controllers.hasPendingMutations()).toBeFalsy();
   });
 });
 
@@ -133,13 +133,13 @@ describe("DocumentController session subscription", () => {
     const request = controller.beginTask(first.source);
     const accepted = vi.fn();
 
-    expect(request.deliver(accepted)).toBe(true);
+    expect(request.deliver(accepted)).toBeTruthy();
     expect(accepted).toHaveBeenCalledTimes(1);
 
     controller.attachSession(second.source, () => {});
 
-    expect(request.signal.aborted).toBe(true);
-    expect(request.deliver(accepted)).toBe(false);
+    expect(request.signal.aborted).toBeTruthy();
+    expect(request.deliver(accepted)).toBeFalsy();
     expect(accepted).toHaveBeenCalledTimes(1);
     request.finish();
   });
@@ -155,11 +155,11 @@ describe("DocumentController session subscription", () => {
 
     controllers.release(noteId("a"));
     expect(released.listeners.size).toBe(0);
-    expect(releaseTask.signal.aborted).toBe(true);
+    expect(releaseTask.signal.aborted).toBeTruthy();
     controllers.disposeAll();
     expect(disposed.listeners.size).toBe(0);
-    expect(request.signal.aborted).toBe(true);
-    expect(request.deliver(() => {})).toBe(false);
+    expect(request.signal.aborted).toBeTruthy();
+    expect(request.deliver(() => {})).toBeFalsy();
   });
 });
 

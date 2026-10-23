@@ -15,6 +15,10 @@ import {
   getWorkspaceState,
   saveWorkspaceState,
   writeDraftCheckpoint,
+  type DraftJournalRecord,
+  type LocalDraftJournalRecord,
+  type WorkspaceState,
+  type WorkspaceTab,
 } from "./app/workspace-store.ts";
 import { canonicalSourceHash } from "./source-hash.ts";
 import { V2ApiError, type V2VaultBootstrap, type V2VaultClient, type V2VaultSnapshot } from "./app/v2-api.ts";
@@ -37,7 +41,6 @@ import type {
   V2SettingsRequest,
   V2VaultBootstrapResponse,
 } from "./types.generated.ts";
-import type { DraftJournalRecord, LocalDraftJournalRecord, WorkspaceState, WorkspaceTab } from "./app/workspace-store.ts";
 
 const HASH_A = `blake3-v3:${"a".repeat(64)}`;
 const HASH_B = `blake3-v3:${"b".repeat(64)}`;
@@ -396,7 +399,7 @@ describe("v2 desktop shell", () => {
     await until(() => root.querySelector(".auth-gate") !== null);
 
     expect(logout).toHaveBeenCalledTimes(1);
-    expect(await storedWorkspace()).not.toBeNull();
+    await expect(storedWorkspace()).resolves.not.toBeNull();
   });
 
   it("requests persistent storage from the settings user gesture", async () => {
@@ -983,7 +986,7 @@ describe("v2 desktop shell", () => {
     await runCommand(root, "save");
     const request = client.saveNote.mock.calls[0]![1];
     await until(async () => (await cachedBody({ noteId: note.noteId, sourceHash: request.sourceHash }))?.content === "# Saved\n");
-    expect(await cachedBody({ noteId: note.noteId, sourceHash: request.sourceHash })).toMatchObject({ sourceHash: request.sourceHash, content: "# Saved\n" });
+    await expect(cachedBody({ noteId: note.noteId, sourceHash: request.sourceHash })).resolves.toMatchObject({ sourceHash: request.sourceHash, content: "# Saved\n" });
   });
 
   it("promotes a typed new note on autosave with a title from its first line and never creates an empty one", async () => {
@@ -1034,7 +1037,7 @@ describe("v2 desktop shell", () => {
     const checkpoint = await savedCheckpoint(created.noteId);
     expect(checkpoint?.noteId).toBe(created.noteId);
     expect(localId).not.toBe(created.noteId);
-    expect(await localCheckpoint(localId)).toBeNull();
+    await expect(localCheckpoint(localId)).resolves.toBeNull();
   });
 
   it("does not schedule workspace persistence when a local checkpoint read finishes after dispose", async () => {
@@ -1264,7 +1267,9 @@ describe("v2 desktop shell", () => {
       precondition: { baseRevision: 1, baseSourceHash: HASH_A, baseDiskHash: DISK_HASH },
     }));
     expect(editorMock.instances[0]?.getSnapshot()?.source).toBe("# Restored\n");
-    expect(root.querySelector(".tab.active")?.classList.contains("tab-dirty")).toBe(false);
+    const restoredTab = root.querySelector(".tab.active");
+    expect(restoredTab).not.toBeNull();
+    expect(restoredTab!.classList.contains("tab-dirty")).toBeFalsy();
     expect(root.textContent).not.toContain("Save conflict");
     await until(async () => (await cachedBody(restored))?.content === "# Restored\n");
     expect((await cachedBody(restored))?.content).toBe("# Restored\n");
@@ -1350,7 +1355,7 @@ describe("v2 desktop shell", () => {
     await flushAsync();
 
     expect(client.openNote).toHaveBeenCalledTimes(openNoteCallsBeforeRestoreSettles);
-    expect(await cachedBody(first)).toBeNull();
+    await expect(cachedBody(first)).resolves.toBeNull();
     expect(root.querySelector(".toast")).toBeNull();
   });
 
@@ -1400,7 +1405,7 @@ describe("v2 desktop shell", () => {
 
     expect(client.saveNote).not.toHaveBeenCalled();
     expect(root.textContent).not.toContain("Save conflict");
-    expect(await savedCheckpoint(note.noteId)).toBeNull();
+    await expect(savedCheckpoint(note.noteId)).resolves.toBeNull();
     await app.dispose();
   });
 
@@ -1834,7 +1839,7 @@ describe("v2 desktop shell", () => {
     expect(editor.getSnapshot()).toMatchObject({ source: "# Newer local edit\n", selection: { anchor: 4, head: 9 } });
     expect(root.querySelector(".tab-conflict")).toBeNull();
     expect(root.querySelector(".history-edge-panel")).toBeNull();
-    expect(await savedCheckpoint(note.noteId)).toBeNull();
+    await expect(savedCheckpoint(note.noteId)).resolves.toBeNull();
     expect(client.saveNote).toHaveBeenCalledTimes(3);
   });
 
@@ -1878,9 +1883,9 @@ describe("v2 desktop shell", () => {
     expect(root.querySelector('[data-key="history-edge:conflict"]')).not.toBeNull();
     expect(root.querySelector(".merge-editor-hint")?.textContent)
       .toBe("The merge is accepted and is waiting for the note to be materialized.");
-    expect(root.querySelector<HTMLButtonElement>('[title="Save merge against the latest canonical revision"]')?.disabled).toBe(true);
+    expect(root.querySelector<HTMLButtonElement>('[title="Save merge against the latest canonical revision"]')?.disabled).toBeTruthy();
     expect(editor.getSnapshot()).toMatchObject({ source: "# Merge draft\n", selection: { anchor: 3, head: 8 } });
-    expect(await savedCheckpoint(note.noteId)).toMatchObject({ source: "# Merge draft\n", baseRevision: 2 });
+    await expect(savedCheckpoint(note.noteId)).resolves.toMatchObject({ source: "# Merge draft\n", baseRevision: 2 });
 
     await vi.advanceTimersByTimeAsync(900);
     await flushAsync();
@@ -1930,7 +1935,7 @@ describe("v2 desktop shell", () => {
     expect(root.querySelector(".empty-state")?.textContent).toContain("No note selected");
     expect(client.openNote).toHaveBeenCalledTimes(openNoteCallsBeforeClose);
     expect(client.saveNote).toHaveBeenCalledTimes(2);
-    expect(await savedCheckpoint(note.noteId)).toBeNull();
+    await expect(savedCheckpoint(note.noteId)).resolves.toBeNull();
   });
 
   it("clears the exact checkpoint and replaces the editor after restoring a conflict draft", async () => {
@@ -1962,7 +1967,7 @@ describe("v2 desktop shell", () => {
     }));
     expect(editorMock.instances[0]?.getSnapshot()?.source).toBe("# Draft\n");
     expect(root.textContent).not.toContain("Save conflict");
-    expect(await savedCheckpoint(note.noteId)).toBeNull();
+    await expect(savedCheckpoint(note.noteId)).resolves.toBeNull();
   });
 
   it("clears a restored conflict checkpoint after its tab closes", async () => {
@@ -2006,7 +2011,7 @@ describe("v2 desktop shell", () => {
     await until(async () => await savedCheckpoint(note.noteId) === null);
 
     expect(client.saveNote).toHaveBeenCalledTimes(1);
-    expect(await savedCheckpoint(note.noteId)).toBeNull();
+    await expect(savedCheckpoint(note.noteId)).resolves.toBeNull();
     await app.dispose();
   });
 
@@ -2396,7 +2401,7 @@ describe("v2 desktop shell", () => {
     expect(client.saveNote.mock.calls[0]?.[0]).toBe(first.noteId);
     expect(client.saveNote.mock.calls[0]?.[1]).toMatchObject({ content: "![[z-images/a.webp]]\n# One\n" });
     expect((await savedCheckpoint(first.noteId))?.source).toBe("![[z-images/a.webp]]\n# One\n");
-    expect(await savedCheckpoint(second.noteId)).toBeNull();
+    await expect(savedCheckpoint(second.noteId)).resolves.toBeNull();
   });
 
   it("debounces workspace session writes while typing", async () => {
@@ -2561,7 +2566,7 @@ describe("v2 desktop shell", () => {
     await until(async () => (await localCheckpoint(localId))?.source === "# Recover me\n" &&
       await savedCheckpoint(lost.noteId) === null);
     expect((await localCheckpoint(localId))?.source).toBe("# Recover me\n");
-    expect(await savedCheckpoint(lost.noteId)).toBeNull();
+    await expect(savedCheckpoint(lost.noteId)).resolves.toBeNull();
     await app.dispose();
   });
 
@@ -3452,12 +3457,12 @@ describe("asset url cache", () => {
     await until(() => root.querySelector<HTMLButtonElement>(".tab.active")?.title === "B");
     const configurationCount = vi.mocked(editor.updateConfiguration).mock.calls.length;
 
-    expect(signal.aborted).toBe(true);
+    expect(signal.aborted).toBeTruthy();
     late.resolve(new Blob(["late image"], { type: "image/webp" }));
     await flushAsync();
 
     expect(created).toHaveLength(0);
-    expect(vi.mocked(editor.updateConfiguration).mock.calls.length).toBe(configurationCount);
+    expect(editor.updateConfiguration).toHaveBeenCalledTimes(configurationCount);
   });
 
   it("evicts past 64 entries without leaving a revoked url resolvable", async () => {
@@ -3505,7 +3510,7 @@ describe("saved tab load completions", () => {
     await oldBoot;
     await flushAsync();
 
-    expect(await cachedBody(first)).toBeNull();
+    await expect(cachedBody(first)).resolves.toBeNull();
     expect(root.textContent).not.toContain("Old vault body");
     expect(root.querySelector('.tab[title="First"]')).toBeNull();
   });
@@ -3530,7 +3535,7 @@ describe("saved tab load completions", () => {
 
     root.querySelector<HTMLButtonElement>(".tab.active .tab-close")!.click();
     await until(() => root.querySelector(".tab") === null);
-    expect(signal.aborted).toBe(true);
+    expect(signal.aborted).toBeTruthy();
     late.resolve(documentFor(updated, "# Late reconciliation\n"));
     await flushAsync();
 
@@ -3556,7 +3561,7 @@ describe("saved tab load completions", () => {
     await booting;
     await flushAsync();
 
-    expect(await cachedBody(first)).toBeNull();
+    await expect(cachedBody(first)).resolves.toBeNull();
     expect(root.querySelector('.tab[title="First"]')).toBeNull();
   });
 
@@ -3615,7 +3620,7 @@ describe("saved tab load completions", () => {
 
     root.querySelector<HTMLButtonElement>(".tab.active .tab-close")!.click();
     await until(() => root.querySelector(".tab") === null);
-    expect(signal.aborted).toBe(true);
+    expect(signal.aborted).toBeTruthy();
     retry.resolve(documentFor(first, "# Late retry\n"));
     await flushAsync();
 

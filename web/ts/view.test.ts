@@ -336,7 +336,7 @@ describe("view rendering", () => {
     const conflictRoot = render(state, actions);
     expect(conflictRoot.querySelector('[data-key="history-edge:conflict"]')).not.toBeNull();
     expect(conflictRoot.textContent).toContain("Conflict merge");
-    expect(conflictRoot.querySelector<HTMLDetailsElement>(".conflict-draft-recovery")?.open).toBe(true);
+    expect(conflictRoot.querySelector<HTMLDetailsElement>(".conflict-draft-recovery")?.open).toBeTruthy();
     expect(conflictRoot.querySelector(".conflict-draft-recovery pre")?.textContent).toBe("# Draft\n");
     conflictRoot.querySelector<HTMLButtonElement>('[title="Restore conflict draft"]')!.click();
     conflictRoot.querySelector<HTMLButtonElement>('[title="Save merge against the latest canonical revision"]')!.click();
@@ -393,9 +393,9 @@ describe("view rendering", () => {
     const root = render(state);
     const diffLines = [...root.querySelectorAll(".diff-preview .diff-line")];
     expect(diffLines).toHaveLength(159);
-    expect(diffLines.some((line) => line.classList.contains("diff-removed"))).toBe(true);
-    expect(diffLines.some((line) => line.classList.contains("diff-added"))).toBe(true);
-    expect(diffLines.some((line) => line.textContent?.includes("Additional changes omitted"))).toBe(true);
+    expect(diffLines.some((line) => line.classList.contains("diff-removed"))).toBeTruthy();
+    expect(diffLines.some((line) => line.classList.contains("diff-added"))).toBeTruthy();
+    expect(diffLines.some((line) => line.textContent?.includes("Additional changes omitted"))).toBeTruthy();
   });
 
   it("bounds the settings inputs with the shared limits", () => {
