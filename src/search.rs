@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use pulldown_cmark::{Event, Parser, Tag, TagEnd};
 use tansu_search::{
     DirtyNoteSnapshot, DocumentInput, Fuzziness, NoteIdentity, OverlaySearchResult,
-    QuickOpenResponse, SearchLimit, SearchMode, SearchOptions, SearchService, SearchWeights, MAX_REBUILD_NOTES,
+    SearchLimit, SearchMode, SearchOptions, SearchService, SearchWeights, MAX_REBUILD_NOTES,
     MAX_REBUILD_SOURCE_BYTES,
 };
 
@@ -155,22 +155,6 @@ impl SearchIndex {
         self.call_service(|service| {
             service.search_with_overlay(query.to_owned(), options, identities, snapshots)
         })
-    }
-
-    pub fn quick_open(
-        &mut self,
-        query: &str,
-        current: &[NoteMeta],
-        pinned: &[String],
-        recent: &[String],
-        limit: usize,
-    ) -> std::result::Result<QuickOpenResponse, tansu_search::SearchError> {
-        let limit = SearchLimit::try_from(limit)?;
-        let identities = current
-            .iter()
-            .map(note_identity)
-            .collect::<std::result::Result<Vec<_>, _>>()?;
-        self.call_service(|service| service.quick_open(query, &identities, pinned, recent, limit))
     }
 
     pub fn search_status(&self) -> tansu_search::SearchStatus {

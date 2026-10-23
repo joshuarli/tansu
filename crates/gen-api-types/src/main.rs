@@ -56,9 +56,6 @@ fn main() {
     push::<V2SearchHit>(&mut output);
     push::<V2OverlayCoverage>(&mut output);
     push::<V2SearchResponse>(&mut output);
-    push::<V2QuickOpenRequest>(&mut output);
-    push::<V2QuickOpenHit>(&mut output);
-    push::<V2QuickOpenResponse>(&mut output);
     push::<V2ServerEventUpdate>(&mut output);
     push::<V2ServerEvent>(&mut output);
     push::<V2ApiErrorResponse>(&mut output);

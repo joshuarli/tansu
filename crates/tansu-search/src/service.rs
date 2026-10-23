@@ -10,11 +10,10 @@ use std::time::Duration;
 use crate::error::SearchError;
 use crate::index::{IndexManager, IndexMutation};
 use crate::overlay;
-use crate::quick_open;
 use crate::search;
 use crate::types::{
-    DirtyNoteSnapshot, DocumentInput, NoteIdentity, OverlaySearchResult, QuickOpenResponse,
-    SearchLimit, SearchOptions, SearchResult, SearchStatus, UpdateOutcome,
+    DirtyNoteSnapshot, DocumentInput, NoteIdentity, OverlaySearchResult, SearchOptions,
+    SearchResult, SearchStatus, UpdateOutcome,
 };
 
 const INDEX_QUEUE_CAPACITY: usize = 128;
@@ -210,17 +209,6 @@ impl SearchService {
         });
         canonical.truncate(options.limit.get());
         Ok(OverlaySearchResult { hits: canonical })
-    }
-
-    pub fn quick_open(
-        &self,
-        query: &str,
-        current: &[NoteIdentity],
-        pinned: &[String],
-        recent: &[String],
-        limit: SearchLimit,
-    ) -> Result<QuickOpenResponse, SearchError> {
-        quick_open::search(query, current, pinned, recent, limit)
     }
 
     pub fn is_current(&self, identities: Vec<NoteIdentity>) -> Result<bool, SearchError> {
