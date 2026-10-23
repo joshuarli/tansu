@@ -3,7 +3,7 @@ import { keyboardShortcutFor } from "./app/keyboard-shortcuts.ts";
 import type { CommandId, SettingsFormValue, ViewEvent } from "./app/events.ts";
 import { applySettingsForm } from "./app/settings-policy.ts";
 import { DocumentSession, defaultDocumentSessionServices, type DocumentSessionServices, type DocumentSessionState } from "./app/document-session.ts";
-import { dirtySnapshot, DocumentControllers } from "./app/document-controller.ts";
+import { dirtySnapshot, DocumentControllers, type ControllerTask } from "./app/document-controller.ts";
 import { JournalHandle } from "./app/journal-handle.ts";
 import { LocalDraftSession } from "./app/local-draft-session.ts";
 import { defaultServices, type AppServices } from "./app/services.ts";
@@ -84,7 +84,7 @@ function markdownPreview(source: string): string {
 }
 
 type VaultClient = ReturnType<AppServices["api"]["forVault"]>;
-type MutationTarget = { identity: ServerIdentity; client: VaultClient; tab: SavedTab };
+type MutationTarget = { identity: ServerIdentity; client: VaultClient; tab: SavedTab; session: DocumentSession };
 
 export class TansuApp {
   private readonly state: State;
@@ -114,7 +114,8 @@ export class TansuApp {
   private assetScopeRevision = 0;
   private readonly globalEventCleanups: Array<() => void> = [];
   private extensionImport: ExtensionImportReceiver | null = null;
-  private assetController: AbortController | null = null;
+  private assetTask: ControllerTask | null = null;
+  private localAssetController: AbortController | null = null;
   private eventSubscription: { close: () => void } | null = null;
   private readonly draftPromotionTimers = new Map<LocalDraftId, number>();
   private workspaceTimer: number | undefined;
@@ -295,8 +296,11 @@ export class TansuApp {
   }
 
   private async drainInFlightActions(): Promise<void> {
-    while (this.inFlightActions.size > 0) {
-      await Promise.allSettled(this.inFlightActions);
+    for (;;) {
+      const actions = [...this.inFlightActions];
+      if (actions.length > 0) await Promise.allSettled(actions);
+      await this.documents.settled();
+      if (this.inFlightActions.size === 0 && !this.documents.hasPendingMutations()) return;
     }
   }
 
@@ -440,12 +444,12 @@ export class TansuApp {
     this.eventSubscription?.close();
     this.eventSubscription = null;
     this.clearAssetScope();
+    this.documents.disposeAll();
     for (const tab of this.state.tabs) if (tab.kind === "saved") tab.session?.close();
     this.editor?.dispose();
     this.editor = null;
     this.activeEditorKey = null;
     this.attachedEditor = null;
-    this.documents.cancelAutoSaves();
     if (this.workspaceTimer !== undefined) window.clearTimeout(this.workspaceTimer);
     this.workspaceTimer = undefined;
     if (this.noticeTimer !== undefined) window.clearTimeout(this.noticeTimer);
@@ -517,31 +521,40 @@ export class TansuApp {
   }
 
   private async reconcileTab(tab: SavedTab): Promise<void> {
-    if (tab.session === null || this.vaultClient === null) return;
+    const session = tab.session;
+    if (session === null || this.vaultClient === null) return;
     const client = this.vaultClient;
-    const serverIdentity = this.identity;
-    if (serverIdentity === null) return;
     const note = this.state.notes.get(tab.noteId);
     if (note === undefined) return;
     if (tab.doc?.meta.revision === note.revision && tab.doc.meta.sourceHash === note.sourceHash &&
       tab.doc.meta.diskHash === note.diskHash) return;
-    const document = await client.openNote(tab.noteId);
-    if (!this.isCurrentTab(tab, serverIdentity, client)) return;
-    const before = tab.session.state;
-    const result = tab.session.reconcile(document);
-    tab.doc = document;
-    const sessionState = tab.session.state;
-    if (!this.pendingRenames.has(tab.noteId) && "titleDraft" in sessionState && sessionState.titleDraft !== null) {
-      tab.title = sessionState.titleDraft;
+    const task = this.documents.for(tab.noteId).beginTask(session);
+    try {
+      const document = await client.openNote(tab.noteId, task.signal);
+      let materialization: Promise<void> | null = null;
+      task.deliver(() => {
+        const before = session.state;
+        const result = session.reconcile(document);
+        tab.doc = document;
+        const sessionState = session.state;
+        if (!this.pendingRenames.has(tab.noteId) && "titleDraft" in sessionState && sessionState.titleDraft !== null) {
+          tab.title = sessionState.titleDraft;
+        }
+        tab.path = document.meta.path;
+        if (result === "reloaded" && this.activeEditorKey === tab.key && tab.editorSession !== null) {
+          this.editor?.reloadIfClean(tab.editorSession, document.content);
+        }
+        if (before.status === "saving" && before.phase === "pendingMaterialization") {
+          materialization = this.documents.for(tab.noteId).track(session.resolvePendingMaterialization(document.meta));
+        }
+        this.cacheDocument(document);
+      });
+      if (materialization !== null) await materialization;
+    } catch (error) {
+      if (!task.signal.aborted) throw error;
+    } finally {
+      task.finish();
     }
-    tab.path = document.meta.path;
-    if (result === "reloaded" && this.activeEditorKey === tab.key && tab.editorSession !== null) {
-      this.editor?.reloadIfClean(tab.editorSession, document.content);
-    }
-    if (before.status === "saving" && before.phase === "pendingMaterialization") {
-      await tab.session.resolvePendingMaterialization(document.meta);
-    }
-    this.cacheDocument(document);
   }
 
   loadNotePreview(id: string): Promise<string> {
@@ -869,56 +882,68 @@ export class TansuApp {
     const services = this.documentSessionServices(client);
     const session = new DocumentSession(identity, generation, this.workspaceId, services);
     tab.session = session;
-    this.documents.for(tab.noteId).attachSession(session, (value) => this.onDocumentSessionState(tab, session, serverIdentity, client, value));
-    const isLoadCurrent = () => tab.session === session && this.isTabLive(tab, serverIdentity, client);
-    const [checkpoint, cached] = await Promise.all([
-      this.services.workspace.getDraftCheckpoint(identity, this.workspaceId, tab.noteId),
-      this.services.workspace.getCachedNoteBody(identity, this.state.notes.get(tab.noteId) ?? { noteId: tab.noteId, sourceHash: "" }),
-    ]);
-    const cachedDocument: V2NoteDocument | null = cached !== null && this.state.notes.has(tab.noteId)
-      ? { meta: this.state.notes.get(tab.noteId)!, content: cached.content }
-      : null;
-    if (!isLoadCurrent()) return;
-    if (cachedDocument !== null && tab.doc === null) {
-      tab.doc = cachedDocument;
-      tab.draft = cachedDocument.content;
-      tab.selection = selectionWithin(tab.selection, cachedDocument.content.length);
-      if (checkpoint !== null) session.recover(cachedDocument, checkpoint);
-      else session.loaded(cachedDocument, tab.selection);
-      this.render();
-    }
+    const controller = this.documents.for(tab.noteId);
+    controller.attachSession(session, (value) => this.onDocumentSessionState(tab, session, serverIdentity, client, value));
+    const task = controller.beginTask(session);
     try {
-      const document = await client.openNote(tab.noteId);
-      if (!isLoadCurrent()) return;
-      const cached = tab.doc;
-      tab.doc = document;
-      tab.selection = selectionWithin(tab.selection, document.content.length);
-      if (session.state.status === "loading") {
-        if (checkpoint !== null) session.recover(document, checkpoint);
-        else session.loaded(document, tab.selection);
-      } else if (cached !== null) {
-        session.reconcile(document);
-      }
-      this.cacheDocument(document);
-      const editor = tab.editorSession;
-      if (editor !== null) this.editor?.reloadIfClean(editor, loadedDraft(tab) ?? document.content);
-    } catch (error) {
-      if (!isLoadCurrent()) return;
-      if (error instanceof V2ApiError && error.kind?.code === "auth_required") {
-        await this.lockForAuthentication();
+      const [checkpoint, cached] = await Promise.all([
+        this.services.workspace.getDraftCheckpoint(identity, this.workspaceId, tab.noteId),
+        this.services.workspace.getCachedNoteBody(identity, this.state.notes.get(tab.noteId) ?? { noteId: tab.noteId, sourceHash: "" }),
+      ]);
+      const cachedDocument: V2NoteDocument | null = cached !== null && this.state.notes.has(tab.noteId)
+        ? { meta: this.state.notes.get(tab.noteId)!, content: cached.content }
+        : null;
+      if (!task.deliver(() => {
+        if (cachedDocument !== null && tab.doc === null) {
+          tab.doc = cachedDocument;
+          tab.draft = cachedDocument.content;
+          tab.selection = selectionWithin(tab.selection, cachedDocument.content.length);
+          if (checkpoint !== null) session.recover(cachedDocument, checkpoint);
+          else session.loaded(cachedDocument, tab.selection);
+          this.render();
+        }
+      })) return;
+      try {
+        const document = await client.openNote(tab.noteId, task.signal);
+        if (!task.deliver(() => {
+          const cached = tab.doc;
+          tab.doc = document;
+          tab.selection = selectionWithin(tab.selection, document.content.length);
+          if (session.state.status === "loading") {
+            if (checkpoint !== null) session.recover(document, checkpoint);
+            else session.loaded(document, tab.selection);
+          } else if (cached !== null) {
+            session.reconcile(document);
+          }
+          this.cacheDocument(document);
+          const editor = tab.editorSession;
+          if (editor !== null) this.editor?.reloadIfClean(editor, loadedDraft(tab) ?? document.content);
+        })) return;
+      } catch (error) {
+        let authenticationTask: Promise<void> | null = null;
+        if (!task.deliver(() => {
+          if (error instanceof V2ApiError && error.kind?.code === "auth_required") {
+            authenticationTask = this.lockForAuthentication();
+            return;
+          }
+          if (cachedDocument !== null) {
+            if (checkpoint !== null) session.recover(cachedDocument, checkpoint);
+            else session.loaded(cachedDocument, tab.selection);
+            session.markUnavailable(error);
+          } else if (checkpoint !== null) {
+            session.recoverUnavailable(checkpoint, error, tab.title, tab.path);
+          } else {
+            session.markUnavailable(error);
+          }
+          this.render();
+        })) return;
+        if (authenticationTask !== null) await authenticationTask;
         return;
       }
-      if (cachedDocument !== null) {
-        if (checkpoint !== null) session.recover(cachedDocument, checkpoint);
-        else session.loaded(cachedDocument, tab.selection);
-        session.markUnavailable(error);
-      } else if (checkpoint !== null) {
-        session.recoverUnavailable(checkpoint, error, tab.title, tab.path);
-      } else {
-        session.markUnavailable(error);
-      }
+      task.deliver(() => this.render());
+    } finally {
+      task.finish();
     }
-    this.render();
   }
 
   private async loadLocalDraft(tab: Extract<Tab, { kind: "local-draft" }>): Promise<void> {
@@ -1034,26 +1059,37 @@ export class TansuApp {
       await this.loadSavedTab(tab);
       return;
     }
-    const identity = this.identity;
     const client = this.vaultClient;
+    const task = this.documents.for(tab.noteId).beginTask(session);
     try {
-      const document = await client.openNote(id);
-      if (!this.isCurrentTab(tab, identity, client) || tab.session !== session) return;
-      tab.doc = document;
-      tab.selection = selectionWithin(tab.selection, document.content.length);
-      const result = session.reconcile(document);
-      if (result === "reloaded" && tab.editorSession !== null) {
-        this.editor?.reloadIfClean(tab.editorSession, document.content);
+      try {
+        const document = await client.openNote(id, task.signal);
+        task.deliver(() => {
+          tab.doc = document;
+          tab.selection = selectionWithin(tab.selection, document.content.length);
+          const result = session.reconcile(document);
+          if (result === "reloaded" && tab.editorSession !== null) {
+            this.editor?.reloadIfClean(tab.editorSession, document.content);
+          }
+          this.render();
+        });
+      } catch (error) {
+        let authenticationTask: Promise<void> | null = null;
+        if (!task.deliver(() => {
+          if (error instanceof V2ApiError && error.kind?.code === "auth_required") {
+            authenticationTask = this.lockForAuthentication();
+            return;
+          }
+          session.markUnavailable(error);
+        })) return;
+        if (authenticationTask !== null) {
+          await authenticationTask;
+          return;
+        }
+        throw error;
       }
-      this.render();
-    } catch (error) {
-      if (!this.isCurrentTab(tab, identity, client) || tab.session !== session) return;
-      if (error instanceof V2ApiError && error.kind?.code === "auth_required") {
-        await this.lockForAuthentication();
-        return;
-      }
-      session.markUnavailable(error);
-      throw error;
+    } finally {
+      task.finish();
     }
   }
 
@@ -1528,71 +1564,83 @@ export class TansuApp {
       return false;
     }
 
-    this.pendingRenames.add(tab.noteId);
-    let accepted: V2NoteMeta | null = null;
-    try {
-      session.editTitle(title);
-      const pending = session.state;
-      if (!("base" in pending) || pending.titleMutationId === null) {
-        this.pendingRenames.delete(tab.noteId);
-        return true;
-      }
-      const path = renamedPath(tab.path, title, this.state.notes.values(), tab.noteId);
-      const response = await client.renameNote(tab.noteId, {
-        mutationId: pending.titleMutationId,
-        precondition: {
-          baseRevision: pending.base.revision,
-          baseSourceHash: pending.base.sourceHash,
-          baseDiskHash: pending.base.diskHash,
-        },
-        path,
-      });
-      if (!this.isCurrentTab(tab, identity, client)) {
-        this.pendingRenames.delete(tab.noteId);
-        return false;
-      }
-      if (response.outcome.state !== "accepted" || response.outcome.result === null) {
-        throw new Error("Rename was not accepted");
-      }
-      accepted = response.outcome.result;
-      tab.title = title;
-      tab.path = accepted.path;
-      if (tab.doc !== null) tab.doc = { ...tab.doc, meta: accepted };
-      this.state.notes.set(tab.noteId, accepted);
-      this.pendingRenames.delete(tab.noteId);
-      await session.acceptRename(accepted, pending.titleRevision, pending.titleMutationId);
-      tab.title = title;
-      tab.path = accepted.path;
-      this.persistWorkspace();
-      this.scheduleNoteLinksRefresh();
-      this.render();
-      this.flashRenamedTitle();
-      return true;
-    } catch (error) {
-      this.pendingRenames.delete(tab.noteId);
-      if (accepted === null) {
-        try {
-          if (tab.session === session) session.editTitle(null);
-        } catch (cleanupError) {
-          logClientEvent("error", "client.error", { error: errorSummary(cleanupError), message: "Could not restore the previous note name" });
+    const controller = this.documents.for(tab.noteId);
+    const task = controller.beginTask(session);
+    const rename = (async () => {
+      this.pendingRenames.add(tab.noteId);
+      let accepted: V2NoteMeta | null = null;
+      try {
+        session.editTitle(title);
+        const pending = session.state;
+        if (!("base" in pending) || pending.titleMutationId === null) return true;
+        const path = renamedPath(tab.path, title, this.state.notes.values(), tab.noteId);
+        const response = await client.renameNote(tab.noteId, {
+          mutationId: pending.titleMutationId,
+          precondition: {
+            baseRevision: pending.base.revision,
+            baseSourceHash: pending.base.sourceHash,
+            baseDiskHash: pending.base.diskHash,
+          },
+          path,
+        });
+        if (response.outcome.state !== "accepted" || response.outcome.result === null) {
+          throw new Error("Rename was not accepted");
         }
-        this.render();
-        this.notify(`Rename failed: ${errorSummary(error)}`);
-        return false;
+        const renamed = response.outcome.result;
+        accepted = renamed;
+        task.deliver(() => {
+          if (!this.isCurrentTab(tab, identity, client)) return;
+          tab.title = title;
+          tab.path = renamed.path;
+          if (tab.doc !== null) tab.doc = { ...tab.doc, meta: renamed };
+          this.state.notes.set(tab.noteId, renamed);
+          this.pendingRenames.delete(tab.noteId);
+        });
+        await session.acceptRename(renamed, pending.titleRevision, pending.titleMutationId);
+        let delivered = false;
+        if (!task.deliver(() => {
+          if (!this.isCurrentTab(tab, identity, client)) return;
+          delivered = true;
+          tab.title = title;
+          tab.path = renamed.path;
+          this.persistWorkspace();
+          this.scheduleNoteLinksRefresh();
+          this.render();
+          this.flashRenamedTitle();
+        })) return false;
+        return delivered;
+      } catch (error) {
+        let result = false;
+        if (!task.deliver(() => {
+          if (!this.isCurrentTab(tab, identity, client)) return;
+          this.pendingRenames.delete(tab.noteId);
+          if (accepted === null) {
+            try {
+              if (tab.session === session) session.editTitle(null);
+            } catch (cleanupError) {
+              logClientEvent("error", "client.error", { error: errorSummary(cleanupError), message: "Could not restore the previous note name" });
+            }
+            this.render();
+            this.notify(`Rename failed: ${errorSummary(error)}`);
+            return;
+          }
+          tab.title = title;
+          tab.path = accepted.path;
+          if (tab.doc !== null) tab.doc = { ...tab.doc, meta: accepted };
+          this.state.notes.set(tab.noteId, accepted);
+          this.persistWorkspace();
+          this.scheduleNoteLinksRefresh();
+          this.render();
+          this.flashRenamedTitle();
+          this.notify(`Rename succeeded, but local recovery cleanup failed: ${errorSummary(error)}`);
+          result = true;
+        })) return false;
+        return result;
+      } finally {
+        this.pendingRenames.delete(tab.noteId);
       }
-      tab.title = title;
-      tab.path = accepted.path;
-      if (tab.doc !== null) tab.doc = { ...tab.doc, meta: accepted };
-      this.state.notes.set(tab.noteId, accepted);
-      this.persistWorkspace();
-      this.scheduleNoteLinksRefresh();
-      this.render();
-      this.flashRenamedTitle();
-      this.notify(`Rename succeeded, but local recovery cleanup failed: ${errorSummary(error)}`);
-      return true;
-    } finally {
-      this.pendingRenames.delete(tab.noteId);
-    }
+    })();
+    return controller.track(rename).finally(() => task.finish());
   }
 
   private flashRenamedTitle(): void {
@@ -1665,10 +1713,11 @@ export class TansuApp {
   private async restoreSelectedRevision(): Promise<void> {
     const tab = activeTab(this.state);
     const selected = this.state.revisionDocument;
-    const status = tab?.kind === "saved" ? tab.session?.state : undefined;
+    const session = tab?.kind === "saved" ? tab.session : null;
+    const status = session?.state;
     const identity = this.identity;
     const client = this.vaultClient;
-    if (tab?.kind !== "saved" || selected === null || selected.revision.noteId !== tab.noteId ||
+    if (tab?.kind !== "saved" || session === null || selected === null || selected.revision.noteId !== tab.noteId ||
       this.state.revisionNoteId !== tab.noteId || status === undefined || !("base" in status) ||
       identity === null || client === null) return;
     await this.documents.for(tab.noteId).track((async () => {
@@ -1676,7 +1725,7 @@ export class TansuApp {
         mutationId: mutationId(),
         precondition: { baseRevision: status.base.revision, baseSourceHash: status.base.sourceHash, baseDiskHash: status.base.diskHash },
       });
-      await this.handleMutation(response, { identity, client, tab }, status.draft.localRevision);
+      await this.handleMutation(response, { identity, client, tab, session }, status.draft.localRevision, selected.content);
     })());
     if (this.isCurrentVault(identity, client) && activeTab(this.state) === tab && this.state.revisionNoteId === tab.noteId) {
       this.state.revisionsOpen = false;
@@ -1698,16 +1747,20 @@ export class TansuApp {
 
   private async restoreConflictDraft(): Promise<void> {
     const tab = activeTab(this.state);
-    const status = tab?.kind === "saved" ? tab.session?.state : undefined;
+    const session = tab?.kind === "saved" ? tab.session : null;
+    const status = session?.state;
     const identity = this.identity;
     const client = this.vaultClient;
-    if (tab?.kind !== "saved" || status?.status !== "conflict" || identity === null || client === null) return;
+    if (tab?.kind !== "saved" || session === null || status?.status !== "conflict" || identity === null || client === null) return;
     const { meta } = status.canonical;
     const precondition = { baseRevision: meta.revision, baseSourceHash: meta.sourceHash, baseDiskHash: meta.diskHash };
+    const conflictDraft = this.state.conflictDraft;
+    if (status.conflictDraft !== null &&
+      (conflictDraft?.draft.draftId !== status.conflictDraft.draftId || conflictDraft.draft.noteId !== tab.noteId)) return;
+    const content = conflictDraft?.content ?? status.draft.source;
     await this.documents.for(tab.noteId).track((async () => {
       let response: V2MutationResponse;
       if (status.conflictDraft === null) {
-        const content = status.draft.source;
         response = await client.saveNote(tab.noteId, {
           mutationId: mutationId(),
           precondition,
@@ -1715,33 +1768,37 @@ export class TansuApp {
           sourceHash: await canonicalSourceHash(content),
         });
       } else {
-        if (this.state.conflictDraft === null) return;
         response = await client.restoreConflictDraft(tab.noteId, status.conflictDraft.draftId, { mutationId: mutationId(), precondition });
       }
-      await this.handleMutation(response, { identity, client, tab }, status.draft.localRevision);
+      await this.handleMutation(response, { identity, client, tab, session }, status.draft.localRevision, content);
     })());
     if (this.isCurrentTab(tab, identity, client)) this.state.conflictDraft = null;
   }
 
-  private async handleMutation(response: V2MutationResponse, target: MutationTarget, expectedLocalRevision: number): Promise<void> {
-    const { identity, client, tab } = target;
+  private async handleMutation(
+    response: V2MutationResponse,
+    target: MutationTarget,
+    expectedLocalRevision: number,
+    content: string,
+  ): Promise<void> {
+    const { identity, client, tab, session } = target;
     if (response.outcome.state === "accepted") {
       if (response.outcome.result === null) throw new Error("Accepted restore response omitted note metadata");
-      if (!this.isCurrentTab(tab, identity, client)) return;
-      const document = await client.openNote(tab.noteId);
-      if (!this.isCurrentTab(tab, identity, client)) return;
-      tab.doc = document;
-      const sessionState = tab.session?.state;
+      const document: V2NoteDocument = { meta: response.outcome.result, content };
+      const sessionState = session.state;
       const matchesRevision = sessionState !== undefined && "draft" in sessionState &&
         sessionState.draft !== null && sessionState.draft.localRevision === expectedLocalRevision;
-      if (matchesRevision && tab.editorSession !== null) {
+      const tabIsCurrent = () => this.isCurrentTab(tab, identity, client) && tab.session === session;
+      if (tabIsCurrent()) tab.doc = document;
+      if (tabIsCurrent() && matchesRevision && tab.editorSession !== null) {
         const snapshot = this.activeEditorKey === tab.key ? this.editor?.getSnapshot() : null;
         const editorRevision = snapshot?.noteId === tab.key ? snapshot.revision : tab.editorRevision;
         if (this.editor?.markSaved(tab.editorSession, editorRevision)) {
           this.editor.reloadIfClean(tab.editorSession, document.content);
         }
       }
-      tab.session?.applyAcceptedMutation(document, expectedLocalRevision);
+      session.applyAcceptedMutation(document, expectedLocalRevision);
+      if (!tabIsCurrent()) return;
       this.state.notes.set(tab.noteId, document.meta);
       this.cacheDocument(document);
     } else if (response.outcome.state === "conflict") {
@@ -2140,47 +2197,65 @@ export class TansuApp {
 
   private async prefetchAssets(tab: Tab, source: string): Promise<void> {
     this.abortAssetLoads();
-    const controller = new AbortController();
-    this.assetController = controller;
+    const task = tab.kind === "saved" && tab.session !== null
+      ? this.documents.for(tab.noteId).beginTask(tab.session)
+      : null;
+    const localController = task === null ? new AbortController() : null;
+    const signal = task?.signal ?? localController!.signal;
+    this.assetTask = task;
+    this.localAssetController = localController;
     const key = tab.key;
     const generation = this.bootGeneration;
     const names = new Set(
       [...source.matchAll(/(?:^|\[|\(|\/)((?:\/?z-images\/)[^\s)"'>\]|]+)/g)]
         .map((match) => match[1]!.replace(/^\//, "")),
     );
-    const client = this.vaultClient;
-    if (client === null) return;
-    const missing: string[] = [];
-    for (const name of names) {
-      const url = this.assetScope.get(name);
-      if (url === undefined) missing.push(name);
-      else {
-        this.assetScope.delete(name);
-        this.assetScope.set(name, url);
-      }
-    }
-    const isCurrent = () => !controller.signal.aborted && generation === this.bootGeneration && activeTab(this.state)?.key === key;
-    for (let start = 0; start < missing.length; start += ASSET_PREFETCH_CONCURRENCY) {
-      const batch = missing.slice(start, start + ASSET_PREFETCH_CONCURRENCY);
-      const loaded = await Promise.all(batch.map(async (name) => {
-        try {
-          return { name, blob: await client.loadAsset(name, controller.signal) };
-        } catch (error) {
-          if (!controller.signal.aborted) logClientEvent("warn", "client.asset", { error: errorSummary(error) });
-          return null;
+    try {
+      const client = this.vaultClient;
+      if (client === null) return;
+      const missing: string[] = [];
+      for (const name of names) {
+        const url = this.assetScope.get(name);
+        if (url === undefined) missing.push(name);
+        else {
+          this.assetScope.delete(name);
+          this.assetScope.set(name, url);
         }
-      }));
-      if (!isCurrent()) return;
-      let changed = false;
-      for (const entry of loaded) {
-        if (entry === null) continue;
-        this.assetScope.set(entry.name, URL.createObjectURL(entry.blob));
-        changed = true;
       }
-      if (!changed) continue;
-      this.evictAssetsBeyondLimit(names);
-      this.assetScopeRevision += 1;
-      this.editor?.updateConfiguration(this.editorConfig());
+      const isCurrent = () => !signal.aborted && generation === this.bootGeneration && activeTab(this.state)?.key === key;
+      const deliver = (completion: () => void) => {
+        if (!isCurrent()) return false;
+        if (task !== null) return task.deliver(completion);
+        completion();
+        return true;
+      };
+      for (let start = 0; start < missing.length; start += ASSET_PREFETCH_CONCURRENCY) {
+        const batch = missing.slice(start, start + ASSET_PREFETCH_CONCURRENCY);
+        const loaded = await Promise.all(batch.map(async (name) => {
+          try {
+            return { name, blob: await client.loadAsset(name, signal) };
+          } catch (error) {
+            if (!signal.aborted) logClientEvent("warn", "client.asset", { error: errorSummary(error) });
+            return null;
+          }
+        }));
+        let changed = false;
+        if (!deliver(() => {
+          for (const entry of loaded) {
+            if (entry === null) continue;
+            this.assetScope.set(entry.name, URL.createObjectURL(entry.blob));
+            changed = true;
+          }
+          if (!changed) return;
+          this.evictAssetsBeyondLimit(names);
+          this.assetScopeRevision += 1;
+          this.editor?.updateConfiguration(this.editorConfig());
+        })) return;
+      }
+    } finally {
+      task?.finish();
+      if (this.assetTask === task) this.assetTask = null;
+      if (this.localAssetController === localController) this.localAssetController = null;
     }
   }
 
@@ -2199,8 +2274,10 @@ export class TansuApp {
   }
 
   private abortAssetLoads(): void {
-    this.assetController?.abort();
-    this.assetController = null;
+    this.assetTask?.cancel();
+    this.assetTask = null;
+    this.localAssetController?.abort();
+    this.localAssetController = null;
   }
 
   private clearAssetScope(): void {

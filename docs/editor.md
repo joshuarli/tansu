@@ -88,10 +88,14 @@ or undo history. The outline reads headings from the Markdown syntax tree.
 ## Source and tests
 
 The editor boundary owns Markdown rendering, selection, source mode, undo,
-formatting, paste handling, and editor extensions. The app owns note lifecycle,
-persistence, assets, and session state. Focused editor tests live under
-`web/ts/editor/tests/` and run with `deno task test web/ts/editor/tests`.
-Integrated browser measurements run with `make bench` and `make bench-full`.
+formatting, paste handling, and editor extensions. The app owns tabs, each
+tab's editor session and view, and the shared asset URL cache. For saved notes,
+the per-note controller issues identity-bound load, retry, reconciliation,
+rename, and image-fetch tasks and accepts their completions for the issuing
+session. Local-draft image requests remain app-scoped until the draft has a
+durable note identity. Focused editor tests live under `web/ts/editor/tests/`
+and run with `deno task test web/ts/editor/tests`. Integrated browser
+measurements run with `make bench` and `make bench-full`.
 
 Vendored editor code and licenses live under `web/ts/editor/vendor/`. Read the
 upstream and license files there before changing a vendored dependency.

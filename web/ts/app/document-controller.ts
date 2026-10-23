@@ -1,5 +1,5 @@
 import type { DocumentSessionState, Selection } from "./document-session.ts";
-import type { NoteId } from "./identity.ts";
+import { documentIdentityKey, type DocumentIdentity, type NoteId } from "./identity.ts";
 
 export type DirtySnapshot = {
   draft: string | null;
@@ -27,7 +27,15 @@ export function dirtySnapshot(value: DocumentSessionState): DirtySnapshot {
 }
 
 export type SessionSource = {
+  readonly identity: DocumentIdentity;
   subscribe(listener: (state: DocumentSessionState) => void): () => void;
+};
+
+export type ControllerTask = {
+  readonly signal: AbortSignal;
+  deliver(completion: () => void): boolean;
+  cancel(): void;
+  finish(): void;
 };
 
 export type ClosableSession = {
@@ -40,6 +48,7 @@ export type CloseDisposition = "flush" | "discard";
 export class DocumentController {
   private load: Promise<void> | null = null;
   private readonly mutations = new Set<Promise<unknown>>();
+  private readonly tasks = new Set<ControllerTask>();
   private autoSaveTimer: number | undefined;
   private session: SessionSource | null = null;
   private unsubscribe: (() => void) | null = null;
@@ -53,9 +62,40 @@ export class DocumentController {
   }
 
   detachSession(): void {
+    this.cancelTasks();
     this.unsubscribe?.();
     this.unsubscribe = null;
     this.session = null;
+  }
+
+  beginTask(session: SessionSource): ControllerTask {
+    if (this.session !== session) throw new TypeError("Cannot issue a task for a detached document session");
+    const identityKey = documentIdentityKey(session.identity);
+    const controller = new AbortController();
+    let active = true;
+    let task: ControllerTask;
+    const end = (cancel: boolean) => {
+      if (!active) return;
+      active = false;
+      this.tasks.delete(task);
+      if (cancel) controller.abort();
+    };
+    task = {
+      signal: controller.signal,
+      deliver: (completion) => {
+        if (!active || controller.signal.aborted || this.session !== session ||
+          documentIdentityKey(this.session.identity) !== identityKey) {
+          end(true);
+          return false;
+        }
+        completion();
+        return true;
+      },
+      cancel: () => end(true),
+      finish: () => end(false),
+    };
+    this.tasks.add(task);
+    return task;
   }
 
   track<T>(mutation: Promise<T>): Promise<T> {
@@ -85,7 +125,11 @@ export class DocumentController {
       session.close();
       return Promise.resolve();
     }
-    return this.track(session.save().finally(() => session.close())).then(() => undefined);
+    const pending = [...this.mutations];
+    const closing = Promise.allSettled(pending)
+      .then(() => session.save())
+      .finally(() => session.close());
+    return this.track(closing).then(() => undefined);
   }
 
   ensureLoaded(start: () => Promise<void>): Promise<void> {
@@ -109,6 +153,10 @@ export class DocumentController {
     if (this.autoSaveTimer === undefined) return;
     window.clearTimeout(this.autoSaveTimer);
     this.autoSaveTimer = undefined;
+  }
+
+  private cancelTasks(): void {
+    for (const task of this.tasks) task.cancel();
   }
 }
 
@@ -150,6 +198,18 @@ export class DocumentControllers {
 
   cancelAutoSaves(): void {
     for (const controller of this.controllers.values()) controller.cancelAutoSave();
+  }
+
+  hasPendingMutations(): boolean {
+    return [...this.controllers.values()].some((controller) => controller.hasPendingMutations());
+  }
+
+  async settled(): Promise<void> {
+    for (;;) {
+      const pending = [...this.controllers.values()].filter((controller) => controller.hasPendingMutations());
+      if (pending.length === 0) return;
+      await Promise.all(pending.map((controller) => controller.settled()));
+    }
   }
 
   disposeAll(): void {

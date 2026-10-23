@@ -70,5 +70,12 @@ tabs, and draft checkpoints live in browser IndexedDB, which is not encrypted
 and may be cleared or evicted. Recovery covers the latest journaled checkpoint,
 not every keystroke.
 
-`web/ts/editor/` owns Markdown editing behavior. The app owns note lifecycle,
-persistence, assets, settings, tabs, and session state. See [Editor](editor.md).
+`web/ts/editor/` owns Markdown editing behavior. The app owns tabs, each tab's
+editor session and view, settings, and the shared asset URL cache. A per-note
+`DocumentController` accepts saved-note load, retry, reconciliation, rename, and
+image-fetch completions only for the session and server/vault identity that
+issued them. It cancels cancellable tasks when that session is detached and
+tracks mutations through close and vault changes; a reopened note waits for
+prior mutations before loading. Asset requests for unsaved local drafts remain
+app-scoped because those drafts do not yet have a durable note identity. See
+[Editor](editor.md).

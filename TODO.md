@@ -3,16 +3,6 @@
 Prefix: TNS
 Next: 83
 
-### TNS-050 · P3 · Move document state into a per-document controller
-
-- **Area:** Architecture
-- **Where:** `web/ts/app.ts`
-- **Problem:** The controller now owns load, autosave, dirty snapshot, session subscription, journal handle, and close-time save and restore. The editor session and asset loads still live on the tab and the app, and completions are matched to tabs by closures, not delivered to the issuing controller.
-- **Recommendation:** Continue the RFC's Not done list one boundary at a time. No sweeping file split.
-- **Fix with:** api-surface-and-module-boundaries
-- **Design:** `docs/rfcs/TNS-050-document-controller.md`
-- **Effort:** L
-
 ### TNS-068 · P4 · Order asset prefetch by visibility and test cache stability
 
 - **Area:** Performance

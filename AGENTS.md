@@ -26,5 +26,5 @@ Commands: frontend build `deno task build`, fixture app `make dev`, check `make 
 - Loupe browser extension: [Loupe](docs/loupe.md)
 - Security and deployment: [security](docs/security.md), [deployment](docs/deployment.md)
 - Logging and backlog: [logging](docs/logging.md), [logging backlog](docs/logging-backlog.md)
-- Current design: [TNS-050 per-document controller](docs/rfcs/TNS-050-document-controller.md)
+- Current design: [architecture](docs/architecture.md)
 - Deferred features: [product backlog](docs/product-backlog.md)
