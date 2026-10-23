@@ -67,15 +67,6 @@ Next: 83
 - **Fix with:** lifecycle-concurrency
 - **Effort:** M
 
-### TNS-077 · P3 · Fix or remove the stale visual review script
-
-- **Area:** Tests
-- **Where:** `bench/visual-review.mjs`
-- **Problem:** The script waits on `.quick-open-panel` and `.sidebar .note-row`, which the current app does not emit. Its layout assertions and screenshots are not covered by a named test target.
-- **Recommendation:** Update its selectors and add a focused target, or delete it.
-- **Fix with:** dead-code-archaeology
-- **Effort:** S
-
 ### TNS-079 · P4 · Collapse speculative editor seams
 
 - **Area:** Architecture
