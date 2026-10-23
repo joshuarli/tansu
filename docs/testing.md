@@ -17,6 +17,18 @@ running tests. Install the required Rust, Deno, Node, and npm toolchains first.
 For direct `deno task build` use, run `make setup` once. See [Development](development.md)
 for the setup steps and browser dependencies.
 
+The path tests passed on Linux x86_64 musl and aarch64 musl on 2026-10-23.
+Each matching-architecture Alpine container executed all eight `paths::tests`,
+including `operations_accept_a_root_relative_to_the_current_directory`:
+
+```sh
+cargo test --locked --target x86_64-unknown-linux-musl --lib paths::tests
+cargo test --locked --target aarch64-unknown-linux-musl --lib paths::tests
+```
+
+Use the normal debug test profile. The logging tests require debug instrumentation,
+so `--release --lib` cannot compile the complete library test harness.
+
 Install browser dependencies with `deno task playwright:install`; see
 [Development](development.md) for toolchain setup.
 

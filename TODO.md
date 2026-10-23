@@ -13,15 +13,6 @@ Next: 83
 - **Design:** `docs/rfcs/TNS-050-document-controller.md`
 - **Effort:** L
 
-### TNS-062 · P3 · Test relative roots on Linux and other Unix targets
-
-- **Area:** Portability
-- **Where:** `src/paths.rs`
-- **Problem:** The `O_*` flags now come from `rustix` and unsupported unix targets fail to compile, but the relative-root test has run on macOS only.
-- **Recommendation:** Run `paths::tests` on Linux x86_64 and aarch64 musl.
-- **Fix with:** os-boundaries
-- **Effort:** S
-
 ### TNS-068 · P4 · Order asset prefetch by visibility and test cache stability
 
 - **Area:** Performance
