@@ -17,7 +17,7 @@ import { KEYBOARD_SHORTCUTS } from "./app/keyboard-shortcuts.ts";
 import { sameTabIdentity, type TabIdentity } from "./app/tab-identity.ts";
 import { renderLinksRail } from "./links-rail.ts";
 import { paletteEntries, paletteRawQuery, parsePaletteQuery, type PaletteEntry, type PaletteMode } from "./app/commands.ts";
-import type { V2OverlayCoverage, V2SearchHit } from "./types.generated.ts";
+import type { V2OverlayCoverage, V2RevisionMeta, V2SearchHit } from "./types.generated.ts";
 import type { FindMatch, Outline } from "./editor/source-navigation.js";
 
 export type ViewActions = {
@@ -404,6 +404,7 @@ function closeVaultOptions(vaultControl: HTMLElement): void {
 function renderMain(state: State, actions: ViewActions): HTMLElement {
   const active = activeTab(state);
   const reading = state.readingMode;
+  const historyPanel = renderHistoryPanel(state, actions);
   const main = el(
     "main",
     ["main", reading ? "reading-mode" : "", state.focusMode ? "focus-mode" : "", state.findOpen ? "find-open" : ""]
@@ -411,6 +412,7 @@ function renderMain(state: State, actions: ViewActions): HTMLElement {
       .join(" "),
   );
   if (active !== undefined) main.classList.add("has-article-layout");
+  if (historyPanel !== null) main.classList.add("has-history-edge");
   const tabs = el("div", "tabs");
   for (const tab of state.tabs) {
     const identity = tabIdentity(tab);
@@ -560,7 +562,9 @@ function renderMain(state: State, actions: ViewActions): HTMLElement {
     }
   }
   main.append(topbar);
-  main.append(workspace, renderStatusBar(state));
+  main.append(workspace);
+  if (historyPanel !== null) main.append(historyPanel);
+  main.append(renderStatusBar(state));
   main.append(renderFloatingControls(state, actions));
   const outline = renderNoteOutline(state, actions);
   if (outline !== null) {
@@ -696,9 +700,6 @@ function renderOverlays(state: State, actions: ViewActions): HTMLElement {
     host.append(backdrop(actions), panel);
     focusOnOpen(input);
   }
-  if (state.revisionsOpen) {
-    host.append(backdrop(actions), renderRevisionsPanel(state, actions));
-  }
   if (state.settingsOpen && state.boot !== null) {
     host.append(backdrop(actions), renderSettingsPanel(state, actions));
   }
@@ -717,9 +718,6 @@ function renderOverlays(state: State, actions: ViewActions): HTMLElement {
     panel.setAttribute("aria-modal", "true");
     panel.dataset["key"] = "modal:keyboard-help";
     host.append(backdrop(actions), panel);
-  }
-  if (state.conflictDraft !== null) {
-    host.append(backdrop(actions), renderConflictPanel(state, actions));
   }
   if (state.noteDialog !== null) {
     host.append(backdrop(actions), renderNoteDialog(state, actions));
@@ -866,13 +864,28 @@ function focusOnOpen(input: HTMLInputElement, select = false): void {
   });
 }
 
+function renderHistoryPanel(state: State, actions: ViewActions): HTMLElement | null {
+  const active = activeTab(state);
+  if (state.conflictDraft !== null && active?.kind === "saved" && active.noteId === state.conflictDraft.draft.noteId) {
+    return renderConflictPanel(state, actions);
+  }
+  if (state.revisionsOpen && active?.kind === "saved" && state.revisionNoteId === active.noteId) {
+    return renderRevisionsPanel(state, actions);
+  }
+  return null;
+}
+
 function renderRevisionsPanel(state: State, actions: ViewActions): HTMLElement {
   const active = activeTab(state);
-  const revisionList = active?.kind === "saved" && state.revisionNoteId === active.noteId
-    ? state.revisionList?.filter((revision) => revision.noteId === active.noteId) ?? null
-    : null;
-  const revisionDocument = active?.kind === "saved" && state.revisionNoteId === active.noteId &&
-      state.revisionDocument?.revision.noteId === active.noteId
+  const activeNoteId = active?.kind === "saved" ? active.noteId : null;
+  const revisionList = state.revisionList?.filter((revision) => revision.noteId === activeNoteId)
+    .sort((left, right) => left.revision - right.revision) ?? null;
+  const selectedRevision = revisionList?.find((revision) =>
+    toRevisionEventId(revision.revision) === state.revisionSelectedEventId
+  ) ?? null;
+  const revisionDocument = selectedRevision !== null && state.revisionDocument !== null &&
+      state.revisionDocument.revision.noteId === activeNoteId &&
+      state.revisionDocument.revision.revision === selectedRevision.revision
     ? state.revisionDocument
     : null;
   const list = el("div", "revision-list");
@@ -886,65 +899,217 @@ function renderRevisionsPanel(state: State, actions: ViewActions): HTMLElement {
             type: "revisions.select",
             eventId: toRevisionEventId(revision.revision),
           }),
-        revisionDocument?.revision.revision === revision.revision
+        state.revisionSelectedEventId === toRevisionEventId(revision.revision)
           ? "revision-row active"
           : "revision-row",
       ),
     );
   }
+  const timeline = revisionTimeline(revisionList, state.revisionSelectedEventId, actions);
   const current = active === undefined ? "" : (loadedDraft(active) ?? "");
-  const preview =
-    revisionDocument === null
-      ? el("div", "empty-panel", "Select a revision")
-      : el("pre", "diff-preview", diffPreview(current, revisionDocument.content));
+  const preview = selectedRevision === null
+    ? el("div", "empty-panel", "Select a revision")
+    : revisionDocument === null
+    ? el("div", "empty-panel", "Loading revision…")
+    : renderDiffPreview(current, revisionDocument.content);
+  const branch = button(
+    "Branch from snapshot",
+    "Branch from selected revision",
+    () => actions.dispatch({ type: "revisions.branch" }),
+    "text-button",
+  );
+  branch.disabled = revisionDocument === null;
+  const restore = button(
+    "Restore selected revision",
+    "Restore selected revision",
+    () => actions.dispatch({ type: "revisions.restore" }),
+    "primary-button",
+  );
+  restore.disabled = revisionDocument === null;
   const panel = el(
-    "div",
-    "modal-panel revisions-panel",
+    "aside",
+    "history-edge-panel revisions-panel",
     el(
       "div",
-      "modal-header",
+      "history-edge-header",
       span("Revisions"),
+      button("×", "Close history panel", () => actions.dispatch({ type: "overlay.close" }), "history-edge-close"),
     ),
-    el("div", "revision-body", list, preview),
+    timeline,
+    el("div", "revision-body", list, el("div", "history-preview", span("Revision preview", "history-preview-heading"), preview)),
     el(
       "div",
       "modal-actions",
-      button(
-        "Restore",
-        "Restore selected revision",
-        () => actions.dispatch({ type: "revisions.restore" }),
-        "primary-button",
-      ),
+      branch,
+      restore,
     ),
   );
-  panel.dataset["key"] = "modal:revisions";
+  panel.setAttribute("aria-label", "Revision history");
+  panel.dataset["key"] = "history-edge:revisions";
   return panel;
 }
 
 function renderConflictPanel(state: State, actions: ViewActions): HTMLElement {
   const draft = state.conflictDraft;
+  const active = activeTab(state);
+  const conflict = active?.kind === "saved" && active.session?.state.status === "conflict"
+    ? active.session.state
+    : null;
+  const canonical = conflict?.canonical.content ?? (active?.kind === "saved" ? active.doc?.content ?? "" : "");
+  const localDraft = active === undefined ? "" : loadedDraft(active) ?? "";
+  const sessionState = active?.kind === "saved" ? active.session?.state : undefined;
+  const recovery = document.createElement("details");
+  recovery.className = "conflict-draft-recovery";
+  recovery.open = true;
+  recovery.append(el("summary", "", "Stored conflict draft"));
+  recovery.append(el("pre", "diff-preview", draft?.content ?? ""));
+  const saveMerge = button(
+    "Save merge",
+    "Save merge against the latest canonical revision",
+    () => actions.dispatch({ type: "conflict.merge" }),
+    "primary-button",
+  );
+  saveMerge.disabled = active?.kind !== "saved" || !active.conflict;
+  const restore = button(
+    "Restore conflict draft",
+    "Restore conflict draft",
+    () => actions.dispatch({ type: "conflict.restore" }),
+    "text-button",
+  );
+  restore.disabled = active?.kind !== "saved" || !active.conflict;
+  const mergeHint = sessionState?.status === "saving"
+    ? sessionState.phase === "pendingMaterialization"
+      ? "The merge is accepted and is waiting for the note to be materialized."
+      : "Saving the merge against the current canonical note…"
+    : sessionState?.status === "unavailable"
+    ? "The merge could not be saved. Your edited source is still checkpointed."
+    : "Edit the merge in the note pane. The canonical version stays read-only.";
   const panel = el(
-    "div",
-    "modal-panel revisions-panel",
+    "aside",
+    "history-edge-panel revisions-panel conflict-merge-panel",
     el(
       "div",
-      "modal-header",
-      span("Conflict Draft"),
+      "history-edge-header",
+      span("Conflict merge"),
+      button("×", "Close history panel", () => actions.dispatch({ type: "overlay.close" }), "history-edge-close"),
     ),
-    el("pre", "diff-preview", draft?.content ?? ""),
+    el("p", "merge-editor-hint", mergeHint),
+    el("div", "merge-canonical-pane", span("Current canonical", "history-preview-heading"), renderDiffPreview(canonical, localDraft)),
+    recovery,
     el(
       "div",
       "modal-actions",
-      button(
-        "Restore Draft",
-        "Restore conflict draft",
-        () => actions.dispatch({ type: "conflict.restore" }),
-        "primary-button",
-      ),
+      restore,
+      saveMerge,
     ),
   );
-  panel.dataset["key"] = "modal:conflict";
+  panel.setAttribute("aria-label", "Conflict merge");
+  panel.dataset["key"] = "history-edge:conflict";
   return panel;
+}
+
+function revisionTimeline(
+  revisions: V2RevisionMeta[] | null,
+  selectedEventId: State["revisionSelectedEventId"],
+  actions: ViewActions,
+): HTMLElement {
+  if (revisions === null || revisions.length === 0) return el("div", "revision-timeline-empty", "No revisions available");
+  const range = document.createElement("input");
+  range.className = "revision-timeline-range";
+  range.type = "range";
+  range.min = "0";
+  range.max = String(revisions.length - 1);
+  const selectedIndex = revisions.findIndex((revision) => toRevisionEventId(revision.revision) === selectedEventId);
+  range.value = String(selectedIndex < 0 ? revisions.length - 1 : selectedIndex);
+  range.setAttribute("aria-label", "Revision timeline");
+  range.addEventListener("input", () => {
+    const revision = revisions[Number(range.value)];
+    if (revision !== undefined) {
+      actions.dispatch({ type: "revisions.select", eventId: toRevisionEventId(revision.revision) });
+    }
+  });
+  return el(
+    "label",
+    "revision-timeline",
+    span("Older", "timeline-endpoint"),
+    range,
+    span("Newer", "timeline-endpoint"),
+  );
+}
+
+type DiffLine = { kind: "added" | "removed" | "omitted"; content: string };
+
+function renderDiffPreview(before: string, after: string): HTMLElement {
+  const preview = el("pre", "diff-preview");
+  const lines = diffLines(before.split("\n"), after.split("\n"));
+  if (lines.length === 0) {
+    preview.append(el("span", "diff-line diff-unchanged", "No differences"));
+    return preview;
+  }
+  for (const line of lines) {
+    const marker = line.kind === "added" ? "+ " : line.kind === "removed" ? "− " : "";
+    preview.append(el("span", `diff-line diff-${line.kind}`, `${marker}${line.content}`));
+  }
+  return preview;
+}
+
+function diffLines(before: string[], after: string[]): DiffLine[] {
+  let prefix = 0;
+  while (prefix < before.length && prefix < after.length && before[prefix] === after[prefix]) prefix += 1;
+  let suffix = 0;
+  while (suffix < before.length - prefix && suffix < after.length - prefix &&
+    before[before.length - suffix - 1] === after[after.length - suffix - 1]) suffix += 1;
+  const removed = before.slice(prefix, before.length - suffix);
+  const added = after.slice(prefix, after.length - suffix);
+  if (removed.length === 0) return boundedDiffLines("added", added);
+  if (added.length === 0) return boundedDiffLines("removed", removed);
+  if (removed.length * added.length > 500_000 || removed.length + added.length > 160) {
+    const lines: DiffLine[] = removed.slice(0, 79).map((content) => ({ kind: "removed", content }));
+    if (removed.length > 79 || added.length > 79) {
+      lines.push({ kind: "omitted", content: "Additional changes omitted" });
+    }
+    lines.push(...added.slice(0, 79).map((content): DiffLine => ({ kind: "added", content })));
+    return lines;
+  }
+  const common = Array.from({ length: removed.length + 1 }, () => new Uint32Array(added.length + 1));
+  for (let left = removed.length - 1; left >= 0; left -= 1) {
+    for (let right = added.length - 1; right >= 0; right -= 1) {
+      common[left]![right] = removed[left] === added[right]
+        ? common[left + 1]![right + 1]! + 1
+        : Math.max(common[left + 1]![right]!, common[left]![right + 1]!);
+    }
+  }
+  const lines: DiffLine[] = [];
+  let left = 0;
+  let right = 0;
+  while (left < removed.length || right < added.length) {
+    if (left < removed.length && right < added.length && removed[left] === added[right]) {
+      left += 1;
+      right += 1;
+    } else if (right === added.length || left < removed.length && common[left + 1]![right]! >= common[left]![right + 1]!) {
+      if (!appendDiffLine(lines, { kind: "removed", content: removed[left]! })) return lines;
+      left += 1;
+    } else {
+      if (!appendDiffLine(lines, { kind: "added", content: added[right]! })) return lines;
+      right += 1;
+    }
+  }
+  return lines;
+}
+
+function boundedDiffLines(kind: "added" | "removed", content: string[]): DiffLine[] {
+  const lines: DiffLine[] = content.slice(0, 160).map((line) => ({ kind, content: line }));
+  if (content.length > 160) lines[159] = { kind: "omitted", content: "Additional changes omitted" };
+  return lines;
+}
+
+function appendDiffLine(lines: DiffLine[], line: DiffLine): boolean {
+  if (lines.length < 160) {
+    lines.push(line);
+    return true;
+  }
+  lines[159] = { kind: "omitted", content: "Additional changes omitted" };
+  return false;
 }
 
 function renderSettingsPanel(state: State, actions: ViewActions): HTMLElement {
@@ -1276,21 +1441,6 @@ function input(
   if (max !== undefined) element.max = max;
   if (step !== undefined) element.step = step;
   return element;
-}
-
-function diffPreview(current: string, revision: string): string {
-  const currentLines = current.split("\n");
-  const revisionLines = revision.split("\n");
-  const out = ["Revision preview", ""];
-  for (let i = 0; i < Math.max(currentLines.length, revisionLines.length); i += 1) {
-    if (currentLines[i] === revisionLines[i]) {
-      continue;
-    }
-    if (revisionLines[i] !== undefined) out.push(`+ ${revisionLines[i]}`);
-    if (currentLines[i] !== undefined) out.push(`- ${currentLines[i]}`);
-    if (out.length > 80) break;
-  }
-  return out.join("\n");
 }
 
 function emptyState(): HTMLElement {

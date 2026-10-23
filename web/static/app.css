@@ -956,6 +956,153 @@ button {
   padding: 8px 0;
 }
 
+.history-edge-panel {
+  z-index: 4;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  gap: 10px;
+  overflow: auto;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-panel);
+  background: var(--color-bg-elevated);
+  box-shadow: var(--shadow-floating);
+  padding: 12px;
+}
+
+.history-edge-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 32px;
+  color: var(--color-text);
+  font-weight: 650;
+}
+
+.history-edge-close {
+  width: 30px;
+  height: 30px;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 20px;
+}
+
+.history-edge-close:hover { background: var(--color-bg-hover); }
+
+.revision-timeline {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  color: var(--color-text-muted);
+  font-size: 11px;
+}
+
+.revision-timeline-range {
+  width: 100%;
+  accent-color: var(--color-accent);
+}
+
+.revision-timeline-empty {
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+.timeline-endpoint { white-space: nowrap; }
+
+.history-edge-panel .revision-body {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(70px, 0.55fr) minmax(150px, 1.45fr);
+  flex: 1;
+  min-height: 0;
+}
+
+.history-edge-panel .revision-list {
+  max-height: 100%;
+  border-bottom: 1px solid var(--color-border);
+  padding: 0 0 8px;
+}
+
+.history-preview,
+.merge-canonical-pane {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.history-preview-heading {
+  flex: 0 0 auto;
+  color: var(--color-text-muted);
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.history-edge-panel .diff-preview {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.diff-line {
+  display: block;
+  min-height: 1.4em;
+  overflow-wrap: anywhere;
+}
+
+.diff-added {
+  color: var(--color-success);
+  background: color-mix(in srgb, var(--color-success) 9%, transparent);
+}
+
+.diff-removed {
+  color: var(--color-danger);
+  opacity: 0.62;
+}
+
+.diff-unchanged {
+  color: var(--color-text-muted);
+}
+
+.diff-omitted {
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
+.merge-editor-hint {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.merge-canonical-pane {
+  flex: 1;
+  min-height: 220px;
+}
+
+.conflict-draft-recovery {
+  max-height: 180px;
+  overflow: auto;
+  border-top: 1px solid var(--color-border);
+  color: var(--color-text-muted);
+  padding-top: 8px;
+}
+
+.conflict-draft-recovery summary { cursor: pointer; }
+
+.conflict-draft-recovery .diff-preview {
+  min-height: 100px;
+  max-height: 150px;
+  margin-top: 8px;
+}
+
 .revision-list {
   display: flex;
   flex-direction: column;
@@ -2344,5 +2491,54 @@ button {
 @media (prefers-reduced-motion: reduce) {
   .editor-mount[data-note-enter] .cm-content {
     animation: none;
+  }
+}
+
+@media (min-width: 1100px) {
+  .main.has-history-edge.has-article-layout {
+    grid-template-columns: minmax(0, 1fr) minmax(0, min(52vw, 720px)) minmax(0, min(35vw, 480px)) minmax(0, 1fr);
+    column-gap: 24px;
+  }
+
+  .main.has-history-edge.has-article-layout > .workspace {
+    grid-column: 2;
+    transform: none;
+  }
+
+  .main.has-history-edge.has-article-layout > .history-edge-panel {
+    grid-column: 3;
+    grid-row: 2;
+    max-height: calc(100% - 82px);
+    margin-top: 18px;
+  }
+
+  .main.has-history-edge.find-open > .history-edge-panel { grid-row: 3; }
+}
+
+.main.has-history-edge > .note-outline,
+.main.has-history-edge > .link-rail {
+  display: none;
+}
+
+@media (max-width: 1099.98px) {
+  .main.has-history-edge > .history-edge-panel {
+    position: fixed;
+    top: 70px;
+    right: 12px;
+    bottom: 12px;
+    width: min(430px, calc(100vw - 24px));
+    max-height: none;
+    margin: 0;
+  }
+}
+
+@media (max-width: 539px) {
+  .main.has-history-edge > .history-edge-panel {
+    top: auto;
+    right: 8px;
+    bottom: 8px;
+    left: 8px;
+    width: auto;
+    max-height: min(68dvh, 680px);
   }
 }

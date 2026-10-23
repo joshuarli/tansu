@@ -1077,7 +1077,7 @@ describe("real server harness", () => {
     await expect(readVaultFile("acceptance-conflict.md")).resolves.toBe(winningContent);
 
     await page.locator('.conflict-banner [title="View conflict draft"]').click();
-    await expect.poll(() => page.locator(".revisions-panel .diff-preview").textContent()).toBe(draftContent);
+    await expect.poll(() => page.locator(".conflict-draft-recovery .diff-preview").textContent()).toBe(draftContent);
     await page.locator('.revisions-panel [title="Restore conflict draft"]').click();
     await page.waitForSelector(".conflict-banner", { state: "detached" });
 

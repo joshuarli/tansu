@@ -76,8 +76,10 @@ export type ViewEvent =
   | { type: "links.refresh" }
   | { type: "revisions.open" }
   | { type: "revisions.select"; eventId: RevisionEventId }
+  | { type: "revisions.branch" }
   | { type: "revisions.restore" }
   | { type: "conflict.view" }
+  | { type: "conflict.merge" }
   | { type: "conflict.restore" }
   | { type: "draft.export" }
   | { type: "draft.recreate" }
