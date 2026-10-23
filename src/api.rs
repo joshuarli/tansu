@@ -2,7 +2,7 @@ use crate::api_types::{
     V2ApiErrorKind, V2ApiErrorResponse,
     V2CreateNoteRequest, V2DeleteNoteRequest, V2RenameNoteRequest, V2RestoreConflictRequest,
     V2RestoreRevisionRequest, V2SaveNoteDeltaRequest, V2SaveNoteRequest, V2SearchRequest,
-    V2QuickOpenRequest, V2SettingsRequest,
+    V2SettingsRequest,
 };
 use crate::app::App;
 use crate::http::{HttpRequest, HttpResponse};
@@ -174,10 +174,6 @@ fn dispatch_v2_api(app: &App, request: &HttpRequest) -> std::result::Result<Http
         ("POST", ["search"]) => {
             let body = parse_v2_body::<V2SearchRequest>(&request.body)?;
             v2_json(200, &vault.v2_search(body)?, "search results")
-        }
-        ("POST", ["quick-open"]) => {
-            let body = parse_v2_body::<V2QuickOpenRequest>(&request.body)?;
-            v2_json(200, &vault.v2_quick_open(body)?, "quick-open results")
         }
         ("POST", ["images"]) => {
             if request_header(request, "content-type")?.as_deref() != Some("image/webp") {
@@ -697,7 +693,7 @@ mod tests {
     #[test]
     fn v2_read_routes_return_vault_note_revision_and_search_data() {
         use crate::api_types::{
-            V2BootstrapResponse, V2NoteDocument, V2QuickOpenResponse, V2RevisionDocument,
+            V2BootstrapResponse, V2NoteDocument, V2RevisionDocument,
             V2RevisionMeta, V2SearchResponse, V2VaultBootstrapResponse,
         };
 
@@ -809,30 +805,6 @@ mod tests {
         .unwrap();
         assert_eq!(search.hits.len(), 1);
 
-        let quick_open: V2QuickOpenResponse = serde_json::from_slice(
-            handle_v2_api(
-                &app,
-                &v2_request(
-                    "POST",
-                    &format!("{vault_path}/quick-open"),
-                    Some(&server_id),
-                    &serde_json::json!({
-                        "query": "",
-                        "pinnedNoteIds": [note_id],
-                        "recentNoteIds": [],
-                        "limit": 10
-                    })
-                    .to_string()
-                    .into_bytes(),
-                    &[],
-                ),
-                "req",
-            )
-            .body(),
-        )
-        .unwrap();
-        assert_eq!(quick_open.hits.len(), 1);
-        assert_eq!(quick_open.hits[0].note_id, note_id);
     }
 
     #[test]

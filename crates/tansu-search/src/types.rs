@@ -387,63 +387,6 @@ pub struct SearchResult {
     pub local_revision: Option<u64>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum QuickOpenPriority {
-    Pinned,
-    Recent,
-    Exact,
-    Prefix,
-    Subsequence,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum QuickOpenField {
-    Title,
-    Filename,
-    Path,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct QuickOpenRange {
-    field: QuickOpenField,
-    start: u32,
-    end: u32,
-}
-
-impl QuickOpenRange {
-    pub(crate) fn new(field: QuickOpenField, start: u32, end: u32) -> Result<Self, SearchError> {
-        if start > end {
-            return Err(SearchError::InvalidRange { start, end });
-        }
-        Ok(Self { field, start, end })
-    }
-
-    pub fn field(&self) -> QuickOpenField {
-        self.field
-    }
-
-    pub fn start(&self) -> u32 {
-        self.start
-    }
-
-    pub fn end(&self) -> u32 {
-        self.end
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct QuickOpenHit {
-    pub identity: NoteIdentity,
-    pub priority: QuickOpenPriority,
-    pub score: u16,
-    pub ranges: Vec<QuickOpenRange>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct QuickOpenResponse {
-    pub hits: Vec<QuickOpenHit>,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DirtyNoteSnapshot {
     identity: NoteIdentity,

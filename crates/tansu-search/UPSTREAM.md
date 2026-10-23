@@ -4,7 +4,7 @@
 
 The imported code is licensed under LGPL-3.0-or-later. `LICENSE` contains the upstream license text.
 
-Local changes adapt the index to Tansu note identity and source revisions, remove browser-only and filesystem-free paths, use typed query options and checked limits, add source and excerpt ranges, add quick-open and request-scoped overlays, and give the index a persistent lifecycle with failure recovery.
+Local changes adapt the index to Tansu note identity and source revisions, remove browser-only and filesystem-free paths, use typed query options and checked limits, add source and excerpt ranges, add request-scoped overlays, and give the index a persistent lifecycle with failure recovery.
 
 `tests/goldens/reference-parity.tsv` records sorted candidate IDs from seven queries over a six-note corpus, run against this commit and the Tansu port. Six queries return the same candidates. The `dessert` query returns two Tansu notes from their supported tags; Ferrisearch returns no tag-only hits. The `"quick brown"` query returns the same candidates in a different rank order because Tansu uses fixed title and path weights. The golden compares candidate IDs because the port returns bounded excerpts and typed ranges instead of full note bodies.
 

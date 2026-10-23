@@ -650,32 +650,6 @@ pub struct V2SearchResponse {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[serde(deny_unknown_fields)]
-pub struct V2QuickOpenRequest {
-    pub query: String,
-    pub pinned_note_ids: Vec<String>,
-    pub recent_note_ids: Vec<String>,
-    pub limit: u16,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct V2QuickOpenHit {
-    pub note_id: String,
-    pub source_hash: String,
-    pub title: String,
-    pub path: String,
-    pub score: f32,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct V2QuickOpenResponse {
-    pub hits: Vec<V2QuickOpenHit>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum V2ServerEventUpdate {
     Ready,

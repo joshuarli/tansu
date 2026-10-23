@@ -161,7 +161,7 @@ operation lock only while reading the note list, never while reading files, so
 they do not delay writes. A note whose file cannot be read is skipped. An unknown,
 deleted, or unresolved `noteId` returns `note_not_found`.
 
-### Search and quick-open
+### Search
 
 Search is `POST` so dirty source stays out of URLs. A request has a query, mode
 (`default` or `typo_only`), result limit, and optional overlay snapshots.
@@ -193,10 +193,6 @@ distinct types and coordinate spaces.
 Hits carry no tags, and the client does not display tag metadata from hits or
 notes.
 
-Quick-open matches title, filename, and path. For an empty query it returns
-pinned and recent notes in the supplied order, followed by remaining notes.
-Pinned and recent IDs are client-provided and are not stored by the server.
-
 ### Events
 
 SSE IDs are monotonically increasing `eventVersion` values scoped to a vault
@@ -216,8 +212,8 @@ cannot fit the bounded stream payload, the server sends `resyncRequired`.
 
 In authenticated mode, Host is required for every request and any supplied
 Origin must exactly match the configured HTTPS origin. State-changing requests
-also require that Origin. Bootstrap, note, settings, search, quick-open, asset,
-and event routes require a session. `GET /api/v2/health` is public. Login
+also require that Origin. Bootstrap, note, settings, search, asset, and event
+routes require a session. `GET /api/v2/health` is public. Login
 ceremonies and ticket-bound finishes are available before a session; initial
 enrollment also requires its one-time capability.
 

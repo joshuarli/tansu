@@ -85,15 +85,6 @@ Next: 83
 - **Fix with:** dead-code-archaeology
 - **Effort:** M
 
-### TNS-072 · P3 · Remove quick-open end to end
-
-- **Area:** Dead code
-- **Where:** `crates/tansu-search/src/quick_open.rs`, `src/search.rs`, `src/vault.rs` `v2_quick_open`, `src/api.rs`, `docs/api.md`, `Cargo.toml` `nucleo-matcher`
-- **Problem:** The web client no longer decodes or calls the endpoint and no UI opens a quick-open palette. About 500 lines, one dependency, and one API route remain.
-- **Recommendation:** Delete the route, the vault and search plumbing, the crate module, the `nucleo-matcher` dependency, and the API doc section, unless a quick-open UI is planned.
-- **Fix with:** dead-code-archaeology
-- **Effort:** M
-
 ### TNS-073 · P3 · Drop runtime decoders for same-origin API and IndexedDB records
 
 - **Area:** Types

@@ -16,8 +16,8 @@ use crate::api_types::{
     ApiErrorKind, NoteEventKind, NoteEventSource, NoteMeta, Settings, TextEdit, TextPosition,
     V2ApiErrorKind, ValidatedSettings,
     V2CreateNoteRequest, V2DeleteNoteRequest, V2MutationOutcome,
-    V2MutationResponse, V2NoteDocument, V2NoteMeta, V2NotePrecondition, V2QuickOpenHit,
-    V2QuickOpenRequest, V2QuickOpenResponse, V2RenameNoteRequest, V2SearchHit,
+    V2MutationResponse, V2NoteDocument, V2NoteMeta, V2NotePrecondition, V2RenameNoteRequest,
+    V2SearchHit,
     V2SearchHitIdentity, V2SearchMode, V2SearchOverlay, V2SearchRequest, V2SearchResponse,
     V2SourceRange, V2ExcerptRange, V2OverlayCoverage,
     V2RestoreConflictRequest, V2RestoreRevisionRequest, V2RevisionDocument, V2RevisionMeta,
@@ -2603,39 +2603,6 @@ impl VaultRuntime {
         Ok(V2SearchResponse { hits, overlay_coverage })
     }
 
-    pub fn v2_quick_open(
-        &self,
-        request: V2QuickOpenRequest,
-    ) -> V2Result<V2QuickOpenResponse> {
-        let _op = self.lock_op();
-        validate_v2_search_limit(request.limit)?;
-        let notes = self.lock_catalog().live_notes()?;
-        let result = {
-            let mut search = self.search.lock().expect("search mutex poisoned");
-            search.quick_open(
-                &request.query,
-                &notes,
-                &request.pinned_note_ids,
-                &request.recent_note_ids,
-                usize::from(request.limit),
-            )
-        };
-        self.persist_search_status();
-        let response = result.map_err(v2_search_error)?;
-        let hits = response
-            .hits
-            .into_iter()
-            .map(|hit| V2QuickOpenHit {
-                note_id: hit.identity.note_id().to_owned(),
-                source_hash: hit.identity.source_hash().to_owned(),
-                title: hit.identity.title().to_owned(),
-                path: hit.identity.path().to_owned(),
-                score: f32::from(hit.score),
-            })
-            .collect();
-        Ok(V2QuickOpenResponse { hits })
-    }
-
     pub fn settings(&self) -> Result<Settings> {
         let _op = self.lock_op();
         self.lock_catalog().settings()
@@ -3551,26 +3518,6 @@ mod tests {
                 ..
             } if local_id == &meta.note_id
         )));
-    }
-
-    #[test]
-    fn v2_quick_open_returns_pinned_note_metadata() {
-        let vault = test_vault_with_note("A.md", "# Moon\n\ncontent\n");
-        let meta = vault.lock_catalog().live_notes().unwrap().remove(0);
-        let response = vault
-            .v2_quick_open(V2QuickOpenRequest {
-                query: String::new(),
-                pinned_note_ids: vec![meta.note_id.clone()],
-                recent_note_ids: Vec::new(),
-                limit: 10,
-            })
-            .unwrap();
-
-        assert_eq!(response.hits.len(), 1);
-        assert_eq!(response.hits[0].note_id, meta.note_id);
-        assert_eq!(response.hits[0].source_hash, meta.content_hash);
-        assert_eq!(response.hits[0].title, "Moon");
-        assert_eq!(response.hits[0].score, 0.0);
     }
 
     #[test]

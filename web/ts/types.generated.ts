@@ -95,12 +95,6 @@ export type V2OverlayCoverage = { "status": "complete" } | { "status": "partial"
 
 export type V2SearchResponse = { hits: Array<V2SearchHit>, overlayCoverage: V2OverlayCoverage, };
 
-export type V2QuickOpenRequest = { query: string, pinnedNoteIds: Array<string>, recentNoteIds: Array<string>, limit: number, };
-
-export type V2QuickOpenHit = { noteId: string, sourceHash: string, title: string, path: string, score: number, };
-
-export type V2QuickOpenResponse = { hits: Array<V2QuickOpenHit>, };
-
 export type V2ServerEventUpdate = { "kind": "ready" } | { "kind": "vaultChanged", notes: Array<V2NoteMeta>, } | { "kind": "noteChanged", note: V2NoteMeta, } | { "kind": "noteDeleted", noteId: string, } | { "kind": "searchChanged", dirty: boolean, degraded: boolean, } | { "kind": "resyncRequired" };
 
 export type V2ServerEvent = { eventVersion: number, resyncRequired: boolean, update: V2ServerEventUpdate, };
