@@ -13,15 +13,6 @@ Next: 83
 - **Design:** `docs/rfcs/TNS-050-document-controller.md`
 - **Effort:** L
 
-### TNS-059 · P3 · Add a real two-process vault lock test
-
-- **Area:** Concurrency
-- **Where:** `src/vault.rs`, `tests/`
-- **Problem:** The vault root lock is tested only with two runtimes in one process.
-- **Recommendation:** Spawn two server processes on one root, and on two configs naming it, and assert the second exits non-zero with the ownership error.
-- **Fix with:** durable-state
-- **Effort:** S
-
 ### TNS-060 · P3 · Cover multi-vault partial startup failure and watcher error handling
 
 - **Area:** Concurrency
