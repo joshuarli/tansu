@@ -105,6 +105,17 @@ backs up the restored database, and confirms that restore rejects a corrupt
 backup. The binary must run on the host, so run the drill on Linux for the musl
 artifact.
 
+On 2026-10-23, `make test-sqlite-static` passed all 33 auth tests on macOS
+arm64 with the downloaded SQLite 3.54.0 archive. `make build-linux-musl-x86_64`
+produced the static release binary. The recovery drill passed against that
+binary in an x86_64 Linux Alpine container, including corrupt-backup rejection.
+Run the drill in a container on macOS:
+
+```sh
+docker run --rm --platform linux/amd64 -v "$PWD:/work" -w /work alpine:edge \
+  sh scripts/auth-recovery-drill.sh /work/.work/dist/x86_64-unknown-linux-musl/tansu
+```
+
 ## Back up and restore Tansu state
 
 Stop Tansu and other vault writers before copying state. Back up these items

@@ -13,15 +13,6 @@ Next: 83
 - **Design:** `docs/rfcs/TNS-050-document-controller.md`
 - **Effort:** L
 
-### TNS-057 · P2 · Run the static SQLite test and the release-binary recovery drill
-
-- **Area:** Data
-- **Where:** `Makefile`, `scripts/auth-recovery-drill.sh`, `docs/deployment.md`
-- **Problem:** `make test-sqlite-static` and `make auth-recovery-drill` were written for TNS-038 but never run, because they need a SQLite source download and a Docker release build.
-- **Recommendation:** Run both on a host that can, record the result in the release checklist, and fix what they reveal.
-- **Fix with:** error-model
-- **Effort:** S
-
 ### TNS-059 · P3 · Add a real two-process vault lock test
 
 - **Area:** Concurrency
