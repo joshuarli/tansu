@@ -421,12 +421,26 @@ packages:
     cpu: [x64]
     os: [darwin]
 
+  '@oxlint/binding-linux-arm64-gnu@1.88.0':
+    resolution: {integrity: sha512-jutT2Hy8JCuZuMwIFHo2HtyxfOfBJHyQxlBHBK1SL9W2f8n/WhjAP0FnDMz9d/mjhv9+QA0mx5AdQ9fDjsrFFg==}
+    engines: {node: ^20.19.0 || >=22.12.0}
+    cpu: [arm64]
+    os: [linux]
+    libc: [glibc]
+
   '@oxlint/binding-linux-arm64-musl@1.88.0':
     resolution: {integrity: sha512-8N8iGV9hh4Lkeuq7QsEkjoXNRRflqR1G2qyoGYXcA0k5qllrdqmfylKEXyHIVERxqNDyMO4StqDQ0uLxXcBQAg==}
     engines: {node: ^20.19.0 || >=22.12.0}
     cpu: [arm64]
     os: [linux]
     libc: [musl]
+
+  '@oxlint/binding-linux-x64-gnu@1.88.0':
+    resolution: {integrity: sha512-og/XHVDOD9ZJgRiZkT9DgzQd4sr+JZW7e4l17Q/jVMZiIbeEd4uIu9iAoUbTF1gIvVZoRc4QDOxyVUvQGp4WHg==}
+    engines: {node: ^20.19.0 || >=22.12.0}
+    cpu: [x64]
+    os: [linux]
+    libc: [glibc]
 
   '@oxlint/binding-linux-x64-musl@1.88.0':
     resolution: {integrity: sha512-EmhBsp+xuKb6YbZNEMLBo80Xw71AZOIm18do8ni/GLX/Lw1XzNhVYpbxO1KasYtoAvrGtCOdCPULRlIE0bPbTQ==}
@@ -450,12 +464,26 @@ packages:
     cpu: [x64]
     os: [darwin]
 
+  '@rolldown/binding-linux-arm64-gnu@1.2.13':
+    resolution: {integrity: sha512-DTpb/+jMiqWMPgphn4ksW1zW+XLJ6dJJ9FMvnIk9I291LhCctMPhMYJrP5t9p6C9qa3KXadDdUEZHBaPh3kNxQ==}
+    engines: {node: ^20.19.0 || >=22.12.0}
+    cpu: [arm64]
+    os: [linux]
+    libc: [glibc]
+
   '@rolldown/binding-linux-arm64-musl@1.2.13':
     resolution: {integrity: sha512-xU+Kvv9N2A3SY35zFh1FWWNjxbadE/BKeqnkXe7vScU4GZsw757BlVmDLITZEq8DPpk6m7uoDYkK7P+x/uU5Ow==}
     engines: {node: ^20.19.0 || >=22.12.0}
     cpu: [arm64]
     os: [linux]
     libc: [musl]
+
+  '@rolldown/binding-linux-x64-gnu@1.2.13':
+    resolution: {integrity: sha512-J4cm80Pc6wEwV5AZ42o62sIQgDk+Y7R2s646jIwuvO+4V46QB58N4vVuMPWCBaNgursXLpmUWJV//WQAkPvHBQ==}
+    engines: {node: ^20.19.0 || >=22.12.0}
+    cpu: [x64]
+    os: [linux]
+    libc: [glibc]
 
   '@rolldown/binding-linux-x64-musl@1.2.13':
     resolution: {integrity: sha512-W0euZS40U4V6JkmEnVCIX9mcsL6cbXQ4X8c2w+MMOIjFg68TXUW+u3RT+2e1t1pv9mg/EP3pDtK3POXdQ7Rxyw==}
@@ -473,12 +501,26 @@ packages:
     cpu: [arm64]
     os: [darwin]
 
+  '@tsrs/linux-arm64-gnu@0.18.0-ts7.1.0-dev.20260929':
+    resolution: {integrity: sha512-zm9/z9yylig68JiZF4Aq0Cm26n09KEU8YoQRlG7tdDWTBNAIViYw8knxnWYsjMWVZ2XiU4mYq1xdrOKuOgABHg==}
+    engines: {node: '>=16.20.0'}
+    cpu: [arm64]
+    os: [linux]
+    libc: [glibc]
+
   '@tsrs/linux-arm64-musl@0.18.0-ts7.1.0-dev.20260929':
     resolution: {integrity: sha512-Lw7VVU/YQ9JcarODICEiwzMLdFqZprqh5RGTgbS5Uc6I95P635/g5xA1pOC8RVs4efBvAR30J54iDG3l5JEYiw==}
     engines: {node: '>=16.20.0'}
     cpu: [arm64]
     os: [linux]
     libc: [musl]
+
+  '@tsrs/linux-x64-gnu@0.18.0-ts7.1.0-dev.20260929':
+    resolution: {integrity: sha512-EdBwBgNICGu1r1h23ixdcKwsMo6E9ll7ZsY3mNERNYqE1Pwdtcat99d5E7zB1J+oy/Xk6YqiizaB6nolIjpDTw==}
+    engines: {node: '>=16.20.0'}
+    cpu: [x64]
+    os: [linux]
+    libc: [glibc]
 
   '@tsrs/linux-x64-musl@0.18.0-ts7.1.0-dev.20260929':
     resolution: {integrity: sha512-LHk+AOAtXuTlhJhOJ2+elriEIX17ycXljojeNxrrzckOipTG1LksoVWuCSas2nu00EnWAzrdKpt9oqPylUKZfQ==}
@@ -675,12 +717,26 @@ packages:
     cpu: [x64]
     os: [darwin]
 
+  lightningcss-linux-arm64-gnu@1.33.0:
+    resolution: {integrity: sha512-j2v/itmy4HlNxlc6voKXYgBqNi0Ng2LShg4z7GufpEgs05P+2suBVyi9I6YHq5uoVFx9ETin3eCEhLVyXGQnKg==}
+    engines: {node: '>= 12.0.0'}
+    cpu: [arm64]
+    os: [linux]
+    libc: [glibc]
+
   lightningcss-linux-arm64-musl@1.33.0:
     resolution: {integrity: sha512-yiO5ROMuYQgXbC60yjZU5CYSFZGKXL0HFATXt9mHJn1+zW55oCtMI9NfcVhYLMFDL7gV7oBPon/EmMMGg2OvtQ==}
     engines: {node: '>= 12.0.0'}
     cpu: [arm64]
     os: [linux]
     libc: [musl]
+
+  lightningcss-linux-x64-gnu@1.33.0:
+    resolution: {integrity: sha512-ar+Ju7LmcN0Jo4FpL4hpFybwNG9/3A/Br5KW2n2jyODg3MEZXaDYADdemoNS+BDNfMgKvylJLj4S5tyRActuAg==}
+    engines: {node: '>= 12.0.0'}
+    cpu: [x64]
+    os: [linux]
+    libc: [glibc]
 
   lightningcss-linux-x64-musl@1.33.0:
     resolution: {integrity: sha512-RYiYbkokw0trfKqqzfF55lginwEPrD3OJDfTuJzFs1MK6iFnDenaz1fqLLtX4ITG3OktJQXOeTaw1awrBAlZPw==}
@@ -938,7 +994,6 @@ ignoredOptionalDependencies:
   - '*aix*'
   - '*android*'
   - '*freebsd*'
-  - '*linux-*-gnu*'
   - '*linux-arm-*'
   - '*linux-ia32*'
   - '*linux-loong64*'
@@ -1152,7 +1207,13 @@ snapshots:
   '@oxlint/binding-darwin-x64@1.88.0':
     optional: true
 
+  '@oxlint/binding-linux-arm64-gnu@1.88.0':
+    optional: true
+
   '@oxlint/binding-linux-arm64-musl@1.88.0':
+    optional: true
+
+  '@oxlint/binding-linux-x64-gnu@1.88.0':
     optional: true
 
   '@oxlint/binding-linux-x64-musl@1.88.0':
@@ -1166,7 +1227,13 @@ snapshots:
   '@rolldown/binding-darwin-x64@1.2.13':
     optional: true
 
+  '@rolldown/binding-linux-arm64-gnu@1.2.13':
+    optional: true
+
   '@rolldown/binding-linux-arm64-musl@1.2.13':
+    optional: true
+
+  '@rolldown/binding-linux-x64-gnu@1.2.13':
     optional: true
 
   '@rolldown/binding-linux-x64-musl@1.2.13':
@@ -1177,7 +1244,13 @@ snapshots:
   '@tsrs/darwin-arm64@0.18.0-ts7.1.0-dev.20260929':
     optional: true
 
+  '@tsrs/linux-arm64-gnu@0.18.0-ts7.1.0-dev.20260929':
+    optional: true
+
   '@tsrs/linux-arm64-musl@0.18.0-ts7.1.0-dev.20260929':
+    optional: true
+
+  '@tsrs/linux-x64-gnu@0.18.0-ts7.1.0-dev.20260929':
     optional: true
 
   '@tsrs/linux-x64-musl@0.18.0-ts7.1.0-dev.20260929':
@@ -1388,7 +1461,13 @@ snapshots:
   lightningcss-darwin-x64@1.33.0:
     optional: true
 
+  lightningcss-linux-arm64-gnu@1.33.0:
+    optional: true
+
   lightningcss-linux-arm64-musl@1.33.0:
+    optional: true
+
+  lightningcss-linux-x64-gnu@1.33.0:
     optional: true
 
   lightningcss-linux-x64-musl@1.33.0:
@@ -1400,7 +1479,9 @@ snapshots:
     optionalDependencies:
       lightningcss-darwin-arm64: 1.33.0
       lightningcss-darwin-x64: 1.33.0
+      lightningcss-linux-arm64-gnu: 1.33.0
       lightningcss-linux-arm64-musl: 1.33.0
+      lightningcss-linux-x64-gnu: 1.33.0
       lightningcss-linux-x64-musl: 1.33.0
 
   magic-string@1.4.3:
@@ -1432,7 +1513,9 @@ snapshots:
     optionalDependencies:
       '@oxlint/binding-darwin-arm64': 1.88.0
       '@oxlint/binding-darwin-x64': 1.88.0
+      '@oxlint/binding-linux-arm64-gnu': 1.88.0
       '@oxlint/binding-linux-arm64-musl': 1.88.0
+      '@oxlint/binding-linux-x64-gnu': 1.88.0
       '@oxlint/binding-linux-x64-musl': 1.88.0
       oxlint-tsgolint: 7.0.2004
 
@@ -1465,7 +1548,9 @@ snapshots:
     optionalDependencies:
       '@rolldown/binding-darwin-arm64': 1.2.13
       '@rolldown/binding-darwin-x64': 1.2.13
+      '@rolldown/binding-linux-arm64-gnu': 1.2.13
       '@rolldown/binding-linux-arm64-musl': 1.2.13
+      '@rolldown/binding-linux-x64-gnu': 1.2.13
       '@rolldown/binding-linux-x64-musl': 1.2.13
 
   sirv@3.0.2:
@@ -1513,7 +1598,9 @@ snapshots:
   tsrs@0.18.0-ts7.1.0-dev.20260929:
     optionalDependencies:
       '@tsrs/darwin-arm64': 0.18.0-ts7.1.0-dev.20260929
+      '@tsrs/linux-arm64-gnu': 0.18.0-ts7.1.0-dev.20260929
       '@tsrs/linux-arm64-musl': 0.18.0-ts7.1.0-dev.20260929
+      '@tsrs/linux-x64-gnu': 0.18.0-ts7.1.0-dev.20260929
       '@tsrs/linux-x64-musl': 0.18.0-ts7.1.0-dev.20260929
 
   undici-types@8.9.0: {}

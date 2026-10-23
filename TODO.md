@@ -21,15 +21,6 @@ Next: 83
 - **Recommendation:** Add an editor API that reports visible images and load those first, only if a measurement shows prefetch order matters.
 - **Fix with:** make-it-fast
 - **Effort:** S
-### TNS-069 · P3 · Generate Linux acceptance baselines in a pinned container
-
-- **Area:** Tests
-- **Where:** `web/ts/e2e/`, `Makefile`, `docs/development.md`
-- **Problem:** The light and dark baselines are committed for macOS Chromium and WebKit only, so the acceptance suite fails on Linux CI until baselines exist there.
-- **Recommendation:** Generate the Linux baselines in a pinned container and commit them.
-- **Fix with:** renovate-tests
-- **Effort:** S
-
 ### TNS-071 · P3 · Drop legacy hash formats and one-time state migrations
 
 - **Area:** Dead code
