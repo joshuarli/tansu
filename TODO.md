@@ -67,15 +67,6 @@ Next: 83
 - **Fix with:** lifecycle-concurrency
 - **Effort:** M
 
-### TNS-076 · P3 · Remove tooling nothing names
-
-- **Area:** Build
-- **Where:** `scripts/test-package.py`, `Makefile` `test-package` and `coverage*`, `deno.json` coverage tasks, `package.json` `@vitest/coverage-v8`, `vitest.config.ts` coverage block, `scripts/artifact-hash.mjs`, `Makefile` `test-acceptance`, `web/ts/e2e/server.test.ts`, `docs/development.md`
-- **Problem:** A 242-line Python smoke script, three coverage targets with thresholds nothing enforces, and a recorded artifact hash with no release workflow to consume it. The empty-PATH release run is the only behavior lost.
-- **Recommendation:** Delete them and the doc lines. Keep `ACCEPTANCE_SERVER_BINARY`.
-- **Fix with:** dead-code-archaeology
-- **Effort:** S
-
 ### TNS-077 · P3 · Fix or remove the stale visual review script
 
 - **Area:** Tests

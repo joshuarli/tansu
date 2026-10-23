@@ -23,7 +23,12 @@ Install browser dependencies with `deno task playwright:install`; see
 `make test-acceptance` first runs app interleaving tests, then the browser group
 tagged `acceptance:`. Set `ACCEPTANCE_BROWSER=webkit` to use WebKit. Set
 `ACCEPTANCE_SERVER_BINARY=path/to/tansu` to test a specific server binary.
-The integration suite uses isolated fixtures under `.work/tmp/`.
+The server runs from an isolated working directory with an empty `PATH` and
+isolated home directories. The integration suite uses fixtures under
+`.work/tmp/`. To exercise a release binary, build the frontend with
+`deno task build`, build the server with
+`cargo build --locked --release --bin tansu`, then run
+`make test-acceptance ACCEPTANCE_SERVER_BINARY=target/release/tansu`.
 
 Browser screenshot baselines are specific to the browser and platform. A
 platform without a baseline fails the baseline test. After an intentional UI
