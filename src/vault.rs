@@ -901,7 +901,9 @@ fn watcher_trigger() -> (WatcherTrigger, Receiver<()>) {
 fn run_watcher_worker(runtime: Weak<VaultRuntime>, events: Receiver<()>, stop: Arc<StopSignal>) {
     drain_watcher_triggers(&events, &stop, || match runtime.upgrade() {
         Some(runtime) => {
-            let _ = runtime.reconcile_from_watcher();
+            if let Err(error) = runtime.reconcile_from_watcher() {
+                runtime.log_watcher_reconcile_error(&error);
+            }
             ControlFlow::Continue(())
         }
         None => ControlFlow::Break(()),
@@ -1131,6 +1133,27 @@ impl VaultRuntime {
                         }),
                     ),
                     ("vault", serde_json::json!(self.index)),
+                ]),
+            );
+        }
+    }
+
+    fn log_watcher_reconcile_error(&self, error: &Error) {
+        if self.logs.enabled() {
+            self.logs.server_event(
+                LogLevel::Error,
+                "system.event",
+                None,
+                fields([
+                    (
+                        "system",
+                        serde_json::json!({
+                            "component": "watcher",
+                            "action": "reconcile_error",
+                        }),
+                    ),
+                    ("vault", serde_json::json!(self.index)),
+                    ("error", serde_json::json!(error.to_string())),
                 ]),
             );
         }
@@ -5017,6 +5040,40 @@ mod tests {
         drop(runtime);
 
         VaultRuntime::open(0, &config_for(&root, state.path().join("second")), logs()).unwrap();
+    }
+
+    #[test]
+    fn watcher_reconciliation_errors_are_logged() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("vault");
+        fs::create_dir(&root).unwrap();
+        let state = tempfile::tempdir().unwrap();
+        let logs = LogHub::new(crate::logging::LogMode::Buffer);
+        let runtime = Arc::new(
+            VaultRuntime::open(
+                0,
+                &config_for(&root, state.path().join("state")),
+                logs.clone(),
+            )
+            .unwrap(),
+        );
+        let events = logs.subscribe().unwrap();
+        runtime.start_watcher().unwrap();
+        let operation = runtime.lock_op();
+        fs::remove_dir(&root).unwrap();
+        fs::write(&root, b"not a directory").unwrap();
+        if let WatcherWorkerSlot::Running(worker) = &runtime.lock_workers().watcher {
+            worker.wake.notify();
+        } else {
+            panic!("watcher did not start");
+        }
+        drop(operation);
+
+        let event = events.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert_eq!(event.level, LogLevel::Error);
+        assert_eq!(event.fields["system"]["component"], "watcher");
+        assert_eq!(event.fields["system"]["action"], "reconcile_error");
+        assert!(event.fields["error"].as_str().is_some_and(|error| !error.is_empty()));
     }
 
     #[test]

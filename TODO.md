@@ -13,15 +13,6 @@ Next: 83
 - **Design:** `docs/rfcs/TNS-050-document-controller.md`
 - **Effort:** L
 
-### TNS-060 · P3 · Cover multi-vault partial startup failure and watcher error handling
-
-- **Area:** Concurrency
-- **Where:** `src/app.rs`, `src/vault.rs`
-- **Problem:** `App::from_config` failing on a later vault is not tested for releasing earlier vaults' workers and locks, and the watcher worker discards `reconcile_from_watcher()` errors with `let _ =`.
-- **Recommendation:** Test the partial-startup unwind and log or surface watcher reconcile errors.
-- **Fix with:** lifecycle-concurrency
-- **Effort:** S
-
 ### TNS-062 · P3 · Test relative roots on Linux and other Unix targets
 
 - **Area:** Portability
