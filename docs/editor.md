@@ -12,6 +12,15 @@ make it dirty; selection and mode changes do not. The app marks a session saved
 only when the saved revision is still current. Clean reloads replace the state
 and clear its undo history; dirty sessions are not replaced.
 
+Conflict edits remain in the document session and checkpoint the source and
+selection. The history edge shows the latest canonical source as a read-only
+diff. Save merge submits the current draft against the latest canonical
+revision, source hash, and disk hash. If the canonical note changes during the
+request, the app keeps the local draft and opens a new conflict. An accepted
+merge that is still being materialized remains pending with its checkpoint
+until the canonical note confirms it. If you edit during a merge request, an
+accepted earlier draft does not replace your newer source or selection.
+
 Source mode shows Markdown source in the same editor. Live mode renders Markdown
 decorations without changing source. Frontmatter stays folded and cannot be
 created or edited through the editor in either mode. The UI does not display

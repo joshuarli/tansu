@@ -1270,6 +1270,56 @@ describe("v2 desktop shell", () => {
     expect((await cachedBody(restored))?.content).toBe("# Restored\n");
   });
 
+  it("previews and merges a revision-restore conflict from a clean note", async () => {
+    const note = noteMeta("note-1", "one.md", "One");
+    const canonical = noteMeta(note.noteId, note.path, note.title, [], 2, HASH_B);
+    const revision = { noteId: note.noteId, revision: 4, kind: "save" as const, source: "user" as const, sourceHash: HASH_B, createdAtMs: 5 };
+    const serverDraft = conflictDraft(note.noteId);
+    const client = configureVault([note], workspaceSeed([
+      { noteId: note.noteId, title: note.title, path: note.path, cursorOffset: null, sourceMode: false },
+    ], note.noteId));
+    client.listRevisions.mockResolvedValue([revision]);
+    client.openRevision.mockResolvedValue({ revision, content: "# Selected snapshot\n" });
+    client.restoreRevision.mockImplementationOnce(async (_id, _revision, request) => ({
+      mutationId: request.mutationId,
+      outcome: { state: "conflict", current: documentFor(canonical, "# Canonical\n"), draft: serverDraft },
+    }));
+    client.openConflictDraft.mockResolvedValue({ draft: serverDraft, content: "# Server stored restore\n" });
+    client.saveNote.mockImplementationOnce(async (_id, request) => accepted(
+      request.mutationId,
+      noteMeta(note.noteId, note.path, note.title, [], 3, request.sourceHash),
+    ));
+    const { app, root } = mountApp();
+    await app.boot();
+    const editor = editorMock.instances[0]!;
+    await runCommand(root, "revisions");
+    root.querySelector<HTMLButtonElement>(".revision-row")!.click();
+    await flushAsync();
+    root.querySelector<HTMLButtonElement>('[title="Restore selected revision"]')!.click();
+    await flushAsync();
+
+    expect(root.querySelector(".tab.active .tab-conflict")).not.toBeNull();
+    expect(editor.getSnapshot()?.source).toBe("# One\n");
+    root.querySelector<HTMLButtonElement>('[title="View conflict draft"]')!.click();
+    await flushAsync();
+    expect(client.openConflictDraft).toHaveBeenCalledWith(note.noteId, serverDraft.draftId);
+    expect(root.querySelector(".conflict-draft-recovery pre")?.textContent).toBe("# Server stored restore\n");
+    expect(editor.getSnapshot()?.source).toBe("# One\n");
+
+    editor.simulateEdit("# Merged from clean source\n", { anchor: 3, head: 8 });
+    await flushEditorCapture();
+    root.querySelector<HTMLButtonElement>('[title="Save merge against the latest canonical revision"]')!.click();
+    await until(() => client.saveNote.mock.calls.length === 1);
+
+    expect(client.saveNote.mock.calls[0]?.[1]).toMatchObject({
+      content: "# Merged from clean source\n",
+      precondition: { baseRevision: 2, baseSourceHash: HASH_B, baseDiskHash: canonical.diskHash },
+    });
+    await flushAsync();
+    expect(editor.getSnapshot()?.source).toBe("# Merged from clean source\n");
+    expect(root.querySelector(".tab-conflict")).toBeNull();
+  });
+
   it("drops a revision restore that resolves after its tab was closed", async () => {
     const first = noteMeta("first", "first.md", "First");
     const second = noteMeta("second", "second.md", "Second");
@@ -1443,6 +1493,168 @@ describe("v2 desktop shell", () => {
     expect(client.restoreRevision).not.toHaveBeenCalled();
   });
 
+  it("keeps the newest same-note revision preview and preserves the dirty editor while scrubbing", async () => {
+    useFakeTimers();
+    const note = noteMeta("note-1", "one.md", "One");
+    const older = { noteId: note.noteId, revision: 4, kind: "save" as const, source: "user" as const, sourceHash: HASH_A, createdAtMs: 4 };
+    const newer = { noteId: note.noteId, revision: 5, kind: "save" as const, source: "user" as const, sourceHash: HASH_B, createdAtMs: 5 };
+    const client = configureVault([note], workspaceSeed([
+      { noteId: note.noteId, title: note.title, path: note.path, cursorOffset: null, sourceMode: false },
+    ], note.noteId));
+    client.listRevisions.mockResolvedValue([newer, older]);
+    const olderPreview = deferred<V2RevisionDocument>();
+    const newerPreview = deferred<V2RevisionDocument>();
+    client.openRevision.mockReturnValueOnce(olderPreview.promise).mockReturnValueOnce(newerPreview.promise);
+    const { app, root } = mountApp();
+    await app.boot();
+    const editor = editorMock.instances[0]!;
+    editor.simulateEdit("# Working copy\n", { anchor: 3, head: 8 });
+    await flushEditorCapture();
+    const beforeScrub = editor.getSnapshot();
+
+    await runCommand(root, "revisions");
+    root.querySelectorAll<HTMLButtonElement>(".revision-row")[0]!.click();
+    await until(() => client.openRevision.mock.calls.length === 1);
+    root.querySelectorAll<HTMLButtonElement>(".revision-row")[1]!.click();
+    await until(() => client.openRevision.mock.calls.length === 2);
+    newerPreview.resolve({ revision: newer, content: "# Newer snapshot\n" });
+    await flushAsync();
+    olderPreview.resolve({ revision: older, content: "# Older snapshot\n" });
+    await flushAsync();
+
+    expect(root.querySelector(".diff-preview")?.textContent).toContain("Newer snapshot");
+    expect(root.querySelector(".diff-preview")?.textContent).not.toContain("Older snapshot");
+    expect(root.querySelectorAll<HTMLButtonElement>(".revision-row")[1]?.classList.contains("active")).toBeTruthy();
+    expect(root.querySelector<HTMLInputElement>(".revision-timeline-range")?.value).toBe("1");
+    expect(editor.getSnapshot()).toMatchObject({
+      source: beforeScrub?.source,
+      selection: beforeScrub?.selection,
+    });
+    expect(client.saveNote).not.toHaveBeenCalled();
+  });
+
+  it("ignores a stale failed revision preview after a newer selection succeeds", async () => {
+    const note = noteMeta("note-1", "one.md", "One");
+    const older = { noteId: note.noteId, revision: 4, kind: "save" as const, source: "user" as const, sourceHash: HASH_A, createdAtMs: 4 };
+    const newer = { noteId: note.noteId, revision: 5, kind: "save" as const, source: "user" as const, sourceHash: HASH_B, createdAtMs: 5 };
+    const client = configureVault([note], workspaceSeed([
+      { noteId: note.noteId, title: note.title, path: note.path, cursorOffset: null, sourceMode: false },
+    ], note.noteId));
+    client.listRevisions.mockResolvedValue([newer, older]);
+    const olderPreview = deferred<V2RevisionDocument>();
+    const newerPreview = deferred<V2RevisionDocument>();
+    client.openRevision.mockReturnValueOnce(olderPreview.promise).mockReturnValueOnce(newerPreview.promise);
+    const { app, root } = mountApp();
+    await app.boot();
+    await runCommand(root, "revisions");
+    root.querySelectorAll<HTMLButtonElement>(".revision-row")[0]!.click();
+    await until(() => client.openRevision.mock.calls.length === 1);
+    root.querySelectorAll<HTMLButtonElement>(".revision-row")[1]!.click();
+    await until(() => client.openRevision.mock.calls.length === 2);
+    newerPreview.resolve({ revision: newer, content: "# Newer preview\n" });
+    await flushAsync();
+    olderPreview.reject(new Error("stale preview failed"));
+    await flushAsync();
+
+    expect(root.querySelector(".diff-preview")?.textContent).toContain("Newer preview");
+    expect(root.querySelector(".diff-preview")?.textContent).not.toContain("Older preview");
+    expect(root.querySelector(".toast")).toBeNull();
+  });
+
+  it("ignores a stale revision-list failure after a newer list succeeds", async () => {
+    const note = noteMeta("note-1", "one.md", "One");
+    const revision = { noteId: note.noteId, revision: 5, kind: "save" as const, source: "user" as const, sourceHash: HASH_B, createdAtMs: 5 };
+    const client = configureVault([note], workspaceSeed([
+      { noteId: note.noteId, title: note.title, path: note.path, cursorOffset: null, sourceMode: false },
+    ], note.noteId));
+    const staleList = deferred<V2RevisionMeta[]>();
+    client.listRevisions.mockReturnValueOnce(staleList.promise).mockResolvedValueOnce([revision]);
+    const { app, root } = mountApp();
+    await app.boot();
+    await runCommand(root, "revisions");
+    await until(() => client.listRevisions.mock.calls.length === 1);
+    await runCommand(root, "revisions");
+    await until(() => client.listRevisions.mock.calls.length === 2 && root.querySelector(".revision-row") !== null);
+    staleList.reject(new Error("stale revision list failed"));
+    await flushAsync();
+
+    expect(root.querySelectorAll(".revision-row")).toHaveLength(1);
+    expect(root.querySelector(".toast")).toBeNull();
+  });
+
+  it("reports a current revision preview failure", async () => {
+    const note = noteMeta("note-1", "one.md", "One");
+    const revision = { noteId: note.noteId, revision: 5, kind: "save" as const, source: "user" as const, sourceHash: HASH_B, createdAtMs: 5 };
+    const client = configureVault([note], workspaceSeed([
+      { noteId: note.noteId, title: note.title, path: note.path, cursorOffset: null, sourceMode: false },
+    ], note.noteId));
+    client.listRevisions.mockResolvedValue([revision]);
+    client.openRevision.mockRejectedValueOnce(new Error("preview failed"));
+    const { app, root } = mountApp();
+    await app.boot();
+    await runCommand(root, "revisions");
+    root.querySelector<HTMLButtonElement>(".revision-row")!.click();
+    await flushAsync();
+
+    expect(root.querySelector(".toast")?.textContent).toContain("Revision failed");
+  });
+
+  it("reports a current revision-list failure", async () => {
+    const note = noteMeta("note-1", "one.md", "One");
+    const client = configureVault([note], workspaceSeed([
+      { noteId: note.noteId, title: note.title, path: note.path, cursorOffset: null, sourceMode: false },
+    ], note.noteId));
+    client.listRevisions.mockRejectedValueOnce(new Error("revision list failed"));
+    const { app, root } = mountApp();
+    await app.boot();
+    await runCommand(root, "revisions");
+    await flushAsync();
+
+    expect(root.querySelector(".toast")?.textContent).toContain("Revisions failed");
+  });
+
+  it("branches from a snapshot with its exact source while keeping the dirty source session", async () => {
+    useFakeTimers();
+    const note = noteMeta("note-1", "one.md", "One");
+    const branch = noteMeta("branched", "one-branch.md", "One branch", [], 1, HASH_B);
+    const snapshot = { noteId: note.noteId, revision: 4, kind: "save" as const, source: "user" as const, sourceHash: HASH_B, createdAtMs: 4 };
+    const snapshotContent = "# From snapshot\n";
+    const client = configureVault([note], workspaceSeed([
+      { noteId: note.noteId, title: note.title, path: note.path, cursorOffset: null, sourceMode: false },
+    ], note.noteId));
+    client.listRevisions.mockResolvedValue([snapshot]);
+    client.openRevision.mockResolvedValue({ revision: snapshot, content: snapshotContent });
+    client.createNote.mockImplementation(async (request) => accepted(request.mutationId, branch));
+    client.openNote.mockImplementation(async (id) => id === branch.noteId
+      ? documentFor(branch, snapshotContent)
+      : documentFor(note, "# One\n"));
+    const { app, root } = mountApp();
+    await app.boot();
+    const editor = editorMock.instances[0]!;
+    const originalSession = editor.attachedSession!;
+    editor.simulateEdit("# Dirty source\n", { anchor: 3, head: 8 });
+    await flushEditorCapture();
+    const original = editor.getSnapshot();
+
+    await runCommand(root, "revisions");
+    root.querySelector<HTMLButtonElement>(".revision-row")!.click();
+    await flushAsync();
+    root.querySelector<HTMLButtonElement>('[title="Branch from selected revision"]')!.click();
+    await until(() => client.createNote.mock.calls.length === 1 && editor.getSnapshot()?.noteId === "saved:branched");
+
+    expect(client.createNote.mock.calls[0]?.[0]).toMatchObject({
+      path: "one-branch.md",
+      content: snapshotContent,
+      sourceHash: await canonicalSourceHash(snapshotContent),
+    });
+    expect(editor.getSessionSnapshot(originalSession)).toMatchObject({
+      source: original?.source,
+      selection: original?.selection,
+    });
+    expect(root.querySelector<HTMLButtonElement>('.tab[title="One"]')?.classList.contains("tab-dirty")).toBeTruthy();
+    expect(client.saveNote).not.toHaveBeenCalled();
+  });
+
   it("saves a dirty note to the server when its tab is closed", async () => {
     useFakeTimers();
     const note = noteMeta("note-1", "one.md", "One");
@@ -1493,6 +1705,232 @@ describe("v2 desktop shell", () => {
       precondition: { baseRevision: 2, baseSourceHash: HASH_B, baseDiskHash: DISK_HASH },
     }));
     expect(root.textContent).not.toContain("Save conflict");
+  });
+
+  it("saves a conflict merge against the latest canonical while retaining newer in-flight edits", async () => {
+    useFakeTimers();
+    const note = noteMeta("note-1", "one.md", "One");
+    const conflicted = noteMeta(note.noteId, note.path, note.title, [], 2, HASH_B);
+    const newestHash = `blake3-v3:${"d".repeat(64)}`;
+    const newest = noteMeta(note.noteId, note.path, note.title, [], 3, newestHash);
+    const latestHash = `blake3-v3:${"e".repeat(64)}`;
+    const latest = noteMeta(note.noteId, note.path, note.title, [], 4, latestHash);
+    const firstDraft = conflictDraft(note.noteId);
+    const nextDraft = { ...firstDraft, draftId: 10, baseRevision: 3, baseSourceHash: newestHash, sourceHash: latestHash, createdAtMs: 4 };
+    const client = configureVault([note], workspaceSeed([
+      { noteId: note.noteId, title: note.title, path: note.path, cursorOffset: null, sourceMode: false },
+    ], note.noteId));
+    client.saveNote.mockImplementationOnce(async (_id, request) => ({
+      mutationId: request.mutationId,
+      outcome: { state: "conflict", current: documentFor(conflicted, "# Canonical two\n"), draft: firstDraft },
+    }));
+    client.openConflictDraft.mockResolvedValueOnce({ draft: firstDraft, content: "# Original rejected draft\n" });
+    const { app, root } = mountApp();
+    await app.boot();
+    const editor = editorMock.instances[0]!;
+    editor.simulateEdit("# Local draft\n", { anchor: 3, head: 8 });
+    await flushEditorCapture();
+    await runCommand(root, "save");
+    await until(() => root.textContent?.includes("Save conflict") === true);
+    root.querySelector<HTMLButtonElement>('[title="View conflict draft"]')!.click();
+    await flushAsync();
+    expect(root.querySelector(".conflict-draft-recovery pre")?.textContent).toBe("# Original rejected draft\n");
+
+    editor.simulateEdit("# Merge draft\n", { anchor: 3, head: 8 });
+    await flushEditorCapture();
+    client.openNote.mockResolvedValue(documentFor(newest, "# New canonical\n"));
+    client.eventHandlers?.onEvent({
+      eventVersion: 2,
+      resyncRequired: false,
+      update: { kind: "noteChanged", note: newest },
+    });
+    await until(() => client.openNote.mock.calls.length === 2 &&
+      root.querySelector(".merge-canonical-pane")?.textContent?.includes("New canonical") === true);
+
+    const mergeResponse = deferred<V2MutationResponse>();
+    client.saveNote.mockReturnValueOnce(mergeResponse.promise);
+    root.querySelector<HTMLButtonElement>('[title="Save merge against the latest canonical revision"]')!.click();
+    await until(() => client.saveNote.mock.calls.length === 2);
+    const mergeRequest = client.saveNote.mock.calls[1]![1];
+    expect(mergeRequest).toMatchObject({
+      content: "# Merge draft\n",
+      precondition: { baseRevision: 3, baseSourceHash: newestHash, baseDiskHash: newest.diskHash },
+    });
+
+    editor.simulateEdit("# Newer local edit\n", { anchor: 4, head: 9 });
+    await flushEditorCapture();
+    mergeResponse.resolve({
+      mutationId: mergeRequest.mutationId,
+      outcome: { state: "conflict", current: documentFor(latest, "# Latest canonical\n"), draft: nextDraft },
+    });
+    await flushAsync();
+    await vi.advanceTimersByTimeAsync(900);
+    await flushAsync();
+
+    expect(editor.getSnapshot()).toMatchObject({ source: "# Newer local edit\n", selection: { anchor: 4, head: 9 } });
+    expect(client.saveNote).toHaveBeenCalledTimes(2);
+    expect(root.querySelector(".tab-conflict")).not.toBeNull();
+    expect(root.querySelector(".history-edge-panel")).toBeNull();
+
+    client.openConflictDraft.mockResolvedValueOnce({ draft: nextDraft, content: "# Rejected merge\n" });
+    root.querySelector<HTMLButtonElement>('[title="View conflict draft"]')!.click();
+    await flushAsync();
+    expect(client.openConflictDraft).toHaveBeenLastCalledWith(note.noteId, nextDraft.draftId);
+    expect(root.querySelector(".merge-canonical-pane")?.textContent).toContain("Latest canonical");
+    expect(root.querySelector(".merge-canonical-pane .diff-added")?.textContent).toContain("Newer local edit");
+    expect(editor.getSnapshot()?.source).toBe("# Newer local edit\n");
+  });
+
+  it("saves edits made during an accepted merge against the newly accepted canonical", async () => {
+    useFakeTimers();
+    const note = noteMeta("note-1", "one.md", "One");
+    const remote = noteMeta(note.noteId, note.path, note.title, [], 2, HASH_B);
+    const conflict = conflictDraft(note.noteId);
+    const client = configureVault([note], workspaceSeed([
+      { noteId: note.noteId, title: note.title, path: note.path, cursorOffset: null, sourceMode: false },
+    ], note.noteId));
+    client.saveNote.mockImplementationOnce(async (_id, request) => ({
+      mutationId: request.mutationId,
+      outcome: { state: "conflict", current: documentFor(remote, "# Canonical\n"), draft: conflict },
+    }));
+    client.openConflictDraft.mockResolvedValue({ draft: conflict, content: "# Original rejected draft\n" });
+    const { app, root } = mountApp();
+    await app.boot();
+    const editor = editorMock.instances[0]!;
+    editor.simulateEdit("# Local draft\n", { anchor: 3, head: 8 });
+    await flushEditorCapture();
+    await runCommand(root, "save");
+    await until(() => root.textContent?.includes("Save conflict") === true);
+    root.querySelector<HTMLButtonElement>('[title="View conflict draft"]')!.click();
+    await flushAsync();
+    editor.simulateEdit("# Merge draft\n", { anchor: 3, head: 8 });
+    await flushEditorCapture();
+
+    const mergeResponse = deferred<V2MutationResponse>();
+    const followupResponse = deferred<V2MutationResponse>();
+    client.saveNote.mockReturnValueOnce(mergeResponse.promise);
+    client.saveNote.mockReturnValueOnce(followupResponse.promise);
+    root.querySelector<HTMLButtonElement>('[title="Save merge against the latest canonical revision"]')!.click();
+    await until(() => client.saveNote.mock.calls.length === 2);
+    const request = client.saveNote.mock.calls[1]![1];
+    const acceptedMeta = noteMeta(note.noteId, note.path, note.title, [], 3, request.sourceHash);
+
+    editor.simulateEdit("# Newer local edit\n", { anchor: 4, head: 9 });
+    await flushEditorCapture();
+    mergeResponse.resolve(accepted(request.mutationId, acceptedMeta));
+    await until(() => client.saveNote.mock.calls.length === 3);
+    const followup = client.saveNote.mock.calls[2]![1];
+    expect(followup).toMatchObject({
+      content: "# Newer local edit\n",
+      precondition: { baseRevision: 3, baseSourceHash: acceptedMeta.sourceHash },
+    });
+
+    expect(editor.getSnapshot()).toMatchObject({ source: "# Newer local edit\n", selection: { anchor: 4, head: 9 } });
+    expect(root.querySelector(".history-edge-panel")).not.toBeNull();
+    expect(root.querySelector(".merge-editor-hint")?.textContent).toContain("Saving the merge");
+    followupResponse.resolve(accepted(followup.mutationId, noteMeta(note.noteId, note.path, note.title, [], 4, followup.sourceHash)));
+    await flushAsync();
+
+    expect(editor.getSnapshot()).toMatchObject({ source: "# Newer local edit\n", selection: { anchor: 4, head: 9 } });
+    expect(root.querySelector(".tab-conflict")).toBeNull();
+    expect(root.querySelector(".history-edge-panel")).toBeNull();
+    expect(await savedCheckpoint(note.noteId)).toBeNull();
+    expect(client.saveNote).toHaveBeenCalledTimes(3);
+  });
+
+  it("keeps a merge visible and checkpointed while accepted materialization is pending", async () => {
+    useFakeTimers();
+    const note = noteMeta("note-1", "one.md", "One");
+    const remote = noteMeta(note.noteId, note.path, note.title, [], 2, HASH_B);
+    const conflict = conflictDraft(note.noteId);
+    const client = configureVault([note], workspaceSeed([
+      { noteId: note.noteId, title: note.title, path: note.path, cursorOffset: null, sourceMode: false },
+    ], note.noteId));
+    client.saveNote.mockImplementationOnce(async (_id, request) => ({
+      mutationId: request.mutationId,
+      outcome: { state: "conflict", current: documentFor(remote, "# Canonical\n"), draft: conflict },
+    }));
+    client.openConflictDraft.mockResolvedValue({ draft: conflict, content: "# Rejected draft\n" });
+    const { app, root } = mountApp();
+    await app.boot();
+    const editor = editorMock.instances[0]!;
+    editor.simulateEdit("# Local draft\n", { anchor: 3, head: 8 });
+    await flushEditorCapture();
+    await runCommand(root, "save");
+    await until(() => root.textContent?.includes("Save conflict") === true);
+    root.querySelector<HTMLButtonElement>('[title="View conflict draft"]')!.click();
+    await flushAsync();
+    expect(root.querySelector(".conflict-draft-recovery pre")?.textContent).toBe("# Rejected draft\n");
+
+    editor.simulateEdit("# Merge draft\n", { anchor: 3, head: 8 });
+    await flushEditorCapture();
+    const pending = deferred<V2MutationResponse>();
+    client.saveNote.mockReturnValueOnce(pending.promise);
+    root.querySelector<HTMLButtonElement>('[title="Save merge against the latest canonical revision"]')!.click();
+    await until(() => client.saveNote.mock.calls.length === 2);
+    const request = client.saveNote.mock.calls[1]![1];
+    pending.resolve({
+      mutationId: request.mutationId,
+      outcome: { state: "pendingMaterialization", operationId: "merge-operation-1" },
+    });
+    await flushAsync();
+
+    expect(root.querySelector('[data-key="history-edge:conflict"]')).not.toBeNull();
+    expect(root.querySelector(".merge-editor-hint")?.textContent)
+      .toBe("The merge is accepted and is waiting for the note to be materialized.");
+    expect(root.querySelector<HTMLButtonElement>('[title="Save merge against the latest canonical revision"]')?.disabled).toBe(true);
+    expect(editor.getSnapshot()).toMatchObject({ source: "# Merge draft\n", selection: { anchor: 3, head: 8 } });
+    expect(await savedCheckpoint(note.noteId)).toMatchObject({ source: "# Merge draft\n", baseRevision: 2 });
+
+    await vi.advanceTimersByTimeAsync(900);
+    await flushAsync();
+    expect(client.saveNote).toHaveBeenCalledTimes(2);
+    expect(root.querySelector(".merge-editor-hint")?.textContent)
+      .toBe("The merge is accepted and is waiting for the note to be materialized.");
+    await app.dispose();
+  });
+
+  it("applies an accepted merge to its captured session before a pending close completes", async () => {
+    useFakeTimers();
+    const note = noteMeta("note-1", "one.md", "One");
+    const remote = noteMeta(note.noteId, note.path, note.title, [], 2, HASH_B);
+    const conflict = conflictDraft(note.noteId);
+    const client = configureVault([note], workspaceSeed([
+      { noteId: note.noteId, title: note.title, path: note.path, cursorOffset: null, sourceMode: false },
+    ], note.noteId));
+    client.saveNote.mockImplementationOnce(async (_id, request) => ({
+      mutationId: request.mutationId,
+      outcome: { state: "conflict", current: documentFor(remote, "# Canonical\n"), draft: conflict },
+    }));
+    client.openConflictDraft.mockResolvedValue({ draft: conflict, content: "# Original rejected draft\n" });
+    const { app, root } = mountApp();
+    await app.boot();
+    editorMock.instances[0]!.simulateEdit("# Local draft\n");
+    await flushEditorCapture();
+    await runCommand(root, "save");
+    await until(() => root.textContent?.includes("Save conflict") === true);
+    root.querySelector<HTMLButtonElement>('[title="View conflict draft"]')!.click();
+    await flushAsync();
+    editorMock.instances[0]!.simulateEdit("# Merge draft\n");
+    await flushEditorCapture();
+
+    const mergeResponse = deferred<V2MutationResponse>();
+    client.saveNote.mockReturnValueOnce(mergeResponse.promise);
+    root.querySelector<HTMLButtonElement>('[title="Save merge against the latest canonical revision"]')!.click();
+    await until(() => client.saveNote.mock.calls.length === 2);
+    const request = client.saveNote.mock.calls[1]![1];
+    const acceptedMeta = noteMeta(note.noteId, note.path, note.title, [], 3, request.sourceHash);
+    const openNoteCallsBeforeClose = client.openNote.mock.calls.length;
+    root.querySelector<HTMLButtonElement>(".tab.active .tab-close")!.click();
+    await until(() => root.querySelector(".tab") === null);
+
+    mergeResponse.resolve(accepted(request.mutationId, acceptedMeta));
+    await until(async () => await savedCheckpoint(note.noteId) === null);
+
+    expect(root.querySelector(".empty-state")?.textContent).toContain("No note selected");
+    expect(client.openNote).toHaveBeenCalledTimes(openNoteCallsBeforeClose);
+    expect(client.saveNote).toHaveBeenCalledTimes(2);
+    expect(await savedCheckpoint(note.noteId)).toBeNull();
   });
 
   it("clears the exact checkpoint and replaces the editor after restoring a conflict draft", async () => {
@@ -1794,7 +2232,7 @@ describe("v2 desktop shell", () => {
     await flushAsync();
 
     expect(root.querySelector(".tab.active")?.getAttribute("title")).toBe("Second");
-    expect(root.querySelector('[data-key="modal:conflict"]')).toBeNull();
+    expect(root.querySelector('[data-key="history-edge:conflict"]')).toBeNull();
   });
 
   it("routes note image loads through the active vault and revokes object URLs on dispose", async () => {

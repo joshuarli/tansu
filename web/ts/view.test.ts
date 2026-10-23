@@ -282,9 +282,9 @@ describe("view rendering", () => {
     state.revisionsOpen = true;
     state.revisionNoteId = toNoteId(noteData.noteId);
     state.revisionList = [revision];
+    state.revisionSelectedEventId = toRevisionEventId(revision.revision);
     state.revisionDocument = { revision, content: "# Old\n" };
     state.settingsOpen = true;
-    state.conflictDraft = conflictDocument("n1");
     state.noteDialog = { kind: "delete", noteId: toNoteId("n1") };
     state.notice = "Saved";
     const actions = actionSpies();
@@ -297,15 +297,17 @@ describe("view rendering", () => {
     root.querySelectorAll<HTMLInputElement>(".command-input")[1]!.dispatchEvent(new Event("input"));
     root.querySelector<HTMLButtonElement>(".search-result-row")!.click();
     root.querySelector<HTMLButtonElement>(".revision-row")!.click();
+    root.querySelector<HTMLInputElement>(".revision-timeline-range")!.dispatchEvent(new Event("input", { bubbles: true }));
+    root.querySelector<HTMLButtonElement>('[title="Branch from selected revision"]')!.click();
     root.querySelector<HTMLButtonElement>('[title="Restore selected revision"]')!.click();
     root.querySelector<HTMLButtonElement>('[title="Save settings"]')!.click();
-    root.querySelector<HTMLButtonElement>('[title="Restore conflict draft"]')!.click();
     root.querySelector<HTMLButtonElement>(".note-dialog-panel .danger-button")!.click();
     root.querySelector<HTMLButtonElement>(".overlay-backdrop")!.click();
 
     expect(root.textContent).toContain("Revision preview");
     expect(root.textContent).toContain("Settings");
-    expect(root.textContent).toContain("Conflict Draft");
+    expect(root.querySelector(".diff-added")?.textContent).toContain("# Old");
+    expect(root.querySelector(".diff-removed")?.textContent).toContain("# One");
     expect(root.textContent).toContain("Saved");
     expect(actions.commandItems).toHaveBeenCalledWith();
     expectDispatched(actions, { type: "search.overlayInput", query: "beta" });
@@ -315,6 +317,7 @@ describe("view rendering", () => {
       hit: expect.objectContaining({ excerpt: "hit alpha", identity: expect.objectContaining({ noteId: "n1" }) }),
     }));
     expectDispatched(actions, { type: "revisions.select", eventId: toRevisionEventId(7) });
+    expectDispatched(actions, { type: "revisions.branch" });
     expectDispatched(actions, { type: "revisions.restore" });
     expectDispatched(actions, {
       type: "settings.submit",
@@ -325,8 +328,74 @@ describe("view rendering", () => {
         imageWebpQuality: 0.8,
       },
     });
-    expectDispatched(actions, { type: "conflict.restore" });
     expectDispatched(actions, { type: "dialog.submit" });
+
+    state.revisionsOpen = false;
+    state.conflictDraft = conflictDocument("n1");
+    tab.conflict = true;
+    const conflictRoot = render(state, actions);
+    expect(conflictRoot.querySelector('[data-key="history-edge:conflict"]')).not.toBeNull();
+    expect(conflictRoot.textContent).toContain("Conflict merge");
+    expect(conflictRoot.querySelector<HTMLDetailsElement>(".conflict-draft-recovery")?.open).toBe(true);
+    expect(conflictRoot.querySelector(".conflict-draft-recovery pre")?.textContent).toBe("# Draft\n");
+    conflictRoot.querySelector<HTMLButtonElement>('[title="Restore conflict draft"]')!.click();
+    conflictRoot.querySelector<HTMLButtonElement>('[title="Save merge against the latest canonical revision"]')!.click();
+    expectDispatched(actions, { type: "conflict.restore" });
+    expectDispatched(actions, { type: "conflict.merge" });
+  });
+
+  it("scrubs revisions in chronological order and aligns inserted and removed lines", () => {
+    const state = baseState();
+    const noteData = note("n1", "one.md", "One");
+    const older = revisionMeta(3);
+    const newer = revisionMeta(7);
+    const tab = tabFromDocument({ meta: noteData, content: "before\nkeep\nafter\n" });
+    state.tabs = [tab];
+    state.activeTab = tabIdentity(tab);
+    state.revisionsOpen = true;
+    state.revisionNoteId = toNoteId(noteData.noteId);
+    state.revisionList = [newer, older];
+    state.revisionSelectedEventId = toRevisionEventId(newer.revision);
+    state.revisionDocument = { revision: newer, content: "before\ninserted\nafter\n" };
+    const actions = actionSpies();
+
+    const root = render(state, actions);
+    const range = root.querySelector<HTMLInputElement>(".revision-timeline-range")!;
+    expect(range.getAttribute("aria-label")).toBe("Revision timeline");
+    expect(range.max).toBe("1");
+    expect(root.querySelectorAll(".revision-row")[0]?.textContent).toContain("revision 3");
+    expect(root.querySelector(".diff-added")?.textContent).toContain("inserted");
+    expect(root.querySelector(".diff-removed")?.textContent).toContain("keep");
+
+    range.value = "0";
+    range.dispatchEvent(new Event("input", { bubbles: true }));
+    root.querySelector<HTMLButtonElement>('[title="Branch from selected revision"]')!.click();
+
+    expectDispatched(actions, { type: "revisions.select", eventId: toRevisionEventId(3) });
+    expectDispatched(actions, { type: "revisions.branch" });
+  });
+
+  it("bounds large revision diffs while showing additions and removals", () => {
+    const state = baseState();
+    const noteData = note("n1", "one.md", "One");
+    const before = Array.from({ length: 100 }, (_, index) => `before ${index}`).join("\n");
+    const after = Array.from({ length: 100 }, (_, index) => `after ${index}`).join("\n");
+    const revision = revisionMeta(7);
+    const tab = tabFromDocument({ meta: noteData, content: before });
+    state.tabs = [tab];
+    state.activeTab = tabIdentity(tab);
+    state.revisionsOpen = true;
+    state.revisionNoteId = toNoteId(noteData.noteId);
+    state.revisionList = [revision];
+    state.revisionSelectedEventId = toRevisionEventId(revision.revision);
+    state.revisionDocument = { revision, content: after };
+
+    const root = render(state);
+    const diffLines = [...root.querySelectorAll(".diff-preview .diff-line")];
+    expect(diffLines).toHaveLength(159);
+    expect(diffLines.some((line) => line.classList.contains("diff-removed"))).toBe(true);
+    expect(diffLines.some((line) => line.classList.contains("diff-added"))).toBe(true);
+    expect(diffLines.some((line) => line.textContent?.includes("Additional changes omitted"))).toBe(true);
   });
 
   it("bounds the settings inputs with the shared limits", () => {

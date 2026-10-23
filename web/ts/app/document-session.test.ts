@@ -114,6 +114,15 @@ describe("document sessions", () => {
     expect(services.clearCheckpoint).toHaveBeenCalledWith(identity, 2, secondRequest.mutationId);
   });
 
+  it("only starts an explicit merge from a conflict session", async () => {
+    const services = sessionServices();
+    const session = new DocumentSession(identity, 1, workspace, services);
+    session.loaded(document(1, "# One\n", 1));
+
+    await expect(session.saveConflictMerge()).rejects.toBeInstanceOf(InvalidSessionTransitionError);
+    expect(services.save).not.toHaveBeenCalled();
+  });
+
   it("retries an uncertain transient save with the same mutation identity", async () => {
     const requests: string[] = [];
     const waits: number[] = [];
@@ -182,6 +191,175 @@ describe("document sessions", () => {
       expect(session.state.conflictDraft).toBe(draft);
       expect(session.state.draft.source).toBe("# Draft\n");
     }
+  });
+
+  it("retains a mutation conflict draft from a clean session without replacing its source", () => {
+    const canonical = document(2, "# Canonical\n", 2);
+    const conflictDraft = {
+      draftId: 9,
+      noteId: identity.noteId,
+      baseRevision: 1,
+      baseSourceHash: hash(6),
+      sourceHash: hash(8),
+      createdAtMs: 10,
+    };
+    const services = sessionServices();
+    const session = new DocumentSession(identity, 1, workspace, services);
+    session.loaded(document(1, "# One\n", 1), { anchor: 2, head: 5 });
+
+    expect(session.reconcileMutationConflict({ state: "conflict", current: canonical, draft: conflictDraft }))
+      .toBe("conflict");
+
+    expect(session.state).toMatchObject({
+      status: "conflict",
+      base: { revision: 1 },
+      canonical,
+      conflictDraft,
+      draft: {
+        localRevision: 1,
+        source: "# One\n",
+        selection: { anchor: 2, head: 5 },
+        mutationId: expect.any(String),
+      },
+    });
+    expect(services.checkpointDraft).toHaveBeenCalledWith(
+      expect.objectContaining({
+        baseRevision: 1,
+        localRevision: 1,
+        source: "# One\n",
+        selection: { anchor: 2, head: 5 },
+      }),
+      "structural",
+      expect.any(Function),
+    );
+  });
+
+  it("edits and checkpoints conflicted merge input without saving against stale canonical", async () => {
+    const canonical = document(2, "# Canonical\n", 2);
+    const conflictDraft = {
+      draftId: 4,
+      noteId: identity.noteId,
+      baseRevision: 1,
+      baseSourceHash: hash(6),
+      sourceHash: hash(8),
+      createdAtMs: 10,
+    };
+    const services = sessionServices({
+      save: vi.fn(async () => {
+        throw new V2ApiError("Save conflict", 409, { code: "save_conflict", current: canonical, draft: conflictDraft });
+      }),
+    });
+    const session = new DocumentSession(identity, 1, workspace, services);
+    session.loaded(document(1, "# One\n", 1));
+    session.edit("# Draft\n", { anchor: 3, head: 3 });
+    await session.save();
+
+    session.edit("# Merged\n", { anchor: 4, head: 4 });
+    session.updateSelection({ anchor: 5, head: 5 });
+    await session.save();
+    const newerCanonical = document(3, "# New canonical\n", 3);
+    const newerConflictDraft = {
+      ...conflictDraft,
+      draftId: 5,
+      baseRevision: 2,
+      baseSourceHash: hash(12),
+      sourceHash: hash(9),
+      createdAtMs: 11,
+    };
+    expect(session.reconcileMutationConflict({ state: "conflict", current: newerCanonical, draft: newerConflictDraft }))
+      .toBe("conflict");
+
+    expect(session.state.status).toBe("conflict");
+    if (session.state.status === "conflict") {
+      expect(session.state.canonical).toBe(newerCanonical);
+      expect(session.state.conflictDraft).toBe(newerConflictDraft);
+      expect(session.state.base).toMatchObject({ revision: 1 });
+      expect(session.state.draft).toMatchObject({
+        localRevision: 2,
+        source: "# Merged\n",
+        selection: { anchor: 5, head: 5 },
+      });
+    }
+    expect(services.checkpointDraft).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        baseRevision: 1,
+        source: "# Merged\n",
+        selection: { anchor: 5, head: 5 },
+      }),
+      "typing",
+      expect.any(Function),
+    );
+    expect(services.save).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps a merge pending through materialization and saves edits made meanwhile", async () => {
+    const canonical = document(2, "# Canonical\n", 2);
+    const initialConflictDraft = {
+      draftId: 4,
+      noteId: identity.noteId,
+      baseRevision: 1,
+      baseSourceHash: hash(6),
+      sourceHash: hash(8),
+      createdAtMs: 10,
+    };
+    const mergePending = deferred<V2MutationResponse>();
+    const followupPending = deferred<V2MutationResponse>();
+    const services = sessionServices();
+    const save = vi.mocked(services.save);
+    save.mockImplementationOnce(async (_identity, request) => ({
+        mutationId: request.mutationId,
+        outcome: { state: "conflict" as const, current: canonical, draft: initialConflictDraft },
+      }));
+    save.mockImplementationOnce((_identity, _request) => mergePending.promise);
+    save.mockImplementationOnce((_identity, _request) => followupPending.promise);
+    const session = new DocumentSession(identity, 1, workspace, services);
+    session.loaded(document(1, "# One\n", 1));
+    session.edit("# Merge draft\n", { anchor: 3, head: 3 });
+    await session.save();
+
+    const merge = session.saveConflictMerge();
+    await until(() => save.mock.calls.length === 2);
+    const mergeRequest = at(save.mock.calls, 1)[1];
+    expect(mergeRequest.content).toBe("# Merge draft\n");
+    expect(mergeRequest.precondition).toMatchObject({
+      baseRevision: 2,
+      baseSourceHash: canonical.meta.sourceHash,
+      baseDiskHash: canonical.meta.diskHash,
+    });
+    expect(mergeRequest.mutationId).not.toBe(at(save.mock.calls, 0)[1].mutationId);
+
+    session.edit("# Edited while pending\n", { anchor: 4, head: 9 });
+    await session.saveConflictMerge();
+    expect(save).toHaveBeenCalledTimes(2);
+    mergePending.resolve({
+      mutationId: mergeRequest.mutationId,
+      outcome: { state: "pendingMaterialization", operationId: "operation-1" },
+    });
+    await merge;
+
+    expect(session.state).toMatchObject({
+      status: "saving",
+      phase: "pendingMaterialization",
+      inFlight: { operationId: "operation-1", source: "# Merge draft\n" },
+      draft: { source: "# Edited while pending\n", selection: { anchor: 4, head: 9 } },
+    });
+    await session.saveConflictMerge();
+    expect(save).toHaveBeenCalledTimes(2);
+
+    const materialized = metadata(3, "# Merge draft\n", 3);
+    const recovery = session.resolvePendingMaterialization(materialized);
+    await until(() => save.mock.calls.length === 3);
+    const followupRequest = at(save.mock.calls, 2)[1];
+    expect(followupRequest.content).toBe("# Edited while pending\n");
+    expect(followupRequest.precondition).toMatchObject({ baseRevision: 3, baseSourceHash: materialized.sourceHash });
+    followupPending.resolve(accepted(followupRequest.mutationId, metadata(4, followupRequest.content, 4)));
+    await recovery;
+
+    expect(session.state).toMatchObject({
+      status: "clean",
+      acceptedRevision: 4,
+      draft: { source: "# Edited while pending\n", selection: { anchor: 4, head: 9 } },
+    });
   });
 
   it("classifies unresolved save failures without retrying", async () => {
@@ -605,4 +783,12 @@ function at<T>(items: T[], index: number): T {
     throw new Error(`Missing item at index ${index}`);
   }
   return item;
+}
+
+function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((complete) => {
+    resolve = complete;
+  });
+  return { promise, resolve };
 }

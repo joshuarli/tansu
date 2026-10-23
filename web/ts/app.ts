@@ -34,13 +34,15 @@ import {
   tabIdentity,
   tabIsDirty,
   toNoteId,
+  toRevisionEventId,
   workspaceTabFromTab,
   type SavedTab,
+  type RevisionEventId,
   type State,
   type Tab,
 } from "./state.ts";
 import { disposeAppView, renderApp, renderAuthGate, renderLoading, renderNoVaultConfigured, syncNoteOutlineFade, updateAppView, updateStatusBar, type ViewActions } from "./view.ts";
-import type { V2BootstrapResponse, V2MutationResponse, V2NoteDocument, V2NoteMeta, V2SearchHit, V2SearchOverlay, V2ServerEvent } from "./types.generated.ts";
+import type { V2BootstrapResponse, V2MutationResponse, V2NoteDocument, V2NoteMeta, V2RevisionDocument, V2RevisionMeta, V2SearchHit, V2SearchOverlay, V2ServerEvent } from "./types.generated.ts";
 import type { DraftJournalRecord, WorkspaceState } from "./app/workspace-store.ts";
 import type { OutlineHeading } from "./editor/source-navigation.js";
 
@@ -122,6 +124,7 @@ export class TansuApp {
   private noticeTimer: number | undefined;
   private disposeTask: Promise<void> | null = null;
   private searchOverlayRequestSeq = 0;
+  private revisionRequestToken = 0;
   private commandSearchSeq = 0;
   private commandSearchTimer: number | undefined;
   private commandSearchAbort: AbortController | null = null;
@@ -995,6 +998,11 @@ export class TansuApp {
     tab.dirty = snapshot.dirty;
     tab.saving = snapshot.saving;
     tab.conflict = snapshot.conflict;
+    if (this.state.conflictDraft?.draft.noteId === tab.noteId &&
+      (value.status === "clean" || value.status === "conflict" &&
+        value.conflictDraft?.draftId !== this.state.conflictDraft.draft.draftId)) {
+      this.state.conflictDraft = null;
+    }
     if (snapshot.title !== undefined && !this.pendingRenames.has(tab.noteId)) tab.title = snapshot.title;
     if (snapshot.path !== undefined) tab.path = snapshot.path;
     if (value.status === "auth-locked") {
@@ -1683,42 +1691,99 @@ export class TansuApp {
   }
 
   private async commandRevisions(): Promise<void> {
+    this.captureActiveEditor();
     const tab = activeTab(this.state);
     const identity = this.identity;
     const client = this.vaultClient;
     if (tab?.kind !== "saved" || identity === null || client === null) return;
+    const requestToken = ++this.revisionRequestToken;
     this.state.revisionsOpen = true;
+    this.state.conflictDraft = null;
     this.state.revisionNoteId = tab.noteId;
     this.state.revisionList = null;
+    this.state.revisionSelectedEventId = null;
     this.state.revisionDocument = null;
-    const revisions = await client.listRevisions(tab.noteId);
-    if (!this.isCurrentVault(identity, client) || activeTab(this.state) !== tab || this.state.revisionNoteId !== tab.noteId) return;
+    this.render();
+    let revisions: V2RevisionMeta[];
+    try {
+      revisions = await client.listRevisions(tab.noteId);
+    } catch (error) {
+      if (!this.isCurrentRevisionRequest(requestToken, identity, client, tab)) return;
+      throw error;
+    }
+    if (!this.isCurrentRevisionRequest(requestToken, identity, client, tab)) return;
     this.state.revisionList = revisions;
     this.render();
   }
 
   private async selectRevision(revision: number): Promise<void> {
+    this.captureActiveEditor();
     const tab = activeTab(this.state);
     const identity = this.identity;
     const client = this.vaultClient;
     if (tab?.kind !== "saved" || identity === null || client === null || this.state.revisionNoteId !== tab.noteId ||
       !this.state.revisionList?.some((item) => item.noteId === tab.noteId && item.revision === revision)) return;
-    const document = await client.openRevision(tab.noteId, revision);
-    if (!this.isCurrentVault(identity, client) || activeTab(this.state) !== tab || this.state.revisionNoteId !== tab.noteId ||
+    const requestToken = ++this.revisionRequestToken;
+    const eventId = toRevisionEventId(revision);
+    this.state.revisionSelectedEventId = eventId;
+    this.state.revisionDocument = null;
+    this.render();
+    let document: V2RevisionDocument;
+    try {
+      document = await client.openRevision(tab.noteId, revision);
+    } catch (error) {
+      if (!this.isCurrentRevisionRequest(requestToken, identity, client, tab, eventId)) return;
+      this.state.revisionSelectedEventId = null;
+      this.render();
+      throw error;
+    }
+    if (!this.isCurrentRevisionRequest(requestToken, identity, client, tab, eventId) ||
       document.revision.noteId !== tab.noteId || document.revision.revision !== revision) return;
     this.state.revisionDocument = document;
     this.render();
   }
 
+  private isCurrentRevisionRequest(
+    requestToken: number,
+    identity: ServerIdentity,
+    client: VaultClient,
+    tab: SavedTab,
+    selectedEventId?: RevisionEventId,
+  ): boolean {
+    return requestToken === this.revisionRequestToken && this.isCurrentVault(identity, client) &&
+      activeTab(this.state) === tab && this.state.revisionsOpen && this.state.revisionNoteId === tab.noteId &&
+      (selectedEventId === undefined || this.state.revisionSelectedEventId === selectedEventId);
+  }
+
+  private async branchFromSelectedRevision(): Promise<void> {
+    this.captureActiveEditor();
+    const tab = activeTab(this.state);
+    const selected = this.state.revisionDocument;
+    if (tab?.kind !== "saved" || selected === null || selected.revision.noteId !== tab.noteId ||
+      this.state.revisionNoteId !== tab.noteId ||
+      this.state.revisionSelectedEventId !== toRevisionEventId(selected.revision.revision)) return;
+    const title = `${tab.title} branch`;
+    this.revisionRequestToken += 1;
+    this.state.revisionsOpen = false;
+    this.state.revisionNoteId = null;
+    this.state.revisionList = null;
+    this.state.revisionSelectedEventId = null;
+    this.state.revisionDocument = null;
+    this.render();
+    await this.createImportedNote(title, selected.content);
+  }
+
   private async restoreSelectedRevision(): Promise<void> {
+    this.captureActiveEditor();
     const tab = activeTab(this.state);
     const selected = this.state.revisionDocument;
     const session = tab?.kind === "saved" ? tab.session : null;
     const status = session?.state;
     const identity = this.identity;
     const client = this.vaultClient;
-    if (tab?.kind !== "saved" || session === null || selected === null || selected.revision.noteId !== tab.noteId ||
-      this.state.revisionNoteId !== tab.noteId || status === undefined || !("base" in status) ||
+    if (tab?.kind !== "saved" || selected === null || selected.revision.noteId !== tab.noteId ||
+      this.state.revisionNoteId !== tab.noteId || session === null || status === undefined || !("base" in status) ||
+      this.state.revisionSelectedEventId !== toRevisionEventId(selected.revision.revision) ||
       identity === null || client === null) return;
     await this.documents.for(tab.noteId).track((async () => {
       const response = await client.restoreRevision(tab.noteId, selected.revision.revision, {
@@ -1733,19 +1798,43 @@ export class TansuApp {
   }
 
   private async viewConflictDraft(): Promise<void> {
+    this.captureActiveEditor();
     const tab = activeTab(this.state);
     const status = tab?.kind === "saved" ? tab.session?.state : undefined;
     const identity = this.identity;
     const client = this.vaultClient;
     if (tab?.kind !== "saved" || status?.status !== "conflict" || status.conflictDraft === null ||
       identity === null || client === null) return;
+    this.revisionRequestToken += 1;
+    this.state.revisionsOpen = false;
+    this.state.revisionNoteId = null;
+    this.state.revisionList = null;
+    this.state.revisionSelectedEventId = null;
+    this.state.revisionDocument = null;
+    this.render();
     const draft = await client.openConflictDraft(tab.noteId, status.conflictDraft.draftId);
-    if (!this.isCurrentTab(tab, identity, client) || activeTab(this.state) !== tab) return;
+    if (!this.isCurrentTab(tab, identity, client) || activeTab(this.state) !== tab ||
+      tab.session?.state.status !== "conflict" ||
+      tab.session.state.conflictDraft?.draftId !== draft.draft.draftId) return;
     this.state.conflictDraft = draft;
     this.render();
   }
 
+  private async saveConflictMerge(): Promise<void> {
+    this.captureActiveEditor();
+    const tab = activeTab(this.state);
+    const session = tab?.kind === "saved" ? tab.session : null;
+    const status = session?.state;
+    if (tab?.kind !== "saved" || session === null || status?.status !== "conflict") return;
+    await this.documents.for(tab.noteId).track(session.saveConflictMerge());
+    if (session.state.status === "clean" && this.state.conflictDraft?.draft.noteId === tab.noteId) {
+      this.state.conflictDraft = null;
+      this.render();
+    }
+  }
+
   private async restoreConflictDraft(): Promise<void> {
+    this.captureActiveEditor();
     const tab = activeTab(this.state);
     const session = tab?.kind === "saved" ? tab.session : null;
     const status = session?.state;
@@ -1755,9 +1844,12 @@ export class TansuApp {
     const { meta } = status.canonical;
     const precondition = { baseRevision: meta.revision, baseSourceHash: meta.sourceHash, baseDiskHash: meta.diskHash };
     const conflictDraft = this.state.conflictDraft;
-    if (status.conflictDraft !== null &&
-      (conflictDraft?.draft.draftId !== status.conflictDraft.draftId || conflictDraft.draft.noteId !== tab.noteId)) return;
-    const content = conflictDraft?.content ?? status.draft.source;
+    let content = status.draft.source;
+    if (status.conflictDraft !== null) {
+      if (conflictDraft === null || conflictDraft.draft.draftId !== status.conflictDraft.draftId ||
+        conflictDraft.draft.noteId !== tab.noteId) return;
+      content = conflictDraft.content;
+    }
     await this.documents.for(tab.noteId).track((async () => {
       let response: V2MutationResponse;
       if (status.conflictDraft === null) {
@@ -1802,10 +1894,16 @@ export class TansuApp {
       this.state.notes.set(tab.noteId, document.meta);
       this.cacheDocument(document);
     } else if (response.outcome.state === "conflict") {
-      if (!this.isCurrentTab(tab, identity, client)) return;
-      tab.session?.reconcile(response.outcome.current);
+      session.reconcileMutationConflict(response.outcome);
+      if (!this.isCurrentTab(tab, identity, client) || tab.session !== session) return;
       tab.doc = response.outcome.current;
       tab.conflict = true;
+      this.state.notes.set(tab.noteId, response.outcome.current.meta);
+      this.cacheDocument(response.outcome.current);
+      if (this.state.conflictDraft?.draft.noteId === tab.noteId &&
+        this.state.conflictDraft.draft.draftId !== response.outcome.draft.draftId) {
+        this.state.conflictDraft = null;
+      }
     }
     this.render();
   }
@@ -2078,8 +2176,16 @@ export class TansuApp {
         this.runAsync(this.restoreSelectedRevision(), "Restore failed");
         return;
       }
+      case "revisions.branch": {
+        this.runAsync(this.branchFromSelectedRevision(), "Branch failed");
+        return;
+      }
       case "conflict.view": {
         this.runAsync(this.viewConflictDraft(), "Conflict draft failed");
+        return;
+      }
+      case "conflict.merge": {
+        this.runAsync(this.saveConflictMerge(), "Merge failed");
         return;
       }
       case "conflict.restore": {
@@ -2430,11 +2536,14 @@ export class TansuApp {
   }
 
   private async closeOverlays(): Promise<void> {
+    this.revisionRequestToken += 1;
     this.clearFindHighlights();
     this.state.commandOpen = false;
     this.state.searchOpen = false;
     this.state.findOpen = false;
     this.state.revisionsOpen = false;
+    this.state.revisionSelectedEventId = null;
+    this.state.revisionDocument = null;
     this.state.settingsOpen = false;
     this.state.helpOpen = false;
     this.state.conflictDraft = null;

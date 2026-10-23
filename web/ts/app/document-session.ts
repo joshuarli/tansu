@@ -1,5 +1,5 @@
 import { canonicalSourceHash } from "../source-hash.ts";
-import type { V2ApiErrorKind, V2ConflictDraftMeta, V2MutationResponse, V2NoteDocument, V2NoteMeta, V2NotePrecondition, V2SaveNoteRequest } from "../types.generated.ts";
+import type { V2ApiErrorKind, V2ConflictDraftMeta, V2MutationOutcome, V2MutationResponse, V2NoteDocument, V2NoteMeta, V2NotePrecondition, V2SaveNoteRequest } from "../types.generated.ts";
 import { isRetryableV2Error } from "./v2-api.ts";
 import { type DocumentIdentity, type WorkspaceId, documentIdentityKey } from "./identity.ts";
 import type { DraftJournalRecord } from "./workspace-store.ts";
@@ -315,7 +315,7 @@ export class DocumentSession {
   }
 
   edit(source: string, selection: Selection, urgency: "typing" | "structural" = "typing"): void {
-    const state = this.loadedState("edit");
+    const state = this.current.status === "conflict" ? this.current : this.loadedState("edit");
     const safeSelection = validateSelection(selection, source.length);
     if (source === state.draft.source) {
       const draft = { ...state.draft, selection: safeSelection };
@@ -332,15 +332,15 @@ export class DocumentSession {
       selection: safeSelection,
       mutationId: validMutationId(this.services.createMutationId()),
     };
-    const updated = state.status === "saving"
-      ? { ...state, draft }
+    const updated = state.status === "saving" || state.status === "conflict"
+      ? { ...state, draft } as Extract<DocumentSessionState, { status: "saving" | "conflict" }>
       : { ...state, status: "dirty" as const, draft };
-    this.set(updated as DocumentSessionState);
+    this.set(updated);
     this.checkpoint(state.base, draft, urgency);
   }
 
   updateSelection(selection: Selection): void {
-    const state = this.loadedState("update the selection of");
+    const state = this.current.status === "conflict" ? this.current : this.loadedState("update the selection of");
     const safeSelection = validateSelection(selection, state.draft.source.length);
     const draft = { ...state.draft, selection: safeSelection };
     this.set({ ...state, draft } as DocumentSessionState);
@@ -399,6 +399,56 @@ export class DocumentSession {
   }
 
   reconcile(document: V2NoteDocument): "unchanged" | "reloaded" | "conflict" {
+    return this.reconcileCanonical(document);
+  }
+
+  reconcileMutationConflict(
+    outcome: Extract<V2MutationOutcome, { state: "conflict" }>,
+  ): "unchanged" | "reloaded" | "conflict" {
+    if (outcome.current.meta.noteId !== this.identity.noteId) {
+      throw new SessionProtocolError("Conflict response canonical identity does not match the document session");
+    }
+    if (outcome.draft.noteId !== this.identity.noteId) {
+      throw new SessionProtocolError("Conflict response draft identity does not match the document session");
+    }
+    const state = this.current;
+    if (state.status === "loading" || state.status === "unavailable" && state.draft === null) return "unchanged";
+    const draft: DirtyDraft = state.draft.mutationId === null
+      ? {
+        localRevision: incrementSafeInteger(state.draft.localRevision, "localRevision"),
+        source: state.draft.source,
+        selection: state.draft.selection,
+        mutationId: validMutationId(this.services.createMutationId()),
+      }
+      : state.draft;
+    const canonical = state.status === "conflict" &&
+        state.canonical.meta.revision > outcome.current.meta.revision
+      ? state.canonical
+      : outcome.current;
+    this.set({
+      status: "conflict",
+      identity: this.identity,
+      generation: this.generation,
+      acceptedRevision: state.acceptedRevision,
+      base: state.base,
+      title: state.title,
+      titleDraft: state.titleDraft,
+      titleRevision: state.titleRevision,
+      titleMutationId: state.titleMutationId,
+      path: state.path,
+      draft,
+      canonical,
+      conflictDraft: outcome.draft,
+      storage: state.storage,
+    });
+    if (state.draft.mutationId === null) this.checkpoint(state.base, draft, "structural");
+    return "conflict";
+  }
+
+  private reconcileCanonical(
+    document: V2NoteDocument,
+    conflictDraft?: V2ConflictDraftMeta,
+  ): "unchanged" | "reloaded" | "conflict" {
     if (document.meta.noteId !== this.identity.noteId) {
       throw new SessionProtocolError("Reconciled document note identity does not match the session");
     }
@@ -411,6 +461,10 @@ export class DocumentSession {
     }
     if (this.current.status === "conflict") {
       if (document.meta.revision <= this.current.canonical.meta.revision) {
+        if (conflictDraft !== undefined && conflictDraft !== this.current.conflictDraft) {
+          this.set({ ...this.current, conflictDraft });
+          return "conflict";
+        }
         return "unchanged";
       }
       this.set({
@@ -418,6 +472,7 @@ export class DocumentSession {
         title: document.meta.title,
         path: document.meta.path,
         canonical: document,
+        ...(conflictDraft === undefined ? {} : { conflictDraft }),
       });
       return "conflict";
     }
@@ -497,7 +552,7 @@ export class DocumentSession {
       path: state.path,
       draft: state.draft as DirtyDraft,
       canonical: document,
-      conflictDraft: null,
+      conflictDraft: conflictDraft ?? null,
       storage: state.storage,
     });
     return "conflict";
@@ -598,6 +653,39 @@ export class DocumentSession {
       this.saveTask = null;
     });
     return this.saveTask;
+  }
+
+  async saveConflictMerge(): Promise<void> {
+    const initial = this.current;
+    if (initial.status === "saving") return;
+    if (this.saveTask !== null) await this.saveTask;
+    const state = this.current;
+    if (state.status === "saving") return;
+    if (state.status !== "conflict") {
+      throw new InvalidSessionTransitionError(state.status, "save a conflict merge from");
+    }
+    const meta = state.canonical.meta;
+    const base = baseFromMeta(meta);
+    const draft: DirtyDraft = {
+      ...state.draft,
+      mutationId: validMutationId(this.services.createMutationId()),
+    };
+    this.set({
+      status: "dirty",
+      identity: this.identity,
+      generation: this.generation,
+      acceptedRevision: base.revision,
+      base,
+      title: meta.title,
+      titleDraft: state.titleDraft,
+      titleRevision: state.titleRevision,
+      titleMutationId: state.titleMutationId,
+      path: meta.path,
+      draft,
+      storage: state.storage,
+    });
+    this.checkpoint(base, draft, "structural");
+    await this.save();
   }
 
   async resolvePendingMaterialization(meta: V2NoteMeta): Promise<void> {

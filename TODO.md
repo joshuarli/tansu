@@ -30,15 +30,6 @@ Next: 83
 - **Fix with:** lifecycle-concurrency
 - **Effort:** M
 
-### TNS-081 · P3 · Add a history scrubber and visual conflict-draft merge
-
-- **Area:** Architecture
-- **Where:** `src/history.rs`, `web/ts/app/document-session.ts`, `web/ts/editor/`
-- **Problem:** The revisions panel already lists snapshots, shows a text diff, and restores them through the existing revision API. It has no timeline scrubber or branch-from-here action. The conflict panel previews and restores a draft but has no editable two-pane merge.
-- **Recommendation:** Extend the existing history UI with a timeline slider, a live diff (inserted text green, removed text fading), and branch-from-here. Add an editable two-pane conflict merge while preserving canonical revision preconditions and unsaved edits. Reuse the existing snapshot-list and restore APIs; document any new contracts in `docs/api.md`.
-- **Fix with:** none
-- **Effort:** L
-
 ### TNS-082 · P3 · Add vault-local ambient intelligence
 
 - **Area:** Architecture

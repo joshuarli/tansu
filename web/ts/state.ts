@@ -117,6 +117,7 @@ export type State = {
   revisionsOpen: boolean;
   revisionNoteId: NoteId | null;
   revisionList: V2RevisionMeta[] | null;
+  revisionSelectedEventId: RevisionEventId | null;
   revisionDocument: V2RevisionDocument | null;
   conflictDraft: V2ConflictDraftDocument | null;
   settingsOpen: boolean;
@@ -164,6 +165,7 @@ export function createState(vault: VaultId): State {
     revisionsOpen: false,
     revisionNoteId: null,
     revisionList: null,
+    revisionSelectedEventId: null,
     revisionDocument: null,
     conflictDraft: null,
     settingsOpen: false,
