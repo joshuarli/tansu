@@ -76,15 +76,6 @@ Next: 83
 - **Fix with:** dead-code-archaeology
 - **Effort:** M
 
-### TNS-073 · P3 · Drop runtime decoders for same-origin API and IndexedDB records
-
-- **Area:** Types
-- **Where:** `web/ts/app/v2-api.ts` response decoders, `web/ts/app/workspace-store.ts` record decoders and `ClientStorageFailureError`, `docs/architecture.md`
-- **Problem:** About 580 lines re-validate JSON from the server that ships this bundle, and about 250 lines re-validate records this code wrote. The generated types and the Rust tests already pin the shapes. Nothing reads `ClientStorageFailureError.kind`. The cost is a named protocol error for a stale tab after a server upgrade.
-- **Recommendation:** Keep header checks, echo assertions, error-code parsing, and the `formatVersion` gate; cast the rest to the generated types.
-- **Fix with:** api-surface-and-module-boundaries
-- **Effort:** M
-
 ### TNS-074 · P3 · Remove the search service thread and the crash-safe index swap
 
 - **Area:** Architecture
