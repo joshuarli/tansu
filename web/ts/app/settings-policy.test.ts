@@ -87,7 +87,7 @@ describe("SETTINGS_LIMITS", () => {
     );
 
   function rustRange(name: string): { min: number; max: number } {
-    const match = new RegExp(`pub const ${name}: RangeInclusive<\\w+> = ([0-9_.]+)\\.\\.=([0-9_.]+);`).exec(rust);
+    const match = new RegExp(`pub const ${name}: RangeInclusive<\\w+> =\\s*([0-9_.]+)\\.\\.=([0-9_.]+);`).exec(rust);
     if (match === null) throw new Error(`${name} not found in crates/tansu-api-types/src/lib.rs`);
     return { min: Number(match[1]!.replaceAll("_", "")), max: Number(match[2]!.replaceAll("_", "")) };
   }

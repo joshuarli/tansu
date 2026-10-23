@@ -8,7 +8,7 @@ fn main() {
     let manifest_path = dist.join("manifest.json");
     println!("cargo:rerun-if-changed={}", manifest_path.display());
     let manifest: serde_json::Value = serde_json::from_slice(
-        &fs::read(&manifest_path).expect("run `deno task build` before compiling the server"),
+        &fs::read(&manifest_path).expect("run `pnpm run build` before compiling the server"),
     ).expect("web asset manifest must be valid JSON");
     let files = manifest["files"].as_array().expect("web asset manifest requires a files array");
     let mut entries = Vec::with_capacity(files.len());

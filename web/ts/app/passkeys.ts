@@ -116,7 +116,7 @@ function encodeBase64Url(value: ArrayBuffer): string {
   const bytes = new Uint8Array(value);
   let binary = "";
   for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+  return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
 }
 
 function stringField(value: Record<string, unknown>, name: string): string {

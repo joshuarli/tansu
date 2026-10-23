@@ -2,22 +2,21 @@
 
 ## Set up
 
-Install the Rust toolchain in `rust-toolchain.toml`, Deno 2, Node 26 or later,
-and npm. Install the locked frontend dependencies and Playwright Chromium and
-WebKit for browser tests:
+Install the Rust toolchain in `rust-toolchain.toml`, Node from `.node-version`,
+and pnpm from `package.json`. Install the locked frontend dependencies and
+Playwright Chromium and WebKit for browser tests under `.work/`:
 
 ```sh
-make setup
-deno task playwright:install
+pnpm install --frozen-lockfile
+pnpm run playwright:install
 ```
 
-`make setup` runs pnpm 12.13.0 through npm and installs the frozen lockfile.
-Run it before `deno task build` or other direct Deno tasks that use
-`node_modules`. `make test`, `make dev`, and `make dev-config` run this setup
-automatically.
+`make setup` installs the frozen lockfile. `make test`, `make dev`, and
+`make dev-config` run setup automatically. Run `pnpm install --frozen-lockfile`
+before direct pnpm tasks.
 
-`make check` runs `tsrs` for TypeScript type checking. On macOS, use an arm64
-machine; `tsrs` does not provide an Intel macOS binary.
+`pnpm run check` checks generated API types, lint, TypeScript, unit tests, and
+Rust compilation. `make check` runs the same check after installing dependencies.
 
 The supported Rust targets are `aarch64-apple-darwin`,
 `x86_64-unknown-linux-musl`, and `aarch64-unknown-linux-musl`.
@@ -42,7 +41,7 @@ administration, remote access, and backup procedures, see
 
 ## Build
 
-`deno task build` creates fingerprinted frontend assets and a manifest under
+`pnpm run build` creates fingerprinted frontend assets and a manifest under
 `web/dist/`. Cargo embeds those assets; run the frontend build before invoking
 Cargo directly. `make types` generates `web/ts/types.generated.ts` from
 `crates/tansu-api-types/src/lib.rs`; do not edit the generated file. The dev setup also
@@ -66,8 +65,8 @@ Generate and verify Linux Chromium and WebKit screenshot baselines with:
 make update-e2e-baselines-linux
 ```
 
-The target uses the Playwright `v1.64.0-noble` image and Node `26.12.0` on
-`linux/amd64`. It writes four screenshots under each of
+The target uses the Playwright `v1.64.0-noble` image and the Node version from
+`.node-version` on `linux/amd64`. It writes four screenshots under each of
 `web/ts/e2e/baselines/chromium-linux/` and
 `web/ts/e2e/baselines/webkit-linux/`. The target sets
 `TANSU_UPDATE_BASELINES=1` to write them, then reruns the test without the

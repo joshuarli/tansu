@@ -1,7 +1,7 @@
 # Tansu
 
 Tansu is a local Markdown note app.
-Commands: frontend build `deno task build`, fixture app `make dev`, check `make check`, unit tests `make test`, browser e2e `make test-e2e-chromium` and `make test-e2e-webkit`.
+Commands: frontend build `pnpm run build`, fixture app `make dev`, check `pnpm run check`, unit tests `pnpm run test`, browser e2e `make test-e2e-chromium` and `make test-e2e-webkit`.
 
 ## Invariants
 
@@ -14,6 +14,12 @@ Commands: frontend build `deno task build`, fixture app `make dev`, check `make 
 - Per-vault mutations stay serialized unless a tested design change says otherwise.
 - Markdown editor behavior stays inside `web/ts/editor/`. Update `docs/editor.md` when editor invariants or extension behavior change.
 - Broad dependencies require documentation updates.
+
+## Tooling
+
+- Node runs project scripts. pnpm owns JavaScript packages and tasks. `package.json` and `pnpm-lock.yaml` are the only JavaScript manifest and lockfile.
+- TypeScript 7 owns type checking. Oxlint with `oxlint-tsgolint` owns linting. Vitest owns tests. Vite builds the web app.
+- Do not reintroduce Deno, React, SolidStart, Vite+, Jest, ESLint, the npm CLI, Yarn, Bun, or another lockfile.
 
 ## Topics
 

@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 
@@ -30,8 +30,8 @@ if (corePackage.version !== expectedPlaywrightVersion) {
   );
 }
 
-const browsersPath = join(dirname(corePackagePath), "browsers.json");
-const browserMetadata = JSON.parse(readFileSync(browsersPath, "utf8"));
+const browserMetadataPath = join(dirname(corePackagePath), "browsers.json");
+const browserMetadata = JSON.parse(readFileSync(browserMetadataPath, "utf8"));
 const browserByName = new Map(browserMetadata.browsers.map((browser) => [browser.name, browser]));
 
 for (const name of config.install) {
@@ -65,10 +65,17 @@ for (const name of config.install) {
 }
 
 const passthroughArgs = process.argv.slice(2).filter((arg) => arg !== "--");
+const browserInstallPath = process.env.PLAYWRIGHT_BROWSERS_PATH ?? join(process.cwd(), ".work/tmp/playwright-browsers");
+mkdirSync(browserInstallPath, { recursive: true });
 const install = spawnSync(
   "node_modules/.bin/playwright",
-  ["install", ...passthroughArgs, "--with-deps", ...config.install],
-  { stdio: "inherit" },
+  [
+    "install",
+    ...passthroughArgs,
+    ...(process.platform === "linux" ? ["--with-deps"] : []),
+    ...config.install,
+  ],
+  { env: { ...process.env, PLAYWRIGHT_BROWSERS_PATH: browserInstallPath }, stdio: "inherit" },
 );
 
 if (install.error) {

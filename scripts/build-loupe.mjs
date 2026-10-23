@@ -30,7 +30,7 @@ writeFileSync(
 );
 
 if (!existsSync(loupeExtension.wasmPath)) {
-  throw new Error(`Loupe WebAssembly module is missing at ${loupeExtension.wasmPath}. Run "deno task loupe:wasm" first.`);
+  throw new Error(`Loupe WebAssembly module is missing at ${loupeExtension.wasmPath}. Run "pnpm run loupe:wasm" first.`);
 }
 cpSync(loupeExtension.wasmPath, resolve(loupeExtension.outputDirectory, "defuddle_wasm_bg.wasm"));
 console.log(`Built Loupe in ${loupeExtension.outputDirectory}`);

@@ -1,6 +1,7 @@
 import { defineConfig } from "oxlint";
 
 export default defineConfig({
+  options: { typeAware: true },
   ignorePatterns: [
     "web/dist/**",
     "web/ts/editor/vendor/atomic/**",
@@ -30,6 +31,25 @@ export default defineConfig({
     "vitest/padding-around-test-blocks": "off",
 
     "typescript/no-unused-vars": ["error", { argsIgnorePattern: "^_" }],
+    "typescript/await-thenable": "off",
+    "typescript/dot-notation": "off",
+    "typescript/no-base-to-string": "off",
+    "typescript/no-floating-promises": "off",
+    "typescript/no-misused-spread": "off",
+    "typescript/no-unnecessary-boolean-literal-compare": "off",
+    "typescript/no-unnecessary-template-expression": "off",
+    "typescript/no-unnecessary-type-arguments": "off",
+    "typescript/no-unnecessary-type-assertion": "off",
+    "typescript/no-unnecessary-type-parameters": "off",
+    "typescript/no-unsafe-type-assertion": "off",
+    "typescript/non-nullable-type-assertion-style": "off",
+    "typescript/prefer-readonly": "off",
+    "typescript/prefer-regexp-exec": "off",
+    "typescript/prefer-string-starts-ends-with": "off",
+    "typescript/promise-function-async": "off",
+    "typescript/restrict-template-expressions": "off",
+    "typescript/unbound-method": "off",
+    "typescript/use-unknown-in-catch-callback-variable": "off",
     "no-unused-vars": "off",
 
     "no-undef": "off",

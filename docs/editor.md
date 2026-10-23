@@ -103,7 +103,7 @@ the per-note controller issues identity-bound load, retry, reconciliation,
 rename, and image-fetch tasks and accepts their completions for the issuing
 session. Local-draft image requests remain app-scoped until the draft has a
 durable note identity. Focused editor tests live under `web/ts/editor/tests/`
-and run with `deno task test web/ts/editor/tests`. Integrated browser
+and run with `pnpm run test -- web/ts/editor/tests`. Integrated browser
 measurements run with `make bench` and `make bench-full`.
 
 Vendored editor code and licenses live under `web/ts/editor/vendor/`. Read the
