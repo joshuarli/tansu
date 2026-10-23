@@ -22,15 +22,6 @@ Next: 83
 - **Fix with:** os-boundaries
 - **Effort:** S
 
-### TNS-064 · P3 · Cut per-cursor work in the vendored live-preview extension
-
-- **Area:** Performance
-- **Where:** `web/ts/editor/vendor/atomic/inline-preview.ts`
-- **Problem:** The blank-line scan is cached per document and tree, but `buildInlineDecorations` still walks the syntax tree on every selection change. Unmeasured.
-- **Recommendation:** Measure the walk with a work-counting test, then split a selection-independent node list from the selection-dependent decoration choice and cache the list.
-- **Fix with:** make-it-fast
-- **Effort:** M
-
 ### TNS-068 · P4 · Order asset prefetch by visibility and test cache stability
 
 - **Area:** Performance

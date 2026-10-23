@@ -40,6 +40,10 @@ of a document cannot be read as an opening frontmatter delimiter. Moving a
 top-level block rewrites its full source span as one undoable edit; frontmatter
 cannot be moved.
 
+Inline preview caches decoration-relevant syntax nodes for the current parse
+tree. Selection changes reuse that list while recalculating active-line and link
+visibility. Document edits and parser growth build a new list.
+
 Wiki links resolve against notes in the active vault. `/` starts at the vault
 root; `./` and `../` resolve from the current note's directory. A bare basename
 resolves only when it matches one note. Ambiguous links remain unresolved.

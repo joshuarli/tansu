@@ -246,6 +246,19 @@ const INLINE_MARK_CLASS: Record<string, string> = {
   Link: 'cm-atomic-link',
 };
 
+const INLINE_PREVIEW_NODE_NAMES = new Set([
+  'HeaderMark',
+  ...Object.keys(LINE_CLASS_BY_BLOCK),
+  ...Object.keys(INLINE_MARK_CLASS),
+  ...HIDEABLE_SYNTAX,
+  'Escape',
+  'ListMark',
+  'HorizontalRule',
+  'Image',
+  'TaskMarker',
+  'URL',
+]);
+
 // A Link can contain two URL nodes when its visible label is itself a
 // URL: `[https://label](https://destination)`. Only the node after the
 // closing `]` is the destination syntax that should collapse. Treating
@@ -399,6 +412,10 @@ function hasAncestor(node: SyntaxNode | null, name: string): boolean {
 }
 
 const paragraphGapCache = new WeakMap<Tree, { doc: Text; starts: readonly number[] }>();
+const inlinePreviewNodeCache = new WeakMap<
+  Tree,
+  { doc: Text; treeLength: number; nodes: readonly SyntaxNode[] }
+>();
 
 function paragraphGapLineStarts(state: EditorState, tree: Tree): readonly number[] {
   const cached = paragraphGapCache.get(tree);
@@ -414,6 +431,25 @@ function paragraphGapLineStarts(state: EditorState, tree: Tree): readonly number
   }
   paragraphGapCache.set(tree, { doc, starts });
   return starts;
+}
+
+function inlinePreviewNodes(
+  doc: Text,
+  tree: Tree,
+  foldTo: number | null,
+): readonly SyntaxNode[] {
+  const cached = inlinePreviewNodeCache.get(tree);
+  if (cached?.doc === doc && cached.treeLength === tree.length) return cached.nodes;
+
+  const nodes: SyntaxNode[] = [];
+  tree.iterate({
+    enter(node): boolean | void {
+      if (node.name !== 'Document' && foldTo !== null && node.from < foldTo) return false;
+      if (INLINE_PREVIEW_NODE_NAMES.has(node.name)) nodes.push(node.node);
+    },
+  });
+  inlinePreviewNodeCache.set(tree, { doc, treeLength: tree.length, nodes });
+  return nodes;
 }
 
 function buildInlineDecorations(view: EditorView): DecorationSet {
@@ -437,31 +473,10 @@ function buildInlineDecorations(view: EditorView): DecorationSet {
     ensureSyntaxTree(state, state.doc.length, 200) ?? syntaxTree(state);
   const frontmatter = frontmatterRange(state);
 
-  // `from` positions of Link nodes whose range overlaps a selection.
-  // Link children (LinkMark/URL/LinkTitle) hide unless their parent
-  // Link's `from` is in this set — i.e. the cursor has entered the
-  // link specifically, not merely landed on the same line. Images
-  // aren't included; they already have their own widget UX and the
-  // line-based reveal is the right fit for `![alt](url)`.
   const activeLinkStarts = new Set<number>();
 
-  // Single pre-order walk. A tree walk visits a parent before its
-  // children, which lets us compute two pieces of look-ahead state on
-  // the way in — right before the children that depend on them:
-  //   - Fenced-code active expansion: clicking any line of a fence
-  //     activates the whole block. FencedCode is entered before its
-  //     CodeMark/CodeInfo children, so expanding activeLines here means
-  //     those children hide/reveal consistently with the block.
-  //   - activeLinkStarts: a Link is entered before its LinkMark/URL/
-  //     LinkTitle children, so recording it here makes the link-scoped
-  //     reveal rule ready when those children are processed.
-  // (A previous version ran a separate pre-pass plus a taskMarkerByLine
-  // map. Folding both into this one walk halves the per-rebuild tree
-  // traversal — meaningful because this runs on every cursor move and
-  // its cost scales with document size.)
-  tree.iterate({
-    enter: (node): boolean | void => {
-      if (node.name !== 'Document' && frontmatter !== null && node.from < frontmatter.foldTo) return false;
+  inlinePreviewNodes(doc, tree, frontmatter?.foldTo ?? null).forEach(
+    (node) => {
       if (node.name === 'HeaderMark' && node.from < node.to) {
         const lineNumber = doc.lineAt(node.from).number;
         if (!readOnly && activeLines.has(lineNumber)) {
@@ -766,7 +781,7 @@ function buildInlineDecorations(view: EditorView): DecorationSet {
         }
       }
     },
-  });
+  );
 
   for (const from of paragraphGapLineStarts(state, tree)) {
     ranges.push(Decoration.line({ class: 'cm-atomic-paragraph-gap' }).range(from));
