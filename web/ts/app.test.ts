@@ -1275,12 +1275,13 @@ describe("v2 desktop shell", () => {
     root.querySelector<HTMLButtonElement>('.tab[title="First"] .tab-close')?.click();
     await flushAsync();
     await until(() => !memory.cached.has(first.noteId));
+    const openNoteCallsBeforeRestoreSettles = client.openNote.mock.calls.length;
     client.openNote.mockResolvedValue(documentFor(restored, "# Restored\n"));
 
     restore.resolve(accepted(client.restoreRevision.mock.calls[0]![2].mutationId, restored));
     await flushAsync();
 
-    expect(client.openNote).toHaveBeenCalledTimes(2);
+    expect(client.openNote).toHaveBeenCalledTimes(openNoteCallsBeforeRestoreSettles);
     expect(memory.cached.has(first.noteId)).toBeFalsy();
     expect(root.querySelector(".toast")).toBeNull();
   });
