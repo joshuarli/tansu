@@ -15,6 +15,7 @@ import type { LocalDraftSession } from "./app/local-draft-session.ts";
 import type { EditorSession } from "./editor/codemirror-adapter.ts";
 import type { LocalDraftId, NoteId as IdentityNoteId, VaultId } from "./app/identity.ts";
 import { toTabKey, type TabIdentity } from "./app/tab-identity.ts";
+import type { TagSuggestion } from "./app/tag-suggestions.ts";
 import type { WorkspaceTab } from "./app/workspace-store.ts";
 
 declare const appBrand: unique symbol;
@@ -72,6 +73,12 @@ export type NoteLinksState =
   | { noteId: string; phase: "loading" }
   | { noteId: string; phase: "ready"; links: V2NoteLinksResponse }
   | { noteId: string; phase: "error"; message: string };
+
+type TagSuggestionsState = { tabKey: string; source: string } & (
+  | { phase: "loading" }
+  | { phase: "ready"; suggestions: TagSuggestion[] }
+  | { phase: "error"; message: string }
+);
 
 export const THEMES = ["light", "dark", "paper"] as const;
 export type Theme = (typeof THEMES)[number];
@@ -132,6 +139,7 @@ export type State = {
   linkRailCollapsed: boolean;
   noteLinks: NoteLinksState | null;
   knownLinks: Map<string, V2NoteLinksResponse>;
+  tagSuggestions: TagSuggestionsState | null;
 };
 
 export function createState(vault: VaultId): State {
@@ -180,6 +188,7 @@ export function createState(vault: VaultId): State {
     linkRailCollapsed: true,
     noteLinks: null,
     knownLinks: new Map(),
+    tagSuggestions: null,
   };
 }
 

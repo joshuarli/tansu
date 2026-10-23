@@ -1,4 +1,5 @@
 import { commandItems, paletteEntries, parsePaletteQuery } from "./app/commands.ts";
+import type * as TagFeature from "./app/tag-feature.ts";
 import { keyboardShortcutFor } from "./app/keyboard-shortcuts.ts";
 import type { CommandId, SettingsFormValue, ViewEvent } from "./app/events.ts";
 import { applySettingsForm } from "./app/settings-policy.ts";
@@ -128,6 +129,8 @@ export class TansuApp {
   private commandSearchSeq = 0;
   private commandSearchTimer: number | undefined;
   private commandSearchAbort: AbortController | null = null;
+  private tagSuggestionAbort: AbortController | null = null;
+  private tagFeature: typeof TagFeature | null = null;
   private readonly noteLinksLoader = createNoteLinksLoader(
     (id, signal) => {
       if (this.vaultClient === null) return Promise.reject(new Error("No vault is open"));
@@ -167,6 +170,7 @@ export class TansuApp {
   }
 
   async boot(requestedVault?: string): Promise<void> {
+    this.cancelTagSuggestions();
     const generation = ++this.bootGeneration;
     this.transitioningVault = true;
     this.extensionImport?.cancel();
@@ -434,6 +438,7 @@ export class TansuApp {
   dispose(): Promise<void> {
     if (this.disposeTask !== null) return this.disposeTask;
     this.disposed = true;
+    this.cancelTagSuggestions();
     window.clearTimeout(this.noteLinksTimer);
     for (const timer of this.draftPromotionTimers.values()) window.clearTimeout(timer);
     this.draftPromotionTimers.clear();
@@ -477,6 +482,7 @@ export class TansuApp {
       },
       onResync: async (snapshot) => {
         if (generation !== this.bootGeneration || this.transitioningVault || !this.isCurrentVault(identity, client)) return;
+        this.cancelTagSuggestions();
         await this.trackAction((async () => {
           if (generation !== this.bootGeneration || this.transitioningVault || !this.isCurrentVault(identity, client)) return;
           this.state.boot = {
@@ -499,6 +505,9 @@ export class TansuApp {
   }
 
   private async applyServerEvent(event: V2ServerEvent): Promise<void> {
+    if (event.update.kind === "noteChanged" || event.update.kind === "vaultChanged" || event.update.kind === "noteDeleted") {
+      this.cancelTagSuggestions();
+    }
     if (event.update.kind === "noteChanged") {
       this.state.notes.set(event.update.note.noteId, event.update.note);
       const tab = tabById(this.state, event.update.note.noteId);
@@ -606,6 +615,10 @@ export class TansuApp {
     if (this.disposed) return;
     this.syncNoteLinks();
     this.captureActiveEditor();
+    const suggestions = this.state.tagSuggestions;
+    const current = activeTab(this.state);
+    if (suggestions !== null && (current?.key !== suggestions.tabKey ||
+      loadedDraft(current) !== suggestions.source || this.state.readingMode || this.state.authRequired)) this.cancelTagSuggestions();
     const view = this.state.authRequired
       ? [renderAuthGate(this.state, this.viewActions())]
       : this.noVaultConfigured ? [renderNoVaultConfigured()]
@@ -721,13 +734,20 @@ export class TansuApp {
           return;
         }
         tab.dirty = true;
+        if (this.state.tagSuggestions !== null) {
+          this.cancelTagSuggestions();
+          queueMicrotask(() => this.render());
+        }
         if (this.editorCaptureTimer !== undefined) window.clearTimeout(this.editorCaptureTimer);
         this.editorCaptureTimer = window.setTimeout(() => {
           this.editorCaptureTimer = undefined;
           if (generation !== this.bootGeneration || this.transitioningVault ||
             !currentVault() || !this.state.tabs.includes(tab) || this.attachedEditor?.tab !== tab) return;
+          const previousTags = this.tagFeature?.readNoteTags(loadedDraft(tab) ?? "") ?? [];
           this.captureActiveEditor();
-          this.renderStatusOnly();
+          const currentTags = this.tagFeature?.readNoteTags(loadedDraft(tab) ?? "") ?? [];
+          if (previousTags.length !== currentTags.length || previousTags.some((tag, index) => tag !== currentTags[index])) this.render();
+          else this.renderStatusOnly();
           this.scheduleWorkspaceSave();
         }, EDITOR_CAPTURE_DELAY_MS);
         this.renderStatusOnly();
@@ -1237,6 +1257,88 @@ export class TansuApp {
       !this.isCurrentVault(serverIdentity, client)) return;
     this.state.searchOverlayHits = response.hits;
     this.state.searchOverlayCoverage = response.overlayCoverage;
+    this.render();
+  }
+
+  private cancelTagSuggestions(): void {
+    this.tagSuggestionAbort?.abort();
+    this.tagSuggestionAbort = null;
+    this.state.tagSuggestions = null;
+  }
+
+  private async suggestTags(): Promise<void> {
+    this.cancelTagSuggestions();
+    this.captureActiveEditor();
+    const tab = activeTab(this.state);
+    const client = this.vaultClient;
+    const identity = this.identity;
+    const source = tab === undefined ? null : loadedDraft(tab);
+    if (tab === undefined || source === null || client === null || identity === null || this.state.readingMode) return;
+    const abort = new AbortController();
+    this.tagSuggestionAbort = abort;
+    this.state.tagSuggestions = { tabKey: tab.key, source, phase: "loading" };
+    this.render();
+    try {
+      const feature = this.tagFeature ?? await import("./app/tag-feature.ts");
+      this.tagFeature = feature;
+      if (abort.signal.aborted) return;
+      this.render();
+      const hits: V2SearchHit[] = [];
+      for (const query of feature.tagSuggestionQueries(source)) {
+        const response = await client.search({ query, mode: "default", limit: 10, overlays: [] }, abort.signal);
+        if (abort.signal.aborted) return;
+        hits.push(...response.hits);
+      }
+      this.captureActiveEditor();
+      if (abort.signal.aborted || this.tagSuggestionAbort !== abort || !this.isCurrentVault(identity, client) ||
+        activeTab(this.state) !== tab || loadedDraft(tab) !== source) return;
+      this.state.tagSuggestions = {
+        tabKey: tab.key, source, phase: "ready",
+        suggestions: feature.rankTagSuggestions({
+          notes: this.state.notes, hits, currentNoteId: tab.kind === "saved" ? tab.noteId : null,
+          existingTags: feature.readNoteTags(source),
+        }),
+      };
+      this.render();
+    } catch (error) {
+      if (abort.signal.aborted || this.tagSuggestionAbort !== abort || !this.isCurrentVault(identity, client) ||
+        activeTab(this.state) !== tab || this.editor?.getSnapshot()?.source !== source) return;
+      if (error instanceof V2ApiError && error.kind?.code === "auth_required") throw error;
+      this.state.tagSuggestions = {
+        tabKey: tab.key, source, phase: "error", message: error instanceof Error ? error.message : String(error),
+      };
+      this.render();
+    } finally {
+      if (this.tagSuggestionAbort === abort) this.tagSuggestionAbort = null;
+    }
+  }
+
+  private async applySuggestedTag(tag: string): Promise<void> {
+    const panel = this.state.tagSuggestions;
+    const tab = activeTab(this.state);
+    const suggestion = panel?.phase === "ready" ? panel.suggestions.find((item) => item.tag === tag) : undefined;
+    if (suggestion === undefined || panel === null || tab?.key !== panel.tabKey ||
+      this.editor?.getSnapshot()?.source !== panel.source || this.state.readingMode) return;
+    if (!suggestion.notes.some((note) => this.state.notes.get(note.noteId)?.tags.includes(tag))) {
+      this.cancelTagSuggestions();
+      this.notify("The supporting notes changed. Request tag suggestions again.");
+      return;
+    }
+    const identity = this.identity;
+    const client = this.vaultClient;
+    const editor = this.editor;
+    const result = await editor.addTag(tag);
+    if (identity === null || client === null || !this.isCurrentVault(identity, client) || activeTab(this.state) !== tab) return;
+    if (result.kind === "unavailable") {
+      this.notify(result.message);
+      return;
+    }
+    this.captureActiveEditor();
+    const source = this.editor.getSnapshot()?.source;
+    if (source !== undefined && panel.phase === "ready") {
+      const tags = this.tagFeature!.readNoteTags(source);
+      this.state.tagSuggestions = { ...panel, source, suggestions: panel.suggestions.filter((item) => !tags.includes(item.tag)) };
+    }
     this.render();
   }
 
@@ -2168,6 +2270,19 @@ export class TansuApp {
         this.runAsync(this.commandRevisions(), "Revisions failed");
         return;
       }
+      case "tags.suggest": {
+        this.runAsync(this.suggestTags(), "Tag suggestions failed");
+        return;
+      }
+      case "tags.close": {
+        this.cancelTagSuggestions();
+        this.render();
+        return;
+      }
+      case "tags.apply": {
+        this.runAsync(this.applySuggestedTag(event.tag), "Tag could not be applied");
+        return;
+      }
       case "revisions.select": {
         this.runAsync(this.selectRevision(event.eventId), "Revision failed");
         return;
@@ -2438,6 +2553,7 @@ export class TansuApp {
       findMatches: () => this.editor?.find(this.state.findQuery) ?? [],
       outline: () => this.editor?.outline() ?? { headings: [], complete: true },
       activeHeadingFrom: this.activeOutlineHeadingFrom,
+      tagControls: (tab) => this.tagFeature?.renderNoteTags(this.state, (event) => this.dispatch(event), tab) ?? null,
     };
   }
 
@@ -2617,6 +2733,7 @@ export class TansuApp {
 
   private async logout(): Promise<void> {
     if (this.state.authBusy !== null) return;
+    this.cancelTagSuggestions();
     this.state.authBusy = "logout";
     this.transitioningVault = true;
     this.configureActiveEditor(true);
@@ -2645,6 +2762,7 @@ export class TansuApp {
 
   private async lockForAuthentication(): Promise<void> {
     if (this.disposed || this.state.authRequired) return;
+    this.cancelTagSuggestions();
     this.captureActiveEditor();
     const identity = this.identity;
     const pending = identity === null ? Promise.resolve() : this.flushOutgoingWorkspace(identity);

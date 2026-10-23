@@ -5,6 +5,11 @@ editor. Markdown files remain ordinary files in each vault. The server stores
 catalog and revision state in the XDG data path, keyed by stable vault ID. See
 [Configuration](configuration.md).
 
+The [product scope](product-backlog.md) rejects in-app AI and automatic
+related-note recommendations. Tag suggestions reuse vault-local search and
+require explicit selection before changing note content.
+Suggestion code loads on request so the feature stays out of the initial bundle.
+
 ## Data integrity
 
 `noteId` is durable identity; `path` is mutable metadata. Accepted writes,

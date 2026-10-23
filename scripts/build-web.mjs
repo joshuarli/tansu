@@ -11,7 +11,7 @@ const logMode = process.env.TANSU_LOGS ?? (mode === "production" ? "off" : "pret
 const encoderBaseUrl = await webpEncoderBaseUrl();
 const encoderAssets = await webpEncoderAssets();
 
-await build({
+const bundles = await build({
   configFile: false,
   root,
   base: "/",
@@ -54,6 +54,18 @@ for (const [url, file] of pages) {
       url: assetUrl,
       file: assetUrl.slice(1),
       contentType: assetUrl.endsWith(".js") ? "text/javascript; charset=utf-8" : "text/css; charset=utf-8",
+      immutable: true,
+    });
+  }
+}
+
+for (const bundle of Array.isArray(bundles) ? bundles : [bundles]) {
+  for (const output of bundle.output) {
+    if (output.type !== "chunk") continue;
+    pageAssets.push({
+      url: `/${output.fileName}`,
+      file: output.fileName,
+      contentType: "text/javascript; charset=utf-8",
       immutable: true,
     });
   }

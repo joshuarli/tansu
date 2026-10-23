@@ -532,6 +532,7 @@ type ViewActionSpies = {
   findMatches: ReturnType<typeof vi.fn<() => readonly { from: number; to: number }[]>>;
   outline: ReturnType<typeof vi.fn<() => Outline>>;
   activeHeadingFrom: number | null;
+  tagControls: ReturnType<typeof vi.fn<() => HTMLElement | null>>;
 };
 
 function actionSpies(): ViewActionSpies {
@@ -543,6 +544,7 @@ function actionSpies(): ViewActionSpies {
     findMatches: vi.fn<() => readonly { from: number; to: number }[]>(() => []),
     outline: vi.fn<() => Outline>(() => ({ headings: [], complete: true })),
     activeHeadingFrom: null,
+    tagControls: vi.fn(() => null),
   };
 }
 

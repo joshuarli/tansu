@@ -1,5 +1,5 @@
 import { closeBrackets, closeBracketsKeymap } from "@codemirror/autocomplete";
-import { indentWithTab, defaultKeymap, history, historyKeymap, redo, undo } from "@codemirror/commands";
+import { indentWithTab, defaultKeymap, history, historyKeymap, isolateHistory, redo, undo } from "@codemirror/commands";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { codeFolding, foldEffect, foldedRanges, unfoldEffect } from "@codemirror/language";
 import {
@@ -61,6 +61,7 @@ import {
 } from "./format-ops.js";
 
 const transactionOrigin = Annotation.define<EditorOrigin>();
+const tagEdit = Annotation.define<{ source: string; taggedSource: string }>();
 const EMPTY_CALLOUT_ICONS: Readonly<Record<string, string>> = {};
 
 const frontmatterLineDecorations = StateField.define<DecorationSet>({
@@ -203,6 +204,11 @@ export type ReloadResult =
   | { kind: "unchanged"; revision: number }
   | { kind: "dirty"; revision: number };
 
+export type AddTagOutcome =
+  | { kind: "applied" }
+  | { kind: "unchanged" }
+  | { kind: "unavailable"; message: string };
+
 export type SessionOptions = {
   mode?: EditorMode;
   readOnly?: boolean;
@@ -228,6 +234,7 @@ export type EditorHandle = {
   revealFindMatch(match: FindMatch): boolean;
   outline(): Outline;
   formatSelection(command: FormatCommand): void;
+  addTag(tag: string): Promise<AddTagOutcome>;
   undo(): boolean;
   redo(): boolean;
 };
@@ -499,6 +506,11 @@ function createState(
       EditorState.transactionFilter.of((transaction) => {
         if (!transaction.docChanged) return transaction;
         const origin = transaction.annotation(transactionOrigin);
+        const tag = transaction.annotation(tagEdit);
+        if (tag !== undefined) {
+          if (origin !== "userEdit" || transaction.startState.facet(readOnlyFacet)) return [];
+          return transaction.startState.doc.toString() === tag.source && transaction.newDoc.toString() === tag.taggedSource ? transaction : [];
+        }
         if (origin === "load" || origin === "externalReload") return transaction;
         if (transaction.startState.facet(readOnlyFacet)) return [];
         const frontmatter = frontmatterRange(transaction.startState);
@@ -1034,6 +1046,38 @@ export function createCodeMirrorEditor(container: HTMLElement, initialConfig: Ed
     sourceChange(data, operation);
   }
 
+  async function addTag(tag: string): Promise<AddTagOutcome> {
+    const data = ensureActive();
+    if (data === null) return { kind: "unavailable", message: "No note is active." };
+    if (data.readOnly) return { kind: "unavailable", message: "The active note is read-only." };
+    const source = currentSource(data);
+    const { planTagAddition } = await import("./tags.js");
+    if (disposed || ensureActive() !== data || data.readOnly || currentSource(data) !== source) {
+      return { kind: "unavailable", message: "The note changed before the tag could be applied." };
+    }
+    const plan = planTagAddition(source, tag);
+    if (plan.kind !== "applied") return plan;
+
+    let prefix = 0;
+    while (prefix < source.length && prefix < plan.source.length && source[prefix] === plan.source[prefix]) prefix++;
+    let sourceEnd = source.length;
+    let plannedEnd = plan.source.length;
+    while (sourceEnd > prefix && plannedEnd > prefix && source[sourceEnd - 1] === plan.source[plannedEnd - 1]) {
+      sourceEnd--;
+      plannedEnd--;
+    }
+    view.dispatch({
+      changes: { from: prefix, to: sourceEnd, insert: plan.source.slice(prefix, plannedEnd) },
+      annotations: [
+        transactionOrigin.of("userEdit"),
+        tagEdit.of({ source, taggedSource: plan.source }),
+        Transaction.userEvent.of("input.add-tag"),
+        isolateHistory.of("full"),
+      ],
+    });
+    return { kind: "applied" };
+  }
+
   const selectionToolbar = document.createElement("div");
   selectionToolbar.className = "selection-toolbar";
   selectionToolbar.setAttribute("role", "toolbar");
@@ -1366,6 +1410,7 @@ export function createCodeMirrorEditor(container: HTMLElement, initialConfig: Ed
     },
 
     formatSelection,
+    addTag,
 
     undo() {
       const data = ensureActive();

@@ -27,6 +27,7 @@ export type ViewActions = {
   findMatches: () => readonly FindMatch[];
   outline: () => Outline;
   activeHeadingFrom: number | null;
+  tagControls: (tab: Tab) => HTMLElement | null;
 };
 
 export function renderApp(state: State, actions: ViewActions): HTMLElement[] {
@@ -499,6 +500,7 @@ function renderMain(state: State, actions: ViewActions): HTMLElement {
     }
     workspace.append(renderEditorMount(true));
   } else {
+    workspace.append(renderNoteTags(state, actions, active));
     workspace.append(renderEditorMount(false));
     if (active.conflict) {
       const banner = el(
@@ -580,6 +582,19 @@ function renderDocumentTitle(tab: Tab): HTMLElement {
   const title = el("h1", "document-title", tab.title);
   title.dataset["key"] = `document-title:${tab.key}`;
   return title;
+}
+
+function renderNoteTags(state: State, actions: ViewActions, tab: Tab): HTMLElement {
+  const loaded = actions.tagControls(tab);
+  if (loaded !== null) return loaded;
+  const request = button("Suggest tags", "Suggest tags", () => actions.dispatch({ type: "tags.suggest" }), "text-button");
+  request.disabled = state.readingMode || state.tagSuggestions?.phase === "loading" ||
+    (tab.kind === "local-draft" && tab.session?.state.promotionPending === true);
+  const section = el("section", "note-tags", el("div", "note-tag-controls", request));
+  section.dataset["key"] = `note-tags:${tab.key}`;
+  section.setAttribute("aria-label", "Note tags");
+  if (state.tagSuggestions?.phase === "error") section.append(el("p", "tag-suggestions-error", state.tagSuggestions.message));
+  return section;
 }
 
 function renderFindBar(state: State, actions: ViewActions): HTMLElement {

@@ -37,6 +37,11 @@ requires a session and CSRF token.
 The current route and method list is in [HTTP dispatch](../src/http.rs). Request
 and response DTOs are in [API types](../crates/tansu-api-types/src/lib.rs).
 
+Tag suggestions use the existing vault-scoped search route and canonical note
+metadata. Choosing a suggestion edits tags frontmatter in the browser; the
+normal note save carries that change. There is no tag-suggestion endpoint or
+separate metadata write.
+
 `/api/v2/bootstrap` returns only server identity and vault IDs. Workspace
 sessions, pins, and recents are stored in the browser's private workspace.
 

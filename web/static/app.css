@@ -632,6 +632,64 @@ button {
   padding-top: 0;
 }
 
+.note-tags {
+  flex: 0 0 auto;
+  max-height: 35vh;
+  overflow-y: auto;
+  margin: 0 auto;
+  padding: 6px 20px;
+  width: min(100%, 800px);
+  box-sizing: border-box;
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.note-tag-controls,
+.tag-suggestions-heading,
+.tag-suggestion-label,
+.tag-suggestion-notes {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.note-tag,
+.tag-suggestion-add {
+  border: 1px solid var(--color-border);
+  border-radius: 5px;
+  padding: 2px 7px;
+  background: var(--color-bg);
+  color: var(--color-text);
+  overflow-wrap: anywhere;
+}
+
+.tag-suggestions {
+  padding-top: 8px;
+}
+
+.tag-suggestions-heading {
+  justify-content: space-between;
+  color: var(--color-text);
+}
+
+.tag-suggestion {
+  padding: 8px 0;
+}
+
+.tag-suggestion-notes {
+  margin-top: 4px;
+}
+
+.tag-suggestion-notes .text-button {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.tag-suggestions-error {
+  color: var(--color-danger);
+}
+
 .editor-mount {
   width: 100%;
   margin: 0;

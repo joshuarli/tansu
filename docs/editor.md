@@ -22,10 +22,13 @@ until the canonical note confirms it. If you edit during a merge request, an
 accepted earlier draft does not replace your newer source or selection.
 
 Source mode shows Markdown source in the same editor. Live mode renders Markdown
-decorations without changing source. Frontmatter stays folded and cannot be
-created or edited through the editor in either mode. The UI does not display
-frontmatter-derived tags. Tansu preserves frontmatter in the Markdown source and
-continues to read tags from it.
+decorations without changing source. Frontmatter stays folded and manual editor
+transactions cannot create or edit it in either mode. `EditorHandle.addTag`
+provides the explicit app operation for tag changes. It preserves the body and
+unrelated frontmatter, records one undoable user edit, and refuses malformed or
+unsupported tag forms with an unavailable result. The operation returns a promise
+and refuses the edit if its note changes while tag support loads. `readNoteTags`
+reads the V1 frontmatter tag forms used by the app; the adapter does not render tags.
 
 Click the note title to edit its name in place. Leaving the field attempts the
 rename; failures show a notification and restore the prior name. Successful

@@ -74,6 +74,9 @@ export type ViewEvent =
   | { type: "theme.toggle" }
   | { type: "linkRail.toggle" }
   | { type: "links.refresh" }
+  | { type: "tags.suggest" }
+  | { type: "tags.close" }
+  | { type: "tags.apply"; tag: string }
   | { type: "revisions.open" }
   | { type: "revisions.select"; eventId: RevisionEventId }
   | { type: "revisions.branch" }

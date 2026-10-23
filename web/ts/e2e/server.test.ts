@@ -18,6 +18,7 @@ import {
 import { expect, afterAll, beforeEach, describe, beforeAll, it } from "vitest";
 
 import { canonicalSourceHash } from "../source-hash.ts";
+import encodeWebp from "../editor/vendor/jsquash-webp/encode.js";
 import type { V2ServerEvent } from "../types.generated.ts";
 
 let server: ChildProcess | undefined;
@@ -48,6 +49,7 @@ type TestNoteMeta = {
   noteId: string;
   path: string;
   title: string;
+  tags: string[];
   revision: number;
   sourceHash: string;
   diskHash: string;
@@ -660,6 +662,49 @@ describe("real server harness", () => {
     await Promise.race([subscribed, eventPromise]);
     await writeFile(join(vaultOnePath, "outside.md"), "# Outside\n\nedit\n", "utf8");
     await expect(eventPromise).resolves.toBe("vaultChanged");
+    await page.close();
+  });
+
+  it("suggests local tags with supporting notes and persists an explicitly chosen tag", async () => {
+    const body = "# Quasar storage current\n\nQuasar storage transactions.\n";
+    for (const [path, content] of [
+      ["quasar-support.md", "---\ntags: [systems]\n---\n# Quasar storage reference\n\nQuasar storage transactions.\n"],
+      ["quasar-current.md", body],
+    ] as const) {
+      const response = await v2Request(vaultOneId, "/notes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mutationId: randomUUID(), path, content, sourceHash: await canonicalSourceHash(content) }),
+      });
+      expect(response.ok).toBeTruthy();
+    }
+    await expect.poll(async () => {
+      const response = await v2Request(vaultOneId, "/search", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query: "quasar", mode: "default", limit: 10, overlays: [] }),
+      });
+      const results = await response.json() as { hits: { path: string }[] };
+      return results.hits.some((hit) => hit.path === "quasar-support.md");
+    }).toBeTruthy();
+    const page = await newLoggedPage();
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto(baseUrl);
+    await page.waitForSelector(".main");
+    await openSearchNote(page, "quasar current");
+    await page.getByRole("button", { name: "Suggest tags", exact: true }).click();
+    await expect.poll(() => page.locator('[title="Add tag systems"]').isVisible()).toBeTruthy();
+    await expect(page.locator(".tag-suggestions").textContent()).resolves.toContain("Quasar storage reference");
+    expect((await loadNoteByPath(vaultOneId, "quasar-current.md")).content).toBe(body);
+    const saved = page.waitForResponse((response) => response.request().method() === "PUT" && response.url().includes("/notes/") && response.status() === 200);
+    await page.locator('[title="Add tag systems"]').click();
+    await page.keyboard.press(`${shortcutModifier()}+s`);
+    await saved;
+    const document = await loadNoteByPath(vaultOneId, "quasar-current.md");
+    expect(document.meta.tags).toStrictEqual(["systems"]);
+    expect(document.content.endsWith(body)).toBeTruthy();
+    await page.reload();
+    await page.getByRole("button", { name: "Suggest tags", exact: true }).click();
+    await expect.poll(() => page.locator(".note-tag").allTextContents()).toContain("systems");
     await page.close();
   });
 
@@ -1734,11 +1779,11 @@ async function expectMatchesBaseline(page: Page, name: string): Promise<void> {
     "baselines",
     `${process.env["TANSU_E2E_BROWSER"] ?? "chromium"}-${process.platform}`,
   );
-  const baselinePath = join(directory, `${name}.png`);
+  const baselinePath = join(directory, `${name}.webp`);
   const actual = await page.screenshot({ animations: "disabled", caret: "hide" });
   if (process.env["TANSU_UPDATE_BASELINES"] === "1") {
     await mkdir(directory, { recursive: true });
-    await writeFile(baselinePath, actual);
+    await writeFile(baselinePath, await encodeScreenshotAsWebp(actual, name));
     return;
   }
   const expected = await readFile(baselinePath).catch((error: NodeJS.ErrnoException) => {
@@ -1747,7 +1792,7 @@ async function expectMatchesBaseline(page: Page, name: string): Promise<void> {
     }
     throw error;
   });
-  const comparison = await comparePngs(expected, actual);
+  const comparison = await compareBaselineImages(expected, actual);
   if (comparison.size === "different" || comparison.differingRatio > BASELINE_MAX_DIFFERING_PIXEL_RATIO) {
     const actualPath = join(process.cwd(), ".work", "tmp", `baseline-actual-${name}.png`);
     await mkdir(join(process.cwd(), ".work", "tmp"), { recursive: true });
@@ -1758,16 +1803,97 @@ async function expectMatchesBaseline(page: Page, name: string): Promise<void> {
   }
 }
 
-async function comparePngs(
+async function encodeScreenshotAsWebp(png: Buffer, name: string): Promise<Buffer> {
+  const sipsOutput = await encodeScreenshotWithSips(png, name);
+  if (sipsOutput !== undefined) return sipsOutput;
+
+  const page = await browser!.newPage();
+  try {
+    const pixels = await page.evaluate(async (base64) => {
+      const image = new Image();
+      image.src = `data:image/png;base64,${base64}`;
+      await image.decode();
+      const canvas = document.createElement("canvas");
+      canvas.width = image.naturalWidth;
+      canvas.height = image.naturalHeight;
+      const context = canvas.getContext("2d");
+      if (context === null) throw new Error("2D canvas is unavailable");
+      context.drawImage(image, 0, 0);
+      const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+      const bytes = new Uint8Array(imageData.data.buffer);
+      let binary = "";
+      for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+        binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
+      }
+      return {
+        width: imageData.width,
+        height: imageData.height,
+        data: btoa(binary),
+      };
+    }, png.toString("base64"));
+    const wasm = await readFile(new URL("../editor/vendor/jsquash-webp/codec/enc/webp_enc.wasm", import.meta.url));
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (input, init) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      if (url.endsWith("webp_enc.wasm")) {
+        return new Response(wasm, { headers: { "content-type": "application/wasm" } });
+      }
+      return originalFetch(input, init);
+    };
+    try {
+      const encoded = await encodeWebp({
+        width: pixels.width,
+        height: pixels.height,
+        data: new Uint8ClampedArray(Buffer.from(pixels.data, "base64")),
+        colorSpace: "srgb",
+      } as ImageData, 1);
+      return Buffer.from(await encoded.arrayBuffer());
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  } finally {
+    await page.close();
+  }
+}
+
+async function encodeScreenshotWithSips(png: Buffer, name: string): Promise<Buffer | undefined> {
+  if (process.platform !== "darwin") return undefined;
+
+  const scratchRoot = join(process.cwd(), ".work", "tmp");
+  await mkdir(scratchRoot, { recursive: true });
+  const scratch = await mkdtemp(join(scratchRoot, `baseline-webp-${name}-`));
+  const sourcePath = join(scratch, `${name}.png`);
+  const outputPath = join(scratch, `${name}.webp`);
+  try {
+    await writeFile(sourcePath, png);
+    try {
+      execFileSync("sips", ["-s", "format", "webp", "-s", "formatOptions", "100", sourcePath, "--out", outputPath], {
+        encoding: "utf8",
+        stdio: "pipe",
+      });
+      return await readFile(outputPath);
+    } catch (error) {
+      const stderr = error !== null && typeof error === "object" && "stderr" in error
+        ? String(error.stderr)
+        : "";
+      if (!stderr.includes("Can't write format: org.webmproject.webp")) throw error;
+      return undefined;
+    }
+  } finally {
+    await rm(scratch, { recursive: true, force: true });
+  }
+}
+
+async function compareBaselineImages(
   expected: Buffer,
   actual: Buffer,
 ): Promise<{ size: "same" | "different"; differingRatio: number }> {
   const page = await browser!.newPage();
   try {
     return await page.evaluate(async ({ left, right, tolerance }) => {
-      const pixels = async (base64: string) => {
+      const pixels = async (base64: string, mimeType: string) => {
         const image = new Image();
-        image.src = `data:image/png;base64,${base64}`;
+        image.src = `data:${mimeType};base64,${base64}`;
         await image.decode();
         const canvas = document.createElement("canvas");
         canvas.width = image.naturalWidth;
@@ -1777,8 +1903,8 @@ async function comparePngs(
         context.drawImage(image, 0, 0);
         return context.getImageData(0, 0, canvas.width, canvas.height);
       };
-      const a = await pixels(left);
-      const b = await pixels(right);
+      const a = await pixels(left, "image/webp");
+      const b = await pixels(right, "image/png");
       if (a.width !== b.width || a.height !== b.height) {
         return { size: "different" as const, differingRatio: 1 };
       }

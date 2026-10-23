@@ -71,7 +71,7 @@ The target uses the Playwright `v1.64.0-noble` image and Node `26.12.0` on
 `web/ts/e2e/baselines/chromium-linux/` and
 `web/ts/e2e/baselines/webkit-linux/`. The target sets
 `TANSU_UPDATE_BASELINES=1` to write them, then reruns the test without the
-variable. Review the generated PNG files before committing them.
+variable. Review the generated WebP files before committing them.
 
 The image runs Ubuntu with glibc, so the workspace lock includes glibc
 variants of the existing Linux optional packages alongside the musl variants.

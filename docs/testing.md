@@ -50,5 +50,5 @@ change, generate Chromium baselines with:
 TANSU_UPDATE_BASELINES=1 TANSU_E2E_BROWSER=chromium deno task test:browser -t "baselines"
 ```
 
-Review the generated images in the diff. A failing run writes the actual image
-under `.work/tmp/`.
+Review the generated WebP images in the diff. A failing run writes the actual
+PNG image under `.work/tmp/`.

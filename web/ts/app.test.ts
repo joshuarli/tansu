@@ -1,4 +1,4 @@
-import { isolateHistory, undo } from "@codemirror/commands";
+import { isolateHistory, redo, undo } from "@codemirror/commands";
 import { EditorView } from "@codemirror/view";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { IDBFactory, IDBKeyRange } from "fake-indexeddb";
@@ -38,6 +38,7 @@ import type {
   V2SaveNoteRequest,
   V2SearchRequest,
   V2SearchResponse,
+  V2SearchHit,
   V2SettingsRequest,
   V2VaultBootstrapResponse,
 } from "./types.generated.ts";
@@ -105,6 +106,151 @@ describe("v2 desktop shell", () => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
     document.body.replaceChildren();
+  });
+
+  describe("local tag suggestions", () => {
+    function seedSuggestions() {
+      const current = noteMeta("current", "current.md", "Rust storage");
+      const support = noteMeta("support", "support.md", "Rust transactions", ["rust"]);
+      const client = configureVault([current, support], workspaceSeed([
+        { noteId: current.noteId, title: current.title, path: current.path, cursorOffset: null, sourceMode: false },
+      ], current.noteId));
+      const hit: V2SearchHit = {
+        identity: { kind: "canonical", noteId: support.noteId, revision: support.revision, sourceHash: support.sourceHash },
+        title: support.title, path: support.path, score: 1, excerpt: "Rust transactions", excerptRanges: [], sourceRange: null,
+      };
+      const response: V2SearchResponse = { hits: [hit], overlayCoverage: { status: "complete" } };
+      client.search.mockResolvedValue(response);
+      return { current, support, client, response };
+    }
+
+    it("explains suggestions and saves a chosen tag through the production editor", async () => {
+      useFakeTimers();
+      const { current, client } = seedSuggestions();
+      const { app, root } = mountApp({ ...createServices(), editor: { createEditor: createCodeMirrorEditor } });
+      await app.boot();
+      await until(() => root.querySelector(".cm-content") !== null);
+      expect(client.search).not.toHaveBeenCalled();
+      root.querySelector<HTMLButtonElement>('[title="Suggest tags"]')!.click();
+      await until(() => root.querySelector('[title="Add tag rust"]') !== null);
+      expect(root.querySelector(".tag-suggestions")?.textContent).toContain("Rust transactions");
+      expect(client.saveNote).not.toHaveBeenCalled();
+      root.querySelector<HTMLButtonElement>('[title="Add tag rust"]')!.click();
+      await until(() => root.querySelector(".note-tag")?.textContent === "rust");
+      const view = EditorView.findFromDOM(root.querySelector<HTMLElement>(".cm-editor")!)!;
+      expect(view.state.doc.toString()).toContain("tags:");
+      expect(view.state.doc.toString()).toContain("rust");
+      expect(view.state.doc.toString()).toMatch(/# Rust storage\n$/);
+      root.querySelector<HTMLButtonElement>('[title="Close tag suggestions"]')!.click();
+      expect(undo(view)).toBeTruthy();
+      await vi.advanceTimersByTimeAsync(150);
+      await until(() => root.querySelector(".note-tag") === null);
+      expect(redo(view)).toBeTruthy();
+      await vi.advanceTimersByTimeAsync(150);
+      await until(() => root.querySelector(".note-tag")?.textContent === "rust");
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "s", ctrlKey: true, cancelable: true }));
+      await until(() => client.saveNote.mock.calls.length > 0);
+      expect(client.saveNote.mock.calls[0]![0]).toBe(current.noteId);
+      expect(client.saveNote.mock.calls[0]![1].content).toBe(view.state.doc.toString());
+    });
+
+    it("discards results and cancels work when the note is edited", async () => {
+      const { client, response } = seedSuggestions();
+      const pending = deferred<V2SearchResponse>();
+      client.search.mockReturnValue(pending.promise);
+      const { app, root } = mountApp();
+      await app.boot();
+      await until(() => editorMock.instances[0]?.getSnapshot()?.source === "# Rust storage\n");
+      root.querySelector<HTMLButtonElement>('[title="Suggest tags"]')!.click();
+      await until(() => client.search.mock.calls.length > 0);
+      editorMock.instances[0]!.simulateEdit("# A different subject\n");
+      pending.resolve(response);
+      await flushAsync();
+      expect(root.querySelector('[title="Add tag rust"]')).toBeNull();
+      expect(client.search.mock.calls[0]![1]?.aborted).toBeTruthy();
+      expect(client.saveNote).not.toHaveBeenCalled();
+    });
+
+    it("discards results after a vault switch", async () => {
+      const { client, response } = seedSuggestions();
+      const pending = deferred<V2SearchResponse>();
+      client.search.mockReturnValue(pending.promise);
+      configureVault([noteMeta("other", "other.md", "Other")], null, "vault-2");
+      const { app, root } = mountApp();
+      await app.boot();
+      await until(() => root.querySelector('[title="Suggest tags"]') !== null);
+      root.querySelector<HTMLButtonElement>('[title="Suggest tags"]')!.click();
+      await until(() => client.search.mock.calls.length > 0);
+      const switched = app.boot("vault-2");
+      await until(() => client.search.mock.calls[0]![1]?.aborted === true);
+      pending.resolve(response);
+      await switched;
+      await flushAsync();
+      expect(root.querySelector('[title="Add tag rust"]')).toBeNull();
+      expect(client.search.mock.calls[0]![1]?.aborted).toBeTruthy();
+    });
+
+    it("shows a search failure and can retry without changing the note", async () => {
+      const { client, response } = seedSuggestions();
+      client.search.mockRejectedValue(new Error("Index unavailable"));
+      const { app, root } = mountApp();
+      await app.boot();
+      await until(() => root.querySelector('[title="Suggest tags"]') !== null);
+      root.querySelector<HTMLButtonElement>('[title="Suggest tags"]')!.click();
+      await until(() => root.querySelector(".tag-suggestions-error") !== null);
+      expect(root.querySelector(".tag-suggestions-error")?.textContent).toContain("Index unavailable");
+      client.search.mockResolvedValue(response);
+      root.querySelector<HTMLButtonElement>('[title="Suggest tags"]')!.click();
+      await until(() => root.querySelector('[title="Add tag rust"]') !== null);
+      expect(client.saveNote).not.toHaveBeenCalled();
+    });
+
+    it("cancels a pending request when its tab is closed", async () => {
+      const { client, response } = seedSuggestions();
+      const pending = deferred<V2SearchResponse>();
+      client.search.mockReturnValue(pending.promise);
+      const { app, root } = mountApp();
+      await app.boot();
+      await until(() => root.querySelector('[title="Suggest tags"]') !== null);
+      root.querySelector<HTMLButtonElement>('[title="Suggest tags"]')!.click();
+      await until(() => client.search.mock.calls.length > 0);
+      root.querySelector<HTMLButtonElement>(".tab.active .tab-close")!.click();
+      await until(() => root.querySelector(".tab") === null);
+      pending.resolve(response);
+      await flushAsync();
+      expect(client.search.mock.calls[0]![1]?.aborted).toBeTruthy();
+      expect(root.querySelector(".tag-suggestions")).toBeNull();
+    });
+
+    it("leaves suggestions disabled in reading mode", async () => {
+      const { client } = seedSuggestions();
+      const { app, root } = mountApp();
+      await app.boot();
+      await until(() => root.querySelector('[title="Suggest tags"]') !== null);
+      await runCommand(root, "reading");
+      const request = root.querySelector<HTMLButtonElement>('[title="Suggest tags"]')!;
+      expect(request.disabled).toBeTruthy();
+      request.click();
+      expect(client.search).not.toHaveBeenCalled();
+      expect(client.saveNote).not.toHaveBeenCalled();
+    });
+
+    it("discards pending evidence when vault metadata is resynchronized", async () => {
+      const { current, client, response } = seedSuggestions();
+      const pending = deferred<V2SearchResponse>();
+      client.search.mockReturnValue(pending.promise);
+      const { app, root } = mountApp();
+      await app.boot();
+      await until(() => root.querySelector('[title="Suggest tags"]') !== null);
+      root.querySelector<HTMLButtonElement>('[title="Suggest tags"]')!.click();
+      await until(() => client.search.mock.calls.length > 0);
+      await client.eventHandlers!.onResync({ bootstrap: vaultBootstrap([current]), notes: [current], eventVersion: 2 });
+      pending.resolve(response);
+      await flushAsync();
+      expect(client.search.mock.calls[0]![1]?.aborted).toBeTruthy();
+      expect(root.querySelector(".tag-suggestions")).toBeNull();
+      expect(client.saveNote).not.toHaveBeenCalled();
+    });
   });
 
   it("deduplicates a render-triggered V2 note load", async () => {
@@ -2884,7 +3030,7 @@ function createTestClient() {
     restoreRevision: vi.fn(async (_note: string, _revision: number, request: Parameters<V2VaultClient["restoreRevision"]>[2]) => accepted(request.mutationId, null)),
     restoreConflictDraft: vi.fn(async (_note: string, _draft: number, request: Parameters<V2VaultClient["restoreConflictDraft"]>[2]) => accepted(request.mutationId, null)),
     saveSettings: vi.fn(async (request: V2SettingsRequest) => ({ mutationId: request.mutationId, settings: request.settings })),
-    search: vi.fn(async (_request: V2SearchRequest) => searchResponse([])),
+    search: vi.fn(async (_request: V2SearchRequest, _signal?: AbortSignal) => searchResponse([])),
     uploadImage: vi.fn(async (mutationId: string) => ({ mutationId, name: "z-images/a.webp", markdown: "![[a.webp]]" })),
     loadAsset: vi.fn(async () => new Blob(["image"], { type: "image/webp" })),
     eventHandlers: null as Parameters<V2VaultClient["connectEvents"]>[1] | null,
@@ -3061,6 +3207,7 @@ function createFakeEditor(initialConfig?: EditorConfig): FakeEditor {
       ),
     })),
     formatSelection: vi.fn(),
+    addTag: vi.fn(async () => ({ kind: "unavailable" as const, message: "Use the production editor for tag edits" })),
     undo: vi.fn(() => true),
     redo: vi.fn(() => true),
     simulateInactiveEdit(noteKey: string, source: string) {

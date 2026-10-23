@@ -158,6 +158,137 @@ describe("CodeMirror editor sessions", () => {
     expect(editor.getSnapshot()?.source).toBe(source);
   });
 
+  it("adds tags through an undoable edit while preserving frontmatter and body source", async () => {
+    const source = "---\nauthor: Jane\ntags: [alpha, beta]\n---\n\n# Body\n\nExact body.\n";
+    const onChange = vi.fn();
+    const { editor, view } = mountEditor(source, { onChange });
+
+    await expect(editor.addTag("gamma")).resolves.toStrictEqual({ kind: "applied" });
+    const edited = "---\nauthor: Jane\ntags: [alpha, beta, gamma]\n---\n\n# Body\n\nExact body.\n";
+    expect(editor.getSnapshot()).toMatchObject({ source: edited, revision: 1, dirty: true });
+    expect(onChange).toHaveBeenCalledWith({ noteId: "note", revision: 1, origin: "userEdit" });
+
+    // oxlint-disable-next-line vitest/prefer-to-be-truthy -- Keep the exact boolean result.
+    expect(editor.undo()).toBe(true);
+    expect(editor.getSnapshot()).toMatchObject({ source, revision: 2, dirty: true });
+    // oxlint-disable-next-line vitest/prefer-to-be-truthy -- Keep the exact boolean result.
+    expect(editor.redo()).toBe(true);
+    expect(editor.getSnapshot()).toMatchObject({ source: edited, revision: 3, dirty: true });
+    expect(onChange).toHaveBeenCalledTimes(3);
+    expect(view.state.doc.toString()).toBe(edited);
+  });
+
+  it("does not revise a note when the tag already exists", async () => {
+    const onChange = vi.fn();
+    const { editor } = mountEditor("---\ntags: [alpha]\n---\nbody\n", { onChange });
+
+    await expect(editor.addTag("alpha")).resolves.toStrictEqual({ kind: "unchanged" });
+    expect(editor.getSnapshot()).toMatchObject({ revision: 0, dirty: false });
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("keeps the tag operation separate from nearby typing in history", async () => {
+    const source = "Body text";
+    const { editor, view } = mountEditor(source);
+    view.dispatch({
+      changes: { from: source.length, insert: " typed" },
+      annotations: Transaction.userEvent.of("input.type"),
+    });
+    const typedSource = "Body text typed";
+
+    await expect(editor.addTag("alpha")).resolves.toStrictEqual({ kind: "applied" });
+    // oxlint-disable-next-line vitest/prefer-to-be-truthy -- Keep the exact boolean result.
+    expect(editor.undo()).toBe(true);
+    expect(editor.getSnapshot()?.source).toBe(typedSource);
+    // oxlint-disable-next-line vitest/prefer-to-be-truthy -- Keep the exact boolean result.
+    expect(editor.undo()).toBe(true);
+    expect(editor.getSnapshot()?.source).toBe(source);
+  });
+
+  it("refuses malformed frontmatter and invalid tags without changing source", async () => {
+    const malformed = "---\ntags: [alpha\n---\nbody\n";
+    const malformedEditor = mountEditor(malformed).editor;
+    await expect(malformedEditor.addTag("beta")).resolves.toMatchObject({ kind: "unavailable" });
+    expect(malformedEditor.getSnapshot()).toMatchObject({ source: malformed, revision: 0, dirty: false });
+
+    const source = "---\ntags: [alpha]\n---\nbody\n";
+    const invalidEditor = mountEditor(source).editor;
+    await expect(invalidEditor.addTag("bad\ntag")).resolves.toMatchObject({ kind: "unavailable" });
+    expect(invalidEditor.getSnapshot()).toMatchObject({ source, revision: 0, dirty: false });
+  });
+
+  it("preserves a source BOM when adding to scalar tags", async () => {
+    const source = "\uFEFF---\ntags: alpha\n---\nbody\n";
+    const { editor } = mountEditor(source);
+
+    await expect(editor.addTag("beta")).resolves.toStrictEqual({ kind: "applied" });
+    expect(editor.getSnapshot()?.source).toBe("\uFEFF---\ntags: alpha, beta\n---\nbody\n");
+  });
+
+  it("adds to block lists and creates tags-only frontmatter when needed", async () => {
+    const blockSource = "---\ntags:\n  - alpha\n  - beta\n---\nbody\n";
+    const blockEditor = mountEditor(blockSource).editor;
+    await expect(blockEditor.addTag("gamma")).resolves.toStrictEqual({ kind: "applied" });
+    expect(blockEditor.getSnapshot()?.source).toBe("---\ntags:\n  - alpha\n  - beta\n  - gamma\n---\nbody\n");
+
+    const bodySource = "# Title\n\nBody stays exact.\n";
+    const bodyEditor = mountEditor(bodySource).editor;
+    await expect(bodyEditor.addTag("alpha")).resolves.toStrictEqual({ kind: "applied" });
+    expect(bodyEditor.getSnapshot()?.source).toBe("---\ntags: [alpha]\n---\n# Title\n\nBody stays exact.\n");
+  });
+
+  it("rewrites only the tags field when an inline value cannot hold a comma", async () => {
+    const source = "---\nauthor: Jane\ntags: [alpha, beta]\n---\nbody\n";
+    const { editor } = mountEditor(source);
+
+    await expect(editor.addTag("gamma, delta")).resolves.toStrictEqual({ kind: "applied" });
+    expect(editor.getSnapshot()?.source).toBe(
+      "---\nauthor: Jane\ntags:\n  - alpha\n  - beta\n  - 'gamma, delta'\n---\nbody\n",
+    );
+  });
+
+  it("refuses inline-list syntax whose permissive parser would lose existing tag boundaries", async () => {
+    const source = "---\ntags: [[alpha]]\n---\nbody\n";
+    const { editor } = mountEditor(source);
+
+    await expect(editor.addTag("beta")).resolves.toMatchObject({ kind: "unavailable" });
+    expect(editor.getSnapshot()).toMatchObject({ source, revision: 0, dirty: false });
+  });
+
+  it("refuses tag edits without an active writable session and keeps manual frontmatter edits blocked", async () => {
+    const container = document.createElement("div");
+    document.body.append(container);
+    const editor = createCodeMirrorEditor(container);
+    await expect(editor.addTag("alpha")).resolves.toMatchObject({ kind: "unavailable" });
+    const session = editor.createSession("locked", "---\ntags: [one]\n---\nbody\n", { readOnly: true });
+    editor.attachSession(session);
+    await expect(editor.addTag("alpha")).resolves.toMatchObject({ kind: "unavailable" });
+    editor.dispose();
+    container.remove();
+
+    const source = "---\ntags: [one]\n---\nbody\n";
+    const writable = mountEditor(source);
+    writable.view.dispatch({ changes: { from: source.indexOf("one"), to: source.indexOf("one") + 3, insert: "two" } });
+    expect(writable.editor.getSnapshot()?.source).toBe(source);
+    await expect(writable.editor.addTag("two")).resolves.toStrictEqual({ kind: "applied" });
+    writable.view.dispatch({ changes: { from: source.indexOf("one"), to: source.indexOf("one") + 3, insert: "bad" } });
+    expect(writable.editor.getSnapshot()?.source).toContain("tags: [one, two]");
+  });
+
+  it("does not apply a tag if its note changes while tag support loads", async () => {
+    const { editor, view } = mountEditor("# Original\n");
+    const pendingEdit = editor.addTag("alpha");
+    view.dispatch({ changes: { from: view.state.doc.length, insert: "New text" } });
+    await expect(pendingEdit).resolves.toMatchObject({ kind: "unavailable" });
+    expect(editor.getSnapshot()?.source).toBe("# Original\nNew text");
+
+    const pendingSwitch = editor.addTag("beta");
+    const other = editor.createSession("other", "# Other\n");
+    editor.attachSession(other);
+    await expect(pendingSwitch).resolves.toMatchObject({ kind: "unavailable" });
+    expect(editor.getSnapshot()?.source).toBe("# Other\n");
+  });
+
   it("keeps the first body line out of the folded frontmatter line", () => {
     const body = "First paragraph after the metadata.";
     const source = `---\ntags:\n  - alpha\n---\n\n${body}\n`;
