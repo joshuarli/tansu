@@ -1,6 +1,7 @@
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { once } from "node:events";
+import { createReadStream } from "node:fs";
 import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import net from "node:net";
 import { join, resolve } from "node:path";
@@ -112,7 +113,7 @@ describe("real server harness", () => {
         }
       }
     }
-    if (serverArtifactHash !== "" && artifactHash(serverBinaryPath) !== serverArtifactHash) {
+    if (serverArtifactHash !== "" && await artifactHash(serverBinaryPath) !== serverArtifactHash) {
       throw new Error(`server artifact changed while the suite ran: ${serverBinaryPath}`);
     }
   });
@@ -1393,19 +1394,34 @@ async function freePort(): Promise<number> {
 }
 
 async function startFixtureServer(): Promise<void> {
-  if (fixture === undefined) throw new Error("test fixture is not initialized");
-  const environment = {
+  if (fixture === undefined || fixtureRoot === undefined) throw new Error("test fixture is not initialized");
+  const runtimeRoot = join(fixtureRoot, "server-runtime");
+  const home = join(runtimeRoot, "home");
+  const cacheHome = join(runtimeRoot, "cache");
+  const tempHome = join(runtimeRoot, "tmp");
+  const cwd = join(runtimeRoot, "cwd");
+  const emptyPath = join(runtimeRoot, "empty-path");
+  await Promise.all([home, cacheHome, tempHome, cwd, emptyPath].map((path) => mkdir(path, { recursive: true })));
+  const buildEnvironment = {
     ...process.env,
     TANSU_LOGS: "buffer",
     XDG_CONFIG_HOME: fixture.configHome,
     XDG_DATA_HOME: fixture.dataHome,
+    TMPDIR: resolve(".work/tmp"),
+  };
+  const serverEnvironment = {
+    ...buildEnvironment,
+    HOME: home,
+    XDG_CACHE_HOME: cacheHome,
+    TMPDIR: tempHome,
+    PATH: emptyPath,
   };
   if (!serverBinaryBuilt) {
     const supplied = process.env["TANSU_E2E_SERVER_BINARY"];
     if (supplied === undefined || supplied === "") {
       execFileSync("cargo", ["build", "--quiet", "--bin", "tansu"], {
         cwd: process.cwd(),
-        env: environment,
+        env: buildEnvironment,
         stdio: "pipe",
       });
       const targetDirectory = resolve(process.env["CARGO_TARGET_DIR"] ?? "target");
@@ -1413,11 +1429,7 @@ async function startFixtureServer(): Promise<void> {
     } else {
       serverBinaryPath = resolve(supplied);
     }
-    serverArtifactHash = artifactHash(serverBinaryPath);
-    const record = process.env["TANSU_ACCEPTANCE_RECORD"];
-    if (record !== undefined && record !== "") {
-      await writeFile(record, `${serverArtifactHash} ${serverBinaryPath}\n`);
-    }
+    serverArtifactHash = await artifactHash(serverBinaryPath);
     serverBinaryBuilt = true;
   }
   const serverBinary = serverBinaryPath;
@@ -1425,12 +1437,12 @@ async function startFixtureServer(): Promise<void> {
     execFileSync(serverBinary, [
       "config", "init", "--vault", "One", fixture.vaultOne,
       "--vault", "Two", fixture.vaultTwo,
-    ], { cwd: process.cwd(), env: environment, stdio: "pipe" });
+    ], { cwd, env: serverEnvironment, stdio: "pipe" });
     settingsSeeded = true;
   }
   server = spawn(serverBinary, ["--port", String(serverPort)], {
-    cwd: process.cwd(),
-    env: environment,
+    cwd,
+    env: serverEnvironment,
     stdio: ["ignore", "pipe", "pipe"],
   });
   server.stdout?.on("data", (chunk: Buffer) => serverOutput.push(chunk.toString("utf8")));
@@ -1438,14 +1450,10 @@ async function startFixtureServer(): Promise<void> {
   await waitForReady(`${baseUrl}/api/v2/health`);
 }
 
-function artifactHash(path: string): string {
-  const line = execFileSync(process.execPath, ["scripts/artifact-hash.mjs", path], {
-    cwd: process.cwd(),
-    encoding: "utf8",
-  });
-  const hash = /^sha256:[0-9a-f]{64}/u.exec(line)?.[0];
-  if (hash === undefined) throw new Error(`unexpected artifact hash output: ${line}`);
-  return hash;
+async function artifactHash(path: string): Promise<string> {
+  const hash = createHash("sha256");
+  for await (const chunk of createReadStream(path)) hash.update(chunk);
+  return hash.digest("hex");
 }
 
 async function stopFixtureServer(): Promise<void> {

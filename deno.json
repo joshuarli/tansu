@@ -15,8 +15,6 @@
     "loupe:browser": "deno run --allow-env --allow-read --allow-write --allow-ffi scripts/build-browser-test-bundles.mjs && node_modules/.bin/vitest run --config vitest.loupe-browser.config.ts",
     "loupe:reader-sample": "node scripts/build-reader-sample-fixture.mjs",
     "playwright:install": "node scripts/install-playwright-browsers.mjs",
-    "coverage": "node_modules/.bin/vitest run --coverage",
-    "coverage:html": "node_modules/.bin/vitest run --coverage --coverage.reporter=html",
     "check": "deno task build && deno task lint && deno task typecheck && deno task test && cargo check -q"
   }
 }

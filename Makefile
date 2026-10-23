@@ -41,14 +41,6 @@ lint-rs:
 		-A clippy::type_complexity \
 		-A clippy::needless_borrow
 
-coverage-ts: types-check
-	deno task coverage
-
-coverage: coverage-ts
-
-coverage-html: types-check
-	deno task coverage:html
-
 types:
 	deno task build
 	cargo run --quiet -p gen-api-types
@@ -106,16 +98,15 @@ auth-recovery-drill:
 	TMPDIR="$(CURDIR)/.work/tmp" scripts/auth-recovery-drill.sh "$(AUTH_DRILL_BIN)"
 
 ACCEPTANCE_BROWSER ?= chromium
-ACCEPTANCE_RECORD ?= $(CURDIR)/.work/tmp/acceptance-artifact
+ACCEPTANCE_DEFAULT_SERVER_BINARY := $(if $(CARGO_TARGET_DIR),$(CARGO_TARGET_DIR),target)/debug/$(NAME)
 
 test-acceptance:
-	@mkdir -p "$(dir $(ACCEPTANCE_RECORD))"; rm -f "$(ACCEPTANCE_RECORD)"; \
-	rev="$$(git rev-parse HEAD)$$(git diff --quiet HEAD -- || echo -dirty)"; \
+	@rev="$$(git rev-parse HEAD)$$(git diff --quiet HEAD -- || echo -dirty)"; \
 	echo "acceptance suite revision: $$rev"; \
+	echo "acceptance server binary: $(abspath $(if $(strip $(ACCEPTANCE_SERVER_BINARY)),$(ACCEPTANCE_SERVER_BINARY),$(ACCEPTANCE_DEFAULT_SERVER_BINARY)))"; \
 	node_modules/.bin/vitest run web/ts/app.test.ts -t interleavings && \
-	TANSU_ACCEPTANCE_RECORD="$(ACCEPTANCE_RECORD)" TANSU_E2E_SERVER_BINARY="$(ACCEPTANCE_SERVER_BINARY)" TANSU_E2E_BROWSER=$(ACCEPTANCE_BROWSER) deno task test:browser -t "acceptance:" && \
-	echo "acceptance suite passed at revision: $$rev" && \
-	echo "acceptance suite passed against artifact: $$(cat "$(ACCEPTANCE_RECORD)")"
+	TANSU_E2E_SERVER_BINARY="$(ACCEPTANCE_SERVER_BINARY)" TANSU_E2E_BROWSER=$(ACCEPTANCE_BROWSER) deno task test:browser -t "acceptance:" && \
+	echo "acceptance suite passed at revision: $$rev"
 
 build-linux-musl-docker:
 	mkdir -p "$(CURDIR)/.work/tmp" "$(CURDIR)/.work/dist/$${TARGET:-x86_64-unknown-linux-musl}"
@@ -130,12 +121,6 @@ build-linux-musl-aarch64:
 
 deploy:
 	DEPLOY_HOST="$(DEPLOY_HOST)" TMPDIR="$(CURDIR)/.work/tmp" deploy/deploy-oracle.sh
-
-test-package:
-	mkdir -p "$(CURDIR)/.work/tmp"
-	TMPDIR="$(CURDIR)/.work/tmp" deno task build
-	TMPDIR="$(CURDIR)/.work/tmp" cargo build --locked --release --bin $(NAME)
-	TMPDIR="$(CURDIR)/.work/tmp" python3 scripts/test-package.py target/release/$(NAME)
 
 PERF_GATE_BEFORE := scripts/perf-gate.sh before
 PERF_GATE_AFTER := scripts/perf-gate.sh after
@@ -154,4 +139,4 @@ bench-full:
 	TMPDIR="$(CURDIR)/.work/tmp" MD_WYSIWYG_BENCH=1 deno task test web/ts/editor/tests/large-note-bench.test.ts
 	$(PERF_GATE_AFTER)
 
-.PHONY: auth-recovery-drill bench bench-full build-linux-musl-aarch64 build-linux-musl-docker build-linux-musl-x86_64 coverage coverage-html deploy dev dev-config check lint loupe setup test-loupe-browser test-package types types-check types-generated ts test test-e2e-chromium test-e2e-webkit test-e2e-loupe test-rs test-sqlite-static test-acceptance
+.PHONY: auth-recovery-drill bench bench-full build-linux-musl-aarch64 build-linux-musl-docker build-linux-musl-x86_64 deploy dev dev-config check lint loupe setup test-loupe-browser types types-check types-generated ts test test-e2e-chromium test-e2e-webkit test-e2e-loupe test-rs test-sqlite-static test-acceptance
