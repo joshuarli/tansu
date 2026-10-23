@@ -58,15 +58,6 @@ Next: 83
 - **Fix with:** lifecycle-concurrency
 - **Effort:** M
 
-### TNS-080 · P3 · Remove the test-only service seam and the hand-written store fake
-
-- **Area:** Tests
-- **Where:** `web/ts/app/services.ts`, `web/ts/app/workspace-store.ts:331-390`, `web/ts/app.test.ts:2363-2465`
-- **Problem:** Three type declarations and four curried factories carry one decision, and only tests pass non-default values. `app.test.ts` keeps a 100-line copy of store semantics although `fake-indexeddb` is already a dev dependency.
-- **Recommendation:** Run the app tests against `fake-indexeddb` and delete the seam and the fake.
-- **Fix with:** renovate-tests
-- **Effort:** M
-
 ### TNS-081 · P3 · Add a history scrubber and visual conflict-draft merge
 
 - **Area:** Architecture

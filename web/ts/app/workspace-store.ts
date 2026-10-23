@@ -328,66 +328,6 @@ export class DraftJournal {
   }
 }
 
-export function createDraftCheckpointWriter(
-  journal: DraftJournal,
-): (
-  record: DraftJournalRecord,
-  urgency: "typing" | "structural",
-  onFailure: (error: unknown) => void,
-) => undefined | Promise<boolean> {
-  return (record, urgency, onFailure) => urgency === "typing"
-    ? journal.schedule(record, onFailure)
-    : journal.checkpoint(record, onFailure);
-}
-
-export function createDraftCheckpointClearer(
-  journal: DraftJournal,
-  workspace: WorkspaceId,
-): (
-  identity: DocumentIdentity,
-  acceptedLocalRevision: number,
-  acceptedMutationId: string,
-) => Promise<boolean> {
-  return (identity, acceptedLocalRevision, acceptedMutationId) =>
-    journal.clearCheckpoint(
-      identity,
-      workspace,
-      identity.noteId,
-      acceptedLocalRevision,
-      acceptedMutationId,
-    );
-}
-
-export function createTitleDraftCheckpointClearer(
-  journal: DraftJournal,
-  workspace: WorkspaceId,
-): (
-  identity: DocumentIdentity,
-  titleRevision: number,
-  titleMutationId: string,
-) => Promise<boolean> {
-  return (identity, titleRevision, titleMutationId) =>
-    journal.clearTitleDraftCheckpoint(
-      identity,
-      workspace,
-      identity.noteId,
-      titleRevision,
-      titleMutationId,
-    );
-}
-
-export function createLocalDraftCheckpointWriter(
-  journal: DraftJournal,
-): (
-  record: LocalDraftJournalRecord,
-  urgency: "typing" | "structural",
-  onFailure: (error: unknown) => void,
-) => undefined | Promise<boolean> {
-  return (record, urgency, onFailure) => urgency === "typing"
-    ? journal.scheduleLocal(record, onFailure)
-    : journal.checkpointLocal(record, onFailure);
-}
-
 export async function getCachedNoteBody(
   identity: DocumentIdentity,
   meta: Pick<V2NoteMeta, "noteId" | "sourceHash">,

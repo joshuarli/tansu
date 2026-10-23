@@ -1,12 +1,24 @@
 import { isolateHistory, undo } from "@codemirror/commands";
 import { EditorView } from "@codemirror/view";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { IDBFactory, IDBKeyRange } from "fake-indexeddb";
 
 import { startApp, TansuApp } from "./app.ts";
 import { defaultServices, type AppServices } from "./app/services.ts";
+import {
+  cacheNoteBody,
+  deleteCachedNoteBodies,
+  DraftJournal,
+  getCachedNoteBody,
+  getDraftCheckpoint,
+  getLocalDraftCheckpoint,
+  getWorkspaceState,
+  saveWorkspaceState,
+  writeDraftCheckpoint,
+} from "./app/workspace-store.ts";
 import { canonicalSourceHash } from "./source-hash.ts";
 import { V2ApiError, type V2VaultBootstrap, type V2VaultClient, type V2VaultSnapshot } from "./app/v2-api.ts";
-import { workspaceId } from "./app/identity.ts";
+import { localDraftId, noteId, serverInstanceId, vaultId, workspaceId } from "./app/identity.ts";
 import type { EditorConfig } from "./editor/tansu-extensions.ts";
 import { createCodeMirrorEditor, type EditorHandle, type EditorSession, type EditorSnapshot } from "./editor/codemirror-adapter.ts";
 import type {
@@ -31,18 +43,14 @@ const HASH_A = `blake3-v3:${"a".repeat(64)}`;
 const HASH_B = `blake3-v3:${"b".repeat(64)}`;
 const DISK_HASH = `blake3-v2:${"c".repeat(64)}`;
 const DEFAULT_VAULT = "vault-1";
+const WORKSPACE_ID = workspaceId("workspace-1");
 
 type TestClient = ReturnType<typeof createTestClient>;
 
 const clients = new Map<string, TestClient>();
+let workspaceSeeds = Promise.resolve();
 const memory = {
-  workspaces: new Map<string, WorkspaceState>(),
-  cached: new Map<string, { sourceHash: string; content: string }>(),
-  savedDrafts: new Map<string, DraftJournalRecord>(),
-  localDrafts: new Map<string, LocalDraftJournalRecord>(),
-  promoted: [] as Array<{ localDraftId: string; noteId: string }>,
   workspaceWrites: [] as WorkspaceState[],
-  failWrites: false,
 };
 const apps: TansuApp[] = [];
 const api = {
@@ -58,13 +66,12 @@ const editorMock = { instances: [] as FakeEditor[] };
 describe("v2 desktop shell", () => {
   beforeEach(() => {
     clients.clear();
-    memory.workspaces.clear();
-    memory.cached.clear();
-    memory.savedDrafts.clear();
-    memory.localDrafts.clear();
-    memory.promoted.length = 0;
+    workspaceSeeds = Promise.resolve();
+    vi.stubGlobal("indexedDB", new IDBFactory());
+    vi.stubGlobal("IDBKeyRange", IDBKeyRange);
+    localStorage.clear();
+    localStorage.setItem("tansu.workspace.v1", "workspace-1");
     memory.workspaceWrites.length = 0;
-    memory.failWrites = false;
     editorMock.instances.length = 0;
     api.bootstrap.mockReset().mockResolvedValue({
       apiVersion: 2,
@@ -135,7 +142,7 @@ describe("v2 desktop shell", () => {
   });
 
   it("shows the empty-vault notice when bootstrap has no configured vaults", async () => {
-    vi.useFakeTimers();
+    useFakeTimers();
     api.bootstrap.mockResolvedValueOnce({ apiVersion: 2, serverInstanceId: "server-1", vaults: [] });
     const { app, root } = mountApp();
 
@@ -169,16 +176,18 @@ describe("v2 desktop shell", () => {
       { noteId: note.noteId, title: note.title, path: note.path, cursorOffset: null, sourceMode: false },
     ], note.noteId));
     const services = createServices();
-    const journal = { flushAll: vi.fn(async () => {}) } as unknown as ReturnType<AppServices["workspace"]["createJournal"]>;
+    const journal = new DraftJournal(() => {});
+    const flushAll = vi.spyOn(journal, "flushAll");
     vi.spyOn(services.workspace, "createJournal").mockReturnValue(journal);
     const { app } = mountApp(services);
     app.bindGlobalEvents();
     await app.boot();
+    editorMock.instances[0]!.revealSelection({ anchor: 2, head: 2 });
     window.dispatchEvent(new Event("beforeunload"));
-    await until(() => memory.workspaceWrites.length > 0);
+    await until(() => memory.workspaceWrites.some((state) => state.tabs[0]?.selection?.anchor === 2));
 
-    expect(memory.workspaceWrites.at(-1)?.tabs).toMatchObject([{ kind: "saved", noteId: note.noteId }]);
-    expect(journal.flushAll).toHaveBeenCalledTimes(1);
+    expect((await storedWorkspace())?.tabs).toMatchObject([{ kind: "saved", noteId: note.noteId, selection: { anchor: 2, head: 2 } }]);
+    expect(flushAll).toHaveBeenCalledTimes(1);
   });
 
   it("keeps the current vault mounted when bootstrap temporarily returns no vaults", async () => {
@@ -285,7 +294,7 @@ describe("v2 desktop shell", () => {
   });
 
   it("toggles focus mode from the shortcut, shows a hint, and exits with Escape", async () => {
-    vi.useFakeTimers();
+    useFakeTimers();
     configureVault([]);
     const { app, root } = mountApp();
     await app.boot();
@@ -372,7 +381,7 @@ describe("v2 desktop shell", () => {
 
     expect(root.textContent).toContain("Unlock your notes");
     expect(root.querySelector(".editor-mount")).toBeNull();
-    expect(memory.savedDrafts.get(note.noteId)?.source).toBe("# Local draft\n");
+    expect((await savedCheckpoint(note.noteId))?.source).toBe("# Local draft\n");
   });
 
   it("locks the session from settings after flushing workspace state", async () => {
@@ -387,7 +396,7 @@ describe("v2 desktop shell", () => {
     await until(() => root.querySelector(".auth-gate") !== null);
 
     expect(logout).toHaveBeenCalledTimes(1);
-    expect(memory.workspaces.size).toBeGreaterThan(0);
+    expect(await storedWorkspace()).not.toBeNull();
   });
 
   it("requests persistent storage from the settings user gesture", async () => {
@@ -473,7 +482,7 @@ describe("v2 desktop shell", () => {
     const client = configureVault([note], workspaceSeed([
       { noteId: note.noteId, title: note.title, path: note.path, cursorOffset: 1, sourceMode: false },
     ], note.noteId));
-    memory.cached.set(note.noteId, { sourceHash: note.sourceHash, content: "# Cached\n" });
+    await storeCachedBody(note, "# Cached\n");
     const load = deferred<V2NoteDocument>();
     client.openNote.mockReturnValue(load.promise);
     const { app, root } = mountApp();
@@ -505,7 +514,7 @@ describe("v2 desktop shell", () => {
     configureVault([note], workspaceSeed([
       { noteId: note.noteId, title: note.title, path: note.path, cursorOffset: null, sourceMode: false },
     ], note.noteId));
-    memory.cached.set(note.noteId, { sourceHash: HASH_B, content: "# Stale\n" });
+    await storeCachedBody({ ...note, sourceHash: HASH_B }, "# Stale\n");
     const load = deferred<V2NoteDocument>();
     testClient().openNote.mockReturnValue(load.promise);
     const { app, root } = mountApp();
@@ -523,7 +532,7 @@ describe("v2 desktop shell", () => {
     const client = configureVault([note, noteMeta("note-2", "two.md", "Two")]);
     const load = deferred<V2NoteDocument>();
     client.openNote.mockReturnValue(load.promise);
-    memory.cached.set(note.noteId, { sourceHash: note.sourceHash, content: "# Cached recent\n" });
+    await storeCachedBody(note, "# Cached recent\n");
     const { app, root } = mountApp();
     await app.boot();
     await openRecentNote(root);
@@ -603,7 +612,7 @@ describe("v2 desktop shell", () => {
     ]));
     const load = deferred<V2NoteDocument>();
     client.openNote.mockReturnValue(load.promise);
-    memory.cached.set(note.noteId, { sourceHash: note.sourceHash, content: "# Cached reopen\n" });
+    await storeCachedBody(note, "# Cached reopen\n");
     const { app, root } = mountApp();
     await app.boot();
     await runCommand(root, "reopen");
@@ -661,7 +670,8 @@ describe("v2 desktop shell", () => {
     ], oldNote.noteId));
     const nextClient = configureVault([noteMeta("second", "second.md", "Second")], null, "vault-2");
     const services = createServices();
-    const journal = { flushAll: vi.fn().mockRejectedValueOnce(new Error("storage unavailable")) } as unknown as ReturnType<AppServices["workspace"]["createJournal"]>;
+    const journal = new DraftJournal(() => {});
+    vi.spyOn(journal, "flushAll").mockRejectedValueOnce(new Error("storage unavailable"));
     vi.spyOn(services.workspace, "createJournal").mockReturnValue(journal);
     const root = document.createElement("div");
     document.body.append(root);
@@ -814,7 +824,7 @@ describe("v2 desktop shell", () => {
   });
 
   it("autosaves the tab that scheduled a save after switching to another tab", async () => {
-    vi.useFakeTimers();
+    useFakeTimers();
     const first = noteMeta("one", "one.md", "One");
     const second = noteMeta("two", "two.md", "Two");
     const client = configureVault([first, second], workspaceSeed([
@@ -847,7 +857,7 @@ describe("v2 desktop shell", () => {
   });
 
   it("flushes outgoing workspace state and cancels old vault autosaves before switching", async () => {
-    vi.useFakeTimers();
+    useFakeTimers();
     const first = noteMeta("first", "first.md", "First");
     const second = noteMeta("second", "second.md", "Second");
     const oldClient = configureVault([first], workspaceSeed([
@@ -863,7 +873,7 @@ describe("v2 desktop shell", () => {
     await vi.advanceTimersByTimeAsync(1000);
     await flushAsync();
 
-    expect(memory.workspaces.get(workspaceKey("server-1", DEFAULT_VAULT))?.tabs).toStrictEqual([
+    expect((await storedWorkspace())?.tabs).toMatchObject([
       expect.objectContaining({ kind: "saved", noteId: first.noteId }),
     ]);
     expect(newClient.saveNote).not.toHaveBeenCalled();
@@ -907,7 +917,7 @@ describe("v2 desktop shell", () => {
   });
 
   it("serializes saves and coalesces edits made while a save is in flight", async () => {
-    vi.useFakeTimers();
+    useFakeTimers();
     const note = noteMeta("note-1", "one.md", "One");
     const client = configureVault([note], workspaceSeed([
       { noteId: note.noteId, title: note.title, path: note.path, cursorOffset: null, sourceMode: false },
@@ -936,7 +946,7 @@ describe("v2 desktop shell", () => {
   });
 
   it("captures editor source after a debounce instead of on each change callback", async () => {
-    vi.useFakeTimers();
+    useFakeTimers();
     const note = noteMeta("note-1", "one.md", "One");
     const client = configureVault([note], workspaceSeed([
       { noteId: note.noteId, title: note.title, path: note.path, cursorOffset: null, sourceMode: false },
@@ -968,16 +978,16 @@ describe("v2 desktop shell", () => {
     );
     const { app, root } = mountApp();
     await app.boot();
-    memory.cached.delete(note.noteId);
+    await deleteCachedNoteBodies(documentIdentity(note.noteId));
     editorMock.instances[0]!.simulateEdit("# Saved\n");
     await runCommand(root, "save");
-    await until(() => memory.cached.get(note.noteId)?.content === "# Saved\n");
     const request = client.saveNote.mock.calls[0]![1];
-    expect(memory.cached.get(note.noteId)).toStrictEqual({ sourceHash: request.sourceHash, content: "# Saved\n" });
+    await until(async () => (await cachedBody({ noteId: note.noteId, sourceHash: request.sourceHash }))?.content === "# Saved\n");
+    expect(await cachedBody({ noteId: note.noteId, sourceHash: request.sourceHash })).toMatchObject({ sourceHash: request.sourceHash, content: "# Saved\n" });
   });
 
   it("promotes a typed new note on autosave with a title from its first line and never creates an empty one", async () => {
-    vi.useFakeTimers();
+    useFakeTimers();
     const client = configureVault([]);
     const created = noteMeta("created", "plan-for-may.md", "Plan for May");
     client.createNote.mockImplementation(async (request) => accepted(request.mutationId, created));
@@ -991,6 +1001,7 @@ describe("v2 desktop shell", () => {
 
     editorMock.instances[0]!.simulateEdit("## Plan for May\n");
     await vi.advanceTimersByTimeAsync(2000);
+    await until(() => client.createNote.mock.calls.length === 1);
     expect(client.createNote).toHaveBeenCalledTimes(1);
     expect(client.createNote.mock.calls[0]![0]).toMatchObject({ path: "plan-for-may.md", content: "## Plan for May\n" });
     expect(root.querySelector(".note-dialog-panel")).toBeNull();
@@ -1010,7 +1021,7 @@ describe("v2 desktop shell", () => {
     editorMock.instances[0]!.simulateEdit("# Meeting Notes\n");
     await flushEditorCapture();
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "s", ctrlKey: true, cancelable: true }));
-    await flushAsync();
+    await until(() => client.createNote.mock.calls.length === 1);
     const request = client.createNote.mock.calls[0]![0];
     expect(request).toMatchObject({ path: "meeting-notes.md", content: "# Meeting Notes\n", sourceHash: expect.stringMatching(/^blake3-v3:/) });
     pending.resolve({ mutationId: request.mutationId, outcome: { state: "pendingMaterialization", operationId: "op-1" } });
@@ -1019,13 +1030,15 @@ describe("v2 desktop shell", () => {
     await flushAsync();
     expect(client.createNote).toHaveBeenCalledTimes(2);
     expect(client.createNote.mock.calls[1]?.[0].mutationId).toBe(request.mutationId);
-    expect(memory.promoted).toHaveLength(1);
-    expect(memory.promoted[0]?.localDraftId).not.toBe(created.noteId);
-    expect(memory.promoted[0]?.noteId).toBe(created.noteId);
+    const localId = localIdFrom(editorMock.instances[0]!);
+    const checkpoint = await savedCheckpoint(created.noteId);
+    expect(checkpoint?.noteId).toBe(created.noteId);
+    expect(localId).not.toBe(created.noteId);
+    expect(await localCheckpoint(localId)).toBeNull();
   });
 
   it("does not schedule workspace persistence when a local checkpoint read finishes after dispose", async () => {
-    vi.useFakeTimers();
+    useFakeTimers();
     configureVault([]);
     const services = createServices();
     const checkpoint = deferred<LocalDraftJournalRecord | null>();
@@ -1036,6 +1049,7 @@ describe("v2 desktop shell", () => {
     apps.push(app);
     await app.boot();
 
+    const workspaceWritesBeforeOpen = memory.workspaceWrites.length;
     root.querySelector<HTMLButtonElement>('[title="New note"]')?.click();
     await until(() => read.mock.calls.length === 1);
     await app.dispose();
@@ -1043,7 +1057,7 @@ describe("v2 desktop shell", () => {
     await flushAsync();
 
     expect(vi.getTimerCount()).toBe(0);
-    expect(memory.workspaceWrites).toHaveLength(0);
+    expect(memory.workspaceWrites.slice(workspaceWritesBeforeOpen)).toHaveLength(0);
   });
 
   it("sends dirty overlays to V2 search and ignores stale results", async () => {
@@ -1098,7 +1112,7 @@ describe("v2 desktop shell", () => {
     const load = deferred<V2NoteDocument>();
     client.openNote.mockReturnValue(load.promise);
     client.search.mockResolvedValue(searchResponse([{ ...searchHit(note), sourceRange: { startUtf16: 2, endUtf16: 8 } }]));
-    memory.cached.set(note.noteId, { sourceHash: note.sourceHash, content: source });
+    await storeCachedBody(note, source);
     const { app, root } = mountApp();
     await app.boot();
     await openSearch(root);
@@ -1160,6 +1174,7 @@ describe("v2 desktop shell", () => {
     await flushAsync();
     expect(client.deleteNote).toHaveBeenCalledWith(note.noteId, expect.objectContaining({ precondition: { baseRevision: 2, baseSourceHash: HASH_B, baseDiskHash: DISK_HASH } }));
     expect(root.querySelector(".note-dialog-panel")).toBeNull();
+    await until(() => root.querySelector(".tab.active") === null);
   });
 
   it("reports title-checkpoint cleanup failures after an accepted rename", async () => {
@@ -1170,23 +1185,22 @@ describe("v2 desktop shell", () => {
     ], note.noteId));
     client.openNote.mockResolvedValue(documentFor(note, "# One\n"));
     client.renameNote.mockResolvedValue(accepted("rename", renamed));
-    const services = createServices();
-    services.workspace.titleCheckpointClearer = () => async () => {
-      throw new Error("storage blocked");
-    };
-    const { app, root } = mountApp(services);
+    const clearTitle = vi.spyOn(DraftJournal.prototype, "clearTitleDraftCheckpoint").mockRejectedValueOnce(new Error("storage blocked"));
+    const { app, root } = mountApp();
     await app.boot();
 
     const renamedSuccessfully = await (editorMock.instances[0]!.config["onNoteTitleCommit"] as (request: { title: string; intent: "rename" }) => Promise<boolean>)({ title: "Renamed", intent: "rename" });
     expect(renamedSuccessfully).toBeTruthy();
 
     expect(client.renameNote).toHaveBeenCalledTimes(1);
+    expect(clearTitle).toHaveBeenCalledTimes(1);
     expect(root.querySelector<HTMLButtonElement>(".tab.active")?.title).toBe("Renamed");
-    expect(memory.savedDrafts.get(note.noteId)?.titleDraft).toBe("Renamed");
+    expect((await savedCheckpoint(note.noteId))?.titleDraft).toBe("Renamed");
+    clearTitle.mockRestore();
   });
 
   it("persists and recovers a dirty closed tab through its workspace and journal", async () => {
-    vi.useFakeTimers();
+    useFakeTimers();
     const note = noteMeta("note-1", "one.md", "One");
     const client = configureVault([note], workspaceSeed([
       { noteId: note.noteId, title: note.title, path: note.path, cursorOffset: null, sourceMode: false },
@@ -1197,7 +1211,8 @@ describe("v2 desktop shell", () => {
       outcome: { state: "conflict", current: documentFor(noteMeta(note.noteId, note.path, note.title, [], 2, HASH_B), "# Remote\n"), draft: conflictDraft(note.noteId) },
     }));
     const services = createServices();
-    const journal = { flushAll: vi.fn(async () => {}) } as unknown as ReturnType<AppServices["workspace"]["createJournal"]>;
+    const journal = new DraftJournal(() => {});
+    const flushAll = vi.spyOn(journal, "flushAll");
     vi.spyOn(services.workspace, "createJournal").mockReturnValue(journal);
     const { app, root } = mountApp(services);
     await app.boot();
@@ -1205,16 +1220,18 @@ describe("v2 desktop shell", () => {
     editor.simulateEdit("# Recoverable draft\n");
     await vi.advanceTimersByTimeAsync(150);
     await flushAsync();
-    expect(memory.savedDrafts.get(note.noteId)?.source).toBe("# Recoverable draft\n");
+    await vi.advanceTimersByTimeAsync(200);
+    await flushAsync();
+    expect((await savedCheckpoint(note.noteId))?.source).toBe("# Recoverable draft\n");
 
     root.querySelector<HTMLButtonElement>(".tab.active .tab-close")?.click();
-    await until(() => root.querySelector(".tab") === null && memory.workspaces.get(workspaceKey("server-1", DEFAULT_VAULT))?.closedTabs.length === 1);
-    expect(journal.flushAll).toHaveBeenCalled();
-    expect(memory.workspaces.get(workspaceKey("server-1", DEFAULT_VAULT))?.closedTabs[0]).toMatchObject({
+    await until(async () => root.querySelector(".tab") === null && (await storedWorkspace())?.closedTabs.length === 1);
+    expect(flushAll).toHaveBeenCalled();
+    expect((await storedWorkspace())?.closedTabs[0]).toMatchObject({
       kind: "saved",
       noteId: note.noteId,
     });
-    expect(memory.savedDrafts.get(note.noteId)?.source).toBe("# Recoverable draft\n");
+    expect((await savedCheckpoint(note.noteId))?.source).toBe("# Recoverable draft\n");
 
     await app.dispose();
     const { root: reopenedRoot } = mountApp();
@@ -1248,8 +1265,8 @@ describe("v2 desktop shell", () => {
     }));
     expect(editorMock.instances[0]?.getSnapshot()?.source).toBe("# Restored\n");
     expect(root.textContent).not.toContain("Save conflict");
-    await until(() => memory.cached.get(note.noteId)?.content === "# Restored\n");
-    expect(memory.cached.get(note.noteId)?.content).toBe("# Restored\n");
+    await until(async () => (await cachedBody(restored))?.content === "# Restored\n");
+    expect((await cachedBody(restored))?.content).toBe("# Restored\n");
   });
 
   it("drops a revision restore that resolves after its tab was closed", async () => {
@@ -1274,7 +1291,7 @@ describe("v2 desktop shell", () => {
     await until(() => client.restoreRevision.mock.calls.length === 1);
     root.querySelector<HTMLButtonElement>('.tab[title="First"] .tab-close')?.click();
     await flushAsync();
-    await until(() => !memory.cached.has(first.noteId));
+    await until(async () => (await cachedBody(first)) === null);
     const openNoteCallsBeforeRestoreSettles = client.openNote.mock.calls.length;
     client.openNote.mockResolvedValue(documentFor(restored, "# Restored\n"));
 
@@ -1282,7 +1299,7 @@ describe("v2 desktop shell", () => {
     await flushAsync();
 
     expect(client.openNote).toHaveBeenCalledTimes(openNoteCallsBeforeRestoreSettles);
-    expect(memory.cached.has(first.noteId)).toBeFalsy();
+    expect(await cachedBody(first)).toBeNull();
     expect(root.querySelector(".toast")).toBeNull();
   });
 
@@ -1319,7 +1336,7 @@ describe("v2 desktop shell", () => {
     expect(newClient.openNote).toHaveBeenCalledTimes(1);
     expect(root.textContent).toContain("New");
     expect(editorMock.instances[0]?.getSnapshot()).toMatchObject({ noteId: "saved:shared", source: "# New\n" });
-    expect(memory.cached.get("shared")?.content).not.toBe("# Restored\n");
+    expect((await cachedBody(oldNote, DEFAULT_VAULT))?.content).not.toBe("# Restored\n");
   });
 
   it("ignores a revision list that resolves after switching notes", async () => {
@@ -1376,7 +1393,7 @@ describe("v2 desktop shell", () => {
   });
 
   it("saves a dirty note to the server when its tab is closed", async () => {
-    vi.useFakeTimers();
+    useFakeTimers();
     const note = noteMeta("note-1", "one.md", "One");
     const client = configureVault([note], workspaceSeed([
       { noteId: note.noteId, title: note.title, path: note.path, cursorOffset: null, sourceMode: false },
@@ -1402,7 +1419,7 @@ describe("v2 desktop shell", () => {
     const client = configureVault([note], workspaceSeed([
       { noteId: note.noteId, title: note.title, path: note.path, cursorOffset: 1, sourceMode: false },
     ], note.noteId));
-    memory.cached.set(note.noteId, { sourceHash: note.sourceHash, content: "# Cached\n" });
+    await storeCachedBody(note, "# Cached\n");
     const load = deferred<V2NoteDocument>();
     client.openNote.mockReturnValueOnce(load.promise).mockResolvedValue(documentFor(restored, "# Local edit\n"));
     client.saveNote.mockImplementation(async (_id, request) => accepted(request.mutationId, restored));
@@ -1456,7 +1473,7 @@ describe("v2 desktop shell", () => {
     }));
     expect(editorMock.instances[0]?.getSnapshot()?.source).toBe("# Draft\n");
     expect(root.textContent).not.toContain("Save conflict");
-    expect(memory.savedDrafts.has(note.noteId)).toBeFalsy();
+    expect(await savedCheckpoint(note.noteId)).toBeNull();
   });
 
   it("clamps settings and retains non-finite values", async () => {
@@ -1784,7 +1801,7 @@ describe("v2 desktop shell", () => {
   });
 
   it("autosaves image insertion when upload status rerenders the shell", async () => {
-    vi.useFakeTimers();
+    useFakeTimers();
     const note = noteMeta("note-1", "one.md", "One");
     const client = configureVault([note], workspaceSeed([
       { noteId: note.noteId, title: note.title, path: note.path, cursorOffset: null, sourceMode: false },
@@ -1816,7 +1833,7 @@ describe("v2 desktop shell", () => {
   });
 
   it("captures a change reported for an inactive note into that note's session", async () => {
-    vi.useFakeTimers();
+    useFakeTimers();
     const first = noteMeta("one", "one.md", "One");
     const second = noteMeta("two", "two.md", "Two");
     const client = configureVault([first, second], workspaceSeed([
@@ -1830,7 +1847,7 @@ describe("v2 desktop shell", () => {
     await flushAsync();
     const editor = editorMock.instances[0]!;
     root.querySelector<HTMLButtonElement>('.tab[title="Two"]')?.click();
-    await flushAsync();
+    await until(() => editor.attachedSession?.noteId === "saved:two");
     expect(editor.attachedSession?.noteId).toBe("saved:two");
 
     editor.simulateEditIn("saved:one", "![[z-images/a.webp]]\n# One\n");
@@ -1844,12 +1861,12 @@ describe("v2 desktop shell", () => {
     expect(client.saveNote).toHaveBeenCalledTimes(1);
     expect(client.saveNote.mock.calls[0]?.[0]).toBe(first.noteId);
     expect(client.saveNote.mock.calls[0]?.[1]).toMatchObject({ content: "![[z-images/a.webp]]\n# One\n" });
-    expect(memory.savedDrafts.get(first.noteId)?.source).toBe("![[z-images/a.webp]]\n# One\n");
-    expect(memory.savedDrafts.has(second.noteId)).toBeFalsy();
+    expect((await savedCheckpoint(first.noteId))?.source).toBe("![[z-images/a.webp]]\n# One\n");
+    expect(await savedCheckpoint(second.noteId)).toBeNull();
   });
 
   it("debounces workspace session writes while typing", async () => {
-    vi.useFakeTimers();
+    useFakeTimers();
     const note = noteMeta("note-1", "one.md", "One");
     const client = configureVault([note], workspaceSeed([
       { noteId: note.noteId, title: note.title, path: note.path, cursorOffset: null, sourceMode: false },
@@ -1872,6 +1889,7 @@ describe("v2 desktop shell", () => {
     await vi.advanceTimersByTimeAsync(249);
     expect(memory.workspaceWrites).toHaveLength(0);
     await vi.advanceTimersByTimeAsync(1);
+    await flushAsync();
     expect(memory.workspaceWrites).toHaveLength(1);
   });
 
@@ -1894,7 +1912,7 @@ describe("v2 desktop shell", () => {
   });
 
   it("awaits journal flush and clears owned timers during disposal", async () => {
-    vi.useFakeTimers();
+    useFakeTimers();
     vi.spyOn(window, "postMessage").mockImplementation(() => {});
     const note = noteMeta("note-1", "one.md", "One");
     const client = configureVault([note], workspaceSeed([
@@ -1902,8 +1920,9 @@ describe("v2 desktop shell", () => {
     ], note.noteId));
     client.saveNote.mockRejectedValueOnce(new Error("offline"));
     const services = createServices();
-    const pendingFlush = deferred<undefined>();
-    const journal = { flushAll: vi.fn(() => pendingFlush.promise) } as unknown as ReturnType<AppServices["workspace"]["createJournal"]>;
+    const pendingFlush = deferred<boolean>();
+    const journal = new DraftJournal(() => {}, 200, () => pendingFlush.promise);
+    const flushAll = vi.spyOn(journal, "flushAll");
     vi.spyOn(services.workspace, "createJournal").mockReturnValue(journal);
     const root = document.createElement("div");
     document.body.append(root);
@@ -1920,11 +1939,11 @@ describe("v2 desktop shell", () => {
     void disposing.then(() => {
       disposed = true;
     });
-    expect(journal.flushAll).toHaveBeenCalledTimes(1);
+    expect(flushAll).toHaveBeenCalledTimes(1);
     expect(vi.getTimerCount()).toBe(0);
     await flushAsync();
     expect(disposed).toBeFalsy();
-    pendingFlush.resolve(undefined);
+    pendingFlush.resolve(true);
     await disposing;
     expect(disposed).toBeTruthy();
   });
@@ -1941,7 +1960,7 @@ describe("v2 desktop shell", () => {
   });
 
   it("shows an export action after draft checkpoint storage fails", async () => {
-    vi.useFakeTimers();
+    useFakeTimers();
     const note = noteMeta("note-1", "one.md", "One");
     const client = configureVault([note], workspaceSeed([
       { noteId: note.noteId, title: note.title, path: note.path, cursorOffset: null, sourceMode: false },
@@ -1949,13 +1968,16 @@ describe("v2 desktop shell", () => {
     client.openNote.mockResolvedValue(documentFor(note, "# One\n"));
     const { app, root } = mountApp();
     await app.boot();
-    memory.failWrites = true;
+    const openingDatabase = vi.spyOn(IDBFactory.prototype, "open").mockImplementation(() => {
+      throw new Error("quota exceeded");
+    });
     editorMock.instances[0]!.simulateEdit("# Recover this\n");
     await vi.advanceTimersByTimeAsync(150);
     await vi.advanceTimersByTimeAsync(250);
     await flushAsync();
     expect(root.querySelector<HTMLButtonElement>('[title="Export draft"]')).not.toBeNull();
-    vi.useFakeTimers();
+    openingDatabase.mockRestore();
+    useFakeTimers();
     const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
     const createUrl = vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:export");
     const revokeUrl = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
@@ -1989,7 +2011,7 @@ describe("v2 desktop shell", () => {
       selection: { anchor: 1, head: 1 },
       checkpointedAtMs: 1,
     };
-    memory.savedDrafts.set(lost.noteId, checkpoint);
+    await storeSavedCheckpoint(checkpoint);
     client.openNote.mockRejectedValue(new V2ApiError("unresolved", 404, {
       code: "unresolved_note",
       noteId: lost.noteId,
@@ -2000,10 +2022,12 @@ describe("v2 desktop shell", () => {
     await until(() => root.querySelector('[title="Recreate note from draft"]') !== null);
     expect(editorMock.instances[0]?.getSnapshot()?.source).toBe("# Recover me\n");
     root.querySelector<HTMLButtonElement>('[title="Recreate note from draft"]')?.click();
-    await until(() => [...memory.localDrafts.values()].some((record) => record.source === "# Recover me\n") &&
-      !memory.savedDrafts.has(lost.noteId));
-    expect([...memory.localDrafts.values()].some((record) => record.source === "# Recover me\n")).toBeTruthy();
-    expect(memory.savedDrafts.get(lost.noteId)).toBeUndefined();
+    await until(() => editorMock.instances[0]?.getSnapshot()?.noteId.startsWith("local:") === true);
+    const localId = localIdFrom(editorMock.instances[0]!);
+    await until(async () => (await localCheckpoint(localId))?.source === "# Recover me\n" &&
+      await savedCheckpoint(lost.noteId) === null);
+    expect((await localCheckpoint(localId))?.source).toBe("# Recover me\n");
+    expect(await savedCheckpoint(lost.noteId)).toBeNull();
     await app.dispose();
   });
 
@@ -2234,11 +2258,11 @@ describe("v2 desktop shell", () => {
       await until(() => root.querySelector(".auth-gate") !== null);
 
       expect(client.saveNote).toHaveBeenCalledTimes(1);
-      expect(memory.savedDrafts.get(first.noteId)?.source).toBe("# Newer than the request\n");
+      expect((await savedCheckpoint(first.noteId))?.source).toBe("# Newer than the request\n");
     });
 
     it("saves the queued newer edit when a tab is closed during an in-flight save", async () => {
-      vi.useFakeTimers();
+      useFakeTimers();
       const { first, client } = twoNoteVault();
       const inFlight = deferred<V2MutationResponse>();
       client.saveNote.mockReturnValueOnce(inFlight.promise);
@@ -2285,7 +2309,7 @@ describe("v2 desktop shell", () => {
     });
 
     it("saves an image inserted into a note after the user switched away", async () => {
-      vi.useFakeTimers();
+      useFakeTimers();
       const { first, client } = twoNoteVault();
       const { app, root } = mountApp();
       await app.boot();
@@ -2347,25 +2371,70 @@ function testClient(id = DEFAULT_VAULT): TestClient {
 
 function configureVault(notes: V2NoteMeta[], seed: WorkspaceSeed | null = null, id = DEFAULT_VAULT): TestClient {
   const client = testClient(id);
-  client.bootstrap.mockResolvedValue(vaultBootstrap(notes, id));
+  let seedWrite = workspaceSeeds;
   if (seed !== null) {
-    memory.workspaces.set(workspaceKey("server-1", id), {
+    seedWrite = workspaceSeeds.then(() => saveWorkspaceState({
       formatVersion: 1,
       serverInstanceId: "server-1",
       vaultId: id,
-      workspaceId: "workspace-1",
+      workspaceId: WORKSPACE_ID,
       ...seed,
       pinnedNoteIds: [],
       recentNoteIds: [],
       searchHistory: [],
       savedAtMs: 1,
-    });
+    }));
+    workspaceSeeds = seedWrite;
   }
+  client.bootstrap.mockImplementation(async () => {
+    await seedWrite;
+    return vaultBootstrap(notes, id);
+  });
   client.openNote.mockImplementation(async (note) => {
     const meta = notes.find((item) => item.noteId === note) ?? noteMeta(note, `${note}.md`, note);
     return documentFor(meta, `# ${meta.title}\n`);
   });
   return client;
+}
+
+function serverIdentity(id = DEFAULT_VAULT) {
+  return { serverInstanceId: serverInstanceId("server-1"), vaultId: vaultId(id) };
+}
+
+function documentIdentity(id: string, vault = DEFAULT_VAULT) {
+  return { ...serverIdentity(vault), noteId: noteId(id) };
+}
+
+function storedWorkspace(vault = DEFAULT_VAULT): Promise<WorkspaceState | null> {
+  return getWorkspaceState(serverIdentity(vault), WORKSPACE_ID);
+}
+
+function savedCheckpoint(id: string, vault = DEFAULT_VAULT): Promise<DraftJournalRecord | null> {
+  return getDraftCheckpoint(serverIdentity(vault), WORKSPACE_ID, id);
+}
+
+function localCheckpoint(id: string, vault = DEFAULT_VAULT): Promise<LocalDraftJournalRecord | null> {
+  return getLocalDraftCheckpoint(serverIdentity(vault), WORKSPACE_ID, localDraftId(id));
+}
+
+function cachedBody(note: Pick<V2NoteMeta, "noteId" | "sourceHash">, vault = DEFAULT_VAULT) {
+  return getCachedNoteBody(documentIdentity(note.noteId, vault), note);
+}
+
+async function storeCachedBody(note: V2NoteMeta, content: string, vault = DEFAULT_VAULT): Promise<void> {
+  await workspaceSeeds;
+  await cacheNoteBody(documentIdentity(note.noteId, vault), documentFor(note, content));
+}
+
+async function storeSavedCheckpoint(record: DraftJournalRecord): Promise<boolean> {
+  await workspaceSeeds;
+  return writeDraftCheckpoint(record);
+}
+
+function localIdFrom(editor: FakeEditor): string {
+  const session = [...editor.snapshots.keys()].find((candidate) => candidate.noteId.startsWith("local:"));
+  if (session === undefined) throw new Error("Expected a local draft editor session");
+  return session.noteId.slice("local:".length);
 }
 
 function vaultBootstrap(notes: V2NoteMeta[], id = DEFAULT_VAULT): V2VaultBootstrapResponse {
@@ -2381,93 +2450,21 @@ function workspaceSeed(openTabs: TestSessionTab[], activeNoteId: string | null, 
 }
 
 function createServices(): AppServices {
-  const journal = { flushAll: vi.fn(async () => {}) };
   const workspace = {
-    createWorkspaceId: () => workspaceId("workspace-1"),
-    createJournal: () => journal,
-    attachVisibilityFlush: () => () => {},
-    getWorkspaceState: async (identity: { serverInstanceId: string; vaultId: string }) =>
-      memory.workspaces.get(workspaceKey(identity.serverInstanceId, identity.vaultId)) ?? null,
+    ...defaultServices.workspace,
     saveWorkspaceState: async (state: WorkspaceState) => {
-      memory.workspaces.set(workspaceKey(state.serverInstanceId, state.vaultId), state);
+      await defaultServices.workspace.saveWorkspaceState(state);
       memory.workspaceWrites.push(state);
-    },
-    getOrCreateWorkspace: async (identity: { serverInstanceId: string; vaultId: string }, id: ReturnType<typeof workspaceId>): Promise<WorkspaceState> => {
-      const key = workspaceKey(identity.serverInstanceId, identity.vaultId);
-      const existing = memory.workspaces.get(key);
-      if (existing) return existing;
-      const state: WorkspaceState = {
-        formatVersion: 1,
-        serverInstanceId: identity.serverInstanceId,
-        vaultId: identity.vaultId,
-        workspaceId: id,
-        tabs: [],
-        activeTab: null,
-        closedTabs: [],
-        pinnedNoteIds: [],
-        recentNoteIds: [],
-        searchHistory: [],
-        savedAtMs: 1,
-      };
-      memory.workspaces.set(key, state);
-      return state;
-    },
-    getDraftCheckpoint: async (_identity: unknown, _workspace: unknown, id: string) => memory.savedDrafts.get(id) ?? null,
-    getLocalDraftCheckpoint: async (_identity: unknown, _workspace: unknown, id: string) => memory.localDrafts.get(id) ?? null,
-    promoteLocalDraftCheckpoint: async (identity: { serverInstanceId: string; vaultId: string; noteId: string }, _workspace: unknown, id: string, document: V2NoteDocument) => {
-      const local = memory.localDrafts.get(id);
-      if (local === undefined) return null;
-      const record: DraftJournalRecord = {
-        formatVersion: 1,
-        serverInstanceId: identity.serverInstanceId,
-        vaultId: identity.vaultId,
-        workspaceId: local.workspaceId,
-        noteId: identity.noteId,
-        baseRevision: document.meta.revision,
-        baseSourceHash: document.meta.sourceHash,
-        baseDiskHash: document.meta.diskHash,
-        localRevision: local.localRevision,
-        mutationId: local.mutationId,
-        source: local.source,
-        titleDraft: null,
-        selection: local.selection,
-        checkpointedAtMs: 1,
-      };
-      memory.savedDrafts.set(identity.noteId, record);
-      memory.localDrafts.delete(id);
-      memory.promoted.push({ localDraftId: id, noteId: identity.noteId });
-      return record;
-    },
-    cacheNoteBody: async (identity: { noteId: string }, document: V2NoteDocument) => { memory.cached.set(identity.noteId, { sourceHash: document.meta.sourceHash, content: document.content }); },
-    deleteCachedNoteBodies: async (identity: { noteId: string }) => { memory.cached.delete(identity.noteId); },
-    getCachedNoteBody: async (identity: { noteId: string }, meta: Pick<V2NoteMeta, "sourceHash">) => {
-      const cached = memory.cached.get(identity.noteId);
-      if (cached === undefined || cached.sourceHash !== meta.sourceHash) return null;
-      return { formatVersion: 2 as const, serverInstanceId: "server-1", vaultId: DEFAULT_VAULT, noteId: identity.noteId, sourceHash: cached.sourceHash, content: cached.content, cachedAtMs: 1 };
-    },
-    checkpointWriter: () => (record: DraftJournalRecord, _urgency: "typing" | "structural", onFailure: (error: unknown) => void) => {
-      if (memory.failWrites) { const error = new Error("quota exceeded"); onFailure(error); return Promise.resolve(false); }
-      memory.savedDrafts.set(record.noteId, record);
-      return Promise.resolve(true);
-    },
-    checkpointClearer: () => async (identity: { noteId: string }, _revision: number, mutation: string) => {
-      if (memory.savedDrafts.get(identity.noteId)?.mutationId === mutation) memory.savedDrafts.delete(identity.noteId);
-      return true;
-    },
-    titleCheckpointClearer: () => async () => true,
-    localCheckpointWriter: () => (record: LocalDraftJournalRecord, _urgency: "typing" | "structural", onFailure: (error: unknown) => void) => {
-      if (memory.failWrites) { const error = new Error("quota exceeded"); onFailure(error); return Promise.resolve(false); }
-      memory.localDrafts.set(record.localDraftId, record);
-      return Promise.resolve(true);
     },
   };
   return {
+    ...defaultServices,
     api: api as unknown as AppServices["api"],
     passkeys: { login: vi.fn(async () => {}), enroll: vi.fn(async () => {}), logout: vi.fn(async () => {}) },
     editor: { createEditor: (_container: HTMLElement, config?: EditorConfig) => createFakeEditor(config) },
     workspace,
     storage: { requestPersistent: vi.fn(async () => false) },
-  } as unknown as AppServices;
+  };
 }
 
 function createFakeEditor(initialConfig?: EditorConfig): FakeEditor {
@@ -2598,15 +2595,21 @@ function searchHit(meta: V2NoteMeta) { return { identity: { kind: "canonical" as
 function searchResponse(hits: V2SearchResponse["hits"], overlayCoverage: V2SearchResponse["overlayCoverage"] = { status: "complete" }): V2SearchResponse { return { hits, overlayCoverage }; }
 function settings(): Settings { return { excludedFolders: [], searchTitleWeight: 3, searchHeadingWeight: 2, searchTagWeight: 2, searchContentWeight: 1, recencyBoost: 0, autosaveDelayMs: 900, undoStackMax: 100, imageWebpQuality: 0.8 }; }
 function workspaceTabFromSeed(tab: TestSessionTab): WorkspaceTab { return { kind: "saved", noteId: tab.noteId, title: tab.title, path: tab.path, selection: tab.cursorOffset === null ? null : { anchor: tab.cursorOffset, head: tab.cursorOffset }, scrollTop: 0, mode: tab.sourceMode ? "source" : "live" }; }
-function workspaceKey(server: string, vault: string): string { return `${server}:${vault}`; }
 function deferred<T>() { let resolve!: (value: T) => void; let reject!: (error: unknown) => void; const promise = new Promise<T>((res, rej) => { resolve = res; reject = rej; }); return { promise, resolve, reject }; }
-async function flushAsync(): Promise<void> { for (let index = 0; index < 12; index += 1) await Promise.resolve(); }
+async function flushAsync(): Promise<void> {
+  for (let task = 0; task < 4; task += 1) {
+    for (let index = 0; index < 12; index += 1) await Promise.resolve();
+    if (vi.isFakeTimers()) await vi.advanceTimersByTimeAsync(0);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+}
 async function flushEditorCapture(): Promise<void> {
   if (vi.isFakeTimers()) await vi.advanceTimersByTimeAsync(150);
   else await new Promise<void>((resolve) => window.setTimeout(resolve, 160));
   await flushAsync();
 }
-async function until(predicate: () => boolean): Promise<void> { for (let index = 0; index < 80; index += 1) { if (predicate()) return; await flushAsync(); } throw new Error(`Expected asynchronous work did not finish: ${document.body.textContent}`); }
+function useFakeTimers(): void { vi.useFakeTimers({ toNotFake: ["setImmediate", "clearImmediate"] }); }
+async function until(predicate: () => boolean | Promise<boolean>): Promise<void> { for (let index = 0; index < 80; index += 1) { if (await predicate()) return; await flushAsync(); } throw new Error(`Expected asynchronous work did not finish: ${document.body.textContent}`); }
 async function openSearch(root: HTMLElement): Promise<void> {
   window.dispatchEvent(new KeyboardEvent("keydown", { key: "/", ctrlKey: true, cancelable: true }));
   await until(() => root.querySelector(".search-panel") !== null);
@@ -2637,13 +2640,12 @@ async function runCommand(root: HTMLElement, query: string): Promise<void> {
 function useShellFixtures(): void {
   beforeEach(() => {
     clients.clear();
-    memory.workspaces.clear();
-    memory.cached.clear();
-    memory.savedDrafts.clear();
-    memory.localDrafts.clear();
-    memory.promoted.length = 0;
+    workspaceSeeds = Promise.resolve();
+    vi.stubGlobal("indexedDB", new IDBFactory());
+    vi.stubGlobal("IDBKeyRange", IDBKeyRange);
+    localStorage.clear();
+    localStorage.setItem("tansu.workspace.v1", "workspace-1");
     memory.workspaceWrites.length = 0;
-    memory.failWrites = false;
     editorMock.instances.length = 0;
     api.bootstrap.mockReset().mockResolvedValue({
       apiVersion: 2,
@@ -2936,7 +2938,7 @@ describe("saved tab load completions", () => {
     await oldBoot;
     await flushAsync();
 
-    expect(memory.cached.has(first.noteId)).toBeFalsy();
+    expect(await cachedBody(first)).toBeNull();
     expect(root.textContent).not.toContain("Old vault body");
     expect(root.querySelector('.tab[title="First"]')).toBeNull();
   });
@@ -2959,7 +2961,7 @@ describe("saved tab load completions", () => {
     await booting;
     await flushAsync();
 
-    expect(memory.cached.has(first.noteId)).toBeFalsy();
+    expect(await cachedBody(first)).toBeNull();
     expect(root.querySelector('.tab[title="First"]')).toBeNull();
   });
 
@@ -2990,7 +2992,7 @@ describe("document controller outlives its tab", () => {
   useShellFixtures();
 
   it("loads a reopened note only after the closing save settles", async () => {
-    vi.useFakeTimers();
+    useFakeTimers();
     const note = noteMeta("note-1", "one.md", "One");
     const saved = noteMeta(note.noteId, note.path, note.title, [], 2, HASH_B);
     const client = configureVault([note], workspaceSeed([

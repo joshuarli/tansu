@@ -2,10 +2,6 @@ import { createCodeMirrorEditor, type EditorHandle } from "../editor/codemirror-
 import type { EditorConfig } from "../editor/tansu-extensions.ts";
 import {
   cacheNoteBody,
-  createDraftCheckpointClearer,
-  createDraftCheckpointWriter,
-  createLocalDraftCheckpointWriter,
-  createTitleDraftCheckpointClearer,
   createWorkspaceId,
   deleteCachedNoteBodies,
   DraftJournal,
@@ -16,10 +12,8 @@ import {
   getOrCreateWorkspace,
   promoteLocalDraftCheckpoint,
   saveWorkspaceState,
-  type DraftJournalRecord,
-  type LocalDraftJournalRecord,
 } from "./workspace-store.ts";
-import type { DocumentIdentity, WorkspaceId } from "./identity.ts";
+import type { WorkspaceId } from "./identity.ts";
 import { enrollPasskey, loginWithPasskey } from "./passkeys.ts";
 import { createV2ApiClient, type V2ApiClient } from "./v2-api.ts";
 
@@ -46,26 +40,6 @@ export type AppServices = {
     cacheNoteBody: typeof cacheNoteBody;
     deleteCachedNoteBodies: typeof deleteCachedNoteBodies;
     getCachedNoteBody: typeof getCachedNoteBody;
-    checkpointWriter: (journal: DraftJournal) => (
-      record: DraftJournalRecord,
-      urgency: "typing" | "structural",
-      onFailure: (error: unknown) => void,
-    ) => undefined | Promise<boolean>;
-    checkpointClearer: (journal: DraftJournal, workspaceId: WorkspaceId) => (
-      identity: DocumentIdentity,
-      revision: number,
-      mutationId: string,
-    ) => Promise<boolean>;
-    titleCheckpointClearer: (journal: DraftJournal, workspaceId: WorkspaceId) => (
-      identity: DocumentIdentity,
-      revision: number,
-      mutationId: string,
-    ) => Promise<boolean>;
-    localCheckpointWriter: (journal: DraftJournal) => (
-      record: LocalDraftJournalRecord,
-      urgency: "typing" | "structural",
-      onFailure: (error: unknown) => void,
-    ) => undefined | Promise<boolean>;
   };
   storage: {
     requestPersistent: () => Promise<boolean>;
@@ -95,10 +69,6 @@ export const defaultServices: AppServices = {
     cacheNoteBody,
     deleteCachedNoteBodies,
     getCachedNoteBody,
-    checkpointWriter: createDraftCheckpointWriter,
-    checkpointClearer: createDraftCheckpointClearer,
-    titleCheckpointClearer: createTitleDraftCheckpointClearer,
-    localCheckpointWriter: createLocalDraftCheckpointWriter,
   },
   storage: {
     requestPersistent: async () => navigator.storage?.persist() ?? false,

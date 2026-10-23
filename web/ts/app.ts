@@ -849,10 +849,14 @@ export class TansuApp {
     const journal = this.journal.get();
     const services = defaultDocumentSessionServices(
       (documentIdentity, request) => client.saveNote(documentIdentity.noteId, request),
-      this.services.workspace.checkpointWriter(journal),
-      this.services.workspace.checkpointClearer(journal, this.workspaceId),
+      (record, urgency, onFailure) => urgency === "typing"
+        ? journal.schedule(record, onFailure)
+        : journal.checkpoint(record, onFailure),
+      (documentIdentity, revision, mutationId) =>
+        journal.clearCheckpoint(documentIdentity, this.workspaceId, documentIdentity.noteId, revision, mutationId),
     );
-    services.clearTitleCheckpoint = this.services.workspace.titleCheckpointClearer(journal, this.workspaceId);
+    services.clearTitleCheckpoint = (documentIdentity, revision, mutationId) =>
+      journal.clearTitleDraftCheckpoint(documentIdentity, this.workspaceId, documentIdentity.noteId, revision, mutationId);
     return services;
   }
 
@@ -924,7 +928,9 @@ export class TansuApp {
     const journal = this.journal.get();
     const session = new LocalDraftSession(identity, this.workspaceId, tab.localDraftId, {
       createMutationId: mutationId,
-      checkpoint: this.services.workspace.localCheckpointWriter(journal),
+      checkpoint: (record, urgency, onFailure) => urgency === "typing"
+        ? journal.scheduleLocal(record, onFailure)
+        : journal.checkpointLocal(record, onFailure),
     });
     const checkpoint = await this.services.workspace.getLocalDraftCheckpoint(identity, this.workspaceId, tab.localDraftId);
     if (!this.isTabLive(tab, identity, client)) return;
@@ -2316,10 +2322,14 @@ export class TansuApp {
     await this.loadLocalDraft(local);
     const copied = await local.session!.persist();
     if (!copied) throw new Error("Could not checkpoint recreated draft locally");
-    const cleared = await this.services.workspace.checkpointClearer(
-      this.journal.get(),
+    const identity = { ...this.identity, noteId: original.noteId };
+    const cleared = await this.journal.get().clearCheckpoint(
+      identity,
       this.workspaceId,
-    )({ ...this.identity, noteId: original.noteId }, recovered.localRevision, recovered.mutationId);
+      original.noteId,
+      recovered.localRevision,
+      recovered.mutationId,
+    );
     if (!cleared) {
       this.notify("The original recovery copy changed; both drafts are preserved.");
       return;

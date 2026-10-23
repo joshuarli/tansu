@@ -5,10 +5,6 @@ import {
   ClientStorageFailureError,
   DraftJournal,
   createWorkspaceId,
-  createLocalDraftCheckpointWriter,
-  createDraftCheckpointClearer,
-  createDraftCheckpointWriter,
-  createTitleDraftCheckpointClearer,
   cacheNoteBody,
   clearDraftCheckpoint,
   clearTitleDraftCheckpoint,
@@ -187,7 +183,6 @@ describe("private workspace storage", () => {
       vaultId: vaultId("vault-1"),
       noteId: noteId("note-1"),
     };
-    const clearTitle = createTitleDraftCheckpointClearer(journal, workspaceId("workspace-1"));
     const accepted = {
       ...draftRecord(1, "# Saved body\n"),
       titleRevision: 3,
@@ -196,8 +191,8 @@ describe("private workspace storage", () => {
     };
     journal.schedule(accepted);
 
-    await expect(clearTitle(identity, 3, "other-mutation")).resolves.toBeFalsy();
-    await expect(clearTitle(identity, 3, "title-mutation-3")).resolves.toBeTruthy();
+    await expect(journal.clearTitleDraftCheckpoint(identity, workspaceId("workspace-1"), identity.noteId, 3, "other-mutation")).resolves.toBeFalsy();
+    await expect(journal.clearTitleDraftCheckpoint(identity, workspaceId("workspace-1"), identity.noteId, 3, "title-mutation-3")).resolves.toBeTruthy();
     expect(writes).toStrictEqual([{ ...accepted, titleDraft: null }]);
     expect(at(writes, 0).source).toBe("# Saved body\n");
     expect(clearStoredTitle).not.toHaveBeenCalled();
@@ -209,7 +204,7 @@ describe("private workspace storage", () => {
       titleDraft: "Newer title",
     };
     journal.schedule(newer);
-    await expect(clearTitle(identity, 3, "title-mutation-3")).resolves.toBeFalsy();
+    await expect(journal.clearTitleDraftCheckpoint(identity, workspaceId("workspace-1"), identity.noteId, 3, "title-mutation-3")).resolves.toBeFalsy();
     await vi.advanceTimersByTimeAsync(200);
     expect(writes).toStrictEqual([{ ...accepted, titleDraft: null }, newer]);
   });
@@ -225,16 +220,15 @@ describe("private workspace storage", () => {
         return true;
       },
     );
-    const writeCheckpoint = createDraftCheckpointWriter(journal);
-    writeCheckpoint(draftRecord(1, "# First\n"), "typing", () => {});
-    writeCheckpoint(draftRecord(2, "# Latest\n"), "typing", () => {});
+    journal.schedule(draftRecord(1, "# First\n"));
+    journal.schedule(draftRecord(2, "# Latest\n"));
 
     await vi.advanceTimersByTimeAsync(200);
     await journal.flushAll();
 
     expect(writes).toHaveLength(1);
     expect(at(writes, 0).source).toBe("# Latest\n");
-    await writeCheckpoint(draftRecord(3, "# Structural\n"), "structural", () => {});
+    await journal.checkpoint(draftRecord(3, "# Structural\n"));
     expect(writes).toHaveLength(2);
     expect(at(writes, 1).source).toBe("# Structural\n");
   });
@@ -255,32 +249,27 @@ describe("private workspace storage", () => {
         return true;
       },
     );
-    const clearCheckpoint = createDraftCheckpointClearer(journal, workspaceId("workspace-1"));
-    const writeCheckpoint = createDraftCheckpointWriter(journal);
     const first = draftRecord(1, "# First\n");
-    writeCheckpoint(first, "typing", () => {});
+    journal.schedule(first);
 
-    await expect(clearCheckpoint({
+    await expect(journal.clearCheckpoint({
       serverInstanceId: serverInstanceId("server-1"),
       vaultId: vaultId("vault-1"),
-      noteId: noteId("note-1"),
-    }, first.localRevision, first.mutationId)).resolves.toBeTruthy();
+    }, workspaceId("workspace-1"), noteId("note-1"), first.localRevision, first.mutationId)).resolves.toBeTruthy();
     expect(clears).toStrictEqual([{ noteId: "note-1", revision: 1, mutationId: "mutation-1" }]);
 
     const newer = draftRecord(2, "# Newer\n");
-    writeCheckpoint(newer, "typing", () => {});
-    await expect(clearCheckpoint({
+    journal.schedule(newer);
+    await expect(journal.clearCheckpoint({
       serverInstanceId: serverInstanceId("server-1"),
       vaultId: vaultId("vault-1"),
-      noteId: noteId("note-1"),
-    }, first.localRevision, first.mutationId)).resolves.toBeFalsy();
+    }, workspaceId("workspace-1"), noteId("note-1"), first.localRevision, first.mutationId)).resolves.toBeFalsy();
     await vi.advanceTimersByTimeAsync(200);
     expect(writes).toStrictEqual([newer]);
-    await expect(clearCheckpoint({
+    await expect(journal.clearCheckpoint({
       serverInstanceId: serverInstanceId("server-1"),
       vaultId: vaultId("vault-1"),
-      noteId: noteId("note-1"),
-    }, newer.localRevision, newer.mutationId)).resolves.toBeTruthy();
+    }, workspaceId("workspace-1"), noteId("note-1"), newer.localRevision, newer.mutationId)).resolves.toBeTruthy();
   });
 
   it("reports IndexedDB unavailability instead of silently replacing persistent state", async () => {
@@ -575,12 +564,11 @@ describe("private workspace storage", () => {
         return true;
       },
     );
-    const writeLocal = createLocalDraftCheckpointWriter(journal);
     const failure = () => {};
 
-    expect(writeLocal(localDraftRecord(1, "# Typing\n"), "typing", failure)).toBeUndefined();
+    expect(journal.scheduleLocal(localDraftRecord(1, "# Typing\n"), failure)).toBeUndefined();
     await vi.advanceTimersByTimeAsync(200);
-    await writeLocal(localDraftRecord(2, "# Structural\n"), "structural", failure);
+    await journal.checkpointLocal(localDraftRecord(2, "# Structural\n"), failure);
 
     expect(writes.map((record) => record.source)).toStrictEqual(["# Typing\n", "# Structural\n"]);
   });
@@ -610,8 +598,7 @@ describe("private workspace storage", () => {
       return true;
     });
     const detach = journal.attachVisibilityFlush(document, window);
-    const writeCheckpoint = createDraftCheckpointWriter(journal);
-    writeCheckpoint(draftRecord(1, "# Hidden\n"), "typing", () => {});
+    journal.schedule(draftRecord(1, "# Hidden\n"));
     const visibilityState = Object.getOwnPropertyDescriptor(document, "visibilityState");
     Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" });
     document.dispatchEvent(new Event("visibilitychange"));
