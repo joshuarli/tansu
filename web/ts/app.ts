@@ -60,6 +60,24 @@ const NOTE_LINKS_REFRESH_DELAY_MS = 400;
 
 type TabCloseReason = "user" | "deleted" | "materialized";
 
+function waitForAnimationFrame(signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    let frame: number | undefined;
+    const onAbort = () => {
+      if (frame !== undefined) cancelAnimationFrame(frame);
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    frame = requestAnimationFrame(() => {
+      frame = undefined;
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    });
+    if (signal.aborted) onAbort();
+  });
+}
+
 function savedTheme(): State["theme"] {
   return parseTheme(window.localStorage.getItem(THEME_STORAGE_KEY));
 }
@@ -801,10 +819,10 @@ export class TansuApp {
       this.editor.attachSession(tab.editorSession);
       this.editorMount.dataset["noteEnter"] = this.editorMount.dataset["noteEnter"] === "a" ? "b" : "a";
       this.attachedEditor = { tab, session: tab.editorSession };
+      this.setEditorMountVisible(true);
       if (tab.selection !== null) this.editor.revealSelection(tab.selection);
       this.editor.updateConfiguration({ ...this.editorConfig(), mode: tab.sourceMode ? "source" : "live", readOnly: this.transitioningVault || this.state.readingMode || (tab.kind === "local-draft" && tab.session?.state.promotionPending === true) });
       void this.prefetchAssets(tab, loadedDraft(tab) ?? "");
-      this.setEditorMountVisible(true);
       return true;
     } else {
       this.editor.updateConfiguration({ ...this.editorConfig(), mode: tab.sourceMode ? "source" : "live", readOnly: this.transitioningVault || this.state.readingMode || (tab.kind === "local-draft" && tab.session?.state.promotionPending === true) });
@@ -2431,13 +2449,17 @@ export class TansuApp {
       [...source.matchAll(/(?:^|\[|\(|\/)((?:\/?z-images\/)[^\s)"'>\]|]+)/g)]
         .map((match) => match[1]!.replace(/^\//, "")),
     );
+    if (!document.hidden) await waitForAnimationFrame(signal);
+    if (signal.aborted || generation !== this.bootGeneration || activeTab(this.state)?.key !== key) return;
+    const visible = new Set(this.editor?.visibleWikiImageNames() ?? []);
     try {
       const client = this.vaultClient;
       if (client === null) return;
+      const visibleMissing: string[] = [];
       const missing: string[] = [];
       for (const name of names) {
         const url = this.assetScope.get(name);
-        if (url === undefined) missing.push(name);
+        if (url === undefined) (visible.has(name) ? visibleMissing : missing).push(name);
         else {
           this.assetScope.delete(name);
           this.assetScope.set(name, url);
@@ -2450,8 +2472,9 @@ export class TansuApp {
         completion();
         return true;
       };
-      for (let start = 0; start < missing.length; start += ASSET_PREFETCH_CONCURRENCY) {
-        const batch = missing.slice(start, start + ASSET_PREFETCH_CONCURRENCY);
+      const orderedMissing = [...visibleMissing, ...missing];
+      for (let start = 0; start < orderedMissing.length; start += ASSET_PREFETCH_CONCURRENCY) {
+        const batch = orderedMissing.slice(start, start + ASSET_PREFETCH_CONCURRENCY);
         const loaded = await Promise.all(batch.map(async (name) => {
           try {
             return { name, blob: await client.loadAsset(name, signal) };

@@ -49,7 +49,7 @@ import type {
   EditorImageUploadResult,
 } from "./tansu-extensions.js";
 import { resolveWikiTarget, suggestWikiTargets, type WikiNote } from "./wiki-target.js";
-import { wikiImages } from "./wiki-images.js";
+import { visibleWikiImageNames, wikiImages } from "./wiki-images.js";
 import { wikiPreviewCards } from "./wiki-preview.js";
 import {
   toggleBold,
@@ -221,6 +221,7 @@ export type EditorHandle = {
   dispose(): void;
   focus(): void;
   getSnapshot(): EditorSnapshot | null;
+  visibleWikiImageNames(): readonly string[];
   getSessionSnapshot(session: EditorSession): EditorSnapshot;
   markSaved(session: EditorSession, revision: number): boolean;
   reloadIfClean(session: EditorSession, source: string): ReloadResult;
@@ -1243,6 +1244,11 @@ export function createCodeMirrorEditor(container: HTMLElement, initialConfig: Ed
     getSnapshot() {
       if (disposed) throw new TypeError("Editor has been disposed");
       return activeSession === null ? null : snapshotOf(activeSession);
+    },
+
+    visibleWikiImageNames() {
+      if (disposed) throw new TypeError("Editor has been disposed");
+      return activeSession === null ? [] : visibleWikiImageNames(view);
     },
 
     getSessionSnapshot(session) {

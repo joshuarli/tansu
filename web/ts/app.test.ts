@@ -66,6 +66,7 @@ const api = {
   forVault: vi.fn((_server: string, id: string): TestClient => testClient(id)),
 };
 const editorMock = { instances: [] as FakeEditor[] };
+let fakeVisibleAssetNames: readonly string[] = [];
 
 describe("v2 desktop shell", () => {
   beforeEach(() => {
@@ -77,6 +78,7 @@ describe("v2 desktop shell", () => {
     localStorage.setItem("tansu.workspace.v1", "workspace-1");
     memory.workspaceWrites.length = 0;
     editorMock.instances.length = 0;
+    fakeVisibleAssetNames = [];
     api.bootstrap.mockReset().mockResolvedValue({
       apiVersion: 2,
       serverInstanceId: "server-1",
@@ -2434,6 +2436,24 @@ describe("v2 desktop shell", () => {
     expect(vi.mocked(editor.updateConfiguration).mock.calls.length - before).toBeLessThanOrEqual(Math.ceil(imageCount / 4));
   });
 
+  it("prefetches visible note images before earlier document images", async () => {
+    const note = noteMeta("note-1", "one.md", "One");
+    const client = configureVault([note], workspaceSeed([
+      { noteId: note.noteId, title: note.title, path: note.path, cursorOffset: null, sourceMode: false },
+    ], note.noteId));
+    const names = Array.from({ length: 12 }, (_, index) => `z-images/p${index}.webp`);
+    const visible = [names[8]!, names[9]!];
+    fakeVisibleAssetNames = visible;
+    client.openNote.mockResolvedValue(documentFor(note, `${names.map((name) => `![[${name}]]`).join("\n")}\n`));
+    const { app } = mountApp();
+    await app.boot();
+    await until(() => client.loadAsset.mock.calls.length === names.length);
+    expect(client.loadAsset.mock.calls.map((call) => (call as unknown as [string])[0])).toEqual([
+      ...visible,
+      ...names.filter((name) => !visible.includes(name)),
+    ]);
+  });
+
   it("revokes every created image URL on dispose", async () => {
     const note = noteMeta("note-1", "one.md", "One");
     const client = configureVault([note], workspaceSeed([
@@ -3170,6 +3190,7 @@ function createFakeEditor(initialConfig?: EditorConfig): FakeEditor {
     dispose: vi.fn(() => { active = null; }),
     focus: vi.fn(),
     getSnapshot: vi.fn(() => active === null ? null : snapshots.get(active) ?? null),
+    visibleWikiImageNames: vi.fn(() => fakeVisibleAssetNames),
     getSessionSnapshot: vi.fn((session: EditorSession) => {
       const snapshot = snapshots.get(session);
       if (snapshot === undefined) throw new Error("Unknown editor session");

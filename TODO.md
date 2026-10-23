@@ -3,15 +3,6 @@
 Prefix: TNS
 Next: 84
 
-### TNS-068 · P4 · Order asset prefetch by visibility and test cache stability
-
-- **Area:** Performance
-- **Where:** `web/ts/app.ts`
-- **Problem:** Prefetch loads in document order because the editor cannot report visible images. Cache stability and eviction past 64 are now tested, and the broken-image-after-eviction report did not reproduce.
-- **Recommendation:** Add an editor API that reports visible images and load those first, only if a measurement shows prefetch order matters.
-- **Blocked:** The restored-scroll browser probe did not establish visible-image request rounds: virtualization left the target images outside the rendered viewport. First make the probe reliably identify rendered visible images after restoring scroll, then compare cold request rounds before adding an editor API. No benefit has been demonstrated.
-- **Fix with:** make-it-fast
-- **Effort:** S
 ## Next
 
 ### TNS-083 · P3 · Investigate the intermittent app boot fixture failure

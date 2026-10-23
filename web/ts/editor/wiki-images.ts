@@ -105,6 +105,22 @@ function findWikiImages(state: EditorState): WikiImage[] {
   return images;
 }
 
+export function visibleWikiImageNames(view: EditorView): readonly string[] {
+  const viewport = view.scrollDOM.getBoundingClientRect();
+  const documentTop = view.documentTop;
+  const names = new Set<string>();
+  const images = findWikiImages(view.state);
+  for (const image of images) {
+    const block = view.lineBlockAt(image.from);
+    const top = documentTop + block.top;
+    const bottom = documentTop + block.bottom;
+    if (top < viewport.bottom && bottom > viewport.top) {
+      names.add(image.name);
+    }
+  }
+  return [...names];
+}
+
 function insideCodeSpan(line: string, position: number): boolean {
   const spans = line.matchAll(/(`+)(.*?)\1/g);
   for (const span of spans) {

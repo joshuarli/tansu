@@ -79,6 +79,10 @@ refreshes both image types. Without a resolver, wiki image syntax remains source
 and standard Markdown image URLs pass through unchanged. Live callouts use
 default icons. `calloutIcons` overrides individual types.
 
+The app uses `EditorHandle.visibleWikiImageNames()` to prefetch wiki images in
+the current viewport before other note images. It reads positions from the
+document, so it can choose images before their widgets render.
+
 Image paste keeps WebP clipboard bytes and converts other image files to WebP
 using the configured quality. It previews the image immediately and passes an
 abort signal to the upload callback. Returned Markdown is inserted only into

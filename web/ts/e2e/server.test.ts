@@ -184,6 +184,98 @@ describe("real server harness", () => {
     await page.close();
   });
 
+  it("prefetches restored viewport images in the first request round", async () => {
+    const count = 96;
+    const imageBytes = await readFile(join(vaultOnePath, "z-images/sample.webp"));
+    const names = Array.from({ length: count }, (_, index) => `z-images/probe-${index}.webp`);
+    await Promise.all(names.map((name) => writeFile(join(vaultOnePath, name), imageBytes)));
+    const content = `# Restored Scroll Probe\n\n${names.map((name) => `![[${name}|132]]`).join("\n\n")}\n`;
+    const created = await v2Request(vaultOneId, "/notes", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mutationId: randomUUID(), path: "restored-scroll-probe.md", content, sourceHash: await canonicalSourceHash(content) }),
+    }).then((response) => response.json()) as { outcome: { state: string; result: TestNoteMeta } };
+    expect(created.outcome.state).toBe("accepted");
+
+    const page = await newLoggedPage();
+    const assetRequests: { name: string }[] = [];
+    page.on("request", (request) => {
+      const url = new URL(request.url());
+      const name = url.searchParams.get("name");
+      if (url.pathname.endsWith("/assets") && name !== null && name.startsWith("z-images/probe-")) {
+        assetRequests.push({ name });
+      }
+    });
+    await page.goto(baseUrl);
+    await page.waitForSelector(".main");
+    await openSearchNote(page, "Restored Scroll Probe");
+    await expect.poll(() => assetRequests.length).toBe(count);
+    await page.waitForFunction(() => {
+      const scroller = document.querySelector<HTMLElement>("#editor-mount .cm-scroller");
+      return scroller !== null && scroller.scrollHeight > scroller.clientHeight * 2;
+    });
+    await page.locator("#editor-mount .cm-content").click();
+    await page.keyboard.press(process.platform === "darwin" ? "Meta+ArrowDown" : "Control+End");
+    await page.locator("#editor-mount .cm-scroller").evaluate((scroller) => {
+      scroller.scrollTop = scroller.scrollHeight;
+    });
+    const visibleBeforeReloadHandle = await page.waitForFunction(() => {
+      const scroller = document.querySelector<HTMLElement>("#editor-mount .cm-scroller");
+      if (scroller === null) return null;
+      const viewport = scroller.getBoundingClientRect();
+      const names = [...document.querySelectorAll<HTMLElement>("#editor-mount .tansu-wiki-image[data-image-name]")]
+        .filter((image) => {
+          const box = image.getBoundingClientRect();
+          return box.top < viewport.bottom && box.bottom > viewport.top && box.left < viewport.right && box.right > viewport.left;
+        })
+        .map((image) => image.dataset["imageName"]!);
+      return names.length === 0 ? null : names;
+    });
+    const visibleBeforeReload = await visibleBeforeReloadHandle.jsonValue() as string[];
+    expect(visibleBeforeReload.length).toBeGreaterThan(0);
+    await page.evaluate(() => window.dispatchEvent(new Event("beforeunload")));
+    await page.waitForFunction(async (noteId: string) => {
+      const db = await new Promise<IDBDatabase>((resolve, reject) => {
+        const request = indexedDB.open("tansu-client-state-v2");
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      const records = await new Promise<{ tabs?: { noteId?: string; scrollTop?: number }[] }[]>((resolve, reject) => {
+        const request = db.transaction("workspaces", "readonly").objectStore("workspaces").getAll();
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      db.close();
+      return records.some((record) => record.tabs?.some((tab) => tab.noteId === noteId && (tab.scrollTop ?? 0) > 100));
+    }, created.outcome.result.noteId);
+    for (let run = 0; run < 5; run += 1) {
+      assetRequests.length = 0;
+      await page.reload();
+      await page.waitForSelector(".main");
+      await page.waitForSelector("#editor-mount .cm-scroller");
+      await expect.poll(() => page.locator("#editor-mount .cm-scroller").evaluate((scroller) => scroller.scrollTop))
+        .toBeGreaterThan(100);
+      const visibleNamesHandle = await page.waitForFunction(() => {
+        const scroller = document.querySelector<HTMLElement>("#editor-mount .cm-scroller");
+        if (scroller === null) return null;
+        const viewport = scroller.getBoundingClientRect();
+        const names = [...document.querySelectorAll<HTMLElement>("#editor-mount .tansu-wiki-image[data-image-name]")]
+          .filter((image) => {
+            const box = image.getBoundingClientRect();
+            return box.top < viewport.bottom && box.bottom > viewport.top && box.left < viewport.right && box.right > viewport.left;
+          })
+          .map((image) => image.dataset["imageName"]!);
+        return names.length === 0 ? null : names;
+      });
+      const visibleNames = await visibleNamesHandle.jsonValue() as string[];
+      await expect.poll(() => assetRequests.some((request) => visibleNames.includes(request.name))).toBe(true);
+      const firstVisibleRequest = assetRequests.findIndex((request) => visibleNames.includes(request.name));
+      expect(Math.floor(firstVisibleRequest / 4) + 1).toBe(1);
+      await expect.poll(() => assetRequests.length).toBe(count);
+    }
+    await page.close();
+  }, 120_000);
+
   it("opens rendered links in read-only mode and preserves theme preference", async () => {
     const page = await newLoggedPage();
     await page.addInitScript(() => {
