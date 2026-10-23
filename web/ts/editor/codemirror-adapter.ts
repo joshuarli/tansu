@@ -40,13 +40,13 @@ import { findLiteral, outlineFromSyntaxTree, type FindMatch, type Outline, type 
 import { convertImageToWebp, webpAssetMarkdown } from "./image-webp.js";
 import { tufteNotes } from "./tufte-notes.js";
 import { addPendingImagePreview, pendingImagePreviews, removePendingImagePreview } from "./pasted-image-preview.js";
-import {
-  type EditorChange,
-  type EditorConfig,
-  type EditorImagePasteSelection,
-  type EditorImagePasteState,
-  type EditorImageUploadRequest,
-  type EditorImageUploadResult,
+import type {
+  EditorChange,
+  EditorConfig,
+  EditorImagePasteSelection,
+  EditorImagePasteState,
+  EditorImageUploadRequest,
+  EditorImageUploadResult,
 } from "./tansu-extensions.js";
 import { resolveWikiTarget, suggestWikiTargets, type WikiNote } from "./wiki-target.js";
 import { wikiImages } from "./wiki-images.js";

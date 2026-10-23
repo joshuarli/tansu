@@ -879,7 +879,7 @@ function renderRevisionsPanel(state: State, actions: ViewActions): HTMLElement {
   const active = activeTab(state);
   const activeNoteId = active?.kind === "saved" ? active.noteId : null;
   const revisionList = state.revisionList?.filter((revision) => revision.noteId === activeNoteId)
-    .sort((left, right) => left.revision - right.revision) ?? null;
+    .toSorted((left, right) => left.revision - right.revision) ?? null;
   const selectedRevision = revisionList?.find((revision) =>
     toRevisionEventId(revision.revision) === state.revisionSelectedEventId
   ) ?? null;
@@ -1020,7 +1020,7 @@ function revisionTimeline(
   range.min = "0";
   range.max = String(revisions.length - 1);
   const selectedIndex = revisions.findIndex((revision) => toRevisionEventId(revision.revision) === selectedEventId);
-  range.value = String(selectedIndex < 0 ? revisions.length - 1 : selectedIndex);
+  range.value = String(selectedIndex === -1 ? revisions.length - 1 : selectedIndex);
   range.setAttribute("aria-label", "Revision timeline");
   range.addEventListener("input", () => {
     const revision = revisions[Number(range.value)];
