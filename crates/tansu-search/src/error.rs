@@ -27,20 +27,6 @@ pub enum SearchError {
     SchemaMismatch,
     #[error("search index metadata is corrupt")]
     CorruptIndex,
-    #[error("search service stopped before replying")]
-    WorkerStopped,
     #[error("overlay contains note identity more than once")]
     DuplicateOverlayNote,
-    #[error("search index replacement could not be installed: {install}")]
-    DirectorySwap {
-        #[source]
-        install: std::io::Error,
-        restore: Option<std::io::Error>,
-    },
-    #[error("search index replacement cleanup failed after {primary}: {cleanup}")]
-    RebuildCleanup {
-        #[source]
-        primary: Box<SearchError>,
-        cleanup: std::io::Error,
-    },
 }

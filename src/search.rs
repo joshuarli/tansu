@@ -113,22 +113,14 @@ impl SearchIndex {
                 return Err(search_error(error));
             }
         };
-        let outcome = self
-            .call_service(|service| service.upsert(document))
+        self.call_service(|service| service.upsert(document))
             .map_err(search_error)?;
-        if outcome == tansu_search::UpdateOutcome::Overflow {
-            self.mark_needs_reconciliation(false);
-        }
         Ok(())
     }
 
     pub fn try_remove_note(&mut self, note_id: &str, revision: i64) -> Result<()> {
-        let outcome = self
-            .call_service(|service| service.remove(note_id.to_owned(), revision))
+        self.call_service(|service| service.remove(note_id.to_owned(), revision))
             .map_err(search_error)?;
-        if outcome == tansu_search::UpdateOutcome::Overflow {
-            self.mark_needs_reconciliation(false);
-        }
         Ok(())
     }
 
@@ -214,7 +206,9 @@ impl SearchIndex {
 
     fn call_service<T>(
         &mut self,
-        operation: impl FnOnce(&SearchService) -> std::result::Result<T, tansu_search::SearchError>,
+        operation: impl FnOnce(
+            &mut SearchService,
+        ) -> std::result::Result<T, tansu_search::SearchError>,
     ) -> std::result::Result<T, tansu_search::SearchError> {
         let result = {
             let service = self.ensure_service()?;
@@ -240,7 +234,7 @@ impl SearchIndex {
 
     fn ensure_service(
         &mut self,
-    ) -> std::result::Result<&SearchService, tansu_search::SearchError> {
+    ) -> std::result::Result<&mut SearchService, tansu_search::SearchError> {
         if matches!(self.state, SearchIndexState::Unavailable) {
             match SearchService::open(&self.path) {
                 Ok(service) => {
@@ -253,9 +247,9 @@ impl SearchIndex {
                 Err(error) => return Err(error),
             }
         }
-        match &self.state {
+        match &mut self.state {
             SearchIndexState::Available { service, .. } => Ok(service),
-            SearchIndexState::Unavailable => Err(tansu_search::SearchError::WorkerStopped),
+            SearchIndexState::Unavailable => unreachable!(),
         }
     }
 }

@@ -85,7 +85,7 @@ fn port_matches_the_pinned_reference_candidate_golden() {
         })
         .collect::<Vec<_>>();
     let directory = tempfile::tempdir().unwrap();
-    let service = SearchService::open(&directory.path().join("search")).unwrap();
+    let mut service = SearchService::open(&directory.path().join("search")).unwrap();
     service.rebuild(documents).unwrap();
     let options = SearchOptions::new(
         tansu_search::SearchMode::ExactPrefix,

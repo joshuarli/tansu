@@ -458,7 +458,6 @@ pub struct OverlaySearchResult {
 pub enum UpdateOutcome {
     Applied,
     Stale,
-    Overflow,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

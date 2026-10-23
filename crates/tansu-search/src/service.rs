@@ -1,11 +1,6 @@
-use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender, TrySendError};
-use std::sync::{Arc, Mutex};
-use std::thread::{self, JoinHandle};
-use std::time::Duration;
 
 use crate::error::SearchError;
 use crate::index::{IndexManager, IndexMutation};
@@ -16,71 +11,37 @@ use crate::types::{
     SearchResult, SearchStatus, UpdateOutcome,
 };
 
-const INDEX_QUEUE_CAPACITY: usize = 128;
-const MAX_INDEX_BATCH: usize = 256;
 pub const MAX_REBUILD_NOTES: usize = 10_000;
 pub const MAX_REBUILD_SOURCE_BYTES: usize = 128 * 1024 * 1024;
-const WRITER_IDLE_TIMEOUT: Duration = Duration::from_secs(10);
-const COALESCE_TIMEOUT: Duration = Duration::from_millis(4);
 
 pub struct SearchService {
-    sender: SyncSender<Message>,
-    worker: Mutex<Option<JoinHandle<()>>>,
-    state: Arc<SharedState>,
-}
-
-struct SharedState {
-    dirty: AtomicBool,
-    degraded: AtomicBool,
-    needs_reconciliation: AtomicBool,
-}
-
-enum Message {
-    Change {
-        mutation: IndexMutation,
-        reply: mpsc::SyncSender<Result<UpdateOutcome, SearchError>>,
-    },
-    Search {
-        query: String,
-        options: SearchOptions,
-        current: Vec<NoteIdentity>,
-        reply: mpsc::SyncSender<Result<Vec<SearchResult>, SearchError>>,
-    },
-    IsCurrent {
-        identities: Vec<NoteIdentity>,
-        reply: mpsc::SyncSender<Result<bool, SearchError>>,
-    },
-    Rebuild {
-        documents: Vec<DocumentInput>,
-        reply: mpsc::SyncSender<Result<(), SearchError>>,
-    },
-    Shutdown,
-}
-
-struct PendingChange {
-    mutation: IndexMutation,
-    replies: Vec<mpsc::SyncSender<Result<UpdateOutcome, SearchError>>>,
-    stale_replies: Vec<mpsc::SyncSender<Result<UpdateOutcome, SearchError>>>,
+    index: IndexManager,
+    path: PathBuf,
+    latest: HashMap<String, (i64, bool)>,
+    status: SearchStatus,
+    needs_reconciliation: bool,
 }
 
 impl SearchService {
     pub fn open(path: &Path) -> Result<Self, SearchError> {
-        recover_backup(path)?;
+        let had_metadata = match fs::symlink_metadata(path.join("meta.json")) {
+            Ok(_) => true,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+            Err(error) => return Err(error.into()),
+        };
         ensure_search_directory(path)?;
         let (index, recovered) = match IndexManager::open(path) {
             Ok(index) if index.metadata_initialized() => (index, false),
             Ok(mut index) => {
                 index.initialize_metadata()?;
                 index.close_writer();
-                (index, false)
+                (index, had_metadata)
             }
             Err(
                 SearchError::SchemaMismatch
                 | SearchError::CorruptIndex
                 | SearchError::IndexOpen { .. },
-            ) => {
-                (replace_index(path, &[])?, true)
-            }
+            ) => (replace_index(path)?, true),
             Err(error) => return Err(error),
         };
         let latest = index
@@ -88,108 +49,111 @@ impl SearchService {
             .into_iter()
             .map(|identity| (identity.note_id().to_owned(), (identity.revision(), false)))
             .collect();
-        let state = Arc::new(SharedState {
-            dirty: AtomicBool::new(recovered),
-            degraded: AtomicBool::new(recovered),
-            needs_reconciliation: AtomicBool::new(recovered),
-        });
-        let (sender, receiver) = mpsc::sync_channel(INDEX_QUEUE_CAPACITY);
-        let worker_state = Arc::clone(&state);
-        let worker_path = path.to_path_buf();
-        let worker = thread::Builder::new()
-            .name("tansu-search-index".into())
-            .spawn(move || worker_loop(index, &worker_path, receiver, worker_state, latest))?;
         Ok(Self {
-            sender,
-            worker: Mutex::new(Some(worker)),
-            state,
+            index,
+            path: path.to_path_buf(),
+            latest,
+            status: SearchStatus {
+                dirty: recovered,
+                degraded: recovered,
+            },
+            needs_reconciliation: recovered,
         })
     }
 
     pub fn status(&self) -> SearchStatus {
-        SearchStatus {
-            dirty: self.state.dirty.load(Ordering::Acquire),
-            degraded: self.state.degraded.load(Ordering::Acquire),
-        }
-    }
-
-    fn worker_stopped(&self) -> SearchError {
-        self.state.dirty.store(true, Ordering::Release);
-        self.state.degraded.store(true, Ordering::Release);
-        self.state
-            .needs_reconciliation
-            .store(true, Ordering::Release);
-        SearchError::WorkerStopped
+        self.status
     }
 
     pub fn needs_reconciliation(&self) -> bool {
-        self.state.needs_reconciliation.load(Ordering::Acquire)
+        self.needs_reconciliation
     }
 
-    pub fn upsert(&self, input: DocumentInput) -> Result<UpdateOutcome, SearchError> {
+    pub fn upsert(&mut self, input: DocumentInput) -> Result<UpdateOutcome, SearchError> {
         self.change(IndexMutation::Upsert(input))
     }
 
-    pub fn remove(
-        &self,
-        note_id: String,
-        revision: i64,
-    ) -> Result<UpdateOutcome, SearchError> {
+    pub fn remove(&mut self, note_id: String, revision: i64) -> Result<UpdateOutcome, SearchError> {
         self.change(IndexMutation::Delete { note_id, revision })
     }
 
-    fn change(&self, mutation: IndexMutation) -> Result<UpdateOutcome, SearchError> {
-        self.state.dirty.store(true, Ordering::Release);
-        let (reply, response) = mpsc::sync_channel(1);
-        match self.sender.try_send(Message::Change { mutation, reply }) {
-            Ok(()) => {}
-            Err(TrySendError::Full(_)) => {
-                self.state
-                    .needs_reconciliation
-                    .store(true, Ordering::Release);
-                return Ok(UpdateOutcome::Overflow);
+    fn change(&mut self, mutation: IndexMutation) -> Result<UpdateOutcome, SearchError> {
+        self.status.dirty = true;
+        let note_id = mutation.note_id().to_owned();
+        let revision = mutation.revision();
+        let is_delete = mutation.is_delete();
+        let already_applied = self.latest.get(&note_id).is_some_and(|(current, deleted)| {
+            *current > revision || (*current == revision && (!is_delete || *deleted))
+        });
+        if already_applied {
+            if !self.needs_reconciliation {
+                self.status.dirty = false;
             }
-            Err(TrySendError::Disconnected(_)) => {
-                self.state.degraded.store(true, Ordering::Release);
-                self.state
-                    .needs_reconciliation
-                    .store(true, Ordering::Release);
-                return Err(SearchError::WorkerStopped);
-            }
+            return Ok(UpdateOutcome::Stale);
         }
-        match response.recv().map_err(|_| self.worker_stopped())? {
-            Ok(outcome) => Ok(outcome),
+        let result = self.index.apply_batch(std::slice::from_ref(&mutation));
+        self.index.close_writer();
+        match result {
+            Ok(applied) => {
+                if applied[0] {
+                    self.latest.insert(note_id, (revision, is_delete));
+                }
+                if !self.needs_reconciliation {
+                    self.status.dirty = false;
+                }
+                Ok(if applied[0] {
+                    UpdateOutcome::Applied
+                } else {
+                    UpdateOutcome::Stale
+                })
+            }
             Err(error) => {
-                self.state.dirty.store(true, Ordering::Release);
-                self.state.degraded.store(true, Ordering::Release);
-                self.state
-                    .needs_reconciliation
-                    .store(true, Ordering::Release);
+                self.status.dirty = true;
+                self.status.degraded = true;
+                self.needs_reconciliation = true;
                 Err(error)
             }
         }
     }
 
     pub fn search(
-        &self,
+        &mut self,
         query: String,
         options: SearchOptions,
         current: Vec<NoteIdentity>,
     ) -> Result<Vec<SearchResult>, SearchError> {
-        let (reply, response) = mpsc::sync_channel(1);
-        self.sender
-            .send(Message::Search {
-                query,
-                options,
-                current,
-                reply,
-            })
-            .map_err(|_| self.worker_stopped())?;
-        response.recv().map_err(|_| self.worker_stopped())?
+        let result = search::execute(&self.index, &query, options).map(|mut hits| {
+            let canonical = current
+                .iter()
+                .map(|identity| (identity.note_id(), identity))
+                .collect::<HashMap<_, _>>();
+            hits.retain(|hit| {
+                canonical.get(hit.note_id.as_str()).is_some_and(|identity| {
+                    hit.revision == identity.revision()
+                        && hit.source_hash == identity.source_hash()
+                        && hit.path == identity.path()
+                        && hit.title == identity.title()
+                })
+            });
+            search::rank_hits(
+                &mut hits,
+                |hit| {
+                    canonical
+                        .get(hit.note_id.as_str())
+                        .map_or(0, |identity| identity.updated_at_ms())
+                },
+                &options,
+            );
+            hits
+        });
+        if let Err(error) = &result {
+            mark_search_failure(&mut self.status, &mut self.needs_reconciliation, error);
+        }
+        result
     }
 
     pub fn search_with_overlay(
-        &self,
+        &mut self,
         query: String,
         options: SearchOptions,
         current: Vec<NoteIdentity>,
@@ -212,172 +176,43 @@ impl SearchService {
     }
 
     pub fn is_current(&self, identities: Vec<NoteIdentity>) -> Result<bool, SearchError> {
-        let (reply, response) = mpsc::sync_channel(1);
-        self.sender
-            .send(Message::IsCurrent { identities, reply })
-            .map_err(|_| self.worker_stopped())?;
-        response.recv().map_err(|_| self.worker_stopped())?
+        self.index.is_current(&identities)
     }
 
-    pub fn rebuild(&self, documents: Vec<DocumentInput>) -> Result<(), SearchError> {
+    pub fn rebuild(&mut self, documents: Vec<DocumentInput>) -> Result<(), SearchError> {
         check_rebuild_bounds(&documents)?;
-        self.state.dirty.store(true, Ordering::Release);
-        let (reply, response) = mpsc::sync_channel(1);
-        self.sender
-            .send(Message::Rebuild { documents, reply })
-            .map_err(|_| self.worker_stopped())?;
-        match response.recv().map_err(|_| self.worker_stopped())? {
-            Ok(()) => Ok(()),
+        self.status.dirty = true;
+        match rebuild_index(&mut self.index, &self.path, &documents) {
+            Ok(()) => {
+                self.latest = documents
+                    .iter()
+                    .map(|document| {
+                        (
+                            document.note_id().to_owned(),
+                            (document.revision(), false),
+                        )
+                    })
+                    .collect();
+                self.status.dirty = false;
+                self.status.degraded = false;
+                self.needs_reconciliation = false;
+                Ok(())
+            }
             Err(error) => {
-                self.state.dirty.store(true, Ordering::Release);
-                self.state.degraded.store(true, Ordering::Release);
-                self.state
-                    .needs_reconciliation
-                    .store(true, Ordering::Release);
+                self.status.dirty = true;
+                self.status.degraded = true;
+                self.needs_reconciliation = true;
                 Err(error)
             }
         }
     }
 }
 
-impl Drop for SearchService {
-    fn drop(&mut self) {
-        let _ = self.sender.send(Message::Shutdown);
-        if let Some(worker) = self
-            .worker
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .take()
-        {
-            let _ = worker.join();
-        }
-    }
-}
-
-fn worker_loop(
-    mut index: IndexManager,
-    path: &Path,
-    receiver: Receiver<Message>,
-    state: Arc<SharedState>,
-    mut latest: HashMap<String, (i64, bool)>,
+fn mark_search_failure(
+    status: &mut SearchStatus,
+    needs_reconciliation: &mut bool,
+    error: &SearchError,
 ) {
-    let mut deferred = VecDeque::new();
-    loop {
-        let message = match deferred.pop_front() {
-            Some(message) => Ok(message),
-            None => receiver.recv_timeout(WRITER_IDLE_TIMEOUT),
-        };
-        let message = match message {
-            Ok(message) => message,
-            Err(RecvTimeoutError::Timeout) => {
-                index.close_writer();
-                continue;
-            }
-            Err(RecvTimeoutError::Disconnected) => return,
-        };
-        match message {
-            Message::Change { mutation, reply } => {
-                let mut updates = vec![(mutation, reply)];
-                collect_changes(&receiver, &mut deferred, &mut updates);
-                let mut next_latest = latest.clone();
-                let (mutations, outcomes) = coalesce_changes(updates, &mut next_latest);
-                match index.apply_batch(&mutations) {
-                    Ok(applied) => {
-                        latest = next_latest;
-                        for (outcome, result) in outcomes.into_iter().zip(applied) {
-                            let _ = outcome.send(Ok(if result {
-                                UpdateOutcome::Applied
-                            } else {
-                                UpdateOutcome::Stale
-                            }));
-                        }
-                        if !state.needs_reconciliation.load(Ordering::Acquire) {
-                            state.dirty.store(false, Ordering::Release);
-                        }
-                    }
-                    Err(error) => {
-                        state.dirty.store(true, Ordering::Release);
-                        state.degraded.store(true, Ordering::Release);
-                        state
-                            .needs_reconciliation
-                            .store(true, Ordering::Release);
-                        let mut primary = Some(error);
-                        for reply in outcomes {
-                            let error = primary.take().unwrap_or(SearchError::WorkerStopped);
-                            let _ = reply.send(Err(error));
-                        }
-                    }
-                }
-            }
-            Message::Search {
-                query,
-                options,
-                current,
-                reply,
-            } => {
-                let result = search::execute(&index, &query, options).map(|mut hits| {
-                    let canonical = current
-                        .iter()
-                        .map(|identity| (identity.note_id(), identity))
-                        .collect::<HashMap<_, _>>();
-                    hits.retain(|hit| {
-                        canonical.get(hit.note_id.as_str()).is_some_and(|identity| {
-                            hit.revision == identity.revision()
-                                && hit.source_hash == identity.source_hash()
-                                && hit.path == identity.path()
-                                && hit.title == identity.title()
-                        })
-                    });
-                    search::rank_hits(
-                        &mut hits,
-                        |hit| canonical.get(hit.note_id.as_str()).map_or(0, |identity| identity.updated_at_ms()),
-                        &options,
-                    );
-                    hits
-                });
-                if let Err(error) = &result {
-                    mark_search_failure(&state, error);
-                }
-                let _ = reply.send(result);
-            }
-            Message::IsCurrent { identities, reply } => {
-                let _ = reply.send(index.is_current(&identities));
-            }
-            Message::Rebuild { documents, reply } => {
-                match rebuild_index(&mut index, path, &documents) {
-                    Ok(()) => {
-                        latest = documents
-                            .iter()
-                            .map(|document| {
-                                (
-                                    document.note_id().to_owned(),
-                                    (document.revision(), false),
-                                )
-                            })
-                            .collect();
-                        state.dirty.store(false, Ordering::Release);
-                        state.degraded.store(false, Ordering::Release);
-                        state
-                            .needs_reconciliation
-                            .store(false, Ordering::Release);
-                        let _ = reply.send(Ok(()));
-                    }
-                    Err(error) => {
-                        state.dirty.store(true, Ordering::Release);
-                        state.degraded.store(true, Ordering::Release);
-                        state
-                            .needs_reconciliation
-                            .store(true, Ordering::Release);
-                        let _ = reply.send(Err(error));
-                    }
-                }
-            }
-            Message::Shutdown => return,
-        }
-    }
-}
-
-fn mark_search_failure(state: &SharedState, error: &SearchError) {
     if matches!(
         error,
         SearchError::InvalidInput { .. }
@@ -388,82 +223,9 @@ fn mark_search_failure(state: &SharedState, error: &SearchError) {
     ) {
         return;
     }
-    state.dirty.store(true, Ordering::Release);
-    state.degraded.store(true, Ordering::Release);
-    state
-        .needs_reconciliation
-        .store(true, Ordering::Release);
-}
-
-fn collect_changes(
-    receiver: &Receiver<Message>,
-    deferred: &mut VecDeque<Message>,
-    updates: &mut Vec<(
-        IndexMutation,
-        mpsc::SyncSender<Result<UpdateOutcome, SearchError>>,
-    )>,
-) {
-    let deadline = std::time::Instant::now() + COALESCE_TIMEOUT;
-    while updates.len() < MAX_INDEX_BATCH {
-        match receiver.recv_timeout(deadline.saturating_duration_since(std::time::Instant::now())) {
-            Ok(Message::Change { mutation, reply }) => updates.push((mutation, reply)),
-            Ok(message) => deferred.push_back(message),
-            Err(RecvTimeoutError::Timeout | RecvTimeoutError::Disconnected) => return,
-        }
-    }
-}
-
-fn coalesce_changes(
-    updates: Vec<(
-        IndexMutation,
-        mpsc::SyncSender<Result<UpdateOutcome, SearchError>>,
-    )>,
-    latest: &mut HashMap<String, (i64, bool)>,
-) -> (
-    Vec<IndexMutation>,
-    Vec<mpsc::SyncSender<Result<UpdateOutcome, SearchError>>>,
-) {
-    let mut pending: BTreeMap<String, PendingChange> = BTreeMap::new();
-    for (mutation, reply) in updates {
-        let note_id = mutation.note_id().to_owned();
-        let revision = mutation.revision();
-        let is_delete = mutation.is_delete();
-        let already_applied = latest.get(&note_id).is_some_and(|(current, deleted)| {
-            *current > revision || (*current == revision && (!is_delete || *deleted))
-        });
-        if already_applied {
-            let _ = reply.send(Ok(UpdateOutcome::Stale));
-            continue;
-        }
-        latest.insert(note_id.clone(), (revision, is_delete));
-        match pending.get_mut(&note_id) {
-            Some(change) => {
-                change.stale_replies.append(&mut change.replies);
-                change.mutation = mutation;
-                change.replies.push(reply);
-            }
-            None => {
-                pending.insert(
-                    note_id,
-                    PendingChange {
-                        mutation,
-                        replies: vec![reply],
-                        stale_replies: Vec::new(),
-                    },
-                );
-            }
-        }
-    }
-    let mut mutations = Vec::new();
-    let mut responses = Vec::new();
-    for (_, change) in pending {
-        for reply in change.stale_replies {
-            let _ = reply.send(Ok(UpdateOutcome::Stale));
-        }
-        mutations.push(change.mutation);
-        responses.extend(change.replies);
-    }
-    (mutations, responses)
+    status.dirty = true;
+    status.degraded = true;
+    *needs_reconciliation = true;
 }
 
 fn check_rebuild_bounds(documents: &[DocumentInput]) -> Result<(), SearchError> {
@@ -489,148 +251,43 @@ fn rebuild_index(
     documents: &[DocumentInput],
 ) -> Result<(), SearchError> {
     check_rebuild_bounds(documents)?;
-    let candidate_path = unique_rebuild_path(path)?;
-    let mut candidate = IndexManager::open(&candidate_path)?;
-    let build_result = if documents.is_empty() {
-        candidate.initialize_metadata()
-    } else {
-        candidate.upsert_batch(documents)
-    };
-    if let Err(primary) = build_result {
-        candidate.close_writer();
-        drop(candidate);
-        return match fs::remove_dir_all(&candidate_path) {
-            Ok(()) => Err(primary),
-            Err(cleanup) => Err(SearchError::RebuildCleanup {
-                primary: Box::new(primary),
-                cleanup,
-            }),
-        };
-    }
-    candidate.close_writer();
-    drop(candidate);
     current.close_writer();
     let placeholder = IndexManager::new_in_memory()?;
     let previous = std::mem::replace(current, placeholder);
     drop(previous);
-    let swap_result = swap_index_directory(&candidate_path, path);
-    let reopen_result = IndexManager::open(path);
-    match (swap_result, reopen_result) {
-        (Ok(()), Ok(reopened)) => {
-            *current = reopened;
-            Ok(())
-        }
-        (Err(primary), Ok(reopened)) => {
-            *current = reopened;
-            cleanup_failed_rebuild(&candidate_path, primary)
-        }
-        (Err(primary), Err(_)) => cleanup_failed_rebuild(&candidate_path, primary),
-        (Ok(()), Err(reopen)) => Err(reopen),
-    }
-}
-
-fn cleanup_failed_rebuild(path: &Path, primary: SearchError) -> Result<(), SearchError> {
-    match fs::remove_dir_all(path) {
-        Ok(()) => Err(primary),
-        Err(cleanup) if cleanup.kind() == std::io::ErrorKind::NotFound => Err(primary),
-        Err(cleanup) => Err(SearchError::RebuildCleanup {
-            primary: Box::new(primary),
-            cleanup,
-        }),
-    }
-}
-
-fn replace_index(path: &Path, documents: &[DocumentInput]) -> Result<IndexManager, SearchError> {
-    let candidate_path = unique_rebuild_path(path)?;
-    let mut candidate = IndexManager::open(&candidate_path)?;
-    let build_result = if documents.is_empty() {
-        candidate.initialize_metadata()
+    reset_search_directory(path)?;
+    let mut rebuilt = IndexManager::open(path)?;
+    if documents.is_empty() {
+        rebuilt.initialize_metadata()?;
     } else {
-        candidate.upsert_batch(documents)
-    };
-    if let Err(primary) = build_result {
-        candidate.close_writer();
-        drop(candidate);
-        return match fs::remove_dir_all(&candidate_path) {
-            Ok(()) => Err(primary),
-            Err(cleanup) => Err(SearchError::RebuildCleanup {
-                primary: Box::new(primary),
-                cleanup,
-            }),
-        };
+        rebuilt.upsert_batch(documents)?;
     }
-    candidate.close_writer();
-    drop(candidate);
-    swap_index_directory(&candidate_path, path)?;
-    IndexManager::open(path)
-}
-
-fn unique_rebuild_path(path: &Path) -> Result<PathBuf, SearchError> {
-    static NEXT_REBUILD: std::sync::atomic::AtomicU64 =
-        std::sync::atomic::AtomicU64::new(0);
-    let parent = path.parent().ok_or(SearchError::InvalidInput {
-        field: "index path",
-    })?;
-    let name = path.file_name().ok_or(SearchError::InvalidInput {
-        field: "index path",
-    })?;
-    for _ in 0..32 {
-        let sequence = NEXT_REBUILD.fetch_add(1, Ordering::Relaxed);
-        let mut candidate_name = name.to_os_string();
-        candidate_name.push(format!(".rebuild-{}-{sequence}", std::process::id()));
-        let candidate = parent.join(candidate_name);
-        match fs::create_dir(&candidate) {
-            Ok(()) => return Ok(candidate),
-            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
-            Err(error) => return Err(error.into()),
-        }
-    }
-    Err(SearchError::InvalidInput {
-        field: "unique index rebuild directory",
-    })
-}
-
-fn swap_index_directory(candidate: &Path, path: &Path) -> Result<(), SearchError> {
-    let backup = backup_path(path)?;
-    remove_directory_if_present(&backup)?;
-    let had_old = match fs::symlink_metadata(path) {
-        Ok(_) => true,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
-        Err(error) => return Err(error.into()),
-    };
-    if had_old {
-        ensure_real_directory(path)?;
-        fs::rename(path, &backup)?;
-        sync_parent(path)?;
-    }
-    if let Err(install) = fs::rename(candidate, path) {
-        let restore = if had_old {
-            fs::rename(&backup, path).err()
-        } else {
-            None
-        };
-        return Err(SearchError::DirectorySwap { install, restore });
-    }
-    sync_parent(path)?;
-    remove_directory_if_present(&backup)?;
-    sync_parent(path)?;
+    rebuilt.close_writer();
+    *current = rebuilt;
     Ok(())
 }
 
-fn recover_backup(path: &Path) -> Result<(), SearchError> {
-    let backup = backup_path(path)?;
-    let path_exists = fs::symlink_metadata(path).is_ok();
-    let backup_exists = fs::symlink_metadata(&backup).is_ok();
-    if !backup_exists {
-        return Ok(());
+fn replace_index(path: &Path) -> Result<IndexManager, SearchError> {
+    reset_search_directory(path)?;
+    let mut index = IndexManager::open(path)?;
+    index.initialize_metadata()?;
+    index.close_writer();
+    Ok(index)
+}
+
+fn reset_search_directory(path: &Path) -> Result<(), SearchError> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {
+            return Err(SearchError::InvalidInput {
+                field: "search index directory",
+            });
+        }
+        Ok(_) => fs::remove_dir_all(path)?,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error.into()),
     }
-    ensure_real_directory(&backup)?;
-    if path_exists {
-        remove_directory_if_present(&backup)?;
-    } else {
-        fs::rename(&backup, path)?;
-    }
-    sync_parent(path)
+    fs::create_dir(path)?;
+    Ok(())
 }
 
 fn ensure_search_directory(path: &Path) -> Result<(), SearchError> {
@@ -656,40 +313,12 @@ fn ensure_real_directory(path: &Path) -> Result<(), SearchError> {
     Ok(())
 }
 
-fn remove_directory_if_present(path: &Path) -> Result<(), SearchError> {
-    match fs::symlink_metadata(path) {
-        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {
-            Err(SearchError::InvalidInput {
-                field: "search index backup directory",
-            })
-        }
-        Ok(_) => fs::remove_dir_all(path).map_err(SearchError::from),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(error.into()),
-    }
-}
-
-fn backup_path(path: &Path) -> Result<PathBuf, SearchError> {
-    let parent = path.parent().ok_or(SearchError::InvalidInput {
-        field: "index path",
-    })?;
-    let name = path.file_name().ok_or(SearchError::InvalidInput {
-        field: "index path",
-    })?;
-    Ok(parent.join(format!("{}.previous", name.to_string_lossy())))
-}
-
-fn sync_parent(path: &Path) -> Result<(), SearchError> {
-    if let Some(parent) = path.parent() {
-        fs::File::open(parent)?.sync_all()?;
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::types::{DirtyNoteSnapshot, Fuzziness, NoteIdentity, SearchMode};
+    use std::sync::mpsc;
+    use std::time::Duration;
 
     fn document(note_id: &str, revision: i64, content: &str) -> DocumentInput {
         let identity = NoteIdentity::new(
@@ -715,7 +344,7 @@ mod tests {
     #[test]
     fn rejected_search_query_does_not_mark_the_index_degraded() {
         let temp = tempfile::tempdir().unwrap();
-        let service = SearchService::open(temp.path()).unwrap();
+        let mut service = SearchService::open(temp.path()).unwrap();
         let error = service
             .search("x".repeat(1025), options(), Vec::new())
             .unwrap_err();
@@ -733,11 +362,11 @@ mod tests {
 
     #[test]
     fn request_validation_errors_preserve_status_and_storage_errors_degrade() {
-        let state = SharedState {
-            dirty: AtomicBool::new(false),
-            degraded: AtomicBool::new(false),
-            needs_reconciliation: AtomicBool::new(false),
+        let mut status = SearchStatus {
+            dirty: false,
+            degraded: false,
         };
+        let mut needs_reconciliation = false;
         let validation_errors = [
             SearchError::InvalidInput { field: "query" },
             SearchError::LimitOutOfRange {
@@ -753,32 +382,24 @@ mod tests {
         ];
 
         for error in &validation_errors {
-            mark_search_failure(&state, error);
+            mark_search_failure(&mut status, &mut needs_reconciliation, error);
         }
         assert_eq!(
-            SearchStatus {
-                dirty: state.dirty.load(Ordering::Acquire),
-                degraded: state.degraded.load(Ordering::Acquire),
-            },
-            SearchStatus {
-                dirty: false,
-                degraded: false,
-            }
+            status,
+            SearchStatus { dirty: false, degraded: false }
         );
-        assert!(!state.needs_reconciliation.load(Ordering::Acquire));
+        assert!(!needs_reconciliation);
 
-        mark_search_failure(&state, &SearchError::WorkerStopped);
-        assert_eq!(
-            SearchStatus {
-                dirty: state.dirty.load(Ordering::Acquire),
-                degraded: state.degraded.load(Ordering::Acquire),
-            },
-            SearchStatus {
-                dirty: true,
-                degraded: true,
-            }
+        mark_search_failure(
+            &mut status,
+            &mut needs_reconciliation,
+            &SearchError::Io(std::io::Error::other("index")),
         );
-        assert!(state.needs_reconciliation.load(Ordering::Acquire));
+        assert_eq!(
+            status,
+            SearchStatus { dirty: true, degraded: true }
+        );
+        assert!(needs_reconciliation);
     }
 
     fn snapshot(identity: NoteIdentity, source: &str, local_revision: u64) -> DirtyNoteSnapshot {
@@ -794,33 +415,110 @@ mod tests {
     }
 
     #[test]
-    fn change_queue_coalesces_by_revision_and_delete_wins_ties() {
-        let mut latest = HashMap::new();
-        let (mutations, replies) = coalesce_changes(
-            vec![
-                (IndexMutation::Upsert(document("a", 1, "old")), mpsc::sync_channel(1).0),
-                (IndexMutation::Upsert(document("a", 2, "new")), mpsc::sync_channel(1).0),
-                (
-                    IndexMutation::Delete {
-                        note_id: "a".into(),
-                        revision: 2,
-                    },
-                    mpsc::sync_channel(1).0,
-                ),
-            ],
-            &mut latest,
+    fn stale_updates_are_ignored_and_delete_wins_revision_ties() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut service = SearchService::open(&temp.path().join("search")).unwrap();
+
+        assert_eq!(
+            service.upsert(document("a", 2, "new")).unwrap(),
+            UpdateOutcome::Applied
         );
-        assert_eq!(mutations.len(), 1);
-        assert!(matches!(mutations[0], IndexMutation::Delete { .. }));
-        assert_eq!(replies.len(), 1);
-        assert_eq!(latest.get("a"), Some(&(2, true)));
+        assert_eq!(
+            service.upsert(document("a", 1, "old")).unwrap(),
+            UpdateOutcome::Stale
+        );
+        assert_eq!(
+            service.remove("a".into(), 2).unwrap(),
+            UpdateOutcome::Applied
+        );
+        assert_eq!(
+            service.upsert(document("a", 2, "resurrected")).unwrap(),
+            UpdateOutcome::Stale
+        );
+        assert_eq!(
+            service.remove("a".into(), 2).unwrap(),
+            UpdateOutcome::Stale
+        );
+        assert_eq!(
+            service.upsert(document("a", 3, "later")).unwrap(),
+            UpdateOutcome::Applied
+        );
+        assert_eq!(
+            service.remove("missing".into(), 5).unwrap(),
+            UpdateOutcome::Applied
+        );
+        assert_eq!(
+            service.upsert(document("missing", 4, "older")).unwrap(),
+            UpdateOutcome::Stale
+        );
+        assert_eq!(
+            service.upsert(document("missing", 5, "same revision")).unwrap(),
+            UpdateOutcome::Stale
+        );
+
+        assert!(service
+            .search("resurrected".into(), options(), vec![])
+            .unwrap()
+            .is_empty());
+        assert!(service
+            .search("older".into(), options(), vec![])
+            .unwrap()
+            .is_empty());
+        assert_eq!(
+            service
+                .search(
+                    "later".into(),
+                    options(),
+                    vec![document("a", 3, "later").identity().clone()]
+                )
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn a_fifth_live_service_can_write_without_waiting_for_idle_services_to_drop() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut services = (0..4)
+            .map(|index| SearchService::open(&temp.path().join(index.to_string())).unwrap())
+            .collect::<Vec<_>>();
+        for (index, service) in services.iter_mut().enumerate() {
+            service
+                .upsert(document(&format!("note-{index}"), 1, "first writer"))
+                .unwrap();
+        }
+        let mut fifth = SearchService::open(&temp.path().join("fifth")).unwrap();
+        let (finished, result) = mpsc::channel();
+        let writer = std::thread::spawn(move || {
+            let result = fifth.upsert(document("fifth", 1, "fifth writer"));
+            finished.send(result).unwrap();
+        });
+
+        let first_result = result.recv_timeout(Duration::from_secs(2));
+        let progressed_with_owners_alive = first_result.is_ok();
+        let write_result = match first_result {
+            Ok(result) => result,
+            Err(_) => {
+                drop(services);
+                result
+                    .recv_timeout(Duration::from_secs(2))
+                    .expect("the fifth writer should proceed after earlier services drop")
+            }
+        };
+        assert_eq!(write_result.unwrap(), UpdateOutcome::Applied);
+        writer.join().unwrap();
+        assert!(
+            progressed_with_owners_alive,
+            "the fifth writer waited for idle service owners"
+        );
     }
 
     #[test]
     fn clean_restart_does_not_rebuild_matching_index() {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("search");
-        let service = SearchService::open(&path).unwrap();
+        let mut service = SearchService::open(&path).unwrap();
         let identity = document("a", 1, "needle").identity().clone();
         service.rebuild(vec![document("a", 1, "needle")]).unwrap();
         drop(service);
@@ -845,7 +543,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("search");
         drop(IndexManager::open(&path).unwrap());
-        let service = SearchService::open(&path).unwrap();
+        let mut service = SearchService::open(&path).unwrap();
         assert!(service.needs_reconciliation());
         service.rebuild(Vec::new()).unwrap();
         assert_eq!(service.status(), SearchStatus { dirty: false, degraded: false });
@@ -854,7 +552,7 @@ mod tests {
     #[test]
     fn accepted_write_is_visible_to_search() {
         let temp = tempfile::tempdir().unwrap();
-        let service = SearchService::open(&temp.path().join("search")).unwrap();
+        let mut service = SearchService::open(&temp.path().join("search")).unwrap();
         assert_eq!(service.upsert(document("a", 1, "accepted content")).unwrap(), UpdateOutcome::Applied);
         let result = service.search(
             "accepted".into(),
@@ -867,14 +565,14 @@ mod tests {
     #[test]
     fn recency_boost_reorders_equal_matches_at_query_time() {
         let temp = tempfile::tempdir().unwrap();
-        let service = SearchService::open(&temp.path().join("search")).unwrap();
+        let mut service = SearchService::open(&temp.path().join("search")).unwrap();
         let day_ms = 24 * 3_600_000;
         let now_ms = 365 * day_ms;
         let old = document("a", 1, "needle").identity().clone().with_updated_at_ms(now_ms - 200 * day_ms);
         let fresh = document("b", 1, "needle").identity().clone().with_updated_at_ms(now_ms);
         service.upsert(document("a", 1, "needle")).unwrap();
         service.upsert(document("b", 1, "needle")).unwrap();
-        let order = |boost: f32| {
+        let mut order = |boost: f32| {
             let weights = crate::types::SearchWeights::new(10.0, 5.0, 2.0, 1.0, boost).unwrap();
             service
                 .search(
@@ -894,7 +592,7 @@ mod tests {
     #[test]
     fn current_identity_filter_suppresses_stale_index_hits() {
         let temp = tempfile::tempdir().unwrap();
-        let service = SearchService::open(&temp.path().join("search")).unwrap();
+        let mut service = SearchService::open(&temp.path().join("search")).unwrap();
         service.upsert(document("a", 1, "needle")).unwrap();
         let stale = document("a", 2, "new source").identity().clone();
         assert!(service.search("needle".into(), options(), vec![stale]).unwrap().is_empty());
@@ -903,7 +601,7 @@ mod tests {
     #[test]
     fn overlay_suppresses_canonical_hits_without_changing_the_index() {
         let temp = tempfile::tempdir().unwrap();
-        let service = SearchService::open(&temp.path().join("search")).unwrap();
+        let mut service = SearchService::open(&temp.path().join("search")).unwrap();
         let canonical = document("a", 1, "canonical needle");
         service.upsert(canonical.clone()).unwrap();
         let dirty = snapshot(canonical.identity().clone(), "private draft", 3);
@@ -927,10 +625,10 @@ mod tests {
     }
 
     #[test]
-    fn rebuild_replaces_index_from_a_sibling_directory() {
+    fn rebuild_replaces_the_derived_index_from_canonical_documents() {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("search");
-        let service = SearchService::open(&path).unwrap();
+        let mut service = SearchService::open(&path).unwrap();
         service.upsert(document("old", 1, "old content")).unwrap();
         service.rebuild(vec![document("new", 1, "new content")]).unwrap();
         assert_eq!(service.search("old".into(), options(), vec![]).unwrap().len(), 0);
@@ -939,30 +637,26 @@ mod tests {
     }
 
     #[test]
-    fn failed_rebuild_swap_removes_its_candidate_directory() {
+    fn corrupt_index_is_discarded_before_canonical_rebuild() {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("search");
-        let service = SearchService::open(&path).unwrap();
-        service.upsert(document("old", 1, "old content")).unwrap();
-        std::os::unix::fs::symlink(temp.path(), temp.path().join("search.previous")).unwrap();
-        let error = service.rebuild(vec![document("new", 1, "new content")]);
-        assert!(matches!(
-            error,
-            Err(SearchError::InvalidInput {
-                field: "search index backup directory"
-            })
-        ));
-        let candidates = fs::read_dir(temp.path())
-            .unwrap()
-            .filter_map(Result::ok)
-            .filter(|entry| {
-                entry
-                    .file_name()
-                    .to_string_lossy()
-                    .starts_with("search.rebuild-")
-            })
-            .count();
-        assert_eq!(candidates, 0);
+        fs::create_dir(&path).unwrap();
+        fs::write(path.join("meta.json"), "damaged metadata").unwrap();
+
+        let mut service = SearchService::open(&path).unwrap();
+        assert!(service.needs_reconciliation());
+        assert_eq!(service.status(), SearchStatus { dirty: true, degraded: true });
+        service.rebuild(vec![document("canonical", 1, "canonical source")]).unwrap();
+        assert_eq!(service.status(), SearchStatus { dirty: false, degraded: false });
+        assert!(!service.needs_reconciliation());
+        let current = document("canonical", 1, "canonical source").identity().clone();
+        assert_eq!(
+            service
+                .search("canonical".into(), options(), vec![current])
+                .unwrap()
+                .len(),
+            1
+        );
     }
 
     #[test]
