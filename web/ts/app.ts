@@ -16,7 +16,7 @@ import { createExtensionImportReceiver, type ExtensionImportReceiver } from "./a
 import { createNoteLinksLoader, createNotePreviewCache, type NoteLinksOutcome } from "./app/note-links.ts";
 import { linksRailNoteId } from "./links-rail.ts";
 import type { EditorHandle, EditorSession, EditorSnapshot } from "./editor/codemirror-adapter.ts";
-import { createCalloutExtension, createWikiImageExtension, createWikiLinkExtension, type EditorConfig } from "./editor/tansu-extensions.ts";
+import type { EditorConfig } from "./editor/tansu-extensions.ts";
 import { convertImageToWebp } from "./editor/image-webp.ts";
 import { resolveWikiTarget } from "./editor/wiki-target.ts";
 import { canonicalSourceHash } from "./source-hash.ts";
@@ -642,19 +642,16 @@ export class TansuApp {
     if (sameVault && cached !== null && cached.assetScopeRevision === this.assetScopeRevision) {
       return this.editorConfigForActiveNote(cached.config);
     }
-    const extensions = [
-      createWikiImageExtension({ resolveUrl: (name) => this.resolveAssetUrl(name) }),
-      createCalloutExtension(),
-      createWikiLinkExtension(),
-    ];
+    const resolveAssetUrl = (name: string) => this.resolveAssetUrl(name);
     if (sameVault && cached !== null) {
-      const config = this.editorConfigForActiveNote({ ...cached.config, extensions });
+      const config = this.editorConfigForActiveNote({ ...cached.config, resolveAssetUrl });
       this.cachedEditorConfig = { generation, identity: serverIdentity, client, assetScopeRevision: this.assetScopeRevision, config };
       return config;
     }
     const currentVault = () => serverIdentity !== null && client !== null && this.isCurrentVault(serverIdentity, client);
     const config: EditorConfig = {
-      extensions,
+      wikiLinks: true,
+      resolveAssetUrl,
       ...this.editorSettings(),
       noteTitle: activeTab(this.state)?.title ?? "",
       onNoteTitleCommit: this.onNoteTitleCommit,

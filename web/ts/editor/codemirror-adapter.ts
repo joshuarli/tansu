@@ -41,10 +41,8 @@ import { convertImageToWebp, webpAssetMarkdown } from "./image-webp.js";
 import { tufteNotes } from "./tufte-notes.js";
 import { addPendingImagePreview, pendingImagePreviews, removePendingImagePreview } from "./pasted-image-preview.js";
 import {
-  createCalloutExtension,
   type EditorChange,
   type EditorConfig,
-  type EditorExtension,
   type EditorImagePasteSelection,
   type EditorImagePasteState,
   type EditorImageUploadRequest,
@@ -63,6 +61,7 @@ import {
 } from "./format-ops.js";
 
 const transactionOrigin = Annotation.define<EditorOrigin>();
+const EMPTY_CALLOUT_ICONS: Readonly<Record<string, string>> = {};
 
 const frontmatterLineDecorations = StateField.define<DecorationSet>({
   create: frontmatterLineDecorationSet,
@@ -321,7 +320,6 @@ type ImagePasteOutcome =
   | { status: "failed"; message: string };
 
 const sessions = new WeakMap<EditorSession, SessionData>();
-const defaultCallout = createCalloutExtension();
 
 function resolveMarkdownImageUrl(
   source: string,
@@ -366,17 +364,7 @@ function editorExtensions(config: EditorConfig, live: boolean): Extension[] {
   }
   if (!live) return extensions;
 
-  const configured = config.extensions ?? [];
-  const imageExtensions = configured.filter(
-    (extension): extension is Extract<EditorExtension, { kind: "wiki-images" }> =>
-      extension.kind === "wiki-images",
-  );
-  const resolveVaultAsset = imageExtensions[imageExtensions.length - 1]?.resolveUrl;
-  const calloutExtensions = configured.filter(
-    (extension): extension is Extract<EditorExtension, { kind: "callouts" }> =>
-      extension.kind === "callouts",
-  );
-  const callout = calloutExtensions[calloutExtensions.length - 1] ?? defaultCallout;
+  const resolveAssetUrl = config.resolveAssetUrl;
   const wikiConfig = {
     suggest: async (query: string) => suggestWikiTargets(query, config.wikiNotes?.() ?? []),
     resolve: async (target: string) => {
@@ -401,20 +389,18 @@ function editorExtensions(config: EditorConfig, live: boolean): Extension[] {
     },
   };
 
-  for (const extension of imageExtensions) {
-    extensions.push(wikiImages({ resolveUrl: extension.resolveUrl }));
-  }
+  if (resolveAssetUrl !== undefined) extensions.push(wikiImages({ resolveUrl: resolveAssetUrl }));
   extensions.push(
     inlinePreview(config.onLinkOpen ? { onLinkClick: config.onLinkOpen } : {}),
-    imageBlocks((source) => resolveMarkdownImageUrl(source, resolveVaultAsset)),
+    imageBlocks((source) => resolveMarkdownImageUrl(source, resolveAssetUrl)),
     tables(config.onLinkOpen ? { onLinkClick: config.onLinkOpen } : {}),
-    calloutDecoration({ icons: callout.icons }),
+    calloutDecoration({ icons: config.calloutIcons ?? EMPTY_CALLOUT_ICONS }),
     tufteNotes(),
     slashMenu(),
     blockDragHandles(),
     urlCards(config.onLinkOpen ? { onOpen: config.onLinkOpen } : {}),
   );
-  if (configured.some((extension) => extension.kind === "wiki-links")) {
+  if (hasWikiLinks(config)) {
     extensions.push(wikiLinks(wikiConfig));
     const loadNotePreview = config.loadNotePreview;
     if (loadNotePreview !== undefined) {
@@ -433,7 +419,7 @@ function editorExtensions(config: EditorConfig, live: boolean): Extension[] {
 type WikiScope = { currentNotePath: string; notes: readonly WikiNote[] };
 
 function hasWikiLinks(config: EditorConfig): boolean {
-  return (config.extensions ?? []).some((extension) => extension.kind === "wiki-links");
+  return config.wikiLinks === true;
 }
 
 function wikiScope(config: EditorConfig): WikiScope {
@@ -455,32 +441,12 @@ function sameRecord(left: Readonly<Record<string, string>>, right: Readonly<Reco
   );
 }
 
-function sameEditorExtensionInputs(left: EditorConfig, right: EditorConfig): boolean {
-  const leftExtensions = left.extensions ?? [];
-  const rightExtensions = right.extensions ?? [];
-  const leftImages = leftExtensions.filter(
-    (extension): extension is Extract<EditorExtension, { kind: "wiki-images" }> => extension.kind === "wiki-images",
-  );
-  const rightImages = rightExtensions.filter(
-    (extension): extension is Extract<EditorExtension, { kind: "wiki-images" }> => extension.kind === "wiki-images",
-  );
-  if (leftImages.length !== rightImages.length || leftImages.some((extension, index) =>
-    extension.resolveUrl !== rightImages[index]?.resolveUrl
-  )) return false;
-
-  const leftCallouts = leftExtensions.filter(
-    (extension): extension is Extract<EditorExtension, { kind: "callouts" }> => extension.kind === "callouts",
-  );
-  const rightCallouts = rightExtensions.filter(
-    (extension): extension is Extract<EditorExtension, { kind: "callouts" }> => extension.kind === "callouts",
-  );
-  const leftCallout = leftCallouts[leftCallouts.length - 1] ?? defaultCallout;
-  const rightCallout = rightCallouts[rightCallouts.length - 1] ?? defaultCallout;
-  if (!sameRecord(leftCallout.icons, rightCallout.icons)) return false;
-
-  const leftWikiLinks = leftExtensions.some((extension) => extension.kind === "wiki-links");
-  const rightWikiLinks = rightExtensions.some((extension) => extension.kind === "wiki-links");
+function sameLiveFeatureInputs(left: EditorConfig, right: EditorConfig): boolean {
+  const leftWikiLinks = hasWikiLinks(left);
+  const rightWikiLinks = hasWikiLinks(right);
   return leftWikiLinks === rightWikiLinks && left.onLinkOpen === right.onLinkOpen &&
+    left.resolveAssetUrl === right.resolveAssetUrl &&
+    sameRecord(left.calloutIcons ?? EMPTY_CALLOUT_ICONS, right.calloutIcons ?? EMPTY_CALLOUT_ICONS) &&
     (!leftWikiLinks || (
       left.currentNotePath === right.currentNotePath &&
       left.wikiNotes === right.wikiNotes &&
@@ -1307,7 +1273,7 @@ export function createCodeMirrorEditor(container: HTMLElement, initialConfig: Ed
       const wikiScopeChanged = data.mode === "live" && hasWikiLinks(config) &&
         (appliedWikiScope === null || !sameWikiScope(appliedWikiScope, wikiScope(config)));
       const editorExtensionsChanged = modeChanged || previous.noteTitle !== config.noteTitle || wikiScopeChanged ||
-        (data.mode === "live" && !sameEditorExtensionInputs(previous, config));
+        (data.mode === "live" && !sameLiveFeatureInputs(previous, config));
       const readOnlyChanged = data.readOnly !== previousReadOnly;
       const keymapChanged = previous.onSave !== config.onSave || previous.onFindRequested !== config.onFindRequested;
       reconfigure(data, "modeChange", {

@@ -58,15 +58,6 @@ Next: 83
 - **Fix with:** lifecycle-concurrency
 - **Effort:** M
 
-### TNS-079 · P4 · Collapse speculative editor seams
-
-- **Area:** Architecture
-- **Where:** `web/ts/editor/tansu-extensions.ts`, `web/ts/editor/codemirror-adapter.ts:411-525`, `web/ts/editor/harness/`, `web/ts/editor/tests/large-note-bench.test.ts`
-- **Problem:** The `EditorExtension` union represents three extension variants, but the app supplies one fixed set. The adapter filters and diffs that set on every render. The standalone harness has a build script but no named target. The happy-dom large-note timing runs in `make bench` and `make bench-full`, but it does not measure browser layout.
-- **Recommendation:** Replace the union with plain config fields and delete the harness and the bench test.
-- **Fix with:** api-surface-and-module-boundaries
-- **Effort:** S
-
 ### TNS-080 · P3 · Remove the test-only service seam and the hand-written store fake
 
 - **Area:** Tests

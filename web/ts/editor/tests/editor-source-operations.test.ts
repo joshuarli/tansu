@@ -1,7 +1,6 @@
 import { EditorView } from "@codemirror/view";
 import { describe, expect, it } from "vitest";
 import { createCodeMirrorEditor } from "../codemirror-adapter.js";
-import { createCalloutExtension, createWikiImageExtension, createWikiLinkExtension } from "../tansu-extensions.js";
 import { findLiteral } from "../source-navigation.js";
 import { resolveWikiTarget, suggestWikiTargets, type WikiNote } from "../wiki-target.js";
 
@@ -72,18 +71,30 @@ describe("source-preserving Markdown operations", () => {
   it("renders wiki images and callouts without changing the source", () => {
     const source = "![[photo|320]]\n> [!warning]\n> body\n\n> [!warning\n";
     const { container, editor, dispose } = mounted(source, {
-      extensions: [
-        createWikiImageExtension({ resolveUrl: () => "/z-images/photo" }),
-        createCalloutExtension(),
-      ],
+      resolveAssetUrl: () => "/z-images/photo",
     });
     try {
       expect(container.querySelector<HTMLImageElement>(".tansu-wiki-image img")?.src).toContain(
         "/z-images/photo",
       );
       expect(container.querySelectorAll(".tansu-callout-title")).toHaveLength(1);
+      expect(container.querySelector(".tansu-callout-title")?.textContent).toBe("⚠️ Warning");
       expect(editor.getSnapshot()?.source).toBe(source);
       expect(container.textContent).toContain("[!warning");
+    } finally {
+      dispose();
+    }
+  });
+
+  it("keeps default callout icons when a configured icon is overridden", () => {
+    const { container, dispose } = mounted("> [!warning]\n\n> [!note]\n", {
+      calloutIcons: { warning: "🔔" },
+    });
+    try {
+      expect([...container.querySelectorAll(".tansu-callout-title")].map((title) => title.textContent)).toStrictEqual([
+        "🔔 Warning",
+        "📝 Note",
+      ]);
     } finally {
       dispose();
     }
@@ -92,11 +103,7 @@ describe("source-preserving Markdown operations", () => {
   it("resolves standard Markdown vault images through the asset resolver", () => {
     const imageUrl = "/api/v2/vaults/vault-1/assets?name=z-images%2Fphoto.webp";
     const { container, dispose } = mounted("![photo](z-images/photo.webp)\n", {
-      extensions: [
-        createWikiImageExtension({
-          resolveUrl: (name) => name === "z-images/photo.webp" ? imageUrl : null,
-        }),
-      ],
+      resolveAssetUrl: (name) => name === "z-images/photo.webp" ? imageUrl : null,
     });
     try {
       expect(container.querySelector(".cm-atomic-image img")?.getAttribute("src")).toBe(imageUrl);
@@ -108,7 +115,7 @@ describe("source-preserving Markdown operations", () => {
   it("resizes one wiki image with one undoable source change", () => {
     const source = "before ![[photo]] after\n";
     const { container, editor, dispose } = mounted(source, {
-      extensions: [createWikiImageExtension({ resolveUrl: () => "/z-images/photo" })],
+      resolveAssetUrl: () => "/z-images/photo",
     });
     try {
       const handle = container.querySelector<HTMLButtonElement>(".tansu-wiki-image-resize")!;
@@ -119,6 +126,19 @@ describe("source-preserving Markdown operations", () => {
       // oxlint-disable-next-line vitest/prefer-to-be-truthy -- Keep the exact boolean result.
       expect(editor.undo()).toBe(true);
       expect(editor.getSnapshot()?.source).toBe(source);
+    } finally {
+      dispose();
+    }
+  });
+
+  it("updates existing wiki image previews when the asset resolver changes", () => {
+    const { container, editor, dispose } = mounted("![[photo]]\n", {
+      resolveAssetUrl: () => "/first/photo",
+    });
+    try {
+      expect(container.querySelector(".tansu-wiki-image img")?.getAttribute("src")).toBe("/first/photo");
+      editor.updateConfiguration({ resolveAssetUrl: () => "/second/photo" });
+      expect(container.querySelector(".tansu-wiki-image img")?.getAttribute("src")).toBe("/second/photo");
     } finally {
       dispose();
     }
@@ -176,10 +196,26 @@ describe("vault-scoped wiki link rules", () => {
     ]);
   });
 
+  it("enables wiki link behavior from editor configuration", async () => {
+    const { container, editor, dispose } = mounted("Open [[/root.md]]", {
+      currentNotePath: () => "folder/current.md",
+      wikiNotes: () => notes,
+    });
+    try {
+      expect(container.querySelector(".cm-atomic-wiki-link")).toBeNull();
+      editor.updateConfiguration({ wikiLinks: true });
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(container.querySelector<HTMLElement>('[data-wiki-link-target="/root.md"]')?.textContent).toBe("Root");
+    } finally {
+      dispose();
+    }
+  });
+
   it("resolves links from the active vault and leaves ambiguous targets unresolved", async () => {
     let opened: string | null = null;
     const { container, dispose } = mounted("Open [[../root]] and [[sibling]]", {
-      extensions: [createWikiLinkExtension()],
+      wikiLinks: true,
       currentNotePath: () => "folder/current.md",
       wikiNotes: () => notes,
       onWikiNoteOpen: (noteId) => { opened = noteId; },
