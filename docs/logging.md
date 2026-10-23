@@ -5,10 +5,12 @@ local debugging.
 
 ## Modes
 
-Set `TANSU_LOGS` to `off`, `buffer`, `pretty`, or `json`. The server defaults
+Set `TANSU_LOGS` to `off`, `buffer`, or `pretty`. The server defaults
 to `off`. Development frontend builds default to `pretty`. Production builds
 default to `off`. `make dev` enables pretty server logs. The browser e2e task
-uses buffered logging. Rust release builds disable the log hub.
+uses buffered logging. Rust release builds disable the log hub. The `pretty` mode prints each bounded
+structured event as one JSON line, including its raw fields, without ANSI colors
+or a separate event summary.
 
 ## Events
 

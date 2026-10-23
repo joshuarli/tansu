@@ -148,15 +148,6 @@ Next: 83
 - **Fix with:** dead-code-archaeology
 - **Effort:** S
 
-### TNS-078 · P4 · Remove the Json log mode and colorized pretty formatter
-
-- **Area:** Operability
-- **Where:** `src/logging.rs:15-35,329-636`, `docs/logging.md`
-- **Problem:** `json` is used by no script, and the pretty summary hand-lists about 20 event kinds that must track emitters and duplicates the payload dump. About 300 lines plus 110 lines of tests.
-- **Recommendation:** Delete `Json` and the summary, and print the raw fields.
-- **Fix with:** none
-- **Effort:** S
-
 ### TNS-079 · P4 · Collapse speculative editor seams
 
 - **Area:** Architecture
