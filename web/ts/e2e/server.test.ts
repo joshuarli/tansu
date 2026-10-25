@@ -1566,7 +1566,7 @@ async function startFixtureServer(): Promise<void> {
         stdio: "pipe",
       });
       const targetDirectory = resolve(process.env["CARGO_TARGET_DIR"] ?? "target");
-      serverBinaryPath = join(targetDirectory, "debug", process.platform === "win32" ? "tansu.exe" : "tansu");
+      serverBinaryPath = join(targetDirectory, "debug", "tansu");
     } else {
       serverBinaryPath = resolve(supplied);
     }

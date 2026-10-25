@@ -27,7 +27,7 @@ const stopRequested = new Promise((resolve) => {
 function buildFrontend() {
   const child = spawn("pnpm", ["run", "build:dev"], {
     cwd: repositoryRoot,
-    detached: process.platform !== "win32",
+    detached: true,
     env: { ...process.env, TANSU_WEB_HMR: "1" },
     stdio: "inherit",
   });
@@ -86,7 +86,7 @@ function closeWatchers() {
 function stopBuild() {
   if (activeBuild === undefined || activeBuild.exitCode !== null || activeBuild.signalCode !== null) return;
   try {
-    if (process.platform === "win32" || activeBuild.pid === undefined) {
+    if (activeBuild.pid === undefined) {
       activeBuild.kill("SIGTERM");
     } else {
       process.kill(-activeBuild.pid, "SIGTERM");

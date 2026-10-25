@@ -10,6 +10,9 @@ Standalone binaries, when available, are listed on the
 [GitHub releases page](https://github.com/joshuarli/tansu/releases). Put the
 `tansu` binary on your `PATH`.
 
+Supported targets are Apple-silicon macOS and musl Linux (x86_64 and ARM64).
+Windows is not supported.
+
 ## Run Tansu
 
 Create a vault directory, run Tansu, and open the first-run setup page:

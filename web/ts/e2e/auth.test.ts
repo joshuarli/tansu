@@ -43,7 +43,7 @@ describe("authenticated Chromium server", () => {
       stdio: "pipe",
     });
     const targetDirectory = resolve(process.env["CARGO_TARGET_DIR"] ?? "target");
-    const serverBinary = join(targetDirectory, "debug", process.platform === "win32" ? "tansu.exe" : "tansu");
+    const serverBinary = join(targetDirectory, "debug", "tansu");
     execFileSync(serverBinary, [
       "config", "init", "--vault", "One", fixture.vaultOne,
       "--vault", "Two", fixture.vaultTwo,
