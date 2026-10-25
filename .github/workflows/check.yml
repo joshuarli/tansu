@@ -18,7 +18,7 @@ jobs:
       PNPM_CONFIG_STORE_DIR: ${{ github.workspace }}/.work/tmp/pnpm-store
       PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.work/tmp/playwright-browsers
     steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -34,7 +34,7 @@ jobs:
         env:
           TMPDIR: ${{ github.workspace }}/.work/tmp
 
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
           repository: joshuarli/defuddle-rs
