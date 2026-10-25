@@ -5,6 +5,10 @@ import { readOnlyFacet } from "./vendor/atomic/read-only.js";
 const MIN_WIDTH = 48;
 const MAX_WIDTH = 2400;
 
+const FENCE_PATTERN = /^ {0,3}(`{3,}|~{3,})/;
+const WIKI_IMAGE_PATTERN = /!\[\[([^\]|\n]+?)(?:\|(\d+))?\]\]/g;
+const CODE_SPAN_PATTERN = /(`+)(.*?)\1/g;
+
 type WikiImage = {
   from: number;
   to: number;
@@ -74,25 +78,24 @@ function findWikiImages(state: EditorState): WikiImage[] {
   let fence: { marker: string; length: number } | null = null;
   for (let number = 1; number <= state.doc.lines; number++) {
     const line = state.doc.line(number);
-    const fenceMatch = line.text.match(/^ {0,3}(`{3,}|~{3,})/);
+    const fenceMarker = FENCE_PATTERN.exec(line.text)?.[1];
     if (fence !== null) {
-      if (fenceMatch && fenceMatch[1]![0] === fence.marker && fenceMatch[1]!.length >= fence.length) {
+      if (fenceMarker !== undefined && fenceMarker[0] === fence.marker && fenceMarker.length >= fence.length) {
         fence = null;
       }
       continue;
     }
-    if (fenceMatch) {
-      fence = { marker: fenceMatch[1]![0]!, length: fenceMatch[1]!.length };
+    if (fenceMarker !== undefined && fenceMarker[0] !== undefined) {
+      fence = { marker: fenceMarker[0], length: fenceMarker.length };
       continue;
     }
 
-    const expression = /!\[\[([^\]|\n]+?)(?:\|(\d+))?\]\]/g;
-    for (const match of line.text.matchAll(expression)) {
+    WIKI_IMAGE_PATTERN.lastIndex = 0;
+    for (const match of line.text.matchAll(WIKI_IMAGE_PATTERN)) {
       const localFrom = match.index;
-      if (localFrom === undefined || insideCodeSpan(line.text, localFrom)) continue;
-      const name = match[1]!.trim();
+      const name = match[1]?.trim() ?? "";
+      if (localFrom === undefined || name === "" || insideCodeSpan(line.text, localFrom)) continue;
       const width = Number(match[2]) || 320;
-      if (name === "") continue;
       images.push({
         from: line.from + localFrom,
         to: line.from + localFrom + match[0].length,
@@ -122,8 +125,8 @@ export function visibleWikiImageNames(view: EditorView): readonly string[] {
 }
 
 function insideCodeSpan(line: string, position: number): boolean {
-  const spans = line.matchAll(/(`+)(.*?)\1/g);
-  for (const span of spans) {
+  CODE_SPAN_PATTERN.lastIndex = 0;
+  for (const span of line.matchAll(CODE_SPAN_PATTERN)) {
     const start = span.index;
     if (start !== undefined && position >= start && position < start + span[0].length) return true;
   }
@@ -175,13 +178,15 @@ export function wikiImages(options: { resolveUrl: (name: string) => string | nul
         event.preventDefault();
         event.stopPropagation();
         if (this.touchPoints.size === 2) {
-          const points = [...this.touchPoints.entries()];
-          if (points[0]![1].wrapper !== wrapper || points[1]![1].wrapper !== wrapper) {
+          const points = [...this.touchPoints.values()];
+          const first = points[0];
+          const second = points[1];
+          if (first === undefined || second === undefined || first.wrapper !== wrapper || second.wrapper !== wrapper) {
             this.touchPoints.clear();
             return;
           }
           const resize = this.startResize(wrapper, "pinch", null);
-          if (resize !== null) resize.startDistance = this.distance(points[0]![1], points[1]![1]);
+          if (resize !== null) resize.startDistance = this.distance(first, second);
         }
         return;
       }
@@ -202,10 +207,13 @@ export function wikiImages(options: { resolveUrl: (name: string) => string | nul
         point.y = event.clientY;
         if (this.resize?.mode === "pinch" && this.touchPoints.size >= 2) {
           const points = [...this.touchPoints.values()];
+          const first = points[0];
+          const second = points[1];
+          if (first === undefined || second === undefined) return;
           event.preventDefault();
           event.stopPropagation();
           this.resize.width = this.clampGestureWidth(
-            this.resize.startWidth * this.distance(points[0]!, points[1]!) / this.resize.startDistance,
+            this.resize.startWidth * this.distance(first, second) / this.resize.startDistance,
           );
           this.preview();
         }
@@ -406,7 +414,7 @@ export function wikiImages(options: { resolveUrl: (name: string) => string | nul
       candidates.sort((left, right) =>
         Math.abs(left.from - position) - Math.abs(right.from - position)
       );
-      return candidates[0]!;
+      return candidates[0] ?? null;
     }
 
     private clampGestureWidth(width: number): number {

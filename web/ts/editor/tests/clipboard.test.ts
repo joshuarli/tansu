@@ -15,7 +15,7 @@ describe("HTML clipboard conversion", () => {
   });
 
   it("converts common block, inline, list, table, and code markup", () => {
-    expect(sanitizeHtmlToMarkdown(`
+    const markdown = sanitizeHtmlToMarkdown(`
       <h1>Heading</h1><h2>Two</h2><h3>Three</h3><h4>Four</h4><h5>Five</h5><h6>Six</h6>
       <p><b>bold</b> <strong>strong</strong> <i>italic</i> <em>emphasis</em> <s>strike</s> <del>delete</del></p>
       <div>first<br>second</div><section>section</section><article>article</article>
@@ -26,18 +26,8 @@ describe("HTML clipboard conversion", () => {
       <p><code>a&#96;b</code></p>
       <table><tr><th>A|B</th><th>C</th></tr><tr><td>one</td></tr></table>
       <hr>
-    `)).toContain("# Heading\n\n## Two\n\n### Three\n\n#### Four\n\n##### Five\n\n###### Six");
-    const markdown = sanitizeHtmlToMarkdown(`
-      <p><b>bold</b> <strong>strong</strong> <i>italic</i> <em>emphasis</em> <s>strike</s> <del>delete</del></p>
-      <div>first<br>second</div><section>section</section><article>article</article>
-      <blockquote><p>quoted</p></blockquote>
-      <ul><li>one</li><span>skip</span><li>two</li></ul>
-      <ol><li>first</li><li>second</li></ol>
-      <pre><code>one&#10;&#96;&#96;&#96;&#96;two</code></pre>
-      <p><code>a&#96;b</code></p>
-      <table><tr><th>A|B</th><th>C</th></tr><tr><td>one</td></tr></table>
-      <hr>
     `);
+    expect(markdown).toContain("# Heading\n\n## Two\n\n### Three\n\n#### Four\n\n##### Five\n\n###### Six");
     expect(markdown).toContain("**bold** **strong** *italic* *emphasis* ~~strike~~ ~~delete~~");
     expect(markdown).toContain("first\nsecond\n\nsection\n\narticle");
     expect(markdown).toContain("> quoted");

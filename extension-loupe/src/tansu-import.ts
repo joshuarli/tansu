@@ -85,8 +85,7 @@ export function planTansuImages(markdown: string, sourceUrl: string): PlannedTan
     });
   }
   let rewritten = markdown;
-  for (let index = replacements.length - 1; index >= 0; index--) {
-    const replacement = replacements[index]!;
+  for (const replacement of replacements.toReversed()) {
     rewritten =
       rewritten.slice(0, replacement.start) + replacement.text + rewritten.slice(replacement.end);
   }
@@ -143,7 +142,7 @@ export async function mapWithConcurrency<T, R>(
 }
 
 export function readImageContentType(headers: Headers): string {
-  return (headers.get("content-type") ?? "").split(";", 1)[0]!.trim().toLowerCase();
+  return (headers.get("content-type") ?? "").split(";", 1)[0]?.trim().toLowerCase() ?? "";
 }
 
 export async function fetchTansuImage(
@@ -238,8 +237,8 @@ export async function prepareTansuImport(
   return {
     markdown: planned.markdown,
     images: planned.urls.map((url, id): TansuImportImage => {
-      const outcome = outcomes[id]!;
-      return outcome.status === "fetched"
+      const outcome = outcomes[id];
+      return outcome !== undefined && outcome.status === "fetched"
         ? { id, url, contentType: outcome.contentType, base64: bytesToBase64(outcome.bytes) }
         : { id, url, contentType: "", base64: null };
     }),

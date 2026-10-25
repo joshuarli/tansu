@@ -64,7 +64,10 @@ export function createNotePreviewCache(
       const request = fetchPreview(noteId).then((preview) => {
         if (started === generation) {
           settled.set(noteId, preview);
-          if (settled.size > limit) settled.delete(settled.keys().next().value!);
+          if (settled.size > limit) {
+            const oldest = settled.keys().next();
+            if (!oldest.done) settled.delete(oldest.value);
+          }
         }
         return preview;
       }).finally(() => {

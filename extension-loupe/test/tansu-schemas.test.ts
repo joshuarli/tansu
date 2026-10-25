@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { Schema } from "effect";
 import { test } from "vitest";
 import {
+  LoupeParsedPageSchema,
   normalizeTansuOrigin,
   SendToTansuRequestSchema,
   SendToTansuResponseSchema,
@@ -9,7 +10,6 @@ import {
   TansuPageOutcomeSchema,
   TansuSettingsSchema,
 } from "../src/tansu-schemas.ts";
-import { describeTansuResponse } from "../src/tansu-status.ts";
 
 const result = { channel: "tansu", version: 1, type: "import.result", requestId: "r" };
 
@@ -60,24 +60,44 @@ test("decodes page outcomes and service-worker messages", () => {
   );
 });
 
-test("describes import outcomes for the reader status", () => {
-  assert.deepEqual(
-    describeTansuResponse({ ok: true, noteId: "n", path: "p", imagesLocalized: 3, imagesFailed: 0 }),
-    { text: "Imported to Tansu · 3 images", action: { kind: "open-note", label: "Open note" } },
-  );
-  assert.equal(
-    describeTansuResponse({ ok: true, noteId: "n", path: "p", imagesLocalized: 1, imagesFailed: 2 }).text,
-    "Imported to Tansu · 1 image · 2 stayed remote",
-  );
-  assert.equal(
-    describeTansuResponse({ ok: true, noteId: "n", path: "p", imagesLocalized: 0, imagesFailed: 0 }).text,
-    "Imported to Tansu",
-  );
-  assert.deepEqual(
-    describeTansuResponse({ ok: false, reason: "not-configured", error: "Set the URL." }),
-    { text: "Set the URL.", action: { kind: "open-options", label: "Open settings" } },
-  );
-  assert.deepEqual(describeTansuResponse({ ok: false, reason: "failed", error: "boom" }), {
-    text: "Could not import to Tansu: boom",
-  });
+test("decodes the narrow defuddle-wasm page JSON and rejects malformed payloads", () => {
+  const decode = Schema.decodeUnknownSync(LoupeParsedPageSchema),
+    page = {
+      content: "<p>Body.</p>",
+      content_markdown: "Body.",
+      title: "Title",
+      author: "Author",
+      description: "Description",
+      published: "2026-07-12",
+      site: "Site",
+      domain: "example.com",
+      extractor_type: null,
+    };
+
+  assert.deepEqual(decode(page), page);
+  assert.equal(decode({ ...page, content_markdown: null, extractor_type: "default" }).extractor_type, "default");
+});
+
+test.each([
+  ["null content", { content: null }],
+  ["missing content_markdown", { content_markdown: undefined }],
+  ["numeric extractor_type", { extractor_type: 3 }],
+  ["missing domain", { domain: undefined }],
+])("rejects a parsed page with %s", (_label, override) => {
+  const page = {
+    content: "<p>Body.</p>",
+    content_markdown: "Body.",
+    title: "Title",
+    author: "Author",
+    description: "Description",
+    published: "2026-07-12",
+    site: "Site",
+    domain: "example.com",
+    extractor_type: null,
+  };
+  assert.throws(() => Schema.decodeUnknownSync(LoupeParsedPageSchema)({ ...page, ...override }));
+});
+
+test.each([["a string"], [null], [[]]])("rejects a non-object parsed page %p", (malformed) => {
+  assert.throws(() => Schema.decodeUnknownSync(LoupeParsedPageSchema)(malformed));
 });

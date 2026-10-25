@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
-import type { LoupeParsedPage } from "../src/extension-messages.ts";
+import type { LoupeParsedPage } from "../src/tansu-schemas.ts";
 import { createReaderMarkdownFromPage } from "../src/reader-markdown.ts";
 
 test("adds reader metadata as YAML frontmatter", () => {

@@ -1084,11 +1084,7 @@ export class DocumentSession {
   }
 
   private updateStorage(storage: StorageState): void {
-    if (this.current.status !== "loading") {
-      this.set({ ...this.current, storage } as DocumentSessionState);
-    } else {
-      this.set({ ...this.current, storage });
-    }
+    this.set({ ...this.current, storage } as DocumentSessionState);
   }
 
   private failCurrent(generation: number, key: string, reason: UnavailableReason): void {

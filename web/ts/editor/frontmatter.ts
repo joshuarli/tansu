@@ -4,6 +4,17 @@ export type FrontmatterRange =
   | { from: number; to: number; foldTo: number; kind: "closed" }
   | { from: number; to: number; foldTo: number; kind: "unterminated" };
 
+export function frontmatterEndOffset(doc: Text): number {
+  if (doc.lines === 0) return 0;
+  const first = doc.line(1).text;
+  if (first !== "---" && first !== "\uFEFF---") return 0;
+  for (let number = 2; number <= doc.lines; number++) {
+    const line = doc.line(number);
+    if (line.text === "---") return line.to + (number < doc.lines ? 1 : 0);
+  }
+  return doc.length;
+}
+
 export function frontmatterRange(source: EditorState | Text): FrontmatterRange | null {
   const doc = "doc" in source ? source.doc : source;
   const firstLine = doc.line(1);

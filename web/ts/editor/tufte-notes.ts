@@ -2,6 +2,7 @@ import { syntaxTree } from "@codemirror/language";
 import type { EditorState, Extension, Range } from "@codemirror/state";
 import { Decoration, EditorView, ViewPlugin, WidgetType, type DecorationSet, type ViewUpdate } from "@codemirror/view";
 import { deriveFromSyntaxTree } from "./syntax-tree-cache.js";
+import { frontmatterEndOffset } from "./frontmatter.js";
 import { readOnlyFacet } from "./vendor/atomic/read-only.js";
 
 type NoteDefinition = {
@@ -121,18 +122,8 @@ class SidenoteReferenceWidget extends WidgetType {
   }
 }
 
-function frontmatterEnd(state: EditorState): number {
-  const firstLine = state.doc.line(1);
-  if (firstLine.text !== "---" && firstLine.text !== "\uFEFF---") return 0;
-  for (let number = 2; number <= state.doc.lines; number++) {
-    const line = state.doc.line(number);
-    if (line.text === "---") return line.to + (number < state.doc.lines ? 1 : 0);
-  }
-  return state.doc.length;
-}
-
 const scanSidenotes = deriveFromSyntaxTree((state, tree): SidenoteScan => {
-  const frontmatterTo = frontmatterEnd(state);
+  const frontmatterTo = frontmatterEndOffset(state.doc);
   const codeRanges: Array<{ from: number; to: number }> = [];
   tree.iterate({
     enter(node) {
@@ -142,7 +133,19 @@ const scanSidenotes = deriveFromSyntaxTree((state, tree): SidenoteScan => {
     },
   });
 
-  const isCode = (position: number): boolean => codeRanges.some((range) => range.from <= position && position < range.to);
+  const isCode = (position: number): boolean => {
+    let low = 0;
+    let high = codeRanges.length;
+    while (low < high) {
+      const middle = (low + high) >>> 1;
+      const range = codeRanges[middle];
+      if (range === undefined) break;
+      if (position < range.from) high = middle;
+      else if (position >= range.to) low = middle + 1;
+      else return true;
+    }
+    return false;
+  };
   const definitions = new Map<string, NoteDefinition>();
   const duplicateDefinitions = new Set<string>();
   const definitionLines = new Set<number>();
@@ -150,8 +153,8 @@ const scanSidenotes = deriveFromSyntaxTree((state, tree): SidenoteScan => {
     const line = state.doc.line(number);
     if (line.from < frontmatterTo || isCode(line.from)) continue;
     const match = definitionPattern.exec(line.text);
-    if (match === null) continue;
-    const label = match[1]!.toLowerCase();
+    if (match?.[1] === undefined) continue;
+    const label = match[1].toLowerCase();
     definitionLines.add(line.from);
     if (definitions.has(label)) duplicateDefinitions.add(label);
     else definitions.set(label, { label, text: match[2]!, from: line.from, lineFrom: line.from });
@@ -165,8 +168,8 @@ const scanSidenotes = deriveFromSyntaxTree((state, tree): SidenoteScan => {
       const line = state.doc.lineAt(node.from);
       if (definitionLines.has(line.from)) return;
       const match = referencePattern.exec(state.sliceDoc(node.from, node.to));
-      if (match === null) return;
-      const label = match[1]!.toLowerCase();
+      if (match?.[1] === undefined) return;
+      const label = match[1].toLowerCase();
       if (!definitions.has(label)) return;
       references.push({ label, from: node.from, to: node.to, lineFrom: line.from });
     },
@@ -189,7 +192,8 @@ function buildSidenoteLayout(state: EditorState): SidenoteLayout {
   const anchorLines = new Set<number>();
 
   for (const label of visibleLabels) {
-    const definition = definitions.get(label)!;
+    const definition = definitions.get(label);
+    if (definition === undefined) continue;
     const line = state.doc.lineAt(definition.lineFrom);
     if (readOnly || activeLine !== line.from) {
       ranges.push(Decoration.replace({}).range(line.from, line.to));
@@ -197,8 +201,9 @@ function buildSidenoteLayout(state: EditorState): SidenoteLayout {
   }
 
   for (const reference of references) {
-    const definition = definitions.get(reference.label)!;
-    const marker = markerNumbers.get(reference.label)!;
+    const definition = definitions.get(reference.label);
+    const marker = markerNumbers.get(reference.label);
+    if (definition === undefined || marker === undefined) continue;
     const isFirst = firstReference.get(reference.label) === reference;
     const active = state.selection.ranges.some((selection) =>
       selection.from <= reference.to && selection.to >= reference.from

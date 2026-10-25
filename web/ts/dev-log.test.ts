@@ -49,31 +49,24 @@ describe("dev log client", () => {
     });
   });
 
-  it("disables sending after a transport failure", async () => {
+  it.each([
+    {
+      name: "a transport failure",
+      respond: async (): Promise<unknown> => {
+        throw new Error("network down");
+      },
+    },
+    {
+      name: "a rejected log response",
+      respond: async (): Promise<unknown> => ({ ok: false, status: 400 }),
+    },
+  ])("disables sending after $name", async ({ respond }) => {
     process.env["TANSU_LOGS"] = "buffer";
-    const fetch = vi.fn(async () => {
-      throw new Error("network down");
-    });
+    const fetch = vi.fn(respond);
     vi.stubGlobal("fetch", fetch);
     const { logClientEvent, flushLogs } = await import("./dev-log.ts");
 
     logClientEvent("warn", "system.event");
-    flushLogs(false);
-    await Promise.resolve();
-    await Promise.resolve();
-    logClientEvent("warn", "system.event");
-    flushLogs(false);
-
-    expect(fetch).toHaveBeenCalledTimes(1);
-  });
-
-  it("disables sending after a rejected log response", async () => {
-    process.env["TANSU_LOGS"] = "buffer";
-    const fetch = vi.fn(async () => ({ ok: false, status: 400 }));
-    vi.stubGlobal("fetch", fetch);
-    const { logClientEvent, flushLogs } = await import("./dev-log.ts");
-
-    logClientEvent("warn", "system.event", { client: { seq: 1 } });
     flushLogs(false);
     await Promise.resolve();
     await Promise.resolve();

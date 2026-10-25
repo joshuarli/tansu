@@ -49,7 +49,8 @@ export function tagSuggestionQueries(source: string): string[] {
   let hasTitle = false;
 
   for (let index = 0; index < lines.length; index++) {
-    const line = lines[index]!;
+    const line = lines[index];
+    if (line === undefined) continue;
     const fenceMarker = /^ {0,3}(`{3,}|~{3,})/.exec(line)?.[1];
     if (fence !== null) {
       if (

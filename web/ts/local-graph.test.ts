@@ -30,6 +30,11 @@ describe("local graph layout", () => {
     const known = new Map([["a", response(["x1", "x2", "c"], ["x3", "a"])]]);
     const layout = layoutLocalGraph(center, response(["a"], []), known);
     expect(layout.nodes.filter((node) => node.hop === 2).map((node) => node.noteId)).toStrictEqual(["x1", "x2", "x3"]);
+    expect(layout.edges.filter((edge) => edge.hop === 2)).toStrictEqual([
+      { from: "a", to: "x1", hop: 2 },
+      { from: "a", to: "x2", hop: 2 },
+      { from: "a", to: "x3", hop: 2 },
+    ]);
 
     const crowded = new Map(
       many.slice(0, 5).map((id) => [id, response(Array.from({ length: 30 }, (_, i) => `${id}-${i}`), [])] as const),

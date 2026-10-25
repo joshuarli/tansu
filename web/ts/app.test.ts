@@ -2448,7 +2448,7 @@ describe("v2 desktop shell", () => {
     const { app } = mountApp();
     await app.boot();
     await until(() => client.loadAsset.mock.calls.length === names.length);
-    expect(client.loadAsset.mock.calls.map((call) => (call as unknown as [string])[0])).toEqual([
+    expect(client.loadAsset.mock.calls.map((call) => (call as unknown as [string])[0])).toStrictEqual([
       ...visible,
       ...names.filter((name) => !visible.includes(name)),
     ]);

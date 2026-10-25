@@ -79,9 +79,12 @@ export function planBlockMove(
   const removeBefore = previous !== undefined &&
     (next === undefined || (moved.list !== null && previous.list === moved.list) ||
       !(moved.list !== null && next.list === moved.list));
-  const removal = removeBefore
+  const removal = removeBefore && previous !== undefined
     ? { from: previous.to, to: moved.to }
-    : { from: moved.from, to: next!.from };
+    : next === undefined
+    ? null
+    : { from: moved.from, to: next.from };
+  if (removal === null) return null;
   const removedLength = removal.to - removal.from;
   const listItem = moved.list !== null;
 
@@ -91,9 +94,14 @@ export function planBlockMove(
   let insert: string;
   let textOffset: number;
   if (before === undefined) {
-    const sameList = listItem && target!.list !== null;
-    const separator = sameList ? "\n" : blockSeparator(state.sliceDoc(target!.to, blocks[1]!.from), false);
-    insertAt = target!.from;
+    if (target === undefined) return null;
+    const sameList = listItem && target.list !== null;
+    const following = blocks[1];
+    if (!sameList && following === undefined) return null;
+    const separator = sameList || following === undefined
+      ? "\n"
+      : blockSeparator(state.sliceDoc(target.to, following.from), false);
+    insertAt = target.from;
     insert = text + separator;
     textOffset = 0;
   } else {

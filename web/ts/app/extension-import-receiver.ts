@@ -41,7 +41,9 @@ async function mapWithConcurrency<T, R>(items: readonly T[], limit: number, run:
     while (next < items.length) {
       const index = next;
       next += 1;
-      results[index] = await run(items[index]!);
+      const item = items[index];
+      if (item === undefined) throw new Error("Concurrency worker ran past the end of its items");
+      results[index] = await run(item);
     }
   };
   await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));

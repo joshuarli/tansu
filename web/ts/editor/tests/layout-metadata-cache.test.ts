@@ -61,35 +61,23 @@ describe("editor layout metadata caching", () => {
     vi.restoreAllMocks();
   });
 
-  it("reuses sidenote metadata across selection and viewport updates", () => {
+  it("reuses sidenote and outline metadata across selection and viewport updates", () => {
     const source = structuredNote(60, 20);
     const view = mountView(source);
     view.dispatch({ selection: { anchor: 1 } });
+    const outline = outlineFromSyntaxTree(view.state);
 
     const counts = countMetadataWork(view, () => {
       for (let step = 0; step < UPDATES; step++) {
         view.dispatch({ selection: { anchor: (step * 37) % source.length } });
         view.dispatch({ effects: EditorView.scrollIntoView((step * 91) % source.length) });
+        expect(outlineFromSyntaxTree(view.state)).toBe(outline);
       }
     });
 
     expect(counts).toStrictEqual({ treeWalks: 0, lineLookups: 0 });
     expect(view.dom.querySelectorAll(".tansu-sidenote-marker").length).toBeGreaterThan(0);
-  });
-
-  it("reuses the outline until the document changes", () => {
-    const view = mountView(structuredNote(60, 20));
-    const first = outlineFromSyntaxTree(view.state);
-
-    const counts = countMetadataWork(view, () => {
-      for (let step = 0; step < UPDATES; step++) {
-        view.dispatch({ selection: { anchor: step } });
-        expect(outlineFromSyntaxTree(view.state)).toBe(first);
-      }
-    });
-
-    expect(counts).toStrictEqual({ treeWalks: 0, lineLookups: 0 });
-    expect(first.headings).toHaveLength(60);
+    expect(outline.headings).toHaveLength(60);
   });
 
   it("rebuilds metadata after the document changes", () => {

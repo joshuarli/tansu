@@ -7,42 +7,42 @@ import {
   sha256HexOfText,
 } from "../src/obsidian-uri.ts";
 
-test("creates an Obsidian clipboard import URI", () => {
-  const uri = new URL(createObsidianClipboardUri("A title.md"));
+test("creates an Obsidian clipboard import URI with a content fallback", () => {
+  const withFile = new URL(createObsidianClipboardUri("A title.md")),
+    withoutFile = new URL(createObsidianClipboardUri());
 
-  assert.equal(uri.protocol, "obsidian:");
-  assert.equal(uri.hostname, "new");
-  assert.equal(uri.searchParams.get("file"), "A title.md");
-  assert.ok(uri.searchParams.has("clipboard"));
+  assert.equal(withFile.protocol, "obsidian:");
+  assert.equal(withFile.hostname, "new");
+  assert.equal(withFile.searchParams.get("file"), "A title.md");
+  for (const uri of [withFile, withoutFile]) {
+    assert.ok(uri.searchParams.has("clipboard"));
+    assert.ok(uri.searchParams.get("content")?.length);
+  }
+  assert.ok(!withoutFile.searchParams.has("file"));
 });
 
-test("includes a clipboard fallback in an Obsidian clipboard import URI", () => {
-  const uri = new URL(createObsidianClipboardUri());
+test("sanitizes note names across Obsidian URI builders", () => {
+  const sha256 = "0".repeat(64),
+    files = [
+      new URL(createObsidianClipboardUri("  foo/bar: baz  ")).searchParams.get("file"),
+      new URL(createObsidianImportUri("body", "  foo/bar: baz  ")).searchParams.get("file"),
+      new URL(createObsidianLoupeImportUri("  foo/bar: baz  ", "https://example.com/", sha256))
+        .searchParams.get("file"),
+    ];
 
-  assert.ok(uri.searchParams.has("clipboard"));
-  assert.ok(uri.searchParams.get("content")?.length);
+  for (const file of files) {
+    assert.equal(file, "foo-bar- baz");
+  }
+  assert.ok(!createObsidianClipboardUri("  foo/bar: baz  ").includes("foo/bar"));
 });
 
-test("percent-encodes spaces and sanitizes an Obsidian note name", () => {
-  const uri = createObsidianClipboardUri("  foo/bar: baz  ");
-
-  assert.match(uri, /file=foo-bar-%20baz&/);
-  assert.equal(new URL(uri).searchParams.get("file"), "foo-bar- baz");
-});
-
-test("creates an Obsidian import URI containing the complete Markdown payload", () => {
+test("carries the complete Markdown payload in the content URI", () => {
   const markdown = "# Heading\n\nA & B? 100%",
     uri = new URL(createObsidianImportUri(markdown));
 
   assert.equal(uri.protocol, "obsidian:");
   assert.equal(uri.hostname, "new");
   assert.equal(uri.searchParams.get("content"), markdown);
-});
-
-test("includes a note name in an Obsidian Markdown import URI", () => {
-  const uri = new URL(createObsidianImportUri("body", "A title.md"));
-
-  assert.equal(uri.searchParams.get("file"), "A title.md");
 });
 
 test("percent-encodes Markdown spaces for Obsidian URL parsing", () => {
@@ -83,17 +83,6 @@ test("encodes loupe-import metadata as structured query parameters", () => {
   assert.ok(!uri.search.includes("&b=2"));
 });
 
-test("sanitizes and encodes the loupe-import note name", () => {
-  const uri = createObsidianLoupeImportUri(
-      "  foo/bar: baz  ",
-      "https://example.com/",
-      "0".repeat(64),
-    ),
-    parsedUri = new URL(uri);
-  assert.equal(parsedUri.searchParams.get("file"), "foo-bar- baz");
-  assert.ok(!uri.includes("foo/bar"));
-});
-
 test("omits an empty note name from the loupe-import URI", () => {
   const uri = new URL(createObsidianLoupeImportUri("", "https://example.com/", "0".repeat(64)));
 
@@ -107,12 +96,4 @@ test("never puts article Markdown into the loupe-import URI", () => {
   assert.ok(!uri.includes(encodeURIComponent("Heading")));
   assert.ok(!uri.includes("photo.jpg"));
   assert.ok(!uri.includes("content="));
-});
-
-test("keeps the content URI fallback carrying the complete Markdown payload", () => {
-  const markdown = "# Heading\n\nA & B? 100%",
-    uri = new URL(createObsidianImportUri(markdown));
-
-  assert.equal(uri.hostname, "new");
-  assert.equal(uri.searchParams.get("content"), markdown);
 });

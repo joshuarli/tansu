@@ -1,5 +1,6 @@
 import { StateEffect, StateField, Transaction, type EditorState, type Extension, type Range } from "@codemirror/state";
 import { syntaxTree } from "@codemirror/language";
+import type { Tree } from "@lezer/common";
 import { Decoration, EditorView, ViewPlugin, type DecorationSet, type ViewUpdate } from "@codemirror/view";
 import { blockIndexAt, planBlockMove, topLevelBlocks, type SourceBlock } from "./block-ops.js";
 import { readOnlyFacet } from "./vendor/atomic/read-only.js";
@@ -31,7 +32,7 @@ const settleDecorations = StateField.define<DecorationSet>({
   provide: (field) => EditorView.decorations.from(field),
 });
 
-let cachedBlocks: { doc: EditorState["doc"]; tree: unknown; blocks: SourceBlock[] } | null = null;
+let cachedBlocks: { doc: EditorState["doc"]; tree: Tree; blocks: SourceBlock[] } | null = null;
 
 function blocksOf(state: EditorState): SourceBlock[] {
   const tree = syntaxTree(state);
@@ -60,7 +61,8 @@ export function moveBlock(view: EditorView, index: number, gap: number): boolean
 
 function dropGap(view: EditorView, blocks: readonly SourceBlock[], y: number): number {
   for (let index = 0; index < blocks.length; index++) {
-    const block = blocks[index]!;
+    const block = blocks[index];
+    if (block === undefined) continue;
     const top = view.coordsAtPos(block.from)?.top;
     const bottom = view.coordsAtPos(block.to)?.bottom;
     if (top === undefined || bottom === undefined) continue;
@@ -170,9 +172,14 @@ class BlockDragHandles {
     const blocks = blocksOf(this.view.state);
     const gap = dropGap(this.view, blocks, event.clientY);
     this.dragging.gap = gap;
-    const edge = gap < blocks.length
-      ? this.view.coordsAtPos(blocks[gap]!.from)?.top
-      : this.view.coordsAtPos(blocks[blocks.length - 1]!.to)?.bottom;
+    let edge: number | undefined;
+    if (gap < blocks.length) {
+      const target = blocks[gap];
+      edge = target === undefined ? undefined : this.view.coordsAtPos(target.from)?.top;
+    } else {
+      const last = blocks[blocks.length - 1];
+      edge = last === undefined ? undefined : this.view.coordsAtPos(last.to)?.bottom;
+    }
     if (edge === undefined) return;
     const content = this.view.contentDOM.getBoundingClientRect();
     const padding = Number.parseFloat(getComputedStyle(this.view.contentDOM).paddingLeft) || 0;

@@ -64,43 +64,45 @@ function calloutDecorations(state: EditorState, options: CalloutOptions): Decora
 
   for (let number = 1; number <= state.doc.lines; number++) {
     const line = state.doc.line(number);
-    const fenceMatch = line.text.match(/^ {0,3}(`{3,}|~{3,})/);
+    const fenceMatch = /^ {0,3}(`{3,}|~{3,})/.exec(line.text)?.[1];
     if (fence !== null) {
       calloutType = null;
-      if (fenceMatch && fenceMatch[1]![0] === fence.marker && fenceMatch[1]!.length >= fence.length) {
+      if (fenceMatch !== undefined && fenceMatch[0] === fence.marker && fenceMatch.length >= fence.length) {
         fence = null;
       }
       continue;
     }
-    if (fenceMatch) {
-      fence = { marker: fenceMatch[1]![0]!, length: fenceMatch[1]!.length };
+    if (fenceMatch !== undefined) {
+      fence = { marker: fenceMatch.charAt(0), length: fenceMatch.length };
       calloutType = null;
       continue;
     }
 
-    const header = line.text.match(/^ {0,3}>[ \t]?\[!(\w+)\](?:[ \t]+(.*))?$/);
-    if (header) {
-      const type = header[1]!.toLowerCase();
-      const title = header[2]?.trim();
-      const displayTitle = title === undefined || title === "" ? titleFromType(type) : "";
-      const marker = header[0].indexOf(`[!${header[1]}]`);
-      ranges.push(
-        Decoration.line({ attributes: { class: `tansu-callout tansu-callout-${type}` } }).range(line.from),
-        Decoration.replace({
-          widget: new CalloutTitle(type, displayTitle, options.icons[type] ?? DEFAULT_CALLOUT_ICONS[type] ?? ""),
-        }).range(line.from + marker, line.from + marker + header[1]!.length + 3),
-      );
-      calloutType = type;
+    const header = /^ {0,3}>[ \t]?\[!(\w+)\](?:[ \t]+(.*))?$/.exec(line.text);
+    const kind = header?.[1];
+    if (kind === undefined) {
+      if (calloutType !== null && /^ {0,3}>/.test(line.text)) {
+        ranges.push(
+          Decoration.line({ attributes: { class: `tansu-callout-body tansu-callout-${calloutType}` } }).range(line.from),
+        );
+      } else {
+        calloutType = null;
+      }
       continue;
     }
 
-    if (calloutType !== null && /^ {0,3}>/.test(line.text)) {
-      ranges.push(
-        Decoration.line({ attributes: { class: `tansu-callout-body tansu-callout-${calloutType}` } }).range(line.from),
-      );
-    } else {
-      calloutType = null;
-    }
+    const type = kind.toLowerCase();
+    const title = header?.[2]?.trim();
+    const displayTitle = title === undefined || title === "" ? titleFromType(type) : "";
+    const marker = (header?.[0] ?? "").indexOf(`[!${kind}]`);
+    ranges.push(
+      Decoration.line({ attributes: { class: `tansu-callout tansu-callout-${type}` } }).range(line.from),
+      Decoration.replace({
+        widget: new CalloutTitle(type, displayTitle, options.icons[type] ?? DEFAULT_CALLOUT_ICONS[type] ?? ""),
+      }).range(line.from + marker, line.from + marker + kind.length + 3),
+    );
+    calloutType = type;
+    continue;
   }
 
   return Decoration.set(ranges, true);

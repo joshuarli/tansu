@@ -84,6 +84,16 @@ describe("source-preserving Markdown operations", () => {
     } finally {
       dispose();
     }
+
+    const imageUrl = "/api/v2/vaults/vault-1/assets?name=z-images%2Fphoto.webp";
+    const markdownImage = mounted("![photo](z-images/photo.webp)\n", {
+      resolveAssetUrl: (name) => name === "z-images/photo.webp" ? imageUrl : null,
+    });
+    try {
+      expect(markdownImage.container.querySelector(".cm-atomic-image img")?.getAttribute("src")).toBe(imageUrl);
+    } finally {
+      markdownImage.dispose();
+    }
   });
 
   it("keeps default callout icons when a configured icon is overridden", () => {
@@ -95,18 +105,6 @@ describe("source-preserving Markdown operations", () => {
         "🔔 Warning",
         "📝 Note",
       ]);
-    } finally {
-      dispose();
-    }
-  });
-
-  it("resolves standard Markdown vault images through the asset resolver", () => {
-    const imageUrl = "/api/v2/vaults/vault-1/assets?name=z-images%2Fphoto.webp";
-    const { container, dispose } = mounted("![photo](z-images/photo.webp)\n", {
-      resolveAssetUrl: (name) => name === "z-images/photo.webp" ? imageUrl : null,
-    });
-    try {
-      expect(container.querySelector(".cm-atomic-image img")?.getAttribute("src")).toBe(imageUrl);
     } finally {
       dispose();
     }

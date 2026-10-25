@@ -3,7 +3,20 @@ import { TANSU_CHANNEL, TANSU_PROTOCOL_VERSION } from "./tansu-wire.ts";
 
 export const TANSU_ORIGIN_PATTERN = /^https?:\/\/[^/?#\s]+$/u;
 
-export const TansuOriginSchema = Schema.String.check(Schema.isPattern(TANSU_ORIGIN_PATTERN)),
+// The parsed-page fields mirror the narrow JSON returned by defuddle-wasm,
+// Not the Rust DefuddleResult type.
+export const LoupeParsedPageSchema = Schema.Struct({
+    content: Schema.String,
+    content_markdown: Schema.NullOr(Schema.String),
+    title: Schema.String,
+    author: Schema.String,
+    description: Schema.String,
+    published: Schema.String,
+    site: Schema.String,
+    domain: Schema.String,
+    extractor_type: Schema.NullOr(Schema.String),
+  }),
+  TansuOriginSchema = Schema.String.check(Schema.isPattern(TANSU_ORIGIN_PATTERN)),
   TansuSettingsSchema = Schema.Struct({
     tansuOrigin: Schema.optional(TansuOriginSchema),
   }),
@@ -53,6 +66,7 @@ export const TansuOriginSchema = Schema.String.check(Schema.isPattern(TANSU_ORIG
     }),
   ]);
 
+export type LoupeParsedPage = Schema.Schema.Type<typeof LoupeParsedPageSchema>;
 export type TansuImportResult = Schema.Schema.Type<typeof TansuImportResultSchema>;
 export type SendToTansuRequest = Schema.Schema.Type<typeof SendToTansuRequestSchema>;
 export type SendToTansuResponse = Schema.Schema.Type<typeof SendToTansuResponseSchema>;

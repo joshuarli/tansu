@@ -139,10 +139,12 @@ function serializeTable(table: Element): string {
     [...row.querySelectorAll("th, td")].map((cell) => serializeChildren(cell).trim())
   );
   if (rows.length === 0) return "";
+  const first = rows[0];
+  if (first === undefined) return "";
   const columns = Math.max(...rows.map((row) => row.length));
   const escapedPipe = String.raw`\|`;
   const serializeRow = (row: string[]) => `| ${Array.from({ length: columns }, (_, index) => (row[index] ?? "").replaceAll("|", escapedPipe)).join(" | ")} |`;
-  const header = serializeRow(rows[0]!);
+  const header = serializeRow(first);
   const separator = `| ${Array.from({ length: columns }, () => "---").join(" | ")} |`;
   return `${[header, separator, ...rows.slice(1).map(serializeRow)].join("\n")}\n\n`;
 }

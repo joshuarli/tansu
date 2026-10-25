@@ -1,18 +1,4 @@
-import type { SendToTansuRequest } from "./tansu-schemas.ts";
-
-// The parsed-page fields mirror the narrow JSON returned by defuddle-wasm. Keep
-// This boundary separate from the Rust DefuddleResult type.
-export interface LoupeParsedPage {
-  content: string;
-  content_markdown: string | null;
-  title: string;
-  author: string;
-  description: string;
-  published: string;
-  site: string;
-  domain: string;
-  extractor_type: string | null;
-}
+import type { LoupeParsedPage, SendToTansuRequest } from "./tansu-schemas.ts";
 
 export interface ListExtractorsResponse {
   extractorNames: string[];
@@ -41,20 +27,14 @@ export interface DownloadReaderFixturesRequest {
   extractorName: string;
 }
 
-export interface DownloadReaderFixturesResponse {
-  ok: boolean;
-  error?: string;
-}
+export type DownloadReaderFixturesResponse = { ok: true } | { ok: false; error: string };
 
 export interface OpenObsidianUrlRequest {
   action: "openObsidian";
   obsidianUrl: string;
 }
 
-export interface OpenObsidianUrlResponse {
-  ok: boolean;
-  error?: string;
-}
+export type OpenObsidianUrlResponse = { ok: true } | { ok: false; error: string };
 
 export interface OpenOptionsRequest {
   action: "openOptions";
@@ -83,8 +63,6 @@ export type ServiceWorkerRequest =
   | OpenOptionsRequest
   | OpenTansuTabRequest;
 
-export interface ParsePageResponse {
-  ok: boolean;
-  parsedPage?: LoupeParsedPage;
-  error?: string;
-}
+export type ParsePageResponse =
+  | { ok: true; parsedPage: LoupeParsedPage }
+  | { ok: false; error: string };

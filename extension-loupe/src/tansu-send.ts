@@ -1,4 +1,5 @@
 import { Effect, Schema } from "effect";
+import { getErrorMessage } from "./error-logging.ts";
 import { tansuPageCall, type TansuPageMethod } from "./tansu-page-call.ts";
 import { readTansuSettings } from "./tansu-settings.ts";
 import { prepareTansuImport } from "./tansu-import.ts";
@@ -36,7 +37,7 @@ function failure(message: string) {
 function tryChrome<A>(operation: () => Promise<A>, message: string) {
   return Effect.tryPromise({
     try: operation,
-    catch: (cause) => failure(`${message} ${cause instanceof Error ? cause.message : String(cause)}`),
+    catch: (cause) => failure(`${message} ${getErrorMessage(cause)}`),
   });
 }
 
@@ -62,7 +63,10 @@ async function findTansuTab(origin: string): Promise<chrome.tabs.Tab | undefined
 }
 
 async function activateTab(tab: chrome.tabs.Tab): Promise<void> {
-  await chrome.tabs.update(tab.id!, { active: true });
+  if (tab.id === undefined) {
+    throw new Error("Loupe could not show the Tansu tab.");
+  }
+  await chrome.tabs.update(tab.id, { active: true });
   await chrome.windows.update(tab.windowId, { focused: true });
 }
 
@@ -129,7 +133,10 @@ const readyTabForImport = (origin: string) =>
         "Loupe could not open Tansu.",
       );
     }
-    const tabId = tab.id!;
+    const tabId = tab.id;
+    if (tabId === undefined) {
+      return yield* Effect.fail(failure("Loupe could not open Tansu."));
+    }
     yield* tryChrome(() => waitForTabComplete(tabId), "Tansu did not load.");
     yield* tryChrome(
       () => chrome.scripting.executeScript({ target: { tabId }, files: ["tansu-import-page.js"] }),

@@ -25,16 +25,25 @@ function computeCodeRanges(markdown: string): CodeRange[] {
   }
   let openFence: { char: string; length: number; start: number } | null = null;
   for (let lineIndex = 0; lineIndex < lineStarts.length; lineIndex++) {
-    const lineStart = lineStarts[lineIndex] as number;
-    const lineEnd =
-      lineIndex + 1 < lineStarts.length ? (lineStarts[lineIndex + 1] as number) - 1 : markdown.length;
+    const lineStart = lineStarts[lineIndex];
+    if (lineStart === undefined) {
+      continue;
+    }
+    const nextLineStart = lineStarts[lineIndex + 1],
+      lineEnd = nextLineStart === undefined ? markdown.length : nextLineStart - 1;
     const line = markdown.slice(lineStart, lineEnd);
     const fenceMatch = /^( {0,3})(`{3,}|~{3,})/.exec(line);
     if (fenceMatch === null) {
       continue;
     }
-    const fenceRun = fenceMatch[2] as string;
-    const fenceChar = fenceRun[0] as string;
+    const fenceRun = fenceMatch[2];
+    if (fenceRun === undefined) {
+      continue;
+    }
+    const fenceChar = fenceRun[0];
+    if (fenceChar === undefined) {
+      continue;
+    }
     const rest = line.slice(fenceMatch[0].length);
     if (openFence === null) {
       if (fenceChar === "`" && rest.includes("`")) {
@@ -180,7 +189,10 @@ function parseLinkDestination(
     const start = i;
     let depth = 0;
     while (i < markdown.length) {
-      const char = markdown[i] as string;
+      const char = markdown[i];
+      if (char === undefined) {
+        break;
+      }
       if (char === "\\") {
         i += 2;
         continue;
@@ -293,11 +305,12 @@ export function findLoupeImageOccurrences(markdown: string): LoupeImageOccurrenc
   const occurrences: LoupeImageOccurrence[] = [];
   let i = 0;
   let codeIndex = 0;
+  let code: CodeRange | null = codeRanges[0] ?? null;
   while (i < markdown.length) {
-    while (codeIndex < codeRanges.length && i >= (codeRanges[codeIndex] as CodeRange).end) {
+    while (code !== null && i >= code.end) {
       codeIndex++;
+      code = codeRanges[codeIndex] ?? null;
     }
-    const code = codeIndex < codeRanges.length ? (codeRanges[codeIndex] as CodeRange) : null;
     if (code !== null && i >= code.start) {
       i = code.end;
       continue;

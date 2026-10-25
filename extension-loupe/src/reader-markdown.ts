@@ -1,4 +1,4 @@
-import type { LoupeParsedPage } from "./extension-messages.ts";
+import type { LoupeParsedPage } from "./tansu-schemas.ts";
 import { formatFrontmatterDate } from "./published-date.ts";
 
 export interface ReaderMarkdownMetadata {

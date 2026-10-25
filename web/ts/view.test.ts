@@ -366,6 +366,9 @@ describe("view rendering", () => {
     expect(root.querySelectorAll(".revision-row")[0]?.textContent).toContain("revision 3");
     expect(root.querySelector(".diff-added")?.textContent).toContain("inserted");
     expect(root.querySelector(".diff-removed")?.textContent).toContain("keep");
+    expect([...root.querySelectorAll(".diff-preview .diff-line")].map((line) =>
+      line.classList.contains("diff-removed") ? "removed" : line.classList.contains("diff-added") ? "added" : "other"
+    )).toStrictEqual(["removed", "added"]);
 
     range.value = "0";
     range.dispatchEvent(new Event("input", { bubbles: true }));

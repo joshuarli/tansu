@@ -45,10 +45,11 @@ class UrlCardWidget extends WidgetType {
 
 export function loneUrlHost(lineText: string): { url: string; host: string } | null {
   const match = LONE_URL.exec(lineText.trim());
-  if (match === null) return null;
+  const url = match?.[1];
+  if (url === undefined) return null;
   try {
-    const parsed = new URL(match[1]!);
-    return parsed.host === "" ? null : { url: match[1]!, host: parsed.host };
+    const parsed = new URL(url);
+    return parsed.host === "" ? null : { url, host: parsed.host };
   } catch {
     return null;
   }

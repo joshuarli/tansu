@@ -299,7 +299,6 @@ describe("CodeMirror editor sessions", () => {
 
     expect(container.querySelector(".cm-content")?.textContent).not.toContain("tags:");
     expect(bodyLine()?.querySelector(".cm-foldPlaceholder")).toBeNull();
-    expect(bodyLine()?.querySelector(".cm-foldPlaceholder")).toBeNull();
     expect(editor.getSnapshot()).toMatchObject({ source, revision: 0, dirty: false });
   });
 
@@ -436,16 +435,23 @@ describe("CodeMirror editor sessions", () => {
     expect(editor.getSnapshot()?.source).toBe("start safe linkend");
   });
 
-  it("preserves empty lines in multiline plain-text paste", () => {
+  it("pastes plain text verbatim, preserving empty lines", () => {
     const { editor, view } = mountEditor("start end");
     editor.revealSelection({ anchor: 6, head: 6 });
-    const paste = new Event("paste", { bubbles: true, cancelable: true }) as ClipboardEvent;
-    Object.defineProperty(paste, "clipboardData", {
+    const literal = new Event("paste", { bubbles: true, cancelable: true }) as ClipboardEvent;
+    Object.defineProperty(literal, "clipboardData", {
+      value: { getData: (type: string) => type === "text/plain" ? "**literal**" : "" },
+    });
+    view.contentDOM.dispatchEvent(literal);
+    expect(editor.getSnapshot()?.source).toBe("start **literal**end");
+
+    editor.revealSelection({ anchor: 8, head: 8 });
+    const multiline = new Event("paste", { bubbles: true, cancelable: true }) as ClipboardEvent;
+    Object.defineProperty(multiline, "clipboardData", {
       value: { getData: (type: string) => type === "text/plain" ? "first\n\nthird" : "" },
     });
-    view.contentDOM.dispatchEvent(paste);
-
-    expect(editor.getSnapshot()?.source).toBe("start first\n\nthirdend");
+    view.contentDOM.dispatchEvent(multiline);
+    expect(editor.getSnapshot()?.source).toBe("start **first\n\nthirdliteral**end");
   });
 
   it("toggles a task checkbox as one source edit", () => {
@@ -480,17 +486,5 @@ describe("CodeMirror editor sessions", () => {
 
     expect(editor.getSnapshot()?.source).toBe("before  after");
     expect(editor.getSnapshot()?.revision).toBe(1);
-  });
-
-  it("pastes plain text without converting it to Markdown", () => {
-    const { editor, view } = mountEditor("start end");
-    editor.revealSelection({ anchor: 6, head: 6 });
-    const paste = new Event("paste", { bubbles: true, cancelable: true }) as ClipboardEvent;
-    Object.defineProperty(paste, "clipboardData", {
-      value: { getData: (type: string) => type === "text/plain" ? "**literal**" : "" },
-    });
-    view.contentDOM.dispatchEvent(paste);
-
-    expect(editor.getSnapshot()?.source).toBe("start **literal**end");
   });
 });

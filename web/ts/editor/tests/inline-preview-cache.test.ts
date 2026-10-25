@@ -55,7 +55,7 @@ describe("inline preview caching", () => {
     vi.restoreAllMocks();
   });
 
-  it("does not rescan blank lines when only the selection changes", () => {
+  it("reuses cached syntax work when only the selection changes", () => {
     const source = paragraphs(PARAGRAPHS);
     const view = mountView(source);
     view.dispatch({ selection: { anchor: 1 } });
@@ -67,21 +67,8 @@ describe("inline preview caching", () => {
     });
 
     expect(counts.blankLineScans).toBe(0);
-    expect(view.dom.querySelectorAll(".cm-atomic-paragraph-gap").length).toBeGreaterThan(0);
-  });
-
-  it("does not walk the syntax tree again for selection-only updates", () => {
-    const source = paragraphs(PARAGRAPHS);
-    const view = mountView(source);
-    view.dispatch({ selection: { anchor: 1 } });
-
-    const counts = countPreviewWork(() => {
-      for (let step = 0; step < UPDATES; step++) {
-        view.dispatch({ selection: { anchor: (step * 211) % source.length } });
-      }
-    });
-
     expect(counts.syntaxTreeWalks).toBe(0);
+    expect(view.dom.querySelectorAll(".cm-atomic-paragraph-gap").length).toBeGreaterThan(0);
   });
 
   it("recalculates selection-sensitive syntax decorations from cached nodes", () => {

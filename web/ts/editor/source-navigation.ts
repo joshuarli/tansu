@@ -1,5 +1,5 @@
-import type { EditorState } from "@codemirror/state";
 import { deriveFromSyntaxTree } from "./syntax-tree-cache.js";
+import { frontmatterEndOffset } from "./frontmatter.js";
 
 export type FindMatch = {
   from: number;
@@ -33,7 +33,7 @@ export function findLiteral(source: string, query: string): FindMatch[] {
 }
 
 export const outlineFromSyntaxTree = deriveFromSyntaxTree((state, tree): Outline => {
-  const frontmatterEnd = findFrontmatterEnd(state);
+  const frontmatterEnd = frontmatterEndOffset(state.doc);
   const headings: OutlineHeading[] = [];
   tree.iterate({
     enter(node) {
@@ -52,14 +52,3 @@ export const outlineFromSyntaxTree = deriveFromSyntaxTree((state, tree): Outline
   });
   return { headings, complete: tree.length >= state.doc.length };
 });
-
-function findFrontmatterEnd(state: EditorState): number {
-  if (state.doc.lines === 0) return 0;
-  const first = state.doc.line(1).text;
-  if (first !== "---" && first !== "\uFEFF---") return 0;
-  for (let number = 2; number <= state.doc.lines; number++) {
-    const line = state.doc.line(number);
-    if (line.text === "---") return line.to + (line.number < state.doc.lines ? 1 : 0);
-  }
-  return state.doc.length;
-}

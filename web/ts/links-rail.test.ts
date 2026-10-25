@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { ViewEvent } from "./app/events.ts";
 import { vaultId } from "./app/identity.ts";
 import { EMPTY_BACKLINKS_HINT, mentionSegments, renderLinksRail } from "./links-rail.ts";
+import { LocalGraphView } from "./local-graph.ts";
 import { createState, tabFromDocument, tabIdentity, type State } from "./state.ts";
 import type { V2NoteLinksResponse, V2NoteMeta } from "./types.generated.ts";
 
@@ -47,7 +48,7 @@ describe("links rail", () => {
     const state = stateWithActive();
     state.noteLinks = { noteId: "n1", phase: "ready", links };
     const dispatch = vi.fn<(event: ViewEvent) => void>();
-    const rail = renderLinksRail(state, dispatch)!;
+    const rail = renderLinksRail(state, dispatch, new LocalGraphView())!;
     const cards = rail.querySelectorAll<HTMLButtonElement>(".link-card");
     expect(cards).toHaveLength(2);
     expect(cards[0]!.textContent).toContain("Two");

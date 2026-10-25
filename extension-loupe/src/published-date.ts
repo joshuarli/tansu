@@ -29,7 +29,8 @@ function getValidDateOnly(published: string): string | undefined {
   const match = DATE_ONLY_PATTERN.exec(published);
   if (!match) return undefined;
 
-  const dateOnly = match[1]!;
+  const dateOnly = match[1];
+  if (dateOnly === undefined) return undefined;
   const parsedDate = new Date(`${dateOnly}T00:00:00Z`);
   return !Number.isNaN(parsedDate.getTime()) && parsedDate.toISOString().slice(0, 10) === dateOnly
     ? dateOnly

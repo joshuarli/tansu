@@ -131,9 +131,9 @@ export function toggleHeading(
   const le = lineEnd(md, selStart);
   const line = md.slice(ls, le);
 
-  const existingMatch = line.match(/^(#{1,6})\s/);
-  const existingPrefix = existingMatch ? existingMatch[0] : "";
-  const existingLevel = existingMatch ? existingMatch[1]!.length : 0;
+  const existingMatch = /^(#{1,6})\s/.exec(line);
+  const existingPrefix = existingMatch?.[0] ?? "";
+  const existingLevel = existingMatch?.[1]?.length ?? 0;
 
   const newPrefix = existingLevel === level ? "" : `${"#".repeat(level)} `;
 

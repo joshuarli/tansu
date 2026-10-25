@@ -285,10 +285,11 @@ export class TansuApp {
     this.state.searchHistory = workspace.searchHistory.slice(0, 100);
     this.state.tabs = workspace.tabs.map(tabFromWorkspace);
     this.state.closedTabs = workspace.closedTabs;
-    this.state.activeTab = workspace.activeTab !== null && this.state.tabs.some((tab) =>
-        sameTabIdentity(tabIdentity(tab), identityOfWorkspaceIdentity(workspace.activeTab!))
+    const restoredActive = workspace.activeTab;
+    this.state.activeTab = restoredActive !== null && this.state.tabs.some((tab) =>
+        sameTabIdentity(tabIdentity(tab), identityOfWorkspaceIdentity(restoredActive))
       )
-      ? identityOfWorkspaceIdentity(workspace.activeTab)
+      ? identityOfWorkspaceIdentity(restoredActive)
       : this.state.tabs[0] === undefined ? null : tabIdentity(this.state.tabs[0]);
     if (this.state.activeTab === null && this.state.notes.size === 1) {
       const onlyNote = this.state.notes.values().next().value;
@@ -505,7 +506,7 @@ export class TansuApp {
           if (generation !== this.bootGeneration || this.transitioningVault || !this.isCurrentVault(identity, client)) return;
           this.state.boot = {
             ...snapshot.bootstrap,
-            serverInstanceId: this.state.serverInstanceId!,
+            serverInstanceId: identity.serverInstanceId,
             vaults: this.state.boot?.vaults ?? [],
           };
           this.state.notes = new Map(snapshot.notes.map((meta) => [meta.noteId, meta]));
@@ -716,10 +717,11 @@ export class TansuApp {
         this.updateActiveOutlineHeading(heading);
       },
       uploadPastedImage: async ({ image, signal }) => {
-        if (generation !== this.bootGeneration || this.transitioningVault || !currentVault()) {
+        if (generation !== this.bootGeneration || this.transitioningVault || client === null ||
+          serverIdentity === null || !this.isCurrentVault(serverIdentity, client)) {
           throw new DOMException("Image upload was canceled because the vault changed", "AbortError");
         }
-        const response = await client!.uploadImage(mutationId(), image, signal);
+        const response = await client.uploadImage(mutationId(), image, signal);
         return { name: response.name, markdown: response.markdown };
       },
       onImagePasteStateChange: (paste) => {
@@ -932,8 +934,9 @@ export class TansuApp {
         this.services.workspace.getDraftCheckpoint(identity, this.workspaceId, tab.noteId),
         this.services.workspace.getCachedNoteBody(identity, this.state.notes.get(tab.noteId) ?? { noteId: tab.noteId, sourceHash: "" }),
       ]);
-      const cachedDocument: V2NoteDocument | null = cached !== null && this.state.notes.has(tab.noteId)
-        ? { meta: this.state.notes.get(tab.noteId)!, content: cached.content }
+      const cachedMeta = this.state.notes.get(tab.noteId);
+      const cachedDocument: V2NoteDocument | null = cached !== null && cachedMeta !== undefined
+        ? { meta: cachedMeta, content: cached.content }
         : null;
       if (!task.deliver(() => {
         if (cachedDocument !== null && tab.doc === null) {
@@ -1181,9 +1184,10 @@ export class TansuApp {
     }
     if (reason === "user") this.state.closedTabs = [workspaceTabFromTab(closed), ...this.state.closedTabs.filter((item) => !sameTabIdentity(identityOfWorkspace(item), identity))].slice(0, 50);
     if (sameTabIdentity(this.state.activeTab, identity)) {
-      this.state.activeTab = this.state.tabs[Math.max(0, index - 1)] === undefined
+      const neighbour = this.state.tabs[Math.max(0, index - 1)];
+      this.state.activeTab = neighbour === undefined
         ? this.state.tabs[0] === undefined ? null : tabIdentity(this.state.tabs[0])
-        : tabIdentity(this.state.tabs[Math.max(0, index - 1)]!);
+        : tabIdentity(neighbour);
       this.abortAssetLoads();
     }
     if (closed.kind === "saved" && this.identity !== null && this.vaultClient !== null) {
@@ -2128,9 +2132,9 @@ export class TansuApp {
         const matches = this.editor?.find(this.state.findQuery) ?? [];
         if (matches.length === 0) return;
         this.state.findIndex = (this.state.findIndex + event.direction + matches.length) % matches.length;
-        const match = matches[this.state.findIndex]!;
+        const match = matches[this.state.findIndex];
         this.setFindHighlights(matches, this.state.findIndex);
-        this.editor?.revealFindMatch(match);
+        if (match !== undefined) this.editor?.revealFindMatch(match);
         this.render();
         return;
       }
@@ -2441,18 +2445,22 @@ export class TansuApp {
       ? this.documents.for(tab.noteId).beginTask(tab.session)
       : null;
     const localController = task === null ? new AbortController() : null;
-    const signal = task?.signal ?? localController!.signal;
+    const signal = task?.signal ?? localController?.signal;
+    if (signal === undefined) return;
     this.assetTask = task;
     this.localAssetController = localController;
     const key = tab.key;
     const generation = this.bootGeneration;
     const names = new Set(
       [...source.matchAll(/(?:^|\[|\(|\/)((?:\/?z-images\/)[^\s)"'>\]|]+)/g)]
-        .map((match) => match[1]!.replace(/^\//, "")),
+        .flatMap((match) => {
+          const name = match[1]?.replace(/^\//, "");
+          return name === undefined ? [] : [name];
+        }),
     );
     if (!document.hidden) await waitForAnimationFrame(signal);
     if (signal.aborted || generation !== this.bootGeneration || activeTab(this.state)?.key !== key) return;
-    const visible = new Set(this.editor?.visibleWikiImageNames() ?? []);
+    const visible = new Set(this.editor?.visibleWikiImageNames());
     try {
       const client = this.vaultClient;
       if (client === null) return;

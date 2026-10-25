@@ -30,9 +30,13 @@ export function linksRailNoteId(state: State): string | null {
   return tab.noteId;
 }
 
-const graphView = new LocalGraphView();
+const sharedGraphView = new LocalGraphView();
 
-export function renderLinksRail(state: State, dispatch: (event: ViewEvent) => void): HTMLElement | null {
+export function renderLinksRail(
+  state: State,
+  dispatch: (event: ViewEvent) => void,
+  graphView: LocalGraphView = sharedGraphView,
+): HTMLElement | null {
   const noteId = linksRailNoteId(state);
   if (noteId === null) return null;
   const links = state.noteLinks;

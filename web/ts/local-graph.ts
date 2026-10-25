@@ -76,6 +76,13 @@ export function layoutLocalGraph(
   return { nodes, edges };
 }
 
+type NodeWidgets = {
+  group: SVGGElement;
+  tooltip: Element;
+  dot: SVGCircleElement;
+  label: SVGTextElement;
+};
+
 function svgElement<K extends keyof SVGElementTagNameMap>(tag: K, className: string): SVGElementTagNameMap[K] {
   const element = document.createElementNS(SVG_NAMESPACE, tag);
   element.setAttribute("class", className);
@@ -90,9 +97,9 @@ function edgeKey(edge: GraphEdge): string {
   return `${edge.from}>${edge.to}`;
 }
 
-function edgeTransform(layout: GraphLayout, edge: GraphEdge): string {
-  const from = layout.nodes.find((node) => node.noteId === edge.from)!;
-  const to = layout.nodes.find((node) => node.noteId === edge.to)!;
+function edgeTransform(nodes: ReadonlyMap<string, GraphNode>, edge: GraphEdge): string {
+  const from = nodes.get(edge.from)!;
+  const to = nodes.get(edge.to)!;
   const dx = to.x - from.x;
   const dy = to.y - from.y;
   const angle = round((Math.atan2(dy, dx) * 180) / Math.PI);
@@ -103,7 +110,7 @@ export class LocalGraphView {
   readonly element: SVGSVGElement;
   private readonly edgeLayer: SVGGElement;
   private readonly nodeLayer: SVGGElement;
-  private readonly nodes = new Map<string, SVGGElement>();
+  private readonly nodes = new Map<string, NodeWidgets>();
   private readonly edges = new Map<string, SVGLineElement>();
   private readonly leaving = new Map<Element, number>();
   private onOpen: (noteId: string) => void = () => undefined;
@@ -128,6 +135,7 @@ export class LocalGraphView {
 
   private syncEdges(layout: GraphLayout): void {
     const wanted = new Set(layout.edges.map(edgeKey));
+    const nodes = new Map(layout.nodes.map((node) => [node.noteId, node]));
     for (const edge of layout.edges) {
       const key = edgeKey(edge);
       let line = this.edges.get(key);
@@ -139,36 +147,42 @@ export class LocalGraphView {
       }
       this.revive(line);
       line.dataset["hop"] = String(edge.hop);
-      line.style.transform = edgeTransform(layout, edge);
+      line.style.transform = edgeTransform(nodes, edge);
     }
-    this.retire(this.edges, wanted);
+    this.retire(this.edges, wanted, (line) => line);
   }
 
   private syncNodes(layout: GraphLayout): void {
     const wanted = new Set(layout.nodes.map((node) => node.noteId));
     for (const node of layout.nodes) {
-      let group = this.nodes.get(node.noteId);
-      if (group === undefined) {
-        group = svgElement("g", "graph-node");
-        const circle = svgElement("circle", "graph-dot");
-        const label = svgElement("text", "graph-label");
-        const tooltip = document.createElementNS(SVG_NAMESPACE, "title");
-        group.append(tooltip, circle, label);
-        group.addEventListener("click", () => {
-          if (group!.dataset["hop"] !== "0") this.onOpen(group!.dataset["noteId"]!);
-        });
-        this.nodes.set(node.noteId, group);
-        this.nodeLayer.append(group);
+      let widgets = this.nodes.get(node.noteId);
+      if (widgets === undefined) {
+        widgets = this.createNode();
+        this.nodes.set(node.noteId, widgets);
+        this.nodeLayer.append(widgets.group);
       }
-      this.revive(group);
-      group.dataset["noteId"] = node.noteId;
-      group.dataset["hop"] = String(node.hop);
-      group.style.transform = `translate(${node.x}px, ${node.y}px)`;
-      group.querySelector("title")!.textContent = node.title;
-      group.querySelector("text")!.textContent = truncatedLabel(node.title);
-      group.querySelector("circle")!.setAttribute("r", node.hop === 0 ? "7" : node.hop === 1 ? "4.5" : "3");
+      this.revive(widgets.group);
+      widgets.group.dataset["noteId"] = node.noteId;
+      widgets.group.dataset["hop"] = String(node.hop);
+      widgets.group.style.transform = `translate(${node.x}px, ${node.y}px)`;
+      widgets.tooltip.textContent = node.title;
+      widgets.label.textContent = truncatedLabel(node.title);
+      widgets.dot.setAttribute("r", node.hop === 0 ? "7" : node.hop === 1 ? "4.5" : "3");
     }
-    this.retire(this.nodes, wanted);
+    this.retire(this.nodes, wanted, (widgets) => widgets.group);
+  }
+
+  private createNode(): NodeWidgets {
+    const group = svgElement("g", "graph-node");
+    const dot = svgElement("circle", "graph-dot");
+    const label = svgElement("text", "graph-label");
+    const tooltip = document.createElementNS(SVG_NAMESPACE, "title");
+    group.append(tooltip, dot, label);
+    group.addEventListener("click", () => {
+      const noteId = group.dataset["noteId"];
+      if (group.dataset["hop"] !== "0" && noteId !== undefined) this.onOpen(noteId);
+    });
+    return { group, tooltip, dot, label };
   }
 
   private revive(element: Element): void {
@@ -179,8 +193,9 @@ export class LocalGraphView {
     element.classList.remove("leaving");
   }
 
-  private retire<T extends Element>(registry: Map<string, T>, wanted: ReadonlySet<string>): void {
-    for (const [key, element] of registry) {
+  private retire<T>(registry: Map<string, T>, wanted: ReadonlySet<string>, elementOf: (entry: T) => Element): void {
+    for (const [key, entry] of registry) {
+      const element = elementOf(entry);
       if (wanted.has(key) || this.leaving.has(element)) continue;
       element.classList.add("leaving");
       this.leaving.set(element, window.setTimeout(() => {

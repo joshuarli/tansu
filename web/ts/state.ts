@@ -83,8 +83,14 @@ type TagSuggestionsState = { tabKey: string; source: string } & (
 export const THEMES = ["light", "dark", "paper"] as const;
 export type Theme = (typeof THEMES)[number];
 
+const NEXT_THEME: Readonly<Record<Theme, Theme>> = {
+  light: "dark",
+  dark: "paper",
+  paper: "light",
+};
+
 export function nextTheme(theme: Theme): Theme {
-  return THEMES[(THEMES.indexOf(theme) + 1) % THEMES.length]!;
+  return NEXT_THEME[theme];
 }
 
 export function parseTheme(value: string | null): Theme {

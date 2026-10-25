@@ -1,11 +1,11 @@
 import type {
   DownloadReaderFixturesResponse,
   ListExtractorsResponse,
-  LoupeParsedPage,
   ContentScriptMessage,
+  OpenObsidianUrlResponse,
   ParsePageResponse,
 } from "./extension-messages.ts";
-import type { SendToTansuResponse } from "./tansu-schemas.ts";
+import type { LoupeParsedPage, SendToTansuResponse } from "./tansu-schemas.ts";
 import { describeTansuResponse, type TansuStatus } from "./tansu-status.ts";
 import { createPageToast } from "./page-toast.ts";
 import { getErrorMessage, logLoupeError } from "./error-logging.ts";
@@ -123,13 +123,14 @@ async function requestValidatedParsedPage(): Promise<LoupeParsedPage> {
   if (document.URL !== requestedPageUrl) {
     throw new Error("The page changed while Loupe was reading it. Try again.");
   }
-  if (!parsePageResponse.ok || !parsePageResponse.parsedPage) {
-    throw new Error(parsePageResponse.error || "Loupe could not extract readable content.");
+  if (!parsePageResponse.ok) {
+    throw new Error(parsePageResponse.error);
   }
-  if (!parsePageResponse.parsedPage.content.trim()) {
+  const parsedPage = parsePageResponse.parsedPage;
+  if (!parsedPage.content.trim()) {
     throw new Error("Loupe could not find readable content on this page.");
   }
-  return parsePageResponse.parsedPage;
+  return parsedPage;
 }
 
 async function ensureParsedPage(): Promise<LoupeParsedPage> {
@@ -638,12 +639,15 @@ async function openReaderMarkdownInObsidian(
       : "Opening in Obsidian…",
   );
   try {
-    const openObsidianResponse = await chrome.runtime.sendMessage({
+    const openObsidianResponse = (await chrome.runtime.sendMessage({
       action: "openObsidian",
       obsidianUrl: obsidianUri,
-    });
-    if (!openObsidianResponse?.ok) {
-      throw new Error(openObsidianResponse?.error || "The Obsidian URL could not be opened.");
+    })) as OpenObsidianUrlResponse | undefined;
+    if (openObsidianResponse === undefined) {
+      throw new Error("The Obsidian URL could not be opened.");
+    }
+    if (!openObsidianResponse.ok) {
+      throw new Error(openObsidianResponse.error);
     }
   } catch (error) {
     logLoupeError("Loupe could not open Obsidian", error);

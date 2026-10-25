@@ -103,6 +103,7 @@ class NoteHeaderWidget extends WidgetType {
     if (onTitleCommit !== undefined) {
       let titleAtFocus = this.title;
       let canceled = false;
+      let submitOnEnter = false;
       title.contentEditable = "true";
       title.setAttribute("aria-label", "Note name");
       title.title = "Click to edit note name";
@@ -122,7 +123,6 @@ class NoteHeaderWidget extends WidgetType {
           title.blur();
         }
       });
-      let submitOnEnter = false;
       title.addEventListener("blur", () => {
         const nextTitle = title.textContent?.trim() ?? "";
         const submit = submitOnEnter;
@@ -168,6 +168,28 @@ function foldFrontmatterState(state: EditorState): EditorState {
 }
 
 type EditorOrigin = "load" | "modeChange" | "externalReload" | "userEdit";
+
+const FORMAT_OPERATIONS: Record<FormatCommand, (source: string, start: number, end: number) => FormatResult> = {
+  bold: toggleBold,
+  italic: toggleItalic,
+  highlight: toggleHighlight,
+  strikethrough: toggleStrikethrough,
+  heading: (source, start) => toggleHeading(source, start, 1),
+};
+
+function minimalChange(current: string, next: string): { from: number; to: number; insert: string } | null {
+  let prefix = 0;
+  while (prefix < current.length && prefix < next.length && current[prefix] === next[prefix]) prefix++;
+  let currentEnd = current.length;
+  let nextEnd = next.length;
+  while (currentEnd > prefix && nextEnd > prefix && current[currentEnd - 1] === next[nextEnd - 1]) {
+    currentEnd--;
+    nextEnd--;
+  }
+  if (currentEnd === prefix && nextEnd === prefix) return null;
+  return { from: prefix, to: currentEnd, insert: next.slice(prefix, nextEnd) };
+}
+
 export type EditorMode = "live" | "source";
 export type FormatCommand = "bold" | "italic" | "highlight" | "strikethrough" | "heading";
 
@@ -437,8 +459,9 @@ function wikiScope(config: EditorConfig): WikiScope {
 function sameWikiScope(left: WikiScope, right: WikiScope): boolean {
   return left.currentNotePath === right.currentNotePath && left.notes.length === right.notes.length &&
     left.notes.every((note, index) => {
-      const other = right.notes[index]!;
-      return note.noteId === other.noteId && note.path === other.path && note.title === other.title;
+      const other = right.notes[index];
+      return other !== undefined && note.noteId === other.noteId && note.path === other.path &&
+        note.title === other.title;
     });
 }
 
@@ -918,7 +941,9 @@ export function createCodeMirrorEditor(container: HTMLElement, initialConfig: Ed
         let high = headings.length;
         while (low < high) {
           const middle = (low + high) >>> 1;
-          if (view.lineBlockAt(headings[middle]!.from).top > threshold) high = middle;
+          const candidate = headings[middle];
+          if (candidate === undefined) break;
+          if (view.lineBlockAt(candidate.from).top > threshold) high = middle;
           else low = middle + 1;
         }
         active = headings[Math.max(low - 1, 0)] ?? null;
@@ -1014,19 +1039,12 @@ export function createCodeMirrorEditor(container: HTMLElement, initialConfig: Ed
   function sourceChange(data: SessionData, transform: (source: string, start: number, end: number) => FormatResult): void {
     if (data.readOnly) return;
     const selection = data.state.selection.main;
-    const result = transform(currentSource(data), selection.from, selection.to);
     const current = currentSource(data);
-    let prefix = 0;
-    while (prefix < current.length && prefix < result.md.length && current[prefix] === result.md[prefix]) prefix++;
-    let currentEnd = current.length;
-    let nextEnd = result.md.length;
-    while (currentEnd > prefix && nextEnd > prefix && current[currentEnd - 1] === result.md[nextEnd - 1]) {
-      currentEnd--;
-      nextEnd--;
-    }
-    if (currentEnd === prefix && nextEnd === prefix) return;
+    const result = transform(current, selection.from, selection.to);
+    const change = minimalChange(current, result.md);
+    if (change === null) return;
     view.dispatch({
-      changes: { from: prefix, to: currentEnd, insert: result.md.slice(prefix, nextEnd) },
+      changes: change,
       selection: { anchor: result.selStart, head: result.selEnd },
       annotations: [transactionOrigin.of("userEdit"), Transaction.userEvent.of("input.format")],
     });
@@ -1035,16 +1053,7 @@ export function createCodeMirrorEditor(container: HTMLElement, initialConfig: Ed
   function formatSelection(command: FormatCommand): void {
     const data = ensureActive();
     if (data === null) return;
-    const operation = command === "bold"
-      ? toggleBold
-      : command === "italic"
-      ? toggleItalic
-      : command === "highlight"
-      ? toggleHighlight
-      : command === "strikethrough"
-      ? toggleStrikethrough
-      : (source: string, start: number) => toggleHeading(source, start, 1);
-    sourceChange(data, operation);
+    sourceChange(data, FORMAT_OPERATIONS[command]);
   }
 
   async function addTag(tag: string): Promise<AddTagOutcome> {
@@ -1059,16 +1068,10 @@ export function createCodeMirrorEditor(container: HTMLElement, initialConfig: Ed
     const plan = planTagAddition(source, tag);
     if (plan.kind !== "applied") return plan;
 
-    let prefix = 0;
-    while (prefix < source.length && prefix < plan.source.length && source[prefix] === plan.source[prefix]) prefix++;
-    let sourceEnd = source.length;
-    let plannedEnd = plan.source.length;
-    while (sourceEnd > prefix && plannedEnd > prefix && source[sourceEnd - 1] === plan.source[plannedEnd - 1]) {
-      sourceEnd--;
-      plannedEnd--;
-    }
+    const change = minimalChange(source, plan.source);
+    if (change === null) return { kind: "applied" };
     view.dispatch({
-      changes: { from: prefix, to: sourceEnd, insert: plan.source.slice(prefix, plannedEnd) },
+      changes: change,
       annotations: [
         transactionOrigin.of("userEdit"),
         tagEdit.of({ source, taggedSource: plan.source }),

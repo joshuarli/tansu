@@ -17,7 +17,7 @@ import { KEYBOARD_SHORTCUTS } from "./app/keyboard-shortcuts.ts";
 import { sameTabIdentity, type TabIdentity } from "./app/tab-identity.ts";
 import { renderLinksRail } from "./links-rail.ts";
 import { paletteEntries, paletteRawQuery, parsePaletteQuery, type PaletteEntry, type PaletteMode } from "./app/commands.ts";
-import type { V2OverlayCoverage, V2RevisionMeta, V2SearchHit } from "./types.generated.ts";
+import type { Settings, V2OverlayCoverage, V2RevisionMeta, V2SearchHit } from "./types.generated.ts";
 import type { FindMatch, Outline } from "./editor/source-navigation.js";
 
 export type ViewActions = {
@@ -716,7 +716,7 @@ function renderOverlays(state: State, actions: ViewActions): HTMLElement {
     focusOnOpen(input);
   }
   if (state.settingsOpen && state.boot !== null) {
-    host.append(backdrop(actions), renderSettingsPanel(state, actions));
+    host.append(backdrop(actions), renderSettingsPanel(state.boot.settings, state.storagePersisted, actions));
   }
   if (state.helpOpen) {
     const rows = KEYBOARD_SHORTCUTS.map((shortcut) =>
@@ -1088,28 +1088,40 @@ function diffLines(before: string[], after: string[]): DiffLine[] {
   }
   const common = Array.from({ length: removed.length + 1 }, () => new Uint32Array(added.length + 1));
   for (let left = removed.length - 1; left >= 0; left -= 1) {
+    const row = common[left];
+    const nextRow = common[left + 1];
+    if (row === undefined || nextRow === undefined) continue;
     for (let right = added.length - 1; right >= 0; right -= 1) {
-      common[left]![right] = removed[left] === added[right]
-        ? common[left + 1]![right + 1]! + 1
-        : Math.max(common[left + 1]![right]!, common[left]![right + 1]!);
+      row[right] = removed[left] === added[right]
+        ? (nextRow[right + 1] ?? 0) + 1
+        : Math.max(nextRow[right] ?? 0, row[right + 1] ?? 0);
     }
   }
   const lines: DiffLine[] = [];
   let left = 0;
   let right = 0;
   while (left < removed.length || right < added.length) {
-    if (left < removed.length && right < added.length && removed[left] === added[right]) {
+    const removedLine = left < removed.length ? removed[left] : undefined;
+    const addedLine = right < added.length ? added[right] : undefined;
+    if (removedLine !== undefined && removedLine === addedLine) {
       left += 1;
       right += 1;
-    } else if (right === added.length || left < removed.length && common[left + 1]![right]! >= common[left]![right + 1]!) {
-      if (!appendDiffLine(lines, { kind: "removed", content: removed[left]! })) return lines;
+    } else if (addedLine === undefined ||
+      (removedLine !== undefined && lcsLength(common, left + 1, right) >= lcsLength(common, left, right + 1))) {
+      if (removedLine === undefined) break;
+      if (!appendDiffLine(lines, { kind: "removed", content: removedLine })) return lines;
       left += 1;
     } else {
-      if (!appendDiffLine(lines, { kind: "added", content: added[right]! })) return lines;
+      if (addedLine === undefined) break;
+      if (!appendDiffLine(lines, { kind: "added", content: addedLine })) return lines;
       right += 1;
     }
   }
   return lines;
+}
+
+function lcsLength(common: Uint32Array[], left: number, right: number): number {
+  return common[left]?.[right] ?? 0;
 }
 
 function boundedDiffLines(kind: "added" | "removed", content: string[]): DiffLine[] {
@@ -1127,15 +1139,15 @@ function appendDiffLine(lines: DiffLine[], line: DiffLine): boolean {
   return false;
 }
 
-function renderSettingsPanel(state: State, actions: ViewActions): HTMLElement {
-  const settings = normalizeSettings(state.boot!.settings);
-  const excluded = input("Excluded folders", settings.excludedFolders.join(", "));
+function renderSettingsPanel(settings: Settings, storagePersisted: State["storagePersisted"], actions: ViewActions): HTMLElement {
+  const normalized = normalizeSettings(settings);
+  const excluded = input("Excluded folders", normalized.excludedFolders.join(", "));
   const { autosaveDelayMs, undoStackMax, imageWebpQuality } = SETTINGS_LIMITS;
-  const autosave = input("Autosave delay", String(settings.autosaveDelayMs), "number", String(autosaveDelayMs.min), String(autosaveDelayMs.max));
-  const undo = input("Undo stack", String(settings.undoStackMax), "number", String(undoStackMax.min), String(undoStackMax.max));
+  const autosave = input("Autosave delay", String(normalized.autosaveDelayMs), "number", String(autosaveDelayMs.min), String(autosaveDelayMs.max));
+  const undo = input("Undo stack", String(normalized.undoStackMax), "number", String(undoStackMax.min), String(undoStackMax.max));
   const quality = input(
     "Image quality",
-    String(settings.imageWebpQuality),
+    String(normalized.imageWebpQuality),
     "number",
     String(imageWebpQuality.min),
     String(imageWebpQuality.max),
@@ -1165,9 +1177,9 @@ function renderSettingsPanel(state: State, actions: ViewActions): HTMLElement {
     el(
       "div",
       "storage-preference",
-      span(state.storagePersisted === null
+      span(storagePersisted === null
         ? "Browser storage may be cleared under storage pressure."
-        : state.storagePersisted ? "Persistent browser storage is enabled." : "The browser declined persistent storage."),
+        : storagePersisted ? "Persistent browser storage is enabled." : "The browser declined persistent storage."),
       button("Request persistent storage", "Request persistent storage", () => actions.dispatch({ type: "storage.persist" }), "text-button"),
     ),
     el(
@@ -1326,10 +1338,13 @@ function renderNoteAge(updatedAtMs: number): HTMLElement {
   ];
   let unitIndex = units.findIndex((unit) => elapsed >= unit.milliseconds);
   if (unitIndex === -1) unitIndex = units.length - 1;
-  let unit = units[unitIndex]!;
+  const fallbackUnit = units[units.length - 1];
+  if (fallbackUnit === undefined) throw new Error("Note age units are empty");
+  let unit = units[unitIndex] ?? fallbackUnit;
   let amount = Math.max(1, Math.round(elapsed / unit.milliseconds));
   while (unitIndex > 0) {
-    const nextUnit = units[unitIndex - 1]!;
+    const nextUnit = units[unitIndex - 1];
+    if (nextUnit === undefined) break;
     if (amount < Math.round(nextUnit.milliseconds / unit.milliseconds)) break;
     unit = nextUnit;
     unitIndex -= 1;
