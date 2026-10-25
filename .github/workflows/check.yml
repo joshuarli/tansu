@@ -49,6 +49,7 @@ jobs:
           ref: master
           path: .work/defuddle-rs
           fetch-depth: 1
+          ssh-key: ${{ secrets.DEFUDDLE_RS_DEPLOY_KEY }}
 
       - name: Install WASM optimizer
         run: sudo apt-get update && sudo apt-get install --yes --no-install-recommends binaryen
