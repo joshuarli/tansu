@@ -60,7 +60,7 @@ opt-level = 2
 opt-level = 3
 lto = "thin"
 panic = "abort"
-strip = true
+strip = false
 
 [patch.crates-io]
 laputa-h2-futures-lite = { git = "https://github.com/joshuarli/h2-futures-lite", rev = "32d106fca1249b731c4169dc8f9115f55abe995b" }
