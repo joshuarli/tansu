@@ -20,17 +20,17 @@ event-listener = "5.4"
 futures-io = "0.3"
 futures-lite = { version = "2.6", default-features = false, features = ["std"] }
 futures-util = { version = "0.3", default-features = false, features = ["async-await", "std"] }
-getrandom = "0.3"
+getrandom = "0.4"
 http-body-util = "0.1"
 hyper = { package = "laputa-hyper-futures-lite", git = "https://github.com/joshuarli/hyper-futures-lite", rev = "770427abdcafc516531dd275423ceee0c0b1fb2e", version = "=1.12.0-beta.0", default-features = false, features = ["server", "http1", "http2"] }
 lz4_flex = "0.14"
 pulldown-cmark = { version = "0.13", default-features = false }
 psl = "2.1.241"
-rusqlite = { version = "0.40", features = ["backup", "modern_sqlite"] }
+rusqlite = { version = "0.41", features = ["backup", "modern_sqlite"] }
 rustix = { version = "1.1", default-features = false, features = ["fs", "std"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-tantivy = { version = "0.26", default-features = false, features = ["mmap", "lz4-compression"] }
+tantivy = { version = "0.27", default-features = false, features = ["mmap", "lz4-compression"] }
 tansu-search = { path = "crates/tansu-search" }
 tansu-api-types = { path = "crates/tansu-api-types" }
 ts-rs = "12.0"
