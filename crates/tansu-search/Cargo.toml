@@ -5,7 +5,7 @@ edition = "2024"
 
 [dependencies]
 regex = "1"
-tantivy = { version = "0.26", default-features = false, features = ["mmap", "lz4-compression"] }
+tantivy = { version = "0.27", default-features = false, features = ["mmap", "lz4-compression"] }
 thiserror = "2"
 unicode-normalization = "0.1"
 tansu-search-policy = { path = "../tansu-search-policy" }
