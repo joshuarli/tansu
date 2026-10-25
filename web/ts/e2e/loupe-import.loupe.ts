@@ -52,7 +52,7 @@ describe("loupe import into tansu", () => {
       throw new Error(`Loupe is not built: ${extensionPath}/manifest.json is missing. Run "make test-e2e-loupe".`);
     }
     if (!existsSync(chromium.executablePath())) {
-      throw new Error(`Chromium is not installed: run "deno task playwright:install".`);
+      throw new Error(`Chromium is not installed: run "pnpm run playwright:install".`);
     }
 
     const scratchRoot = join(process.cwd(), ".work", "tmp");

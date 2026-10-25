@@ -1485,6 +1485,7 @@ name = "tansu-api-types"
 version = "0.1.0"
 dependencies = [
  "serde",
+ "serde_json",
  "tansu-search-policy",
  "ts-rs",
 ]

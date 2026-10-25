@@ -17,7 +17,7 @@ test("reader content renders, keeps route data current, and can dismiss extracti
       parsedPage: {
         content:
           "<h2 id='section'>Section</h2><h2>Generated</h2><h2>Generated</h2><p>Readable text.</p>",
-        content_markdown: "# Section\\n\\n![photo](https://example.com/photo.jpg)",
+        content_markdown: String.raw`# Section\n\n![photo](https://example.com/photo.jpg)`,
         title: "Rendered article",
         author: "",
         description: "",

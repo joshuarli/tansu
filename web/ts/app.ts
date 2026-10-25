@@ -823,6 +823,7 @@ export class TansuApp {
       if (tab.selection !== null) this.editor.revealSelection(tab.selection);
       this.editor.updateConfiguration({ ...this.editorConfig(), mode: tab.sourceMode ? "source" : "live", readOnly: this.transitioningVault || this.state.readingMode || (tab.kind === "local-draft" && tab.session?.state.promotionPending === true) });
       void this.prefetchAssets(tab, loadedDraft(tab) ?? "");
+      this.setEditorMountVisible(true);
       return true;
     } else {
       this.editor.updateConfiguration({ ...this.editorConfig(), mode: tab.sourceMode ? "source" : "live", readOnly: this.transitioningVault || this.state.readingMode || (tab.kind === "local-draft" && tab.session?.state.promotionPending === true) });

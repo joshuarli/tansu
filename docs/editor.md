@@ -30,6 +30,11 @@ unsupported tag forms with an unavailable result. The operation returns a promis
 and refuses the edit if its note changes while tag support loads. `readNoteTags`
 reads the V1 frontmatter tag forms used by the app; the adapter does not render tags.
 
+Frontmatter stays folded and cannot be
+created or edited through the editor in either mode. The UI does not display
+frontmatter-derived tags. Tansu preserves frontmatter in the Markdown source and
+continues to read tags from it.
+
 Click the note title to edit its name in place. Leaving the field attempts the
 rename; failures show a notification and restore the prior name. Successful
 renames update the tab and briefly flash the title green.
@@ -110,7 +115,7 @@ the per-note controller issues identity-bound load, retry, reconciliation,
 rename, and image-fetch tasks and accepts their completions for the issuing
 session. Local-draft image requests remain app-scoped until the draft has a
 durable note identity. Focused editor tests live under `web/ts/editor/tests/`
-and run with `deno task test web/ts/editor/tests`. Integrated browser
+and run with `pnpm run test -- web/ts/editor/tests`. Integrated browser
 measurements run with `make bench` and `make bench-full`.
 
 Vendored editor code and licenses live under `web/ts/editor/vendor/`. Read the

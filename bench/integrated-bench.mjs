@@ -34,7 +34,7 @@ const checkBudgets = args["check-budgets"] !== "false" && args.calibrate !== "tr
 const browserTypes = { chromium, webkit };
 
 async function main() {
-  execFileSync("deno", ["task", "build"], { cwd: REPO_ROOT, stdio: "inherit" });
+  execFileSync("pnpm", ["run", "build"], { cwd: REPO_ROOT, stdio: "inherit" });
   await mkdir(RESULTS_DIR, { recursive: true });
 
   const root = await mkdtemp(join(tmpdir(), "tansu-bench-"));

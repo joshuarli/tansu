@@ -2,6 +2,30 @@
   "name": "tansu",
   "private": true,
   "type": "module",
+  "scripts": {
+    "dev": "make dev",
+    "build": "node scripts/build-web.mjs production",
+    "build:dev": "node scripts/build-web.mjs development",
+    "lint": "oxlint --config oxlint.config.mjs",
+    "typecheck": "pnpm run loupe:wasm && tsc --noEmit --pretty false",
+    "test": "vitest run",
+    "test:browser": "TANSU_LOGS=buffer pnpm run build:dev && PLAYWRIGHT_BROWSERS_PATH=${PLAYWRIGHT_BROWSERS_PATH:-.work/tmp/playwright-browsers} vitest run --config vitest.e2e.config.ts",
+    "loupe:wasm": "node scripts/build-defuddle-wasm.mjs",
+    "loupe:build": "pnpm run loupe:wasm && NODE_ENV=development node scripts/build-loupe.mjs",
+    "loupe:dist": "pnpm run loupe:wasm && NODE_ENV=production node scripts/build-loupe.mjs",
+    "loupe:browser": "node scripts/build-browser-test-bundles.mjs && PLAYWRIGHT_BROWSERS_PATH=${PLAYWRIGHT_BROWSERS_PATH:-.work/tmp/playwright-browsers} vitest run --config vitest.loupe-browser.config.ts",
+    "loupe:reader-sample": "node scripts/build-reader-sample-fixture.mjs",
+    "playwright:install": "node scripts/install-playwright-browsers.mjs",
+    "types": "pnpm run build && cargo run --quiet -p gen-api-types",
+    "types:check": "pnpm run build && cargo run --quiet -p gen-api-types -- --check",
+    "test:rs": "pnpm run build && cargo test -q --workspace",
+    "test:app-interleavings": "vitest run web/ts/app.test.ts -t interleavings",
+    "test:acceptance": "pnpm run test:app-interleavings && pnpm run test:browser -- -t acceptance:",
+    "test:e2e:chromium": "TANSU_E2E_BROWSER=chromium pnpm run test:browser",
+    "test:e2e:webkit": "TANSU_E2E_BROWSER=webkit pnpm run test:browser",
+    "test:e2e:loupe": "pnpm run loupe:build && pnpm run build:dev && PLAYWRIGHT_BROWSERS_PATH=${PLAYWRIGHT_BROWSERS_PATH:-.work/tmp/playwright-browsers} vitest run --config vitest.loupe.config.ts",
+    "check": "pnpm run types:check && pnpm run lint && pnpm run typecheck && pnpm run test && cargo check -q"
+  },
   "playwrightBrowsers": {
     "playwrightVersion": "1.64.0",
     "install": [
@@ -38,18 +62,19 @@
   "devDependencies": {
     "@types/chrome": "0.2.2",
     "@types/node": "26.6.5",
-    "@vitest/browser-playwright": "5.0.4",
-    "effect": "4.0.0",
+    "@vitest/browser-playwright": "5.0.5",
+    "effect": "4.0.6",
     "fake-indexeddb": "6.2.5",
     "happy-dom": "21.0.1",
-    "oxlint": "1.88.0",
+    "oxlint": "1.89.0",
+    "oxlint-tsgolint": "7.0.2005",
     "playwright": "1.64.0",
-    "tsrs": "0.18.0-ts7.1.0-dev.20260929",
-    "vite": "8.3.4",
-    "vitest": "5.0.4"
+    "typescript": "7.0.2",
+    "vite": "8.3.5",
+    "vitest": "5.0.5"
   },
   "engines": {
     "node": ">=26.0.0"
   },
-  "packageManager": "pnpm@12.13.0"
+  "packageManager": "pnpm@12.15.0"
 }
