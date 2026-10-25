@@ -8,6 +8,14 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: "${{ github.workflow }}-${{ github.head_ref || github.run_id }}"
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash -euo pipefail {0}
+
 jobs:
   check:
     runs-on: ubuntu-24.04
@@ -18,22 +26,25 @@ jobs:
       PNPM_CONFIG_STORE_DIR: ${{ github.workspace }}/.work/tmp/pnpm-store
       PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.work/tmp/playwright-browsers
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Create working directories
         run: mkdir -p .work/tmp
         env:
           TMPDIR: ${{ github.workspace }}/.work/tmp
 
-      - uses: pnpm/setup@v3
+      - uses: pnpm/setup@a0881977cd8ea73b1ed212236c99ca10dcc80cf4 # v3.1.1
         with:
           dest: ${{ github.workspace }}/.work/tmp/pnpm
           install: false
         env:
           TMPDIR: ${{ github.workspace }}/.work/tmp
 
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           repository: joshuarli/defuddle-rs
           ref: master
           path: .work/defuddle-rs
