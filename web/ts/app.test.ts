@@ -230,6 +230,7 @@ describe("v2 desktop shell", () => {
       await app.boot();
       await until(() => root.querySelector('[title="Suggest tags"]') !== null);
       await runCommand(root, "reading");
+      client.search.mockClear();
       const request = root.querySelector<HTMLButtonElement>('[title="Suggest tags"]')!;
       expect(request.disabled).toBeTruthy();
       request.click();
@@ -1209,6 +1210,34 @@ describe("v2 desktop shell", () => {
 
     expect(vi.getTimerCount()).toBe(0);
     expect(memory.workspaceWrites.slice(workspaceWritesBeforeOpen)).toHaveLength(0);
+  });
+
+  it("does not schedule workspace persistence when an opened note finishes loading after dispose", async () => {
+    useFakeTimers();
+    const one = noteMeta("note-1", "one.md", "One");
+    const two = noteMeta("note-2", "two.md", "Two");
+    const client = configureVault([one, two], workspaceSeed([
+      { noteId: one.noteId, title: one.title, path: one.path, cursorOffset: null, sourceMode: false },
+    ], one.noteId));
+    const load = deferred<V2NoteDocument>();
+    client.openNote.mockImplementation(async (id) => id === two.noteId ? load.promise : documentFor(one, "# One\n"));
+    client.search.mockResolvedValue(searchResponse([searchHit(two)]));
+    const { app, root } = mountApp(createServices());
+    await app.boot();
+    await openSearch(root);
+    const overlay = root.querySelector<HTMLInputElement>(".search-panel .command-input")!;
+    overlay.value = "two";
+    overlay.dispatchEvent(new Event("input", { bubbles: true }));
+    await until(() => root.querySelector(".search-result-row") !== null);
+    root.querySelector<HTMLButtonElement>(".search-result-row")!.click();
+    await until(() => client.openNote.mock.calls.some(([id]) => id === two.noteId));
+    await app.dispose();
+    const workspaceWritesBeforeLoad = memory.workspaceWrites.length;
+    load.resolve(documentFor(two, "# Two\n"));
+    await flushAsync();
+
+    expect(vi.getTimerCount()).toBe(0);
+    expect(memory.workspaceWrites.slice(workspaceWritesBeforeLoad)).toHaveLength(0);
   });
 
   it("sends dirty overlays to V2 search and ignores stale results", async () => {

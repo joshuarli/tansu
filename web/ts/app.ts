@@ -1252,7 +1252,7 @@ export class TansuApp {
   }
 
   private scheduleWorkspaceSave(): void {
-    if (this.identity === null) return;
+    if (this.identity === null || this.disposed) return;
     const snapshot = this.workspaceSnapshot(this.identity);
     if (this.workspaceTimer !== undefined) window.clearTimeout(this.workspaceTimer);
     this.workspaceTimer = window.setTimeout(() => {
