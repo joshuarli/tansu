@@ -25,12 +25,10 @@ directory. The search index is derived state. See
 [Configuration](configuration.md) for the data path.
 
 On startup, Tansu assigns a stable ID to each canonical vault root and copies
-prior app state into the ID-based directory when needed. It can also copy
-legacy `.tansu/` state when that directory has a `vault.db` and the destination
-is absent or empty. These copies preserve the old state. This does not import
-`config.toml` or revision formats from other note applications. Existing
-installations must add their vaults in the setup page or with
-`tansu config init`.
+prior app state into the ID-based directory when needed. The copy preserves the
+old state. Tansu does not import `.tansu/` vault state, `config.toml`, or
+revision formats from other note applications. Existing installations must add
+their vaults in the setup page or with `tansu config init`.
 
 The new catalog may not be readable by an older Tansu build. To roll back,
 stop the server and restore the matching settings database, app data, and

@@ -91,15 +91,14 @@ impl Catalog {
             ",
         )?;
         let mut catalog = Self { conn };
-        catalog.migrate()?;
+        catalog.ensure_schema()?;
         Ok(catalog)
     }
 
-    fn migrate(&mut self) -> Result<()> {
+    fn ensure_schema(&mut self) -> Result<()> {
         self.conn.execute_batch(
             "
             PRAGMA foreign_keys = ON;
-            DROP TABLE IF EXISTS schema_migrations;
             CREATE TABLE IF NOT EXISTS vault_meta (
               key TEXT PRIMARY KEY,
               value TEXT NOT NULL
@@ -112,7 +111,7 @@ impl Catalog {
               tags_json TEXT NOT NULL,
               seq INTEGER NOT NULL,
               content_hash TEXT NOT NULL,
-              visible_hash TEXT NOT NULL DEFAULT '',
+              visible_hash TEXT NOT NULL,
               updated_at_ms INTEGER NOT NULL,
               tombstoned INTEGER NOT NULL DEFAULT 0,
               unresolved_reason TEXT
@@ -163,20 +162,6 @@ impl Catalog {
             );
             ",
         )?;
-        self.conn.execute_batch(
-            "DROP TABLE IF EXISTS pins; DROP TABLE IF EXISTS recent; DROP TABLE IF EXISTS session;",
-        )?;
-        ensure_column(
-            &self.conn,
-            "notes",
-            "visible_hash",
-            "TEXT NOT NULL DEFAULT ''",
-        )?;
-        self.conn.execute(
-            "UPDATE notes SET visible_hash=content_hash WHERE visible_hash=''",
-            [],
-        )?;
-        self.reset_inert_search_weight_defaults()?;
         self.conn.execute(
             "INSERT OR IGNORE INTO vault_meta(key, value) VALUES('sync_version', '0')",
             [],
@@ -193,52 +178,6 @@ impl Catalog {
             "INSERT OR IGNORE INTO vault_meta(key, value) VALUES('watcher_reconcile_pending', 'false')",
             [],
         )?;
-        Ok(())
-    }
-
-    fn reset_inert_search_weight_defaults(&mut self) -> Result<()> {
-        const LEGACY_DEFAULTS: [(&str, f64); 5] = [
-            ("searchTitleWeight", 4.0),
-            ("searchHeadingWeight", 2.0),
-            ("searchTagWeight", 3.0),
-            ("searchContentWeight", 1.0),
-            ("recencyBoost", 0.1),
-        ];
-        let applied: bool = self.conn.query_row(
-            "SELECT EXISTS(SELECT 1 FROM vault_meta WHERE key='search_weight_defaults_reset_v2')",
-            [],
-            |row| row.get(0),
-        )?;
-        if applied {
-            return Ok(());
-        }
-        let tx = self.conn.transaction()?;
-        let stored: Option<String> = tx
-            .query_row("SELECT value FROM settings WHERE key='settings'", [], |row| row.get(0))
-            .optional()?;
-        if let Some(stored) = stored {
-            let mut value: serde_json::Value = serde_json::from_str(&stored)?;
-            let untouched = value.as_object().is_some_and(|object| {
-                LEGACY_DEFAULTS
-                    .iter()
-                    .all(|(key, legacy)| object.get(*key).and_then(|v| v.as_f64()).is_some_and(|v| (v - legacy).abs() < 1e-6))
-            });
-            if untouched {
-                let defaults = serde_json::to_value(Settings::default())?;
-                for (key, _) in LEGACY_DEFAULTS {
-                    value[key] = defaults[key].clone();
-                }
-                tx.execute(
-                    "UPDATE settings SET value=?1 WHERE key='settings'",
-                    params![serde_json::to_string(&value)?],
-                )?;
-            }
-        }
-        tx.execute(
-            "INSERT INTO vault_meta(key, value) VALUES('search_weight_defaults_reset_v2', '1')",
-            [],
-        )?;
-        tx.commit()?;
         Ok(())
     }
 
@@ -1128,21 +1067,6 @@ fn revision_from_sql(row: &rusqlite::Row<'_>) -> rusqlite::Result<RevisionMeta> 
     })
 }
 
-fn ensure_column(conn: &Connection, table: &str, column: &str, declaration: &str) -> Result<()> {
-    let mut stmt = conn.prepare(&format!("PRAGMA table_info({table})"))?;
-    let rows = stmt.query_map([], |row| row.get::<_, String>(1))?;
-    for row in rows {
-        if row? == column {
-            return Ok(());
-        }
-    }
-    conn.execute(
-        &format!("ALTER TABLE {table} ADD COLUMN {column} {declaration}"),
-        [],
-    )?;
-    Ok(())
-}
-
 fn invalid_column(
     index: usize,
     error: impl Into<Box<dyn std::error::Error + Send + Sync>>,
@@ -1330,7 +1254,7 @@ mod tests {
     }
 
     #[test]
-    fn settings_round_trip_and_app_state_tables_are_removed() {
+    fn settings_round_trip() {
         let dir = tempfile::tempdir().unwrap();
         let mut catalog = Catalog::open(&dir.path().join("vault.db")).unwrap();
         let settings = Settings {
@@ -1342,15 +1266,6 @@ mod tests {
             catalog.settings().unwrap().excluded_folders,
             vec!["Archive"]
         );
-        let tables = ["pins", "recent", "session"];
-        for table in tables {
-            let found: Option<String> = catalog.conn.query_row(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name=?1",
-                [table],
-                |row| row.get(0),
-            ).optional().unwrap();
-            assert!(found.is_none());
-        }
     }
 
     fn open_catalog_with_note() -> (tempfile::TempDir, Catalog, String) {
@@ -1394,47 +1309,6 @@ mod tests {
         assert_eq!(settings.autosave_delay_ms, 5);
         assert_eq!(settings.undo_stack_max, 3);
         assert_eq!(settings.excluded_folders, vec!["a/b"]);
-    }
-
-    fn store_settings_json(path: &std::path::Path, json: &str) {
-        let catalog = Catalog::open(path).unwrap();
-        catalog.conn.execute("DELETE FROM vault_meta WHERE key='search_weight_defaults_reset_v2'", []).unwrap();
-        catalog
-            .conn
-            .execute(
-                "INSERT INTO settings(key, value) VALUES('settings', ?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-                params![json],
-            )
-            .unwrap();
-    }
-
-    #[test]
-    fn untouched_legacy_search_weights_move_to_current_defaults_once() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("vault.db");
-        store_settings_json(
-            &path,
-            r#"{"excludedFolders":["Archive"],"searchTitleWeight":4,"searchHeadingWeight":2,"searchTagWeight":3,"searchContentWeight":1,"recencyBoost":0.1,"autosaveDelayMs":900,"undoStackMax":200,"imageWebpQuality":0.85}"#,
-        );
-        let migrated = Catalog::open(&path).unwrap().settings().unwrap();
-        let defaults = Settings::default();
-        assert_eq!(migrated.search_title_weight, defaults.search_title_weight);
-        assert_eq!(migrated.search_tag_weight, defaults.search_tag_weight);
-        assert_eq!(migrated.recency_boost, defaults.recency_boost);
-        assert_eq!(migrated.excluded_folders, vec!["Archive"]);
-    }
-
-    #[test]
-    fn customized_search_weights_survive_the_migration() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("vault.db");
-        store_settings_json(
-            &path,
-            r#"{"excludedFolders":[],"searchTitleWeight":4,"searchHeadingWeight":2,"searchTagWeight":9,"searchContentWeight":1,"recencyBoost":0.1,"autosaveDelayMs":900,"undoStackMax":200,"imageWebpQuality":0.85}"#,
-        );
-        let settings = Catalog::open(&path).unwrap().settings().unwrap();
-        assert_eq!(settings.search_tag_weight, 9.0);
-        assert_eq!(settings.search_title_weight, 4.0);
     }
 
     #[test]

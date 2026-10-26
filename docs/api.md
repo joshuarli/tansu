@@ -87,8 +87,7 @@ in `X-Tansu-Mutation-Id`. Idempotency is scoped to a vault and retained for the
 life of that vault's durable state: the same ID, method, path, and decoded
 request payload returns the original outcome; reuse with a different method,
 path, or payload returns `mutation_id_reuse`. Image retries compare exact WebP
-bytes. Existing durable mutation records retain their SHA-256 payload hash for
-same-request replay; new records use BLAKE3.
+bytes. Mutation records hash the request payload with BLAKE3.
 
 An accepted content change has a complete recoverable snapshot before its
 revision commits. `accepted` means both catalog and visible-file steps finished.
