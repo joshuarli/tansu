@@ -5,10 +5,6 @@ editor. Markdown files remain ordinary files in each vault. The server stores
 catalog and revision state in the XDG data path, keyed by stable vault ID. See
 [Configuration](configuration.md).
 
-Cloudflare-native/serverless deployment is not implemented. The proposed
-native-preserving portable-core architecture is in
-[Serverless architecture](serverless-architecture.md).
-
 The [product scope](product-backlog.md) rejects in-app AI and automatic
 related-note recommendations. Tag suggestions reuse vault-local search and
 require explicit selection before changing note content.

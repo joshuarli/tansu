@@ -43,12 +43,11 @@ Next: 85
 - **Fix with:** root-cause
 - **Effort:** S
 
-### TNS-084 · P3 · Validate portable core and serverless Cloudflare host
+### TNS-084 · P3 · Extract note mutation decisions from `vault.rs`
 
-- **Area:** Architecture / deployment
-- **Where:** `docs/serverless-architecture.md`, `src/vault.rs`, `src/catalog.rs`, `src/history.rs`, `src/auth.rs`, `crates/tansu-search`
-- **Problem:** The native server relies on POSIX files, process locks, `rusqlite`, Tantivy, watcher threads, and recovery materialization. It cannot be uploaded unchanged to Workers. A naive filesystem-on-R2 abstraction would compromise durability and introduce divergent note semantics.
-- **Recommendation:** Follow the [serverless architecture proposal](docs/serverless-architecture.md). Begin with its **P0 go/no-go**: compile a Rust/SQLite Durable Object/R2 probe, verify WebAuthn WASM compatibility, test FTS5/Tantivy parity, and measure the actual free-tier footprint of a representative 300 MB vault. Only then extract portable mutation logic incrementally; preserve native file-based behavior and the V2 contract.
-- **Blocked:** P0 feasibility and search/cost conformance evidence. No Cloudflare deploy target is implemented.
-- **Fix with:** architecture / measured prototype
-- **Effort:** L
+- **Area:** Architecture
+- **Where:** `src/vault.rs` (`v2_save_source`, `v2_rename_note`, `v2_delete_note`, `v2_create_note`, `v2_check_precondition`, `apply_text_edits` and its position helpers), `src/history.rs` (`SourceDocument`, hashes), `src/catalog.rs` (`NoteRow`)
+- **Problem:** Each mutation interleaves its decisions with file, lock, and catalog calls, so a decision is testable only through a full `VaultRuntime`. The check that a note is live and resolved is written out seven times as `tombstoned` and `unresolved_reason: Option<String>`, and `v2_save_source` runs it twice. The precondition rule exists as both a conflict decision in save and an error in rename and delete.
+- **Recommendation:** Add a `tansu-note-core` crate with no `std::fs`, `rusqlite`, lock, or thread use. First move `apply_text_edits`, the position helpers, and `SourceDocument` with their tests. Then replace `tombstoned` plus `unresolved_reason` with one note-state type and move the save decision (conflict, no-op, or write with candidate bytes) and the shared request validation. Keep the prepare, snapshot, recheck, accept, materialize, and complete sequence in `vault.rs`. Existing `vault.rs` tests pass unchanged.
+- **Fix with:** architect
+- **Effort:** M
