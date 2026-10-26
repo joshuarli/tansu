@@ -41,3 +41,5 @@ Do not add these to V1 without a design update:
 - Frontmatter fields beyond tags and remote asset import or versioning.
 - A hierarchical file tree and unresolved-state repair UI.
 - Packaged app distribution and release signing.
+- Native/serverless dual-host deployment; see the
+  [unimplemented Cloudflare architecture proposal](serverless-architecture.md).

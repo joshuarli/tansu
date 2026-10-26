@@ -1,7 +1,7 @@
 # Tansu TODO
 
 Prefix: TNS
-Next: 84
+Next: 85
 
 ### TNS-068 · P4 · Order asset prefetch by visibility and test cache stability
 
@@ -42,3 +42,13 @@ Next: 84
 - **Recommendation:** Capture boot completion and pending fixture work when the editor is absent, then reproduce and remove the shared-state or lifecycle cause. Keep the closing-save assertions intact.
 - **Fix with:** root-cause
 - **Effort:** S
+
+### TNS-084 · P3 · Validate portable core and serverless Cloudflare host
+
+- **Area:** Architecture / deployment
+- **Where:** `docs/serverless-architecture.md`, `src/vault.rs`, `src/catalog.rs`, `src/history.rs`, `src/auth.rs`, `crates/tansu-search`
+- **Problem:** The native server relies on POSIX files, process locks, `rusqlite`, Tantivy, watcher threads, and recovery materialization. It cannot be uploaded unchanged to Workers. A naive filesystem-on-R2 abstraction would compromise durability and introduce divergent note semantics.
+- **Recommendation:** Follow the [serverless architecture proposal](docs/serverless-architecture.md). Begin with its **P0 go/no-go**: compile a Rust/SQLite Durable Object/R2 probe, verify WebAuthn WASM compatibility, test FTS5/Tantivy parity, and measure the actual free-tier footprint of a representative 300 MB vault. Only then extract portable mutation logic incrementally; preserve native file-based behavior and the V2 contract.
+- **Blocked:** P0 feasibility and search/cost conformance evidence. No Cloudflare deploy target is implemented.
+- **Fix with:** architecture / measured prototype
+- **Effort:** L

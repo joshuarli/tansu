@@ -7,6 +7,11 @@ Tansu binds to `127.0.0.1` on port `3000` by default. Without authentication
 settings, the server uses loopback mode and passkey routes are disabled. Keep
 the default for local use.
 
+Cloudflare Workers/Durable Objects are **not** a supported deployment target
+at present. See the [portable core and serverless architecture proposal](serverless-architecture.md)
+for the gated design and required migration/recovery work. Do not upload a
+private vault to R2 based on that proposal alone.
+
 ## Serve privately over Tailscale
 
 [Tailscale Serve](https://tailscale.com/docs/features/tailscale-serve) gives
