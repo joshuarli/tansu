@@ -50,7 +50,7 @@ pub struct SearchIndex {
 
 enum SearchIndexState {
     Available {
-        service: SearchService,
+        service: Box<SearchService>,
         needs_reconciliation: bool,
         degraded: bool,
     },
@@ -64,7 +64,7 @@ impl SearchIndex {
             Ok(service) => {
                 let status = service.status();
                 SearchIndexState::Available {
-                    service,
+                    service: Box::new(service),
                     needs_reconciliation: status.dirty,
                     degraded: status.degraded,
                 }
@@ -239,7 +239,7 @@ impl SearchIndex {
             match SearchService::open(&self.path) {
                 Ok(service) => {
                     self.state = SearchIndexState::Available {
-                        service,
+                        service: Box::new(service),
                         needs_reconciliation: true,
                         degraded: false,
                     };
