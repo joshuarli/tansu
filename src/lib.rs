@@ -92,6 +92,18 @@ impl From<rusqlite::Error> for Error {
     }
 }
 
+impl From<tansu_note_core::InvalidUtf8> for Error {
+    fn from(value: tansu_note_core::InvalidUtf8) -> Self {
+        Self::BadRequest(value.to_string())
+    }
+}
+
+impl From<tansu_note_core::SourceNotLf> for Error {
+    fn from(value: tansu_note_core::SourceNotLf) -> Self {
+        Self::BadRequest(value.to_string())
+    }
+}
+
 impl From<notify::Error> for Error {
     fn from(value: notify::Error) -> Self {
         Self::Internal(value.to_string())

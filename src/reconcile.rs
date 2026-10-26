@@ -5,7 +5,8 @@ use std::path::Path;
 
 use crate::api_types::{ApiErrorKind, NoteEventKind, NoteEventSource, UnresolvedReason};
 use crate::catalog::{Catalog, InsertNote, NoteRow, generate_note_id};
-use crate::history::{self, SourceDocument};
+use crate::history;
+use tansu_note_core::{NoteUnavailable, SourceDocument};
 use crate::paths::{
     normalize_note_path, path_key, read_visible_bytes, write_visible_note_bytes_atomic,
     write_visible_note_bytes_new,
@@ -50,7 +51,7 @@ pub fn reconcile_vault(
     let rows = catalog.all_rows()?;
     let live_rows = rows
         .iter()
-        .filter(|row| !row.tombstoned && row.unresolved_reason.is_none())
+        .filter(|row| row.state.is_live())
         .cloned()
         .collect::<Vec<_>>();
     let live_paths = live_rows
@@ -111,7 +112,7 @@ pub fn reconcile_vault(
         ) {
             Ok(bytes) if should_repair_missing_visible(catalog, &row.meta.note_id)? => {
                 write_visible_note_bytes_new(root, &row.meta.path, &bytes)?;
-                catalog.record_visible_hash(&row.meta.note_id, &history::disk_hash(&bytes))?;
+                catalog.record_visible_hash(&row.meta.note_id, &tansu_note_core::disk_hash(&bytes))?;
             }
             Ok(_) => {
                 catalog.tombstone_note(
@@ -173,15 +174,13 @@ pub fn reconcile_note_before_write(
     let row = catalog
         .note_row_by_id(note_id)?
         .ok_or_else(|| Error::NotFound(note_id.to_string()))?;
-    if row.tombstoned {
-        return Err(Error::NotFound(note_id.to_string()));
-    }
-    if let Some(reason) = row.unresolved_reason.as_deref() {
-        return Err(Error::api(ApiErrorKind::UnresolvedNote {
+    row.state.require_live().map_err(|unavailable| match unavailable {
+        NoteUnavailable::NotFound => Error::NotFound(note_id.to_string()),
+        NoteUnavailable::Unresolved(reason) => Error::api(ApiErrorKind::UnresolvedNote {
             note_id: note_id.to_string(),
-            reason: parse_unresolved_reason(reason),
-        }));
-    }
+            reason,
+        }),
+    })?;
     let bytes = match read_visible_bytes(root, &row.meta.path) {
         Ok(bytes) => bytes,
         Err(Error::Io(error)) if error.kind() == ErrorKind::NotFound => {
@@ -204,8 +203,8 @@ pub fn reconcile_note_before_write(
             }));
         }
     };
-    let source_hash = history::source_hash(&document.source);
-    let disk_hash = history::disk_hash(&bytes);
+    let source_hash = tansu_note_core::source_hash(&document.source);
+    let disk_hash = tansu_note_core::disk_hash(&bytes);
     if row.meta.content_hash == source_hash {
         if row.visible_hash != disk_hash {
             history::write_snapshot_bytes(state_root, note_id, &source_hash, &bytes)?;
@@ -301,12 +300,12 @@ fn walk_dir(
             Err(_) => continue,
         };
         let disk_bytes = read_visible_bytes(root, &rel)?;
-        let disk_hash = history::disk_hash(&disk_bytes);
+        let disk_hash = tansu_note_core::disk_hash(&disk_bytes);
         match SourceDocument::from_disk(&disk_bytes) {
             Ok(document) => out.push(FileRecord {
                 path: rel,
                 path_key: path_key(&entry_path_to_string(&path, root)?),
-                source_hash: history::source_hash(&document.source),
+                source_hash: tansu_note_core::source_hash(&document.source),
                 disk_hash,
                 source: document.source,
                 disk_bytes,
@@ -407,7 +406,7 @@ fn insert_unresolved(
         history::write_snapshot_bytes(
             state_root,
             &note_id,
-            &history::source_hash(&record.source),
+            &tansu_note_core::source_hash(&record.source),
             &record.disk_bytes,
         )?;
     }
@@ -467,7 +466,7 @@ fn apply_visible_version(
             Err(error) => return Err(error.into_error()),
         };
         write_visible_note_bytes_atomic(root, &row.meta.path, &bytes)?;
-        catalog.record_visible_hash(&row.meta.note_id, &history::disk_hash(&bytes))?;
+        catalog.record_visible_hash(&row.meta.note_id, &tansu_note_core::disk_hash(&bytes))?;
         return Ok(());
     }
     let parsed = parse_markdown(&file.path, &file.source);
@@ -503,21 +502,12 @@ fn mark_snapshot_unresolved(
     Ok(true)
 }
 
-fn parse_unresolved_reason(value: &str) -> UnresolvedReason {
-    match value {
-        "case_fold_collision" => UnresolvedReason::CaseFoldCollision,
-        "invalid_utf8" => UnresolvedReason::InvalidUtf8,
-        "missing_snapshot" => UnresolvedReason::MissingSnapshot,
-        "corrupt_snapshot" => UnresolvedReason::CorruptSnapshot,
-        _ => UnresolvedReason::FileCatalogMismatch,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::fs;
 
     use crate::api_types::{NoteEventKind, NoteEventSource};
+    use tansu_note_core::NoteState;
 
     use super::*;
 
@@ -557,8 +547,8 @@ mod tests {
         let collision = FileRecord {
             path: "A.md".to_string(),
             path_key: path_key("A.md"),
-            source_hash: history::source_hash(collision_source),
-            disk_hash: history::disk_hash(collision_bytes),
+            source_hash: tansu_note_core::source_hash(collision_source),
+            disk_hash: tansu_note_core::disk_hash(collision_bytes),
             source: collision_source.to_string(),
             disk_bytes: collision_bytes.to_vec(),
             unresolved: Some(UnresolvedReason::CaseFoldCollision),
@@ -594,7 +584,7 @@ mod tests {
         assert_eq!(rows.len(), 2);
         assert!(rows.iter().any(|row| {
             row.meta.path == "A.md"
-                && row.unresolved_reason.as_deref() == Some("case_fold_collision")
+                && row.state == NoteState::Unresolved(UnresolvedReason::CaseFoldCollision)
         }));
 
         reconcile_vault(dir.path(), &state_root, &mut catalog, &[]).unwrap();
@@ -605,10 +595,10 @@ mod tests {
     #[test]
     fn missing_or_corrupt_current_snapshots_mark_notes_unresolved() {
         for (damage, remove_visible, expected_reason) in [
-            ("missing", false, "missing_snapshot"),
-            ("corrupt", false, "corrupt_snapshot"),
-            ("missing", true, "missing_snapshot"),
-            ("corrupt", true, "corrupt_snapshot"),
+            ("missing", false, UnresolvedReason::MissingSnapshot),
+            ("corrupt", false, UnresolvedReason::CorruptSnapshot),
+            ("missing", true, UnresolvedReason::MissingSnapshot),
+            ("corrupt", true, UnresolvedReason::CorruptSnapshot),
         ] {
             let dir = tempfile::tempdir().unwrap();
             let visible = dir.path().join("A.md");
@@ -634,7 +624,7 @@ mod tests {
             reconcile_vault(dir.path(), &state_root, &mut catalog, &[]).unwrap();
 
             let rows = catalog.all_rows().unwrap();
-            assert_eq!(rows[0].unresolved_reason.as_deref(), Some(expected_reason));
+            assert_eq!(rows[0].state, NoteState::Unresolved(expected_reason));
             if !remove_visible {
                 assert_eq!(fs::read(&visible).unwrap(), bytes);
             }
@@ -673,7 +663,7 @@ mod tests {
 
         assert_eq!(live.len(), 1);
         assert_ne!(live[0].note_id, original.note_id);
-        assert!(rows.iter().any(|row| row.meta.note_id == original.note_id && row.tombstoned));
+        assert!(rows.iter().any(|row| row.meta.note_id == original.note_id && row.state == NoteState::Tombstoned));
     }
 
     #[test]
@@ -707,7 +697,7 @@ mod tests {
         assert!(catalog.live_notes().unwrap().is_empty());
         let rows = catalog.all_rows().unwrap();
         assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].unresolved_reason.as_deref(), Some("invalid_utf8"));
+        assert_eq!(rows[0].state, NoteState::Unresolved(UnresolvedReason::InvalidUtf8));
     }
 
     #[test]
@@ -719,7 +709,7 @@ mod tests {
         let note = catalog.live_notes().unwrap().remove(0);
         let accepted = "# A\n\nnew\n";
         let accepted_source_hash = history::write_snapshot(&dir.path().join("state"), &note.note_id, accepted).unwrap();
-        let base_disk_hash = history::disk_hash(b"# A\n\nold\n");
+        let base_disk_hash = tansu_note_core::disk_hash(b"# A\n\nold\n");
         let parsed = parse_markdown(&note.path, accepted);
         catalog
             .update_note_content(
@@ -739,7 +729,7 @@ mod tests {
         assert_eq!(visible, accepted);
         let row = catalog.note_row_by_id(&note.note_id).unwrap().unwrap();
         assert_eq!(row.meta.content_hash, accepted_source_hash);
-        assert_eq!(row.visible_hash, history::disk_hash(accepted.as_bytes()));
+        assert_eq!(row.visible_hash, tansu_note_core::disk_hash(accepted.as_bytes()));
     }
 
     #[test]
@@ -751,7 +741,7 @@ mod tests {
         let note = catalog.live_notes().unwrap().remove(0);
         let accepted = "# A\n\nnew\n";
         let accepted_source_hash = history::write_snapshot(&dir.path().join("state"), &note.note_id, accepted).unwrap();
-        let base_disk_hash = history::disk_hash(b"# A\n\nold\n");
+        let base_disk_hash = tansu_note_core::disk_hash(b"# A\n\nold\n");
         let parsed = parse_markdown(&note.path, accepted);
         catalog
             .update_note_content(
@@ -770,7 +760,7 @@ mod tests {
 
         let live = catalog.live_notes().unwrap().remove(0);
         assert_eq!(live.note_id, note.note_id);
-        assert_eq!(live.content_hash, history::content_hash("# A\n\nexternal\n"));
+        assert_eq!(live.content_hash, tansu_note_core::source_hash("# A\n\nexternal\n"));
         assert_eq!(fs::read_to_string(dir.path().join("A.md")).unwrap(), "# A\n\nexternal\n");
     }
 
@@ -788,7 +778,7 @@ mod tests {
         let updated = catalog.note_by_id(&note.note_id).unwrap().unwrap();
         let row = catalog.note_row_by_id(&note.note_id).unwrap().unwrap();
         assert_ne!(updated.content_hash, note.content_hash);
-        assert_eq!(row.visible_hash, history::disk_hash(b"external\r"));
+        assert_eq!(row.visible_hash, tansu_note_core::disk_hash(b"external\r"));
         assert_eq!(history::read_snapshot_bytes(&state, &note.note_id, &updated.content_hash).unwrap(), b"external\r");
     }
 }

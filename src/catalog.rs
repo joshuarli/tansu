@@ -7,13 +7,23 @@ use crate::api_types::{
     SearchStatus, Settings, UnresolvedReason, ValidatedSettings,
 };
 use crate::{Error, Result};
+use tansu_note_core::{NoteState, RecordedNote};
 
 #[derive(Debug, Clone)]
 pub struct NoteRow {
     pub meta: NoteMeta,
     pub visible_hash: String,
-    pub tombstoned: bool,
-    pub unresolved_reason: Option<String>,
+    pub state: NoteState,
+}
+
+impl NoteRow {
+    pub fn recorded(&self) -> RecordedNote<'_> {
+        RecordedNote {
+            revision: self.meta.seq,
+            source_hash: &self.meta.content_hash,
+            disk_hash: &self.visible_hash,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -812,11 +822,7 @@ impl Catalog {
 
     pub fn note_by_id(&self, note_id: &str) -> Result<Option<NoteMeta>> {
         Ok(self.note_row_by_id(note_id)?.and_then(|row| {
-            if row.tombstoned || row.unresolved_reason.is_some() {
-                None
-            } else {
-                Some(row.meta)
-            }
+            row.state.is_live().then_some(row.meta)
         }))
     }
 
@@ -1083,6 +1089,18 @@ fn row_from_sql(row: &rusqlite::Row<'_>) -> rusqlite::Result<NoteRow> {
         1 => true,
         other => return Err(invalid_column(8, format!("tombstoned is {other}, not 0 or 1"))),
     };
+    let unresolved: Option<String> = row.get(9)?;
+    let state = if tombstoned {
+        NoteState::Tombstoned
+    } else {
+        match unresolved {
+            None => NoteState::Live,
+            Some(name) => NoteState::Unresolved(
+                parse_unresolved_reason(&name)
+                    .ok_or_else(|| invalid_column(9, format!("unknown unresolved reason {name:?}")))?,
+            ),
+        }
+    };
     Ok(NoteRow {
         meta: NoteMeta {
             note_id: row.get(0)?,
@@ -1094,8 +1112,7 @@ fn row_from_sql(row: &rusqlite::Row<'_>) -> rusqlite::Result<NoteRow> {
             updated_at_ms: row.get(7)?,
         },
         visible_hash: row.get(6)?,
-        tombstoned,
-        unresolved_reason: row.get(9)?,
+        state,
     })
 }
 
@@ -1249,6 +1266,17 @@ fn note_event_source(source: &str) -> std::result::Result<NoteEventSource, Strin
         "external" => NoteEventSource::External,
         "repair" => NoteEventSource::Repair,
         other => return Err(format!("unknown note event source: {other:?}")),
+    })
+}
+
+fn parse_unresolved_reason(name: &str) -> Option<UnresolvedReason> {
+    Some(match name {
+        "case_fold_collision" => UnresolvedReason::CaseFoldCollision,
+        "invalid_utf8" => UnresolvedReason::InvalidUtf8,
+        "missing_snapshot" => UnresolvedReason::MissingSnapshot,
+        "corrupt_snapshot" => UnresolvedReason::CorruptSnapshot,
+        "file_catalog_mismatch" => UnresolvedReason::FileCatalogMismatch,
+        _ => return None,
     })
 }
 
@@ -1477,6 +1505,27 @@ mod tests {
             .execute("UPDATE notes SET tombstoned=2", [])
             .unwrap();
         assert!(catalog.note_by_id(&note_id).is_err());
+    }
+
+    #[test]
+    fn unresolved_reasons_round_trip_and_unknown_names_are_errors() {
+        let (_dir, mut catalog, note_id) = open_catalog_with_note();
+        for reason in [
+            UnresolvedReason::CaseFoldCollision,
+            UnresolvedReason::InvalidUtf8,
+            UnresolvedReason::MissingSnapshot,
+            UnresolvedReason::CorruptSnapshot,
+            UnresolvedReason::FileCatalogMismatch,
+        ] {
+            catalog.mark_unresolved(&note_id, reason.clone()).unwrap();
+            let row = catalog.note_row_by_id(&note_id).unwrap().unwrap();
+            assert_eq!(row.state, NoteState::Unresolved(reason));
+        }
+        catalog
+            .conn
+            .execute("UPDATE notes SET unresolved_reason='bogus'", [])
+            .unwrap();
+        assert!(catalog.note_row_by_id(&note_id).is_err());
     }
 
     #[test]

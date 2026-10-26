@@ -1,0 +1,8 @@
+[package]
+name = "tansu-note-core"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+blake3 = "1.8"
+tansu-api-types = { path = "../tansu-api-types" }

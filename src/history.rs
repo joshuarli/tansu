@@ -1,39 +1,12 @@
-use std::collections::{HashMap, VecDeque};
 use std::ffi::OsString;
-use std::fmt::Write as _;
 use std::fs::{self, OpenOptions};
 use std::io::{ErrorKind, Write};
 use std::path::{Path, PathBuf};
 
-use blake3::hash as blake3_hash;
 use lz4_flex::{compress_prepend_size, decompress_size_prepended};
+use tansu_note_core::{SourceDocument, normalize_lf, source_hash};
 
 use crate::{Error, Result};
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LineEnding {
-    Lf,
-    CrLf,
-    Cr,
-}
-
-impl LineEnding {
-    fn bytes(self) -> &'static [u8] {
-        match self {
-            Self::Lf => b"\n",
-            Self::CrLf => b"\r\n",
-            Self::Cr => b"\r",
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct SourceDocument {
-    pub source: String,
-    pub disk_bytes: Vec<u8>,
-    pub line_endings: Vec<LineEnding>,
-    dominant_line_ending: LineEnding,
-}
 
 pub(crate) enum SnapshotReadError {
     Missing(String),
@@ -51,106 +24,6 @@ impl SnapshotReadError {
     }
 }
 
-impl SourceDocument {
-    pub fn from_disk(bytes: &[u8]) -> Result<Self> {
-        let text = std::str::from_utf8(bytes)
-            .map_err(|_| Error::BadRequest("markdown must be valid UTF-8".to_string()))?;
-        let mut source = String::with_capacity(text.len());
-        let mut line_endings = Vec::new();
-        let mut counts = [0_usize; 3];
-        let mut chars = text.char_indices().peekable();
-        while let Some((_, ch)) = chars.next() {
-            match ch {
-                '\r' => {
-                    let ending = if matches!(chars.peek(), Some((_, '\n'))) {
-                        chars.next();
-                        LineEnding::CrLf
-                    } else {
-                        LineEnding::Cr
-                    };
-                    line_endings.push(ending);
-                    counts[line_ending_index(ending)] += 1;
-                    source.push('\n');
-                }
-                '\n' => {
-                    line_endings.push(LineEnding::Lf);
-                    counts[line_ending_index(LineEnding::Lf)] += 1;
-                    source.push('\n');
-                }
-                _ => source.push(ch),
-            }
-        }
-        let dominant_line_ending = if counts[0] >= counts[1] && counts[0] >= counts[2] {
-            LineEnding::Lf
-        } else if counts[1] >= counts[2] {
-            LineEnding::CrLf
-        } else {
-            LineEnding::Cr
-        };
-        Ok(Self {
-            source,
-            disk_bytes: bytes.to_vec(),
-            line_endings,
-            dominant_line_ending,
-        })
-    }
-
-    pub fn disk_bytes_for_source(&self, source: &str) -> Result<Vec<u8>> {
-        if source == self.source {
-            return Ok(self.disk_bytes.clone());
-        }
-        if source.contains('\r') {
-            return Err(Error::BadRequest(
-                "editor source must use LF line endings".to_string(),
-            ));
-        }
-        let original_lines = self.source.split('\n').collect::<Vec<_>>();
-        let mut original_positions = HashMap::<&str, VecDeque<usize>>::new();
-        for (index, line) in original_lines.iter().enumerate() {
-            if index < self.line_endings.len() {
-                original_positions
-                    .entry(line)
-                    .or_default()
-                    .push_back(index);
-            }
-        }
-        let mut last_original_line = None;
-        let candidate_lines = source.split('\n').collect::<Vec<_>>();
-        let mut bytes = Vec::with_capacity(source.len() + self.line_endings.len());
-        for (index, line) in candidate_lines.iter().enumerate() {
-            bytes.extend_from_slice(line.as_bytes());
-            if index + 1 == candidate_lines.len() {
-                continue;
-            }
-            let ending = original_positions
-                .get_mut(line)
-                .and_then(|positions| {
-                    while positions.front().is_some_and(|position| {
-                        last_original_line.is_some_and(|last| *position <= last)
-                    }) {
-                        positions.pop_front();
-                    }
-                    positions.pop_front()
-                })
-                .map(|line| {
-                    last_original_line = Some(line);
-                    self.line_endings[line]
-                })
-                .unwrap_or(self.dominant_line_ending);
-            bytes.extend_from_slice(ending.bytes());
-        }
-        Ok(bytes)
-    }
-}
-
-fn line_ending_index(ending: LineEnding) -> usize {
-    match ending {
-        LineEnding::Lf => 0,
-        LineEnding::CrLf => 1,
-        LineEnding::Cr => 2,
-    }
-}
-
 pub fn canonical_markdown_bytes(content: &str) -> Vec<u8> {
     normalize_lf(content).into_bytes()
 }
@@ -161,18 +34,6 @@ pub fn canonical_markdown_string(content: &str) -> String {
 
 pub fn validate_and_canonicalize(bytes: &[u8]) -> Result<String> {
     Ok(SourceDocument::from_disk(bytes)?.source)
-}
-
-pub fn content_hash(content: &str) -> String {
-    source_hash(content)
-}
-
-pub fn source_hash(content: &str) -> String {
-    format!("blake3-v3:{}", digest(normalize_lf(content).as_bytes()))
-}
-
-pub fn disk_hash(bytes: &[u8]) -> String {
-    format!("blake3-v2:{}", digest(bytes))
 }
 
 pub fn source_hash_format_version(hash: &str) -> Result<u16> {
@@ -189,22 +50,6 @@ pub fn disk_hash_format_version(hash: &str) -> Result<u16> {
     } else {
         Err(Error::Internal("catalog disk hash uses an unsupported format".to_string()))
     }
-}
-
-fn normalize_lf(content: &str) -> String {
-    content.replace("\r\n", "\n").replace('\r', "\n")
-}
-
-fn digest(bytes: &[u8]) -> String {
-    hex(blake3_hash(bytes).as_bytes())
-}
-
-fn hex(bytes: &[u8]) -> String {
-    let mut hex = String::with_capacity(64);
-    for byte in bytes {
-        write!(&mut hex, "{byte:02x}").expect("writing to String cannot fail");
-    }
-    hex
 }
 
 fn valid_hash(hash: &str, prefix: &str) -> bool {
@@ -450,47 +295,6 @@ fn validate_note_id(note_id: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn source_hash_normalizes_line_endings_and_keeps_the_bom() {
-        assert_eq!(
-            source_hash("\u{feff}a\nb\nc\nd"),
-            source_hash("\u{feff}a\r\nb\rc\nd")
-        );
-        assert_ne!(source_hash("a"), source_hash("\u{feff}a"));
-        assert_eq!(
-            source_hash("hello\n"),
-            "blake3-v3:8e4c7c1b99dbfd50e7a95185fead5ee1448fa904a2fdd778eaf5f2dbfd629a99"
-        );
-    }
-
-    #[test]
-    fn disk_hash_uses_blake3_over_exact_bytes() {
-        assert_eq!(
-            disk_hash(b"hello\n"),
-            "blake3-v2:8e4c7c1b99dbfd50e7a95185fead5ee1448fa904a2fdd778eaf5f2dbfd629a99"
-        );
-        assert_ne!(disk_hash(b"hello\n"), disk_hash(b"hello\r\n"));
-    }
-
-    #[test]
-    fn source_document_preserves_untouched_endings_and_uses_dominant_for_inserted_lines() {
-        let source = SourceDocument::from_disk(b"a\r\nb\nc\r").unwrap();
-        assert_eq!(source.source, "a\nb\nc\n");
-        assert_eq!(source.line_endings, vec![LineEnding::CrLf, LineEnding::Lf, LineEnding::Cr]);
-        assert_eq!(
-            source.disk_bytes_for_source("a\ninserted\nb\nc\n").unwrap(),
-            b"a\r\ninserted\nb\nc\r"
-        );
-    }
-
-    #[test]
-    fn source_document_preserves_original_bytes_for_no_op_edits() {
-        for bytes in [b"\xef\xbb\xbfalpha\r\n\r\nomega".as_slice(), b"x\rY\nZ"] {
-            let source = SourceDocument::from_disk(bytes).unwrap();
-            assert_eq!(source.disk_bytes_for_source(&source.source).unwrap(), bytes);
-        }
-    }
 
     #[test]
     fn snapshot_hash_cannot_escape_its_history_directory() {

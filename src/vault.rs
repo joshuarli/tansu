@@ -13,7 +13,7 @@ use rusqlite::ErrorCode;
 use serde::de::DeserializeOwned;
 
 use crate::api_types::{
-    ApiErrorKind, NoteEventKind, NoteEventSource, NoteMeta, Settings, TextEdit, TextPosition,
+    ApiErrorKind, NoteEventKind, NoteEventSource, NoteMeta, Settings,
     V2ApiErrorKind, ValidatedSettings,
     V2CreateNoteRequest, V2DeleteNoteRequest, V2MutationOutcome,
     V2MutationResponse, V2NoteDocument, V2NoteMeta, V2NotePrecondition, V2RenameNoteRequest,
@@ -26,7 +26,7 @@ use crate::api_types::{
     V2SaveNoteRequest, V2ServerEvent, V2ServerEventUpdate, V2VaultBootstrapResponse,
     V2VaultMeta, UnresolvedReason, V2Backlink, V2LinkedNote, V2NoteLinksResponse, V2NotePreview,
 };
-use crate::catalog::{Catalog, InsertNote, MutationIntent, MutationRecord, now_ms};
+use crate::catalog::{Catalog, InsertNote, MutationIntent, MutationRecord, NoteRow, now_ms};
 use crate::config::VaultConfig;
 use crate::history;
 use crate::links;
@@ -40,6 +40,10 @@ use crate::reconcile::{reconcile_note_before_write, reconcile_vault};
 use crate::search::{SearchIndex, dirty_note_snapshot};
 use crate::tags::parse_markdown;
 use crate::{Error, Result};
+use tansu_note_core::{
+    MutationIdError, NoteState, NoteUnavailable, PreconditionMismatch, SaveVerdict, SourceDocument,
+    SourceNotLf, SubmittedSource, SubmittedSourceError, plan_save, validate_mutation_id,
+};
 use tansu_search::{SearchMode, MAX_OVERLAY_BYTES, MAX_OVERLAY_NOTES};
 
 const EVENT_REPLAY_LIMIT: usize = 512;
@@ -219,18 +223,9 @@ impl std::fmt::Display for V2VaultError {
     }
 }
 
-fn validate_mutation_id(mutation_id: &str) -> V2Result<()> {
-    if mutation_id.is_empty() || mutation_id.len() > 128 {
-        return Err(V2VaultError::Api(V2ApiErrorKind::BadRequest {
-            message: "mutationId must contain 1 to 128 bytes".to_string(),
-        }));
-    }
-    Ok(())
-}
-
 fn v2_request_hash<T: serde::Serialize>(kind: &str, target: Option<&str>, request: &T) -> V2Result<String> {
     let bytes = serde_json::to_vec(&(kind, target, request))?;
-    Ok(history::disk_hash(&bytes))
+    Ok(tansu_note_core::disk_hash(&bytes))
 }
 
 fn v2_existing_result<T: DeserializeOwned>(
@@ -373,14 +368,84 @@ fn v2_image_upload_response(mutation_id: &str, name: &str) -> V2ImageUploadRespo
     }
 }
 
-fn v2_unresolved_reason(reason: Option<&str>) -> UnresolvedReason {
-    match reason {
-        Some("case_fold_collision") => UnresolvedReason::CaseFoldCollision,
-        Some("invalid_utf8") => UnresolvedReason::InvalidUtf8,
-        Some("missing_snapshot") => UnresolvedReason::MissingSnapshot,
-        Some("corrupt_snapshot") => UnresolvedReason::CorruptSnapshot,
-        _ => UnresolvedReason::FileCatalogMismatch,
+impl From<MutationIdError> for V2VaultError {
+    fn from(error: MutationIdError) -> Self {
+        Self::Api(V2ApiErrorKind::BadRequest {
+            message: error.to_string(),
+        })
     }
+}
+
+impl From<SourceNotLf> for V2VaultError {
+    fn from(error: SourceNotLf) -> Self {
+        Self::Internal(error.into())
+    }
+}
+
+fn v2_submitted_source_error(error: SubmittedSourceError) -> V2VaultError {
+    V2VaultError::Api(match error {
+        SubmittedSourceError::HashMismatch { expected, received } => {
+            V2ApiErrorKind::SourceHashMismatch { expected, received }
+        }
+        error => V2ApiErrorKind::BadRequest {
+            message: error.to_string(),
+        },
+    })
+}
+
+fn v2_precondition_error(mismatch: PreconditionMismatch) -> V2VaultError {
+    V2VaultError::Api(match mismatch {
+        PreconditionMismatch::SourceHash { expected, received } => {
+            V2ApiErrorKind::SourceHashMismatch { expected, received }
+        }
+        PreconditionMismatch::DiskHash { expected, received } => {
+            V2ApiErrorKind::DiskHashMismatch { expected, received }
+        }
+        PreconditionMismatch::Revision => V2ApiErrorKind::BadRequest {
+            message: "note revision changed".to_string(),
+        },
+    })
+}
+
+fn v2_note_unavailable(note_id: &str, unavailable: NoteUnavailable) -> V2VaultError {
+    V2VaultError::Api(match unavailable {
+        NoteUnavailable::NotFound => V2ApiErrorKind::NoteNotFound {
+            note_id: note_id.to_string(),
+        },
+        NoteUnavailable::Unresolved(reason) => V2ApiErrorKind::UnresolvedNote {
+            note_id: note_id.to_string(),
+            reason,
+        },
+    })
+}
+
+fn v2_note_row(catalog: &Catalog, note_id: &str) -> V2Result<NoteRow> {
+    catalog
+        .note_row_by_id(note_id)?
+        .ok_or_else(|| v2_note_unavailable(note_id, NoteUnavailable::NotFound))
+}
+
+fn v2_untombstoned_note_row(catalog: &Catalog, note_id: &str) -> V2Result<NoteRow> {
+    let row = v2_note_row(catalog, note_id)?;
+    if row.state == NoteState::Tombstoned {
+        return Err(v2_note_unavailable(note_id, NoteUnavailable::NotFound));
+    }
+    Ok(row)
+}
+
+fn v2_live_note_row(catalog: &Catalog, note_id: &str) -> V2Result<NoteRow> {
+    let row = v2_note_row(catalog, note_id)?;
+    row.state
+        .require_live()
+        .map_err(|unavailable| v2_note_unavailable(note_id, unavailable))?;
+    Ok(row)
+}
+
+fn v2_read_source_document(root: &Path, note_id: &str, meta: &NoteMeta) -> V2Result<SourceDocument> {
+    let bytes = read_visible_bytes(root, &meta.path)?;
+    SourceDocument::from_disk(&bytes).map_err(|_| {
+        v2_note_unavailable(note_id, NoteUnavailable::Unresolved(UnresolvedReason::InvalidUtf8))
+    })
 }
 
 fn v2_note_error(note_id: &str, error: Error) -> V2VaultError {
@@ -418,36 +483,6 @@ fn v2_document(meta: &NoteMeta, disk_hash: &str, content: String) -> Result<V2No
     })
 }
 
-fn v2_source(content: &str) -> V2Result<&str> {
-    if content.contains('\r') {
-        return Err(V2VaultError::Api(V2ApiErrorKind::BadRequest {
-            message: "editor source must use LF line endings".to_string(),
-        }));
-    }
-    Ok(content)
-}
-
-fn v2_check_precondition(row: &crate::catalog::NoteRow, precondition: &V2NotePrecondition) -> V2Result<()> {
-    if row.meta.content_hash != precondition.base_source_hash {
-        return Err(V2VaultError::Api(V2ApiErrorKind::SourceHashMismatch {
-            expected: row.meta.content_hash.clone(),
-            received: precondition.base_source_hash.clone(),
-        }));
-    }
-    if row.visible_hash != precondition.base_disk_hash {
-        return Err(V2VaultError::Api(V2ApiErrorKind::DiskHashMismatch {
-            expected: row.visible_hash.clone(),
-            received: precondition.base_disk_hash.clone(),
-        }));
-    }
-    if row.meta.seq != precondition.base_revision {
-        return Err(V2VaultError::Api(V2ApiErrorKind::BadRequest {
-            message: "note revision changed".to_string(),
-        }));
-    }
-    Ok(())
-}
-
 fn repair_pending_mutations(root: &Path, state_root: &Path, catalog: &mut Catalog) -> Result<()> {
     for mutation in catalog.pending_mutations()? {
         let _ = repair_pending_mutation(root, state_root, catalog, &mutation)?;
@@ -472,7 +507,7 @@ fn repair_pending_mutation(
                 .disk_hash
                 .as_deref()
                 .ok_or_else(|| Error::Internal("pending mutation has no disk hash".to_string()))?;
-            if history::disk_hash(&bytes) != expected_disk_hash {
+            if tansu_note_core::disk_hash(&bytes) != expected_disk_hash {
                 return Err(Error::Internal(format!(
                     "pending mutation {} snapshot disk hash mismatch",
                     mutation.mutation_id
@@ -539,7 +574,7 @@ fn repair_pending_mutation(
                 Error::Internal("pending delete has no expected disk hash".to_string())
             })?;
             if let Some(bytes) = read_optional_visible_bytes(root, path)? {
-                if history::disk_hash(&bytes) != expected {
+                if tansu_note_core::disk_hash(&bytes) != expected {
                     return Err(Error::Internal(format!(
                         "pending delete {} found unexpected file bytes",
                         mutation.mutation_id
@@ -602,13 +637,13 @@ fn materialize_pending_file(
     candidate_bytes: &[u8],
     expected_before: Option<&str>,
 ) -> Result<()> {
-    let expected = history::disk_hash(candidate_bytes);
+    let expected = tansu_note_core::disk_hash(candidate_bytes);
     match read_optional_visible_bytes(root, path)? {
-        Some(bytes) if history::disk_hash(&bytes) == expected => {
+        Some(bytes) if tansu_note_core::disk_hash(&bytes) == expected => {
             sync_visible_note_parent(root, path)
         }
         Some(bytes) => {
-            if expected_before.is_none_or(|hash| history::disk_hash(&bytes) != hash) {
+            if expected_before.is_none_or(|hash| tansu_note_core::disk_hash(&bytes) != hash) {
                 return Err(Error::Internal(format!(
                     "pending mutation found unexpected bytes at {path}"
                 )));
@@ -631,14 +666,14 @@ fn move_pending_file(
     let old_bytes = read_optional_visible_bytes(root, old_path)?;
     let new_bytes = read_optional_visible_bytes(root, new_path)?;
     if let Some(bytes) = &new_bytes {
-        if history::disk_hash(bytes) != expected_hash {
+        if tansu_note_core::disk_hash(bytes) != expected_hash {
             return Err(Error::Internal(format!(
                 "pending rename found unexpected bytes at {new_path}"
             )));
         }
     }
     if let Some(bytes) = &old_bytes {
-        if history::disk_hash(bytes) != expected_hash {
+        if tansu_note_core::disk_hash(bytes) != expected_hash {
             return Err(Error::Internal(format!(
                 "pending rename found unexpected bytes at {old_path}"
             )));
@@ -1158,16 +1193,7 @@ impl VaultRuntime {
     pub fn v2_list_revisions(&self, note_id: &str) -> V2Result<Vec<V2RevisionMeta>> {
         let _op = self.lock_op();
         let catalog = self.lock_catalog();
-        let row = catalog.note_row_by_id(note_id)?.ok_or_else(|| {
-            V2VaultError::Api(V2ApiErrorKind::NoteNotFound {
-                note_id: note_id.to_string(),
-            })
-        })?;
-        if row.tombstoned {
-            return Err(V2VaultError::Api(V2ApiErrorKind::NoteNotFound {
-                note_id: note_id.to_string(),
-            }));
-        }
+        v2_untombstoned_note_row(&catalog, note_id)?;
         Ok(catalog
             .revisions(note_id)?
             .into_iter()
@@ -1185,16 +1211,7 @@ impl VaultRuntime {
     pub fn v2_open_revision(&self, note_id: &str, revision_id: i64) -> V2Result<V2RevisionDocument> {
         let _op = self.lock_op();
         let catalog = self.lock_catalog();
-        let row = catalog.note_row_by_id(note_id)?.ok_or_else(|| {
-            V2VaultError::Api(V2ApiErrorKind::NoteNotFound {
-                note_id: note_id.to_string(),
-            })
-        })?;
-        if row.tombstoned {
-            return Err(V2VaultError::Api(V2ApiErrorKind::NoteNotFound {
-                note_id: note_id.to_string(),
-            }));
-        }
+        v2_untombstoned_note_row(&catalog, note_id)?;
         let revision = catalog
             .revision(note_id, revision_id)?
             .filter(|revision| revision.content_hash.is_some())
@@ -1312,7 +1329,7 @@ impl VaultRuntime {
                 message: "image body is empty".to_string(),
             }));
         }
-        let body_hash = history::disk_hash(bytes);
+        let body_hash = tansu_note_core::disk_hash(bytes);
         let payload_hash = v2_request_hash("image_upload", None, &body_hash)?;
         let _op = self.lock_op();
         let mut catalog = self.lock_catalog();
@@ -1363,7 +1380,7 @@ impl VaultRuntime {
                 }
             }
         }
-        let digest = history::disk_hash(mutation_id.as_bytes());
+        let digest = tansu_note_core::disk_hash(mutation_id.as_bytes());
         let digest_hex = digest.strip_prefix("blake3-v2:").ok_or_else(|| {
             Error::Internal("image name hash uses an unsupported format".to_string())
         })?;
@@ -1416,28 +1433,9 @@ impl VaultRuntime {
     pub fn v2_open_note(&self, note_id: &str) -> V2Result<V2NoteDocument> {
         let _op = self.lock_op();
         let mut catalog = self.lock_catalog();
-        if catalog.note_row_by_id(note_id)?.is_none() {
-            return Err(V2VaultError::Api(V2ApiErrorKind::NoteNotFound {
-                note_id: note_id.to_string(),
-            }));
-        }
+        v2_note_row(&catalog, note_id)?;
         v2_reconcile_note_before_write(&self.root, &self.state_root, &mut catalog, note_id)?;
-        let row = catalog.note_row_by_id(note_id)?.ok_or_else(|| {
-            V2VaultError::Api(V2ApiErrorKind::NoteNotFound {
-                note_id: note_id.to_string(),
-            })
-        })?;
-        if row.tombstoned {
-            return Err(V2VaultError::Api(V2ApiErrorKind::NoteNotFound {
-                note_id: note_id.to_string(),
-            }));
-        }
-        if row.unresolved_reason.is_some() {
-            return Err(V2VaultError::Api(V2ApiErrorKind::UnresolvedNote {
-                note_id: note_id.to_string(),
-                reason: v2_unresolved_reason(row.unresolved_reason.as_deref()),
-            }));
-        }
+        let row = v2_live_note_row(&catalog, note_id)?;
         let content = read_visible_or_snapshot(&self.root, &row.meta)
             .map_err(|error| v2_note_error(note_id, error))?;
         Ok(v2_document(&row.meta, &row.visible_hash, content)?)
@@ -1508,21 +1506,14 @@ impl VaultRuntime {
         request: V2SaveNoteRequest,
     ) -> V2Result<V2MutationResponse> {
         validate_mutation_id(&request.mutation_id)?;
-        let content = v2_source(&request.content)?.to_string();
-        let submitted_hash = history::source_hash(&content);
-        if submitted_hash != request.source_hash {
-            return Err(V2VaultError::Api(V2ApiErrorKind::SourceHashMismatch {
-                expected: submitted_hash,
-                received: request.source_hash,
-            }));
-        }
+        let submitted = SubmittedSource::from_editor(&request.content, &request.source_hash)
+            .map_err(v2_submitted_source_error)?;
         let payload_hash = v2_request_hash("save", Some(note_id), &request)?;
         self.v2_save_source(
             note_id,
             &request.mutation_id,
             &request.precondition,
-            &content,
-            &submitted_hash,
+            &submitted,
             &payload_hash,
             "save",
         )
@@ -1537,16 +1528,7 @@ impl VaultRuntime {
         {
             let _op = self.lock_op();
             let catalog = self.lock_catalog();
-            let row = catalog.note_row_by_id(note_id)?.ok_or_else(|| {
-                V2VaultError::Api(V2ApiErrorKind::NoteNotFound {
-                    note_id: note_id.to_string(),
-                })
-            })?;
-            if row.tombstoned {
-                return Err(V2VaultError::Api(V2ApiErrorKind::NoteNotFound {
-                    note_id: note_id.to_string(),
-                }));
-            }
+            v2_untombstoned_note_row(&catalog, note_id)?;
         }
         let base = history::read_snapshot(
             &self.state_root,
@@ -1559,25 +1541,14 @@ impl VaultRuntime {
             }),
             error => V2VaultError::Internal(error),
         })?;
-        let content = apply_text_edits(&base, &request.edits).map_err(|error| {
-            V2VaultError::Api(V2ApiErrorKind::BadRequest {
-                message: error.to_string(),
-            })
-        })?;
-        let submitted_hash = history::source_hash(&content);
-        if submitted_hash != request.source_hash {
-            return Err(V2VaultError::Api(V2ApiErrorKind::SourceHashMismatch {
-                expected: submitted_hash,
-                received: request.source_hash,
-            }));
-        }
+        let submitted = SubmittedSource::from_delta(&base, &request.edits, &request.source_hash)
+            .map_err(v2_submitted_source_error)?;
         let payload_hash = v2_request_hash("save_delta", Some(note_id), &request)?;
         self.v2_save_source(
             note_id,
             &request.mutation_id,
             &request.precondition,
-            &content,
-            &submitted_hash,
+            &submitted,
             &payload_hash,
             "save_delta",
         )
@@ -1609,13 +1580,11 @@ impl VaultRuntime {
                 })?
         };
         let content = history::read_snapshot(&self.state_root, note_id, &source_hash)?;
-        let submitted_hash = history::source_hash(&content);
         self.v2_save_source(
             note_id,
             &request.mutation_id,
             &request.precondition,
-            &content,
-            &submitted_hash,
+            &SubmittedSource::from_stored(&content),
             &payload_hash,
             "restore_revision",
         )
@@ -1651,13 +1620,11 @@ impl VaultRuntime {
             draft.draft_id,
             &draft.content_hash,
         )?;
-        let submitted_hash = history::source_hash(&content);
         self.v2_save_source(
             note_id,
             &request.mutation_id,
             &request.precondition,
-            &content,
-            &submitted_hash,
+            &SubmittedSource::from_stored(&content),
             &payload_hash,
             "restore_conflict",
         )
@@ -1668,8 +1635,7 @@ impl VaultRuntime {
         note_id: &str,
         mutation_id: &str,
         precondition: &V2NotePrecondition,
-        content: &str,
-        submitted_hash: &str,
+        submitted: &SubmittedSource,
         payload_hash: &str,
         kind: &str,
     ) -> V2Result<V2MutationResponse> {
@@ -1679,67 +1645,22 @@ impl VaultRuntime {
             return Ok(response);
         }
         v2_reconcile_note_before_write(&self.root, &self.state_root, &mut catalog, note_id)?;
-        let mut row = catalog.note_row_by_id(note_id)?.ok_or_else(|| {
-            V2VaultError::Api(V2ApiErrorKind::NoteNotFound {
-                note_id: note_id.to_string(),
-            })
-        })?;
-        if row.tombstoned {
-            return Err(V2VaultError::Api(V2ApiErrorKind::NoteNotFound {
-                note_id: note_id.to_string(),
-            }));
-        }
-        if let Some(reason) = row.unresolved_reason.as_deref() {
-            return Err(V2VaultError::Api(V2ApiErrorKind::UnresolvedNote {
-                note_id: note_id.to_string(),
-                reason: v2_unresolved_reason(Some(reason)),
-            }));
-        }
-        let mut current_bytes = read_visible_bytes(&self.root, &row.meta.path)?;
-        let mut source_document = history::SourceDocument::from_disk(&current_bytes).map_err(|_| {
-            V2VaultError::Api(V2ApiErrorKind::UnresolvedNote {
-                note_id: note_id.to_string(),
-                reason: UnresolvedReason::InvalidUtf8,
-            })
-        })?;
-        let mut current_disk_hash = history::disk_hash(&current_bytes);
-        if current_disk_hash != row.visible_hash {
+        let mut row = v2_live_note_row(&catalog, note_id)?;
+        let mut on_disk = v2_read_source_document(&self.root, note_id, &row.meta)?;
+        if on_disk.disk_hash() != row.visible_hash {
             v2_reconcile_note_before_write(&self.root, &self.state_root, &mut catalog, note_id)?;
-            row = catalog.note_row_by_id(note_id)?.ok_or_else(|| {
-                V2VaultError::Api(V2ApiErrorKind::NoteNotFound {
-                    note_id: note_id.to_string(),
-                })
-            })?;
-            if row.tombstoned {
-                return Err(V2VaultError::Api(V2ApiErrorKind::NoteNotFound {
-                    note_id: note_id.to_string(),
-                }));
-            }
-            if let Some(reason) = row.unresolved_reason.as_deref() {
-                return Err(V2VaultError::Api(V2ApiErrorKind::UnresolvedNote {
-                    note_id: note_id.to_string(),
-                    reason: v2_unresolved_reason(Some(reason)),
-                }));
-            }
-            current_bytes = read_visible_bytes(&self.root, &row.meta.path)?;
-            source_document = history::SourceDocument::from_disk(&current_bytes).map_err(|_| {
-                V2VaultError::Api(V2ApiErrorKind::UnresolvedNote {
-                    note_id: note_id.to_string(),
-                    reason: UnresolvedReason::InvalidUtf8,
-                })
-            })?;
-            current_disk_hash = history::disk_hash(&current_bytes);
+            row = v2_live_note_row(&catalog, note_id)?;
+            on_disk = v2_read_source_document(&self.root, note_id, &row.meta)?;
         }
-        let precondition_matches = row.meta.seq == precondition.base_revision
-            && row.meta.content_hash == precondition.base_source_hash
-            && row.visible_hash == precondition.base_disk_hash
-            && current_disk_hash == row.visible_hash;
-        let candidate_disk_bytes = source_document.disk_bytes_for_source(&content)?;
-        let candidate_disk_hash = history::disk_hash(&candidate_disk_bytes);
+        let plan = plan_save(row.recorded(), &on_disk, precondition, submitted)?;
+        let submitted_hash = submitted.source_hash();
+        let content = submitted.content();
+        let candidate_disk_bytes = plan.candidate_disk_bytes;
+        let candidate_disk_hash = plan.candidate_disk_hash;
         let current = row.meta.clone();
         catalog.prepare_mutation(MutationIntent {
             mutation_id,
-            payload_hash: payload_hash,
+            payload_hash,
             kind,
             note_id: Some(note_id),
             path: Some(&current.path),
@@ -1748,28 +1669,31 @@ impl VaultRuntime {
             source_hash: Some(submitted_hash),
             disk_hash: Some(&candidate_disk_hash),
         })?;
-        if !precondition_matches {
-            return self.v2_record_conflict(
-                &mut catalog,
-                note_id,
-                mutation_id,
-                precondition.base_revision,
-                &precondition.base_source_hash,
-                content,
-                &current,
-                &row.visible_hash,
-            );
-        }
-        if source_document.source == content {
-            let response = v2_accepted_response(
-                mutation_id,
-                Some(v2_note_meta(&current, &row.visible_hash)?),
-            );
-            catalog.complete_noop_mutation(
-                mutation_id,
-                &serde_json::to_string(&response)?,
-            )?;
-            return Ok(response);
+        match plan.verdict {
+            SaveVerdict::Conflict => {
+                return self.v2_record_conflict(
+                    &mut catalog,
+                    note_id,
+                    mutation_id,
+                    precondition.base_revision,
+                    &precondition.base_source_hash,
+                    content,
+                    &current,
+                    &row.visible_hash,
+                );
+            }
+            SaveVerdict::Unchanged => {
+                let response = v2_accepted_response(
+                    mutation_id,
+                    Some(v2_note_meta(&current, &row.visible_hash)?),
+                );
+                catalog.complete_noop_mutation(
+                    mutation_id,
+                    &serde_json::to_string(&response)?,
+                )?;
+                return Ok(response);
+            }
+            SaveVerdict::Write => {}
         }
         history::write_snapshot_bytes(
             &self.state_root,
@@ -1778,7 +1702,7 @@ impl VaultRuntime {
             &candidate_disk_bytes,
         )?;
         let current_check = read_visible_bytes(&self.root, &current.path)?;
-        if history::disk_hash(&current_check) != row.visible_hash {
+        if tansu_note_core::disk_hash(&current_check) != row.visible_hash {
             catalog.clear_prepared_mutation(mutation_id)?;
             v2_reconcile_note_before_write(&self.root, &self.state_root, &mut catalog, note_id)?;
             let latest = catalog.note_row_by_id(note_id)?.ok_or_else(|| {
@@ -1826,7 +1750,7 @@ impl VaultRuntime {
             NoteEventSource::User,
             &pending_json,
         )?;
-        if history::disk_hash(&read_visible_bytes(&self.root, &current.path)?) != row.visible_hash {
+        if tansu_note_core::disk_hash(&read_visible_bytes(&self.root, &current.path)?) != row.visible_hash {
             return Ok(pending);
         }
         if write_visible_note_bytes_atomic(&self.root, &current.path, &candidate_disk_bytes).is_err() {
@@ -1860,14 +1784,10 @@ impl VaultRuntime {
         request: V2CreateNoteRequest,
     ) -> V2Result<V2MutationResponse> {
         validate_mutation_id(&request.mutation_id)?;
-        let content = v2_source(&request.content)?.to_string();
-        let source_hash = history::source_hash(&content);
-        if source_hash != request.source_hash {
-            return Err(V2VaultError::Api(V2ApiErrorKind::SourceHashMismatch {
-                expected: source_hash,
-                received: request.source_hash,
-            }));
-        }
+        let submitted = SubmittedSource::from_editor(&request.content, &request.source_hash)
+            .map_err(v2_submitted_source_error)?;
+        let content = submitted.content();
+        let source_hash = submitted.source_hash();
         let path = normalize_note_path(&request.path).map_err(|reason| {
             V2VaultError::Api(V2ApiErrorKind::PathInvalid { reason })
         })?;
@@ -1891,7 +1811,7 @@ impl VaultRuntime {
         }
         let note_id = crate::catalog::generate_note_id();
         let disk_bytes = content.as_bytes();
-        let disk_hash = history::disk_hash(disk_bytes);
+        let disk_hash = tansu_note_core::disk_hash(disk_bytes);
         catalog.prepare_mutation(MutationIntent {
             mutation_id: &request.mutation_id,
             payload_hash: &payload_hash,
@@ -1900,15 +1820,15 @@ impl VaultRuntime {
             path: Some(&path),
             old_path: None,
             expected_disk_hash: None,
-            source_hash: Some(&source_hash),
+            source_hash: Some(source_hash),
             disk_hash: Some(&disk_hash),
         })?;
-        history::write_snapshot_bytes(&self.state_root, &note_id, &source_hash, disk_bytes)?;
+        history::write_snapshot_bytes(&self.state_root, &note_id, source_hash, disk_bytes)?;
         if read_optional_visible_bytes(&self.root, &path)?.is_some() {
                 catalog.clear_prepared_mutation(&request.mutation_id)?;
                 return Err(V2VaultError::Api(V2ApiErrorKind::PathCollision { path }));
         }
-        let parsed = parse_markdown(&path, &content);
+        let parsed = parse_markdown(&path, content);
         let pending = v2_pending_response(&request.mutation_id);
         let pending_json = serde_json::to_string(&pending)?;
         catalog
@@ -1920,7 +1840,7 @@ impl VaultRuntime {
                     path_key: &key,
                     title: &parsed.title,
                     tags: &parsed.tags,
-                    content_hash: &source_hash,
+                    content_hash: source_hash,
                     visible_hash: &disk_hash,
                     kind: NoteEventKind::Create,
                     source: NoteEventSource::User,
@@ -1954,7 +1874,7 @@ impl VaultRuntime {
         if let Some(version) = version {
             self.broadcast_v2_event(version, update)?;
         }
-        self.enqueue_search(SearchJob::Upsert(meta.clone(), content.clone()));
+        self.enqueue_search(SearchJob::Upsert(meta.clone(), content.to_string()));
         self.log_note_mutation("create_v2", &meta, Some(content.len()));
         Ok(response)
     }
@@ -1976,23 +1896,10 @@ impl VaultRuntime {
             return Ok(response);
         }
         v2_reconcile_note_before_write(&self.root, &self.state_root, &mut catalog, note_id)?;
-        let row = catalog.note_row_by_id(note_id)?.ok_or_else(|| {
-            V2VaultError::Api(V2ApiErrorKind::NoteNotFound {
-                note_id: note_id.to_string(),
-            })
-        })?;
-        if row.tombstoned {
-            return Err(V2VaultError::Api(V2ApiErrorKind::NoteNotFound {
-                note_id: note_id.to_string(),
-            }));
-        }
-        if let Some(reason) = row.unresolved_reason.as_deref() {
-            return Err(V2VaultError::Api(V2ApiErrorKind::UnresolvedNote {
-                note_id: note_id.to_string(),
-                reason: v2_unresolved_reason(Some(reason)),
-            }));
-        }
-        v2_check_precondition(&row, &request.precondition)?;
+        let row = v2_live_note_row(&catalog, note_id)?;
+        row.recorded()
+            .check(&request.precondition)
+            .map_err(v2_precondition_error)?;
         if path == row.meta.path {
             let response = v2_accepted_response(
                 &request.mutation_id,
@@ -2026,7 +1933,7 @@ impl VaultRuntime {
             Err(error) => return Err(V2VaultError::Internal(Error::Io(error))),
         }
         let source_bytes = read_visible_bytes(&self.root, &row.meta.path)?;
-        if history::disk_hash(&source_bytes) != row.visible_hash {
+        if tansu_note_core::disk_hash(&source_bytes) != row.visible_hash {
             v2_reconcile_note_before_write(&self.root, &self.state_root, &mut catalog, note_id)?;
             return Err(V2VaultError::Api(V2ApiErrorKind::DiskHashMismatch {
                 expected: catalog
@@ -2036,13 +1943,13 @@ impl VaultRuntime {
                 received: row.visible_hash,
             }));
         }
-        let source_document = history::SourceDocument::from_disk(&source_bytes).map_err(|_| {
+        let source_document = tansu_note_core::SourceDocument::from_disk(&source_bytes).map_err(|_| {
             V2VaultError::Api(V2ApiErrorKind::UnresolvedNote {
                 note_id: note_id.to_string(),
                 reason: UnresolvedReason::InvalidUtf8,
             })
         })?;
-        let content_hash = history::source_hash(&source_document.source);
+        let content_hash = tansu_note_core::source_hash(&source_document.source);
         history::write_snapshot_bytes(
             &self.state_root,
             note_id,
@@ -2067,7 +1974,7 @@ impl VaultRuntime {
             disk_hash: Some(&row.visible_hash),
         })?;
         let current_check = read_visible_bytes(&self.root, &row.meta.path)?;
-        if history::disk_hash(&current_check) != row.visible_hash {
+        if tansu_note_core::disk_hash(&current_check) != row.visible_hash {
             catalog.clear_prepared_mutation(&request.mutation_id)?;
             v2_reconcile_note_before_write(&self.root, &self.state_root, &mut catalog, note_id)?;
             return Err(V2VaultError::Api(V2ApiErrorKind::DiskHashMismatch {
@@ -2096,7 +2003,7 @@ impl VaultRuntime {
                 }
                 error => V2VaultError::Internal(error),
             })?;
-        if history::disk_hash(&read_visible_bytes(&self.root, &row.meta.path)?) != row.visible_hash
+        if tansu_note_core::disk_hash(&read_visible_bytes(&self.root, &row.meta.path)?) != row.visible_hash
             || read_optional_visible_bytes(&self.root, &path)?.is_some()
         {
             return Ok(pending);
@@ -2140,35 +2047,22 @@ impl VaultRuntime {
             return Ok(response);
         }
         v2_reconcile_note_before_write(&self.root, &self.state_root, &mut catalog, note_id)?;
-        let row = catalog.note_row_by_id(note_id)?.ok_or_else(|| {
-            V2VaultError::Api(V2ApiErrorKind::NoteNotFound {
-                note_id: note_id.to_string(),
-            })
-        })?;
-        if row.tombstoned {
-            return Err(V2VaultError::Api(V2ApiErrorKind::NoteNotFound {
-                note_id: note_id.to_string(),
-            }));
-        }
-        if let Some(reason) = row.unresolved_reason.as_deref() {
-            return Err(V2VaultError::Api(V2ApiErrorKind::UnresolvedNote {
-                note_id: note_id.to_string(),
-                reason: v2_unresolved_reason(Some(reason)),
-            }));
-        }
-        v2_check_precondition(&row, &request.precondition)?;
+        let row = v2_live_note_row(&catalog, note_id)?;
+        row.recorded()
+            .check(&request.precondition)
+            .map_err(v2_precondition_error)?;
         let bytes = read_visible_bytes(&self.root, &row.meta.path)?;
-        let source_document = history::SourceDocument::from_disk(&bytes).map_err(|_| {
+        let source_document = tansu_note_core::SourceDocument::from_disk(&bytes).map_err(|_| {
             V2VaultError::Api(V2ApiErrorKind::UnresolvedNote {
                 note_id: note_id.to_string(),
                 reason: UnresolvedReason::InvalidUtf8,
             })
         })?;
-        let disk_hash = history::disk_hash(&bytes);
+        let disk_hash = tansu_note_core::disk_hash(&bytes);
         history::write_snapshot_bytes(
             &self.state_root,
             note_id,
-            &history::source_hash(&source_document.source),
+            &tansu_note_core::source_hash(&source_document.source),
             &bytes,
         )?;
         catalog.prepare_mutation(MutationIntent {
@@ -2183,7 +2077,7 @@ impl VaultRuntime {
             disk_hash: Some(&disk_hash),
         })?;
         let check = read_visible_bytes(&self.root, &row.meta.path)?;
-        if history::disk_hash(&check) != disk_hash {
+        if tansu_note_core::disk_hash(&check) != disk_hash {
             catalog.clear_prepared_mutation(&request.mutation_id)?;
             v2_reconcile_note_before_write(&self.root, &self.state_root, &mut catalog, note_id)?;
             let current = catalog.note_row_by_id(note_id)?.ok_or_else(|| {
@@ -2203,7 +2097,7 @@ impl VaultRuntime {
             &serde_json::to_string(&pending)?,
         )?;
         let check = read_visible_bytes(&self.root, &row.meta.path)?;
-        if history::disk_hash(&check) != disk_hash
+        if tansu_note_core::disk_hash(&check) != disk_hash
             || remove_visible_note_file(&self.root, &row.meta.path).is_err()
         {
             return Ok(pending);
@@ -2450,7 +2344,7 @@ impl VaultRuntime {
                         path,
                         content,
                     } => {
-                        let source_hash = history::source_hash(content);
+                        let source_hash = tansu_note_core::source_hash(content);
                         let mut search_note_id = format!("tansu-local-overlay-{overlay_index}");
                         while !search_ids.insert(search_note_id.clone()) {
                             search_note_id.push('_');
@@ -2726,7 +2620,7 @@ impl VaultRuntime {
         let before = catalog
             .all_rows()?
             .into_iter()
-            .filter(|row| !row.tombstoned && row.unresolved_reason.is_none())
+            .filter(|row| row.state.is_live())
             .map(|row| (row.meta.note_id.clone(), (row.meta, row.visible_hash)))
             .collect::<HashMap<_, _>>();
         let settings = catalog.settings()?;
@@ -2740,7 +2634,7 @@ impl VaultRuntime {
         let after = catalog
             .all_rows()?
             .into_iter()
-            .filter(|row| !row.tombstoned && row.unresolved_reason.is_none())
+            .filter(|row| row.state.is_live())
             .map(|row| (row.meta.note_id.clone(), (row.meta, row.visible_hash)))
             .collect::<HashMap<_, _>>();
         let mut deleted = before
@@ -2837,7 +2731,7 @@ fn read_visible_or_snapshot(
     meta: &NoteMeta,
 ) -> Result<String> {
     match read_visible_bytes(root, &meta.path) {
-        Ok(bytes) => match history::SourceDocument::from_disk(&bytes) {
+        Ok(bytes) => match tansu_note_core::SourceDocument::from_disk(&bytes) {
             Ok(document) => Ok(document.source),
             Err(_) => Err(Error::api(ApiErrorKind::UnresolvedNote {
                 note_id: meta.note_id.clone(),
@@ -2848,93 +2742,6 @@ fn read_visible_or_snapshot(
             Err(Error::NotFound(meta.note_id.clone()))
         }
         Err(error) => Err(error),
-    }
-}
-
-fn apply_text_edits(base: &str, edits: &[TextEdit]) -> Result<String> {
-    let base = normalize_markdown_lf(base);
-    let mut ranges = Vec::with_capacity(edits.len());
-    let mut previous_start: Option<&TextPosition> = None;
-    let mut previous_end: Option<&TextPosition> = None;
-    for edit in edits {
-        if edit.text.contains('\r') {
-            return Err(Error::BadRequest("delta edit text contains CR".to_string()));
-        }
-        if compare_position(&edit.start, &edit.end).is_gt() {
-            return Err(Error::BadRequest(
-                "delta edit range is reversed".to_string(),
-            ));
-        }
-        if let Some(previous_start) = previous_start
-            && (compare_position(&edit.start, previous_start).is_eq()
-                || compare_position(&edit.start, previous_end.expect("previous end")).is_lt())
-            {
-                return Err(Error::BadRequest(
-                    "delta edits must be sorted and non-overlapping".to_string(),
-                ));
-            }
-        let start = text_position_to_byte_offset(&base, &edit.start)?;
-        let end = text_position_to_byte_offset(&base, &edit.end)?;
-        if start > end {
-            return Err(Error::BadRequest(
-                "delta edit range is reversed".to_string(),
-            ));
-        }
-        ranges.push((start, end, edit.text.as_str()));
-        previous_start = Some(&edit.start);
-        previous_end = Some(&edit.end);
-    }
-
-    let mut content = base;
-    for (start, end, text) in ranges.into_iter().rev() {
-        content.replace_range(start..end, text);
-    }
-    Ok(content)
-}
-
-fn normalize_markdown_lf(content: &str) -> String {
-    content.replace("\r\n", "\n").replace('\r', "\n")
-}
-
-fn compare_position(left: &TextPosition, right: &TextPosition) -> std::cmp::Ordering {
-    left.line
-        .cmp(&right.line)
-        .then_with(|| left.character.cmp(&right.character))
-}
-
-fn text_position_to_byte_offset(content: &str, position: &TextPosition) -> Result<usize> {
-    let mut line_start = 0;
-    for (line, segment) in content.split('\n').enumerate() {
-        if line == position.line {
-            return utf16_character_to_byte_offset(segment, position.character)
-                .map(|column| line_start + column);
-        }
-        line_start += segment.len() + 1;
-    }
-    Err(Error::BadRequest(
-        "delta edit position is outside the base document".to_string(),
-    ))
-}
-
-fn utf16_character_to_byte_offset(line: &str, character: usize) -> Result<usize> {
-    let mut utf16_offset = 0;
-    for (byte_offset, ch) in line.char_indices() {
-        if utf16_offset == character {
-            return Ok(byte_offset);
-        }
-        utf16_offset += ch.len_utf16();
-        if utf16_offset > character {
-            return Err(Error::BadRequest(
-                "delta edit position splits a UTF-16 surrogate pair".to_string(),
-            ));
-        }
-    }
-    if utf16_offset == character {
-        Ok(line.len())
-    } else {
-        Err(Error::BadRequest(
-            "delta edit position is outside the base document".to_string(),
-        ))
     }
 }
 
@@ -2981,14 +2788,31 @@ mod tests {
 
     #[test]
     fn v2_boundary_helpers_validate_and_translate_errors() {
-        assert!(validate_mutation_id("x").is_ok());
-        assert!(validate_mutation_id(&"x".repeat(128)).is_ok());
-        assert!(validate_mutation_id("").is_err());
-        assert!(validate_mutation_id(&"x".repeat(129)).is_err());
-        assert!(v2_source("# Note\n").is_ok());
         assert!(matches!(
-            v2_source("# Note\r\n"),
-            Err(V2VaultError::Api(V2ApiErrorKind::BadRequest { .. }))
+            V2VaultError::from(MutationIdError),
+            V2VaultError::Api(V2ApiErrorKind::BadRequest { .. })
+        ));
+        assert!(matches!(
+            v2_submitted_source_error(SubmittedSourceError::NotLf),
+            V2VaultError::Api(V2ApiErrorKind::BadRequest { .. })
+        ));
+        assert!(matches!(
+            v2_submitted_source_error(SubmittedSourceError::HashMismatch {
+                expected: "expected".to_string(),
+                received: "received".to_string(),
+            }),
+            V2VaultError::Api(V2ApiErrorKind::SourceHashMismatch { .. })
+        ));
+        assert!(matches!(
+            v2_note_unavailable("note", NoteUnavailable::NotFound),
+            V2VaultError::Api(V2ApiErrorKind::NoteNotFound { .. })
+        ));
+        assert!(matches!(
+            v2_note_unavailable("note", NoteUnavailable::Unresolved(UnresolvedReason::CorruptSnapshot)),
+            V2VaultError::Api(V2ApiErrorKind::UnresolvedNote {
+                reason: UnresolvedReason::CorruptSnapshot,
+                ..
+            })
         ));
         assert!(validate_v2_search_limit(1).is_ok());
         assert!(validate_v2_search_limit(tansu_search::SearchLimit::MAX as u16).is_ok());
@@ -3003,11 +2827,6 @@ mod tests {
             v2_search_error(tansu_search::SearchError::Io(std::io::Error::other("index"))),
             V2VaultError::Internal(Error::Internal(_))
         ));
-        assert_eq!(v2_unresolved_reason(Some("case_fold_collision")), UnresolvedReason::CaseFoldCollision);
-        assert_eq!(v2_unresolved_reason(Some("invalid_utf8")), UnresolvedReason::InvalidUtf8);
-        assert_eq!(v2_unresolved_reason(Some("missing_snapshot")), UnresolvedReason::MissingSnapshot);
-        assert_eq!(v2_unresolved_reason(Some("corrupt_snapshot")), UnresolvedReason::CorruptSnapshot);
-        assert_eq!(v2_unresolved_reason(None), UnresolvedReason::FileCatalogMismatch);
 
         let api_error = V2ApiErrorKind::NotImplemented;
         assert_eq!(V2VaultError::Api(api_error.clone()).to_string(), format!("{api_error:?}"));
@@ -3142,7 +2961,7 @@ mod tests {
                 mutation_id: "precondition-note".to_string(),
                 path: "note.md".to_string(),
                 content: content.to_string(),
-                source_hash: history::source_hash(content),
+                source_hash: tansu_note_core::source_hash(content),
             })
             .unwrap();
         let meta = vault.v2_notes().unwrap().remove(0);
@@ -3156,26 +2975,26 @@ mod tests {
             base_source_hash: meta.source_hash,
             base_disk_hash: meta.disk_hash,
         };
-        assert!(v2_check_precondition(&row, &valid).is_ok());
+        assert!(row.recorded().check(&valid).is_ok());
 
         let mut stale_source = valid.clone();
         stale_source.base_source_hash = "stale-source".to_string();
         assert!(matches!(
-            v2_check_precondition(&row, &stale_source),
+            row.recorded().check(&stale_source).map_err(v2_precondition_error),
             Err(V2VaultError::Api(V2ApiErrorKind::SourceHashMismatch { .. }))
         ));
 
         let mut stale_disk = valid.clone();
         stale_disk.base_disk_hash = "stale-disk".to_string();
         assert!(matches!(
-            v2_check_precondition(&row, &stale_disk),
+            row.recorded().check(&stale_disk).map_err(v2_precondition_error),
             Err(V2VaultError::Api(V2ApiErrorKind::DiskHashMismatch { .. }))
         ));
 
         let mut stale_revision = valid;
         stale_revision.base_revision += 1;
         assert!(matches!(
-            v2_check_precondition(&row, &stale_revision),
+            row.recorded().check(&stale_revision).map_err(v2_precondition_error),
             Err(V2VaultError::Api(V2ApiErrorKind::BadRequest { .. }))
         ));
     }
@@ -3187,7 +3006,7 @@ mod tests {
             mutation_id: String::new(),
             path: "valid.md".to_string(),
             content: "# Valid\n".to_string(),
-            source_hash: history::source_hash("# Valid\n"),
+            source_hash: tansu_note_core::source_hash("# Valid\n"),
         };
         assert!(matches!(
             vault.v2_create_note(invalid_id),
@@ -3198,7 +3017,7 @@ mod tests {
             mutation_id: "invalid-source".to_string(),
             path: "valid.md".to_string(),
             content: "# Valid\r\n".to_string(),
-            source_hash: history::source_hash("# Valid\r\n"),
+            source_hash: tansu_note_core::source_hash("# Valid\r\n"),
         };
         assert!(matches!(
             vault.v2_create_note(invalid_source),
@@ -3209,7 +3028,7 @@ mod tests {
             mutation_id: "wrong-source-hash".to_string(),
             path: "valid.md".to_string(),
             content: "# Valid\n".to_string(),
-            source_hash: history::source_hash("# Other\n"),
+            source_hash: tansu_note_core::source_hash("# Other\n"),
         };
         assert!(matches!(
             vault.v2_create_note(wrong_hash),
@@ -3220,7 +3039,7 @@ mod tests {
             mutation_id: "invalid-path".to_string(),
             path: "../outside.md".to_string(),
             content: "# Outside\n".to_string(),
-            source_hash: history::source_hash("# Outside\n"),
+            source_hash: tansu_note_core::source_hash("# Outside\n"),
         };
         assert!(matches!(
             vault.v2_create_note(invalid_path),
@@ -3233,14 +3052,14 @@ mod tests {
                 mutation_id: "create-existing".to_string(),
                 path: "existing.md".to_string(),
                 content: content.to_string(),
-                source_hash: history::source_hash(content),
+                source_hash: tansu_note_core::source_hash(content),
             })
             .unwrap();
         let catalog_collision = vault.v2_create_note(V2CreateNoteRequest {
             mutation_id: "catalog-collision".to_string(),
             path: "existing.md".to_string(),
             content: content.to_string(),
-            source_hash: history::source_hash(content),
+            source_hash: tansu_note_core::source_hash(content),
         });
         assert!(matches!(
             catalog_collision,
@@ -3252,7 +3071,7 @@ mod tests {
             mutation_id: "disk-collision".to_string(),
             path: "untracked.md".to_string(),
             content: "# Untracked\n".to_string(),
-            source_hash: history::source_hash("# Untracked\n"),
+            source_hash: tansu_note_core::source_hash("# Untracked\n"),
         });
         assert!(matches!(
             disk_collision,
@@ -3382,7 +3201,7 @@ mod tests {
                 mutation_id: "search-failure-create".to_string(),
                 path: "A.md".to_string(),
                 content: content.to_string(),
-                source_hash: history::source_hash(content),
+                source_hash: tansu_note_core::source_hash(content),
             })
             .unwrap();
 
@@ -3442,7 +3261,7 @@ mod tests {
             mutation_id: "create-1".to_string(),
             path: "A.md".to_string(),
             content: created_content.to_string(),
-            source_hash: history::source_hash(created_content),
+            source_hash: tansu_note_core::source_hash(created_content),
         };
         let created = vault.v2_create_note(create.clone()).unwrap();
         let V2MutationOutcome::Accepted { result: Some(meta) } = &created.outcome else {
@@ -3470,7 +3289,7 @@ mod tests {
             mutation_id: "save-1".to_string(),
             precondition: base.clone(),
             content: content.to_string(),
-            source_hash: history::source_hash(content),
+            source_hash: tansu_note_core::source_hash(content),
         };
         let current_event_version = {
             vault
@@ -3500,7 +3319,7 @@ mod tests {
             mutation_id: save.mutation_id.clone(),
             precondition: base.clone(),
             content: "different".to_string(),
-            source_hash: history::source_hash("different"),
+            source_hash: tansu_note_core::source_hash("different"),
         };
         assert!(matches!(
             vault.v2_save_note(&meta.note_id, reused),
@@ -3512,7 +3331,7 @@ mod tests {
             mutation_id: "save-stale".to_string(),
             precondition: base,
             content: stale_content.to_string(),
-            source_hash: history::source_hash(stale_content),
+            source_hash: tansu_note_core::source_hash(stale_content),
         };
         let conflict = vault.v2_save_note(&meta.note_id, stale.clone()).unwrap();
         assert!(matches!(conflict.outcome, V2MutationOutcome::Conflict { .. }));
@@ -3536,7 +3355,7 @@ mod tests {
                 mutation_id: "create-restore".to_string(),
                 path: "A.md".to_string(),
                 content: first_content.to_string(),
-                source_hash: history::source_hash(first_content),
+                source_hash: tansu_note_core::source_hash(first_content),
             })
             .unwrap();
         let V2MutationOutcome::Accepted {
@@ -3557,7 +3376,7 @@ mod tests {
                         base_disk_hash: created.disk_hash,
                     },
                     content: changed.to_string(),
-                    source_hash: history::source_hash(changed),
+                    source_hash: tansu_note_core::source_hash(changed),
                 },
             )
             .unwrap();
@@ -3566,7 +3385,7 @@ mod tests {
             .revisions(&created.note_id)
             .unwrap()
             .into_iter()
-            .find(|revision| revision.content_hash.as_deref() == Some(&history::source_hash(first_content)))
+            .find(|revision| revision.content_hash.as_deref() == Some(&tansu_note_core::source_hash(first_content)))
             .unwrap();
         let current = vault.v2_open_note(&created.note_id).unwrap();
         let request = V2RestoreRevisionRequest {
@@ -3605,7 +3424,7 @@ mod tests {
                 mutation_id: "create-conflict-restore".to_string(),
                 path: "A.md".to_string(),
                 content: first_content.to_string(),
-                source_hash: history::source_hash(first_content),
+                source_hash: tansu_note_core::source_hash(first_content),
             })
             .unwrap();
         let V2MutationOutcome::Accepted {
@@ -3627,7 +3446,7 @@ mod tests {
                     mutation_id: "save-before-conflict-restore".to_string(),
                     precondition: base.clone(),
                     content: accepted_content.to_string(),
-                    source_hash: history::source_hash(accepted_content),
+                    source_hash: tansu_note_core::source_hash(accepted_content),
                 },
             )
             .unwrap();
@@ -3639,7 +3458,7 @@ mod tests {
                     mutation_id: "conflict-before-restore".to_string(),
                     precondition: base,
                     content: draft_content.to_string(),
-                    source_hash: history::source_hash(draft_content),
+                    source_hash: tansu_note_core::source_hash(draft_content),
                 },
             )
             .unwrap();
@@ -3683,7 +3502,7 @@ mod tests {
                 mutation_id: "create-rename-delete".to_string(),
                 path: "A.md".to_string(),
                 content: content.to_string(),
-                source_hash: history::source_hash(content),
+                source_hash: tansu_note_core::source_hash(content),
             })
             .unwrap();
         let V2MutationOutcome::Accepted {
@@ -3755,9 +3574,9 @@ mod tests {
         .unwrap();
         let row = vault.lock_catalog().all_rows().unwrap().remove(0);
         let candidate = "# A\naccepted before crash\n";
-        let source_hash = history::source_hash(candidate);
+        let source_hash = tansu_note_core::source_hash(candidate);
         let disk_bytes = candidate.as_bytes();
-        let disk_hash = history::disk_hash(disk_bytes);
+        let disk_hash = tansu_note_core::disk_hash(disk_bytes);
         history::write_snapshot_bytes(&state_path, &row.meta.note_id, &source_hash, disk_bytes)
             .unwrap();
         let pending = v2_pending_response("pending-save");
@@ -3851,9 +3670,9 @@ mod tests {
         .unwrap();
         let row = vault.lock_catalog().all_rows().unwrap().remove(0);
         let candidate = "# A\naccepted before crash\n";
-        let source_hash = history::source_hash(candidate);
+        let source_hash = tansu_note_core::source_hash(candidate);
         let disk_bytes = candidate.as_bytes();
-        let disk_hash = history::disk_hash(disk_bytes);
+        let disk_hash = tansu_note_core::disk_hash(disk_bytes);
         history::write_snapshot_bytes(&state_path, &row.meta.note_id, &source_hash, disk_bytes)
             .unwrap();
         let pending = v2_pending_response("pending-save");
@@ -3951,7 +3770,7 @@ mod tests {
                     base_disk_hash: base.meta.disk_hash,
                 },
                 content: content.to_string(),
-                source_hash: history::source_hash(content),
+                source_hash: tansu_note_core::source_hash(content),
             };
 
             failure_point::inject(point);
@@ -4077,7 +3896,7 @@ mod tests {
                         mutation_id: "create-restart".to_string(),
                         path: "Created.md".to_string(),
                         content: content.to_string(),
-                        source_hash: history::source_hash(content),
+                        source_hash: tansu_note_core::source_hash(content),
                     })
                 }
                 "rename" => vault.v2_rename_note(
@@ -4114,7 +3933,7 @@ mod tests {
                         mutation_id: "create-restart".to_string(),
                         path: "Created.md".to_string(),
                         content: "# Created\ncreated\n".to_string(),
-                        source_hash: history::source_hash("# Created\ncreated\n"),
+                        source_hash: tansu_note_core::source_hash("# Created\ncreated\n"),
                     }).unwrap()
                 }
                 "rename" => {
@@ -4170,9 +3989,9 @@ mod tests {
             .subscribe_v2_events(Some(current_event_version))
             .unwrap();
         let candidate = "# A\naccepted before retry\n";
-        let source_hash = history::source_hash(candidate);
+        let source_hash = tansu_note_core::source_hash(candidate);
         let disk_bytes = candidate.as_bytes();
-        let disk_hash = history::disk_hash(disk_bytes);
+        let disk_hash = tansu_note_core::disk_hash(disk_bytes);
         history::write_snapshot_bytes(
             &vault.state_root,
             &row.meta.note_id,
@@ -4369,93 +4188,8 @@ mod tests {
             }) if error_note_id == &note_id
         ), "unexpected error: {error:?}");
         let row = vault.lock_catalog().all_rows().unwrap().remove(0);
-        assert_eq!(
-            row.unresolved_reason.as_deref(),
-            Some("invalid_utf8")
-        );
+        assert_eq!(row.state, NoteState::Unresolved(UnresolvedReason::InvalidUtf8));
         assert_eq!(fs::read(vault.root.join("Bad.md")).unwrap(), invalid_bytes);
-    }
-
-    #[test]
-    fn text_edits_apply_utf16_ranges_and_multiline_text() {
-        let content = apply_text_edits(
-            "alpha\nemoji 😀\nomega\n",
-            &[
-                TextEdit {
-                    start: TextPosition {
-                        line: 1,
-                        character: 6,
-                    },
-                    end: TextPosition {
-                        line: 1,
-                        character: 8,
-                    },
-                    text: "😁".to_string(),
-                },
-                TextEdit {
-                    start: TextPosition {
-                        line: 2,
-                        character: 5,
-                    },
-                    end: TextPosition {
-                        line: 2,
-                        character: 5,
-                    },
-                    text: "\ntrail".to_string(),
-                },
-            ],
-        )
-        .unwrap();
-
-        assert_eq!(content, "alpha\nemoji 😁\nomega\ntrail\n");
-    }
-
-    #[test]
-    fn text_edits_reject_invalid_ranges() {
-        let split_pair = apply_text_edits(
-            "😀\n",
-            &[TextEdit {
-                start: TextPosition {
-                    line: 0,
-                    character: 1,
-                },
-                end: TextPosition {
-                    line: 0,
-                    character: 1,
-                },
-                text: "x".to_string(),
-            }],
-        );
-        assert!(matches!(split_pair, Err(Error::BadRequest(_))));
-
-        let overlapping = apply_text_edits(
-            "abcd",
-            &[
-                TextEdit {
-                    start: TextPosition {
-                        line: 0,
-                        character: 1,
-                    },
-                    end: TextPosition {
-                        line: 0,
-                        character: 3,
-                    },
-                    text: "x".to_string(),
-                },
-                TextEdit {
-                    start: TextPosition {
-                        line: 0,
-                        character: 2,
-                    },
-                    end: TextPosition {
-                        line: 0,
-                        character: 4,
-                    },
-                    text: "y".to_string(),
-                },
-            ],
-        );
-        assert!(matches!(overlapping, Err(Error::BadRequest(_))));
     }
 
     #[test]
@@ -4506,8 +4240,8 @@ mod tests {
         let error = result.unwrap_err();
         match &error {
             V2VaultError::Api(V2ApiErrorKind::SourceHashMismatch { expected, received }) => {
-                assert_eq!(expected, &history::source_hash("# A\n\nchanged\n"));
-                assert_eq!(received, &history::source_hash("# wrong\n"));
+                assert_eq!(expected, &tansu_note_core::source_hash("# A\n\nchanged\n"));
+                assert_eq!(received, &tansu_note_core::source_hash("# wrong\n"));
             }
             _ => panic!("expected source hash mismatch, got {error:?}"),
         }
@@ -4539,9 +4273,9 @@ mod tests {
         };
         let bytes = b"webp";
         let mutation_id = "interrupted-image-upload";
-        let body_hash = history::disk_hash(bytes);
+        let body_hash = tansu_note_core::disk_hash(bytes);
         let payload_hash = v2_request_hash("image_upload", None, &body_hash).unwrap();
-        let digest = history::disk_hash(mutation_id.as_bytes());
+        let digest = tansu_note_core::disk_hash(mutation_id.as_bytes());
         let name = format!(
             "z-images/image-{}.webp",
             digest.strip_prefix("blake3-v2:").unwrap()
@@ -4959,7 +4693,7 @@ mod tests {
                 mutation_id: format!("create-{path}"),
                 path: path.to_string(),
                 content: content.to_string(),
-                source_hash: history::source_hash(content),
+                source_hash: tansu_note_core::source_hash(content),
             })
             .unwrap();
         let V2MutationOutcome::Accepted { result: Some(meta) } = response.outcome else {
@@ -4988,7 +4722,7 @@ mod tests {
                 mutation_id: mutation_id.to_string(),
                 precondition: v2_precondition(base),
                 content: content.to_string(),
-                source_hash: history::source_hash(content),
+                source_hash: tansu_note_core::source_hash(content),
             },
         )
     }
@@ -4997,7 +4731,7 @@ mod tests {
         V2SaveNoteDeltaRequest {
             mutation_id: mutation_id.to_string(),
             precondition: v2_precondition(base),
-            source_hash: history::source_hash(result),
+            source_hash: tansu_note_core::source_hash(result),
             edits: vec![TextEdit {
                 start: TextPosition { line: 2, character: 0 },
                 end: TextPosition { line: 2, character: 4 },

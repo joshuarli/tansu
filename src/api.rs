@@ -602,7 +602,7 @@ mod tests {
             mutation_id: "mutation-create".to_string(),
             path: "created.md".to_string(),
             content: content.to_string(),
-            source_hash: crate::history::source_hash(content),
+            source_hash: tansu_note_core::source_hash(content),
         };
         let body = serde_json::to_vec(&create).unwrap();
         let path = format!("/api/v2/vaults/{vault_id}/notes");
@@ -625,7 +625,7 @@ mod tests {
             mutation_id: create.mutation_id.clone(),
             path: create.path.clone(),
             content: changed_content.to_string(),
-            source_hash: crate::history::source_hash(changed_content),
+            source_hash: tansu_note_core::source_hash(changed_content),
         };
         let reuse = handle_v2_api(
             &app,
@@ -835,7 +835,7 @@ mod tests {
                         "mutationId": "save-route",
                         "precondition": v2_precondition(&original.meta),
                         "content": saved_content,
-                        "sourceHash": crate::history::source_hash(saved_content)
+                        "sourceHash": tansu_note_core::source_hash(saved_content)
                     })
                     .to_string()
                     .into_bytes(),
@@ -861,7 +861,7 @@ mod tests {
                     &serde_json::json!({
                         "mutationId": "delta-route",
                         "precondition": v2_precondition(&saved_meta),
-                        "sourceHash": crate::history::source_hash(delta_content),
+                        "sourceHash": tansu_note_core::source_hash(delta_content),
                         "edits": [{
                             "start": {"line": 2, "character": 0},
                             "end": {"line": 2, "character": 7},
@@ -893,7 +893,7 @@ mod tests {
                         "mutationId": "conflict-route",
                         "precondition": v2_precondition(&original.meta),
                         "content": stale_content,
-                        "sourceHash": crate::history::source_hash(stale_content)
+                        "sourceHash": tansu_note_core::source_hash(stale_content)
                     })
                     .to_string()
                     .into_bytes(),
