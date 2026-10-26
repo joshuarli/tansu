@@ -26,6 +26,7 @@ jobs:
       DEFUDDLE_RS_DIR: ${{ github.workspace }}/.work/defuddle-rs
       PNPM_CONFIG_STORE_DIR: ${{ github.workspace }}/.work/tmp/pnpm-store
       PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.work/tmp/playwright-browsers
+      WASM_OPT: ${{ github.workspace }}/.work/tmp/binaryen/bin/wasm-opt
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -51,10 +52,24 @@ jobs:
           path: .work/defuddle-rs
           fetch-depth: 1
 
-      - name: Install WASM optimizer
-        run: sudo apt-get update && sudo apt-get install --yes --no-install-recommends binaryen
+      - name: Install pinned Binaryen
         env:
           TMPDIR: ${{ github.workspace }}/.work/tmp
+        run: |
+          set -euo pipefail
+          version=133
+          case "$(uname -m)" in
+            x86_64) arch=x86_64; sum=2dc9c7813f5375db93d96ead4b78222fcc3e2677bbb832297af4797782a37489 ;;
+            aarch64) arch=aarch64; sum=89c07ea56faf38d0fbecf36ca8ec0721756716185f265b568e133d427f299bf8 ;;
+            *) echo "unsupported architecture: $(uname -m)" >&2; exit 1 ;;
+          esac
+          dest="${{ github.workspace }}/.work/tmp/binaryen"
+          mkdir -p "$dest"
+          archive="$dest/binaryen.tar.gz"
+          wget -O "$archive" "https://github.com/WebAssembly/binaryen/releases/download/version_${version}/binaryen-version_${version}-${arch}-linux.tar.gz"
+          echo "$sum  $archive" | sha256sum -c -
+          tar xf "$archive" -C "$dest" --strip-components=1
+          test -x "$dest/bin/wasm-opt"
 
       - name: Install locked packages
         run: pnpm install --frozen-lockfile
