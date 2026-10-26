@@ -1721,11 +1721,10 @@ mod tests {
         let vault_path = root.path().join("vault");
         std::fs::create_dir_all(&vault_path).unwrap();
         let app = App::new(Config {
+            data_root: root.path().join("data"),
             vaults: vec![VaultConfig {
                 name: "Test".into(),
                 path: vault_path,
-                state_path: root.path().join("state"),
-
             }],
             auth: None,
         })
@@ -1842,11 +1841,10 @@ mod tests {
     fn listener_with_shutdown_returns_for_a_cancelled_token() {
         let root = tempfile::tempdir().unwrap();
         let app = App::new(Config {
+            data_root: root.path().join("data"),
             vaults: vec![VaultConfig {
                 name: "Test".to_string(),
                 path: root.path().join("vault"),
-                state_path: root.path().join("state"),
-
             }],
             auth: None,
         })
@@ -2162,11 +2160,10 @@ mod tests {
         let vault_path = root.path().join("vault");
         std::fs::create_dir_all(&vault_path).unwrap();
         let app = App::new(Config {
+            data_root: root.path().join("data"),
             vaults: vec![VaultConfig {
                 name: "Test".into(),
                 path: vault_path,
-                state_path: root.path().join("state"),
-
             }],
             auth: None,
         }).unwrap();
@@ -2212,11 +2209,10 @@ mod tests {
         let vault_path = root.path().join("vault");
         std::fs::create_dir_all(&vault_path).unwrap();
         let app = App::new(Config {
+            data_root: root.path().join("data"),
             vaults: vec![VaultConfig {
                 name: "Test".into(),
                 path: vault_path,
-                state_path: root.path().join("state"),
-
             }],
             auth: None,
         }).unwrap();
@@ -2262,13 +2258,12 @@ mod tests {
     fn legacy_api_requests_fail_with_version_error_before_mutating() {
         let root = tempfile::tempdir().unwrap();
         let vault_path = root.path().join("vault");
-        let state_path = root.path().join("state");
         std::fs::create_dir_all(&vault_path).unwrap();
         let app = App::new(Config {
+            data_root: root.path().join("data"),
             vaults: vec![VaultConfig {
                 name: "Test".into(),
                 path: vault_path.clone(),
-                state_path,
             }],
             auth: None,
         }).unwrap();
@@ -2287,13 +2282,12 @@ mod tests {
     fn oversized_slow_and_malformed_requests_are_bounded() {
         let root = tempfile::tempdir().unwrap();
         let vault_path = root.path().join("vault");
-        let state_path = root.path().join("state");
         std::fs::create_dir_all(&vault_path).unwrap();
         let app = App::new(Config {
+            data_root: root.path().join("data"),
             vaults: vec![VaultConfig {
                 name: "Test".into(),
                 path: vault_path,
-                state_path,
             }],
             auth: None,
         }).unwrap();

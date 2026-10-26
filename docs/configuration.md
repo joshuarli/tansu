@@ -17,8 +17,7 @@ tansu config init --vault Notes "$HOME/Documents/Notes"
 ```
 
 Repeat `--vault NAME PATH` for more vaults. Paths must be absolute; `~` and
-`~/` are expanded. Nested vault roots and duplicate app-state directories are
-rejected. Existing TOML files are not imported.
+`~/` are expanded. Nested vault roots and duplicate vault names are rejected. Existing TOML files are not imported.
 
 ## Settings
 

@@ -27,7 +27,7 @@ use crate::api_types::{
     V2VaultMeta, UnresolvedReason, V2Backlink, V2LinkedNote, V2NoteLinksResponse, V2NotePreview,
 };
 use crate::catalog::{Catalog, InsertNote, MutationIntent, MutationRecord, NoteRow, now_ms};
-use crate::config::VaultConfig;
+use crate::config::ResolvedVault;
 use crate::history;
 use crate::links;
 use crate::logging::{LogHub, LogLevel, fields};
@@ -919,17 +919,10 @@ fn drain_watcher_triggers(
 }
 
 impl VaultRuntime {
-    pub fn open(index: usize, config: &VaultConfig, logs: LogHub) -> Result<Self> {
+    pub fn open(index: usize, config: &ResolvedVault, logs: LogHub) -> Result<Self> {
         fs::create_dir_all(&config.path)?;
         let owner_lock = VaultOwnerLock::acquire(&config.path)?;
         fs::create_dir_all(&config.state_path)?;
-        let vault_id = config
-            .state_path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .filter(|name| !name.is_empty())
-            .ok_or_else(|| Error::BadRequest("vault state directory needs an opaque ID".to_string()))?
-            .to_string();
         let mut catalog = Catalog::open(&config.state_path.join("vault.db"))?;
         let settings = catalog.settings()?;
         let excluded = settings.excluded_folders;
@@ -972,7 +965,7 @@ impl VaultRuntime {
         Ok(Self {
             index,
             name: config.name.clone(),
-            vault_id,
+            vault_id: config.vault_id.clone(),
             root: config.path.clone(),
             state_root: config.state_path.clone(),
             catalog: Mutex::new(catalog),
@@ -3186,9 +3179,10 @@ mod tests {
         fs::write(state_path.join("search"), "not a directory").unwrap();
         let vault = VaultRuntime::open(
             0,
-            &VaultConfig {
+            &ResolvedVault {
                 name: "Test".to_string(),
                 path: dir.clone(),
+                vault_id: "test-vault".to_string(),
                 state_path: state_path.clone(),
 
             },
@@ -3560,9 +3554,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap().keep();
         let state_path = dir.join("state");
         fs::write(dir.join("A.md"), "# A\nold\n").unwrap();
-        let config = VaultConfig {
+        let config = ResolvedVault {
             name: "Test".to_string(),
             path: dir.clone(),
+            vault_id: "test-vault".to_string(),
             state_path: state_path.clone(),
 
         };
@@ -3635,9 +3630,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap().keep();
         let state_path = dir.join("state");
         fs::write(dir.join("A.md"), "# A\n").unwrap();
-        let config = VaultConfig {
+        let config = ResolvedVault {
             name: "Test".to_string(),
             path: dir.clone(),
+            vault_id: "test-vault".to_string(),
             state_path: state_path.clone(),
         };
         let vault = VaultRuntime::open(0, &config, LogHub::new(crate::logging::LogMode::Off)).unwrap();
@@ -3656,9 +3652,10 @@ mod tests {
         let state_path = dir.join("state");
         let visible = dir.join("A.md");
         fs::write(&visible, "# A\nold\n").unwrap();
-        let config = VaultConfig {
+        let config = ResolvedVault {
             name: "Test".to_string(),
             path: dir.clone(),
+            vault_id: "test-vault".to_string(),
             state_path: state_path.clone(),
 
         };
@@ -3743,9 +3740,10 @@ mod tests {
             let state_path = dir.join("state");
             let visible = dir.join("A.md");
             fs::write(&visible, "# A\nold\n").unwrap();
-            let config = VaultConfig {
+            let config = ResolvedVault {
                 name: "Test".to_string(),
                 path: dir.clone(),
+                vault_id: "test-vault".to_string(),
                 state_path,
             };
             let vault = VaultRuntime::open(
@@ -3858,9 +3856,10 @@ mod tests {
             if operation != "create" {
                 fs::write(dir.join("A.md"), "# A\noriginal\n").unwrap();
             }
-            let config = VaultConfig {
+            let config = ResolvedVault {
                 name: "Test".to_string(),
                 path: dir.clone(),
+                vault_id: "test-vault".to_string(),
                 state_path,
             };
             let vault = VaultRuntime::open(
@@ -4126,9 +4125,10 @@ mod tests {
     fn watcher_reconciliation_crash_replays_resync_after_restart() {
         let vault = test_vault();
         let baseline = vault.subscribe_v2_events(None).unwrap().current_version;
-        let config = VaultConfig {
+        let config = ResolvedVault {
             name: vault.name.clone(),
             path: vault.root.clone(),
+            vault_id: "test-vault".to_string(),
             state_path: vault.state_root.clone(),
 
         };
@@ -4265,9 +4265,10 @@ mod tests {
     fn prepared_image_upload_survives_restart_and_retry() {
         let dir = tempfile::tempdir().unwrap().keep();
         let state_path = dir.join("state");
-        let config = VaultConfig {
+        let config = ResolvedVault {
             name: "Test".to_string(),
             path: dir.clone(),
+            vault_id: "test-vault".to_string(),
             state_path: state_path.clone(),
 
         };
@@ -4344,10 +4345,11 @@ mod tests {
         assert_eq!(reopened.v2_vault_bootstrap().unwrap().notes[0].note_id, first_note_id);
     }
 
-    fn config_for(root: &Path, state_path: PathBuf) -> VaultConfig {
-        VaultConfig {
+    fn config_for(root: &Path, state_path: PathBuf) -> ResolvedVault {
+        ResolvedVault {
             name: "Test".to_string(),
             path: root.to_path_buf(),
+            vault_id: "test-vault".to_string(),
             state_path,
         }
     }
@@ -4662,9 +4664,10 @@ mod tests {
         let state_path = dir.join("state");
         VaultRuntime::open(
             0,
-            &VaultConfig {
+            &ResolvedVault {
                 name: "Test".to_string(),
                 path: dir.clone(),
+                vault_id: "test-vault".to_string(),
                 state_path,
             },
             LogHub::new(crate::logging::LogMode::Off),
@@ -4677,9 +4680,10 @@ mod tests {
         fs::write(dir.join(path), bytes).unwrap();
         VaultRuntime::open(
             0,
-            &VaultConfig {
+            &ResolvedVault {
                 name: "Test".to_string(),
                 path: dir.clone(),
+                vault_id: "test-vault".to_string(),
                 state_path: dir.join("state"),
             },
             LogHub::new(crate::logging::LogMode::Off),
@@ -4745,9 +4749,10 @@ mod tests {
         let state_path = dir.join("state");
         VaultRuntime::open(
             0,
-            &VaultConfig {
+            &ResolvedVault {
                 name: "Test".to_string(),
                 path: dir.clone(),
+                vault_id: "test-vault".to_string(),
                 state_path,
             },
             LogHub::new(crate::logging::LogMode::Off),

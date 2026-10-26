@@ -11,6 +11,7 @@ use crate::{Error, Result};
 
 #[derive(Debug, Clone)]
 pub struct Config {
+    pub data_root: PathBuf,
     pub vaults: Vec<VaultConfig>,
     pub auth: Option<AuthConfig>,
 }
@@ -35,6 +36,13 @@ impl AuthConfig {
 pub struct VaultConfig {
     pub name: String,
     pub path: PathBuf,
+}
+
+#[derive(Debug, Clone)]
+pub struct ResolvedVault {
+    pub name: String,
+    pub path: PathBuf,
+    pub vault_id: String,
     pub state_path: PathBuf,
 }
 
@@ -125,31 +133,18 @@ fn open_settings_database(path: &Path) -> Result<Connection> {
     )?)
 }
 
-pub fn initialize_state_layout(vaults: &[VaultConfig]) -> Result<(String, Vec<VaultConfig>)> {
-    let first = vaults
-        .first()
-        .ok_or_else(|| Error::BadRequest("config must contain at least one vault".to_string()))?;
-    let data_root = first
-        .state_path
-        .parent()
-        .ok_or_else(|| Error::BadRequest("vault state path needs a parent".to_string()))?
-        .to_path_buf();
-    for vault in vaults.iter().skip(1) {
-        if vault.state_path.parent() != Some(data_root.as_path()) {
-            return Err(Error::BadRequest(
-                "vault state paths must share one data root".to_string(),
-            ));
-        }
+pub fn initialize_state_layout(data_root: &Path, vaults: &[VaultConfig]) -> Result<(String, Vec<ResolvedVault>)> {
+    if vaults.is_empty() {
+        return Err(Error::BadRequest("config must contain at least one vault".to_string()));
     }
-    fs::create_dir_all(&data_root)?;
-    let metadata = fs::symlink_metadata(&data_root)?;
+    fs::create_dir_all(data_root)?;
+    let metadata = fs::symlink_metadata(data_root)?;
     if metadata.file_type().is_symlink() || !metadata.is_dir() {
         return Err(Error::BadRequest("application data root must be a real directory".to_string()));
     }
     let data_root = data_root.canonicalize()?;
     let identity = data_root.join("identity");
     ensure_real_directory(&identity)?;
-    ensure_real_directory(&identity.join("relocations"))?;
     ensure_real_directory(&data_root.join("vaults"))?;
     let server_instance_id = persistent_id(&identity.join("server-instance-id"))?;
     let mapping_path = identity.join("vault-roots.json");
@@ -197,11 +192,13 @@ pub fn initialize_state_layout(vaults: &[VaultConfig]) -> Result<(String, Vec<Va
             return Err(Error::BadRequest("vault identity mapping is invalid or colliding".to_string()));
         }
         let state_path = data_root.join("vaults").join(&vault_id);
-        relocate_state(&identity, &vault_id, &vault.state_path, &state_path)?;
-        let mut config = vault.clone();
-        config.path = root;
-        config.state_path = state_path;
-        resolved.push(config);
+        ensure_real_directory(&state_path)?;
+        resolved.push(ResolvedVault {
+            name: vault.name.clone(),
+            path: root,
+            vault_id,
+            state_path,
+        });
     }
     Ok((server_instance_id, resolved))
 }
@@ -313,61 +310,6 @@ fn write_new_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
     Err(Error::Internal("could not allocate an identity temp file".to_string()))
 }
 
-fn relocate_state(identity: &Path, vault_id: &str, legacy: &Path, target: &Path) -> Result<()> {
-    match fs::symlink_metadata(target) {
-        Ok(metadata) => {
-            if metadata.file_type().is_symlink() || !metadata.is_dir() {
-                return Err(Error::BadRequest("vault state target must be a real directory".to_string()));
-            }
-            return Ok(());
-        }
-        Err(error) if error.kind() == ErrorKind::NotFound => {}
-        Err(error) => return Err(Error::Io(error)),
-    }
-    let parent = target
-        .parent()
-        .ok_or_else(|| Error::Internal("vault state target needs a parent".to_string()))?;
-    fs::create_dir_all(parent)?;
-    let marker = identity.join("relocations").join(format!("{vault_id}.json"));
-    write_json_atomic(
-        &marker,
-        &serde_json::json!({
-            "vaultId": vault_id,
-            "legacyStatePath": legacy,
-            "targetStatePath": target,
-            "state": "prepared"
-        }),
-    )?;
-    let temp = parent.join(format!(".{vault_id}.pending"));
-    if temp.exists() {
-        fs::remove_dir_all(&temp)?;
-    }
-    if legacy.exists() {
-        copy_state_tree(legacy, &temp)?;
-    } else {
-        fs::create_dir(&temp)?;
-    }
-    sync_tree(&temp)?;
-    match fs::rename(&temp, target) {
-        Ok(()) => {}
-        Err(error) if error.kind() == ErrorKind::AlreadyExists && target.is_dir() => {
-            fs::remove_dir_all(&temp)?;
-        }
-        Err(error) => return Err(Error::Io(error)),
-    }
-    File::open(parent)?.sync_all()?;
-    write_json_atomic(
-        &marker,
-        &serde_json::json!({
-            "vaultId": vault_id,
-            "legacyStatePath": legacy,
-            "targetStatePath": target,
-            "state": "complete"
-        }),
-    )?;
-    Ok(())
-}
-
 fn ensure_real_directory(path: &Path) -> Result<()> {
     match fs::symlink_metadata(path) {
         Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => Err(
@@ -383,44 +325,6 @@ fn ensure_real_directory(path: &Path) -> Result<()> {
         }
         Err(error) => Err(Error::Io(error)),
     }
-}
-
-fn copy_state_tree(source: &Path, target: &Path) -> Result<()> {
-    let metadata = fs::symlink_metadata(source)?;
-    if metadata.file_type().is_symlink() || !metadata.is_dir() {
-        return Err(Error::BadRequest("legacy vault state must be a real directory".to_string()));
-    }
-    fs::create_dir(target)?;
-    for entry in fs::read_dir(source)? {
-        let entry = entry?;
-        let source_path = entry.path();
-        let target_path = target.join(entry.file_name());
-        let metadata = fs::symlink_metadata(&source_path)?;
-        if metadata.file_type().is_symlink() {
-            return Err(Error::BadRequest("legacy state cannot contain symlinks".to_string()));
-        }
-        if metadata.is_dir() {
-            copy_state_tree(&source_path, &target_path)?;
-        } else if metadata.is_file() {
-            fs::copy(&source_path, &target_path)?;
-            File::open(&target_path)?.sync_all()?;
-        } else {
-            return Err(Error::BadRequest("legacy state contains a special file".to_string()));
-        }
-    }
-    File::open(target)?.sync_all()?;
-    Ok(())
-}
-
-fn sync_tree(path: &Path) -> Result<()> {
-    for entry in fs::read_dir(path)? {
-        let entry = entry?;
-        if entry.file_type()?.is_dir() {
-            sync_tree(&entry.path())?;
-        }
-    }
-    File::open(path)?.sync_all()?;
-    Ok(())
 }
 
 fn generate_opaque_id() -> String {
@@ -460,11 +364,9 @@ pub fn config_from_settings(settings: AppSettings) -> Result<Config> {
             if !path.is_absolute() {
                 return Err(Error::BadRequest("vault path must be absolute".to_string()));
             }
-            let state_path = data_root.join(state_dir_name(&vault.name));
             Ok(VaultConfig {
                 name: vault.name,
                 path,
-                state_path,
             })
         })
         .collect::<Result<Vec<_>>>()?;
@@ -483,7 +385,7 @@ pub fn config_from_settings(settings: AppSettings) -> Result<Config> {
             })
         })
         .transpose()?;
-    Ok(Config { vaults, auth })
+    Ok(Config { data_root, vaults, auth })
 }
 
 pub fn prepare_auth_state_directory(auth: &AuthConfig) -> Result<()> {
@@ -524,22 +426,6 @@ fn xdg_path(env_name: &str, home_suffix: &str) -> Result<PathBuf> {
     }
 }
 
-fn state_dir_name(name: &str) -> String {
-    let sanitized = name
-        .chars()
-        .map(|ch| match ch {
-            '/' | '\\' | ':' | '\0' => '_',
-            ch => ch,
-        })
-        .collect::<String>();
-    let trimmed = sanitized.trim();
-    if trimmed.is_empty() || trimmed == "." || trimmed == ".." {
-        "vault".to_string()
-    } else {
-        trimmed.to_string()
-    }
-}
-
 fn validate_vaults(vaults: &[VaultConfig]) -> Result<()> {
     for (index, vault) in vaults.iter().enumerate() {
         for other in vaults.iter().skip(index + 1) {
@@ -551,11 +437,10 @@ fn validate_vaults(vaults: &[VaultConfig]) -> Result<()> {
                     PathValidationReason::NestedVault
                 )));
             }
-            if normalize_for_compare(&vault.state_path) == normalize_for_compare(&other.state_path)
-            {
+            if vault.name.trim() == other.name.trim() {
                 return Err(Error::BadRequest(format!(
-                    "vault state paths must be unique: {}",
-                    vault.state_path.display()
+                    "vault names must be unique: {}",
+                    vault.name.trim()
                 )));
             }
         }
@@ -596,7 +481,7 @@ mod tests {
         }).unwrap();
         assert_eq!(config.vaults[0].name, "Main");
         assert!(config.vaults[0].path.ends_with("notes"));
-        assert!(config.vaults[0].state_path.ends_with("tansu/Main"));
+        assert!(config.data_root.ends_with("tansu"));
         assert!(config.auth.is_none());
     }
 
@@ -631,6 +516,15 @@ mod tests {
             auth: None,
         }).unwrap_err();
         assert!(error.to_string().contains("nested vaults"));
+
+        let error = config_from_settings(AppSettings {
+            vaults: vec![
+                AppVaultSettings { name: "A".into(), path: "/tmp/a".into() },
+                AppVaultSettings { name: " A ".into(), path: "/tmp/b".into() },
+            ],
+            auth: None,
+        }).unwrap_err();
+        assert!(error.to_string().contains("vault names must be unique"));
 
         let error = config_from_settings(AppSettings {
             vaults: vec![AppVaultSettings { name: "A".into(), path: "relative".into() }],
@@ -698,61 +592,42 @@ mod tests {
         let second_root = root.path().join("notes-b");
         fs::create_dir_all(&first_root).unwrap();
         fs::create_dir_all(&second_root).unwrap();
-        let first = VaultConfig {
-            name: "First".to_string(),
-            path: first_root,
-            state_path: data.join("First"),
+        let first = VaultConfig { name: "First".to_string(), path: first_root };
+        let second = VaultConfig { name: "Second".to_string(), path: second_root };
 
-        };
-        let second = VaultConfig {
-            name: "Second".to_string(),
-            path: second_root,
-            state_path: data.join("Second"),
-
-        };
-
-        let (server_id, original) = initialize_state_layout(&[first.clone(), second.clone()]).unwrap();
+        let (server_id, original) = initialize_state_layout(&data, &[first.clone(), second.clone()]).unwrap();
         let (restarted_server_id, reordered) =
-            initialize_state_layout(&[second.clone(), first.clone()]).unwrap();
-        let renamed = VaultConfig {
-            name: "Renamed".to_string(),
-            path: first.path.clone(),
-            state_path: data.join("Renamed"),
-
-        };
-        let (renamed_server_id, renamed_state) = initialize_state_layout(&[renamed]).unwrap();
+            initialize_state_layout(&data, &[second.clone(), first.clone()]).unwrap();
+        let renamed = VaultConfig { name: "Renamed".to_string(), path: first.path.clone() };
+        let (renamed_server_id, renamed_state) = initialize_state_layout(&data, &[renamed]).unwrap();
 
         assert_eq!(server_id, restarted_server_id);
         assert_eq!(server_id, renamed_server_id);
-        assert_eq!(original[0].state_path, reordered[1].state_path);
-        assert_eq!(original[1].state_path, reordered[0].state_path);
+        assert_eq!(original[0].vault_id, reordered[1].vault_id);
+        assert_eq!(original[1].vault_id, reordered[0].vault_id);
+        assert_eq!(original[0].vault_id, renamed_state[0].vault_id);
         assert_eq!(original[0].state_path, renamed_state[0].state_path);
+        assert_eq!(
+            original[0].state_path,
+            data.canonicalize().unwrap().join("vaults").join(&original[0].vault_id)
+        );
+        assert!(original[0].state_path.is_dir());
     }
 
     #[test]
-    fn state_relocation_preserves_legacy_data_and_records_completion() {
+    fn state_layout_rejects_a_state_directory_replaced_by_a_symlink() {
+        use std::os::unix::fs::symlink;
+
         let root = tempfile::tempdir().unwrap();
         let data = root.path().join("data");
-        let vault_root = root.path().join("notes");
-        let legacy = data.join("Named");
-        fs::create_dir_all(&vault_root).unwrap();
-        fs::create_dir_all(&legacy).unwrap();
-        fs::write(legacy.join("vault.db"), b"catalog bytes").unwrap();
-        let config = VaultConfig {
-            name: "Named".to_string(),
-            path: vault_root,
-            state_path: legacy.clone(),
+        let notes = root.path().join("notes");
+        fs::create_dir_all(&notes).unwrap();
+        let vault = VaultConfig { name: "Notes".to_string(), path: notes };
+        let (_, resolved) = initialize_state_layout(&data, std::slice::from_ref(&vault)).unwrap();
+        fs::remove_dir(&resolved[0].state_path).unwrap();
+        symlink(root.path(), &resolved[0].state_path).unwrap();
 
-        };
-
-        let (_, migrated) = initialize_state_layout(&[config]).unwrap();
-
-        assert_eq!(fs::read(migrated[0].state_path.join("vault.db")).unwrap(), b"catalog bytes");
-        assert_eq!(fs::read(legacy.join("vault.db")).unwrap(), b"catalog bytes");
-        let marker = data.join("identity/relocations");
-        let entry = fs::read_dir(marker).unwrap().next().unwrap().unwrap();
-        let value: serde_json::Value = serde_json::from_slice(&fs::read(entry.path()).unwrap()).unwrap();
-        assert_eq!(value["state"], "complete");
+        assert!(initialize_state_layout(&data, &[vault]).is_err());
     }
 
     #[test]
@@ -765,13 +640,8 @@ mod tests {
         fs::create_dir_all(&real).unwrap();
         let alias = root.path().join("alias");
         symlink(&real, &alias).unwrap();
-        let config = |name: &str, path: PathBuf| VaultConfig {
-            name: name.to_string(),
-            path,
-            state_path: data.join(name),
+        let config = |name: &str, path: PathBuf| VaultConfig { name: name.to_string(), path };
 
-        };
-
-        assert!(initialize_state_layout(&[config("Real", real), config("Alias", alias)]).is_err());
+        assert!(initialize_state_layout(&data, &[config("Real", real), config("Alias", alias)]).is_err());
     }
 }

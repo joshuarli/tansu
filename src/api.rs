@@ -1102,13 +1102,14 @@ mod tests {
             }
             config_vaults.push(VaultConfig {
                 name: (*name).to_string(),
-                state_path: root.path().join(format!("state-{index}")),
                 path,
             });
         }
+        let data_root = root.path().join("data");
         AppFixture {
             _root: root,
             config: Config {
+                data_root,
                 vaults: config_vaults,
                 auth: None,
             },

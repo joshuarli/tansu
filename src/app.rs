@@ -34,7 +34,7 @@ impl App {
     }
 
     fn from_config(config: Config, logs: LogHub, config_store: Option<ConfigStore>) -> Result<Self> {
-        let (server_instance_id, vault_configs) = initialize_state_layout(&config.vaults)?;
+        let (server_instance_id, vault_configs) = initialize_state_layout(&config.data_root, &config.vaults)?;
         let mut runtimes = Vec::new();
         for (index, vault) in vault_configs.iter().enumerate() {
             runtimes.push(Arc::new(VaultRuntime::open(index, vault, logs.clone())?));
@@ -132,11 +132,10 @@ mod tests {
 
     fn config(root: &TempDir) -> Config {
         Config {
+            data_root: root.path().join("data"),
             vaults: vec![crate::config::VaultConfig {
                 name: "Notes".to_string(),
                 path: root.path().join("notes"),
-                state_path: root.path().join("state"),
-
             }],
             auth: None,
         }
@@ -168,29 +167,24 @@ mod tests {
         let second_root = root.path().join("second-notes");
         std::fs::create_dir_all(&first_root).unwrap();
         std::fs::create_dir_all(&second_root).unwrap();
-        let legacy_state = root.path().join("legacy-state");
-        let second_legacy_state = legacy_state.join("second");
-        std::fs::create_dir_all(&second_legacy_state).unwrap();
-        std::fs::write(second_legacy_state.join("vault.db"), b"invalid sqlite database").unwrap();
         let config = Config {
+            data_root: root.path().join("data"),
             vaults: vec![
                 crate::config::VaultConfig {
                     name: "First".to_string(),
                     path: first_root,
-                    state_path: legacy_state.join("first"),
                 },
                 crate::config::VaultConfig {
                     name: "Second".to_string(),
                     path: second_root,
-                    state_path: second_legacy_state,
                 },
             ],
             auth: None,
         };
-        let config_to_resolve = config.clone();
+        let (_, resolved_vaults) = initialize_state_layout(&config.data_root, &config.vaults).unwrap();
+        std::fs::write(resolved_vaults[1].state_path.join("vault.db"), b"invalid sqlite database").unwrap();
 
         assert!(App::from_config(config, LogHub::new(LogMode::Off), None).is_err());
-        let (_, resolved_vaults) = initialize_state_layout(&config_to_resolve.vaults).unwrap();
         let reopened = VaultRuntime::open(
             0,
             &resolved_vaults[0],
