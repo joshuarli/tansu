@@ -372,7 +372,6 @@ execFileSync(
     "-Oz",
     "--strip-debug",
     "--enable-bulk-memory",
-    "--enable-bulk-memory-opt",
     "--enable-nontrapping-float-to-int",
     "-o",
     optimizedWasmPath,
