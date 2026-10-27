@@ -336,7 +336,6 @@ async function populateExtractorSelect(extractorSelectElement: HTMLSelectElement
     extractorSelectElement.value = selectedExtractorName;
   } catch (error) {
     logLoupeError("Loupe could not list extractors", error);
-    // Leave Default-only options on error
   }
 }
 

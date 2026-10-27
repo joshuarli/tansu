@@ -15,11 +15,9 @@ pnpm run playwright:install
 `make dev-config` run setup automatically. Run `pnpm install --frozen-lockfile`
 before direct pnpm tasks.
 
-`make check` runs `tsrs` for TypeScript type checking. On macOS, use an arm64
-machine; `tsrs` does not provide an Intel macOS binary.
-
 `pnpm run check` checks generated API types, lint, TypeScript, unit tests, and
 Rust compilation. `make check` runs the same check after installing dependencies.
+Type checking is `tsc --noEmit` from the TypeScript 7 package.
 
 The supported Rust targets are `aarch64-apple-darwin`,
 `x86_64-unknown-linux-musl`, and `aarch64-unknown-linux-musl`.

@@ -1,16 +1,14 @@
 # Tansu TODO
 
 Prefix: TNS
-Next: 85
+Next: 86
 
-### TNS-074 · P3 · Remove the search service thread and the crash-safe index swap
+### TNS-085 · P1 · Pending materialization publishes a source hash the file does not have
 
-- **Area:** Architecture
-- **Where:** `crates/tansu-search/src/service.rs`, `src/search.rs`, `docs/performance.md`
-- **Problem:** The host mutex serializes every call, so at most one message is ever in flight and coalescing, queue-full overflow, and the 4 ms coalesce wait never help. The rebuild's rename, backup, and fsync recovery protects a derived index. The 743 ms to 45 ms result may depend on the thread, which is unproven.
-- **Recommendation:** Measure with the idle-host `make bench` first. If the target holds, call the index directly under the host mutex and rebuild by discarding on a crash.
-- **Blocked:** Candidate `cb6e748` on `backlog-search-service` passes the search and host tests but is not integrated. The paired final-build comparison was rejected by `perf-gate-ready` because the host stayed busy. Resume with interleaved baseline/candidate runs and successful pre/post load gates; retain the current service until the performance target and observed spread support the change.
-- **Fix with:** lifecycle-concurrency
+- **Area:** Data
+- **Where:** `src/catalog.rs:338`, `src/vault.rs:1746`, `src/vault.rs:1426`, `src/vault.rs:2722`, `src/vault.rs:486`, `src/app.rs:39`
+- **Problem:** `accept_note_content_mutation` stores the submitted `content_hash` and leaves `visible_hash` at the pre-image, then sets the mutation to `pending_materialization`. If the visible write fails, or the file changes before replace, `v2_save_source` returns `pendingMaterialization` and does not roll the catalog back (`src/vault.rs:1746`). `v2_open_note` then reads the visible file in `read_visible_or_snapshot` and pairs those bytes with the new catalog hash (`src/vault.rs:1431`, `src/vault.rs:2726`). The response body is not the accepted source. The same window exists for create and rename: the catalog path is committed before the file move, so open can 404 a note that `v2_notes` still lists. Restart repair rewrites the file when the bytes still match the pre-image (`startup_repairs_pending_content_mutation_before_reconciliation`). If they do not, `repair_pending_mutation` returns `Error::Internal` and `VaultRuntime::open` fails (`startup_pending_repair_preserves_unexpected_external_bytes`). `App::from_config` opens vaults with `?`, so one vault stops the process (`src/app.rs:39`). Proof is the control flow above, not a new run: this checkout has no `target/` or `node_modules`, so the existing tests were not executed. Priority assumed.
+- **Recommendation:** While a mutation is `pending_materialization`, content reads must return the snapshot bytes for that source hash, or a pending error, and must not return other bytes under that hash. On startup, unexpected visible bytes must not fail sibling vaults. Record the note unresolved or as a conflict and keep the snapshot. Do not overwrite bytes that are neither the pre-image nor the candidate.
+- **Fix with:** durable-state
 - **Effort:** M
-
-## Next
+- **Design:** [docs/rfc/TNS-085-pending-materialization.md](docs/rfc/TNS-085-pending-materialization.md)

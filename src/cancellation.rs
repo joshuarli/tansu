@@ -14,24 +14,21 @@ struct CancellationState {
 }
 
 impl CancellationToken {
-    /// Creates a token that has not been canceled.
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Signals cancellation to every clone; repeated calls have no effect.
+    /// Repeated calls have no effect.
     pub fn cancel(&self) {
         if self.0.cancelled.compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire).is_ok() {
             self.0.changed.notify(usize::MAX);
         }
     }
 
-    /// Returns whether cancellation has been signaled.
     pub fn is_cancelled(&self) -> bool {
         self.0.cancelled.load(Ordering::Acquire)
     }
 
-    /// Resolves once cancellation has been signaled.
     pub async fn cancelled(&self) {
         loop {
             let listener = self.0.changed.listen();

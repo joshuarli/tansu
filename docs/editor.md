@@ -28,12 +28,9 @@ provides the explicit app operation for tag changes. It preserves the body and
 unrelated frontmatter, records one undoable user edit, and refuses malformed or
 unsupported tag forms with an unavailable result. The operation returns a promise
 and refuses the edit if its note changes while tag support loads. `readNoteTags`
-reads the V1 frontmatter tag forms used by the app; the adapter does not render tags.
-
-Frontmatter stays folded and cannot be
-created or edited through the editor in either mode. The UI does not display
-frontmatter-derived tags. Tansu preserves frontmatter in the Markdown source and
-continues to read tags from it.
+reads the V1 frontmatter tag forms used by the app. The adapter does not render
+tags, and the UI does not display frontmatter-derived tags. Tansu preserves
+frontmatter in the Markdown source and still reads tags from it.
 
 Click the note title to edit its name in place. Leaving the field attempts the
 rename; failures show a notification and restore the prior name. Successful

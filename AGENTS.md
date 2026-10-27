@@ -32,5 +32,5 @@ Commands: frontend build `pnpm run build`, fixture app `make dev`, check `pnpm r
 - Loupe browser extension: [Loupe](docs/loupe.md)
 - Security and deployment: [security](docs/security.md), [deployment](docs/deployment.md)
 - Logging and backlog: [logging](docs/logging.md), [logging backlog](docs/logging-backlog.md)
-- Current design: [architecture](docs/architecture.md)
 - Deferred features: [product backlog](docs/product-backlog.md)
+- Pending materialization: [TNS-085](docs/rfc/TNS-085-pending-materialization.md)

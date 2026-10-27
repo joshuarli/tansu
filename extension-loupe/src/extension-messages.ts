@@ -4,8 +4,6 @@ export interface ListExtractorsResponse {
   extractorNames: string[];
 }
 
-// Service-worker request fields use explicit page/content names so callers can
-// Distinguish raw page snapshots from extracted reader output.
 export interface ParsePageRequest {
   action: "parsePage";
   pageHtml: string;
