@@ -30,5 +30,6 @@ jobs:
           version: 12.15.0
           runtime: node@26.12.1
           install: false
+      - run: pnpm install --frozen-lockfile
       - name: lint
         run: make lint
