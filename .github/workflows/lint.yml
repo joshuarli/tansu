@@ -31,5 +31,6 @@ jobs:
           runtime: node@26.12.1
           install: false
       - run: pnpm install --frozen-lockfile
+      - run: rustup target add x86_64-unknown-linux-musl
       - name: lint
         run: make lint

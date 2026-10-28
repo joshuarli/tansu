@@ -31,7 +31,7 @@ lint-ts: types-check
 	pnpm run lint
 
 lint-rs:
-	cargo clippy --workspace --all-targets --message-format=short -- \
+	cargo clippy --workspace --all-targets --message-format=short --target x86_64-unknown-linux-musl -- \
 		-D warnings \
 		-A clippy::too_many_arguments \
 		-A clippy::redundant_closure \
