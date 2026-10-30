@@ -7,7 +7,7 @@ License: MIT, retained in `LICENSE`.
 Imported from `src/`: `atomic-theme.ts`, `edit-helpers.ts`, `highlight.ts`,
 `image-blocks.ts`, `inline-preview.ts`, `read-only.ts`, `table-widget.ts`,
 `tree-progress.ts`, and `wiki-links.ts`; also
-`src/styles/inline-preview.css`. `AtomicCodeMirrorEditor.tsx` and
+`styles/inline-preview.css`. `AtomicCodeMirrorEditor.tsx` and
 `code-languages.ts` are excluded. Tansu imports the factories directly and
 uses `markdown({ codeLanguages: [] })`.
 
