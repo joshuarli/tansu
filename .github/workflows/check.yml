@@ -112,15 +112,39 @@ jobs:
             tansu-rust-check \
             cargo build --locked --bin tansu --target x86_64-unknown-linux-musl
 
+      - name: Build e2e image
+        run: |
+          docker build --platform linux/amd64 \
+            --build-arg NODE_VERSION="$(cat .node-version)" \
+            --build-arg PNPM_VERSION="$(node -p "require('./package.json').packageManager.split('@')[1]")" \
+            -f docker/linux-e2e-baselines.Dockerfile \
+            -t tansu-linux-e2e-baselines .
+
       - name: Chromium end-to-end tests
-        run: pnpm run test:e2e:chromium
-        env:
-          TMPDIR: ${{ github.workspace }}/.work/tmp
+        run: |
+          docker run --rm --platform linux/amd64 \
+            --user "$(id -u):$(id -g)" \
+            --ipc=host --shm-size=1g \
+            -v "$PWD:/work" \
+            -w /work \
+            -e TANSU_E2E_SERVER_BINARY=/work/.work/tmp/cargo-target/x86_64-unknown-linux-musl/debug/tansu \
+            -e TMPDIR=/work/.work/tmp \
+            -e PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
+            tansu-linux-e2e-baselines \
+            pnpm run test:e2e:chromium
 
       - name: WebKit end-to-end tests
-        run: pnpm run test:e2e:webkit
-        env:
-          TMPDIR: ${{ github.workspace }}/.work/tmp
+        run: |
+          docker run --rm --platform linux/amd64 \
+            --user "$(id -u):$(id -g)" \
+            --ipc=host --shm-size=1g \
+            -v "$PWD:/work" \
+            -w /work \
+            -e TANSU_E2E_SERVER_BINARY=/work/.work/tmp/cargo-target/x86_64-unknown-linux-musl/debug/tansu \
+            -e TMPDIR=/work/.work/tmp \
+            -e PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
+            tansu-linux-e2e-baselines \
+            pnpm run test:e2e:webkit
 
       - name: Loupe browser tests
         run: pnpm run loupe:browser
