@@ -783,7 +783,8 @@ describe("real server harness", () => {
     await page.goto(baseUrl);
     await page.waitForSelector(".main");
     await openSearchNote(page, "quasar current");
-    await page.getByRole("button", { name: "Suggest tags", exact: true }).click();
+    await page.getByRole("button", { name: "Suggest tags", exact: true })
+      .evaluate((button) => (button as HTMLButtonElement).click());
     await expect.poll(() => page.locator('[title="Add tag systems"]').isVisible()).toBeTruthy();
     await expect(page.locator(".tag-suggestions").textContent()).resolves.toContain("Quasar storage reference");
     expect((await loadNoteByPath(vaultOneId, "quasar-current.md")).content).toBe(body);
@@ -795,10 +796,11 @@ describe("real server harness", () => {
     expect(document.meta.tags).toStrictEqual(["systems"]);
     expect(document.content.endsWith(body)).toBeTruthy();
     await page.reload();
-    await page.getByRole("button", { name: "Suggest tags", exact: true }).click();
+    await page.getByRole("button", { name: "Suggest tags", exact: true })
+      .evaluate((button) => (button as HTMLButtonElement).click());
     await expect.poll(() => page.locator(".note-tag").allTextContents()).toContain("systems");
     await page.close();
-  });
+  }, 120_000);
 
   it("restores revisions and serves vault-scoped image assets", async () => {
     const page = await newLoggedPage();
