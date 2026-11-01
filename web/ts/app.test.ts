@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { IDBFactory, IDBKeyRange } from "fake-indexeddb";
 
 import { startApp, TansuApp } from "./app.ts";
+import "./app/tag-feature.ts";
 import { defaultServices, type AppServices } from "./app/services.ts";
 import {
   cacheNoteBody,
