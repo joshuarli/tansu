@@ -20,7 +20,18 @@ Rust compilation. `make check` runs the same check after installing dependencies
 Type checking is `tsc --noEmit` from the TypeScript 7 package.
 
 The supported Rust targets are `aarch64-apple-darwin`,
-`x86_64-unknown-linux-musl`, and `aarch64-unknown-linux-musl`.
+`x86_64-unknown-linux-musl`, and `aarch64-unknown-linux-musl`. CI runs the web
+half with `pnpm run check:web`, then runs `cargo check` and the Rust tests in the
+musl image from `docker/rust-check.Dockerfile`. Reproduce that half with:
+
+```sh
+pnpm run build
+docker build --platform linux/amd64 -f docker/rust-check.Dockerfile -t tansu-rust-check .
+docker run --rm --platform linux/amd64 \
+  -v "$PWD:/work" -v "$PWD/.work/tmp/cargo-target:/target" \
+  -e CARGO_TARGET_DIR=/target -w /work tansu-rust-check \
+  cargo test --locked --workspace --target x86_64-unknown-linux-musl
+```
 
 ## Run locally
 

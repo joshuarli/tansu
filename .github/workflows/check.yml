@@ -26,6 +26,7 @@ jobs:
       DEFUDDLE_RS_DIR: ${{ github.workspace }}/.work/defuddle-rs
       PNPM_CONFIG_STORE_DIR: ${{ github.workspace }}/.work/tmp/pnpm-store
       PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.work/tmp/playwright-browsers
+      TANSU_E2E_SERVER_BINARY: ${{ github.workspace }}/.work/tmp/cargo-target/x86_64-unknown-linux-musl/debug/tansu
       WASM_OPT: ${{ github.workspace }}/.work/tmp/binaryen/bin/wasm-opt
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -76,20 +77,40 @@ jobs:
         env:
           TMPDIR: ${{ github.workspace }}/.work/tmp
 
-      - name: Check
-        run: pnpm run check
+      - name: Check web
+        run: pnpm run check:web
         env:
           TMPDIR: ${{ github.workspace }}/.work/tmp
 
-      - name: Rust tests
-        run: pnpm run test:rs
-        env:
-          TMPDIR: ${{ github.workspace }}/.work/tmp
+      - name: Build Rust check image
+        run: docker build --platform linux/amd64 -f docker/rust-check.Dockerfile -t tansu-rust-check .
+
+      - name: Rust check and tests
+        run: |
+          docker run --rm --platform linux/amd64 \
+            -v "$PWD:/work" \
+            -v "$PWD/.work/tmp/cargo-target:/target" \
+            -e CARGO_TARGET_DIR=/target \
+            -w /work \
+            tansu-rust-check \
+            sh -c 'cargo check --locked --workspace --target x86_64-unknown-linux-musl \
+              && cargo test --locked --workspace --target x86_64-unknown-linux-musl'
 
       - name: Install browser dependencies
         run: pnpm run playwright:install
         env:
           TMPDIR: ${{ github.workspace }}/.work/tmp
+
+      - name: Build e2e server binary
+        run: |
+          pnpm run build:dev
+          docker run --rm --platform linux/amd64 \
+            -v "$PWD:/work" \
+            -v "$PWD/.work/tmp/cargo-target:/target" \
+            -e CARGO_TARGET_DIR=/target \
+            -w /work \
+            tansu-rust-check \
+            cargo build --locked --bin tansu --target x86_64-unknown-linux-musl
 
       - name: Chromium end-to-end tests
         run: pnpm run test:e2e:chromium
