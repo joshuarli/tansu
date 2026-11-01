@@ -1445,8 +1445,7 @@ describe("real server harness", () => {
     await page.goto(baseUrl);
     await page.waitForSelector(".main");
     await expect.poll(() => streamRequests.length).toBe(1);
-    const after = Number(new URLSearchParams(streamRequests[0]).get("after"));
-    const replayFrom = await eventReplayStart(after);
+    const replayFrom = await currentEventVersion();
 
     const original = "acceptance-replay-before.md";
     const renamed = "acceptance-replay-after.md";
@@ -1824,36 +1823,27 @@ function authRequiredResponse() {
   };
 }
 
-async function eventReplayStart(after: number): Promise<number> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 2000);
-  try {
-    const response = await fetch(`${baseUrl}/api/v2/vaults/${encodeURIComponent(vaultOneId)}/events?after=${after}`, {
-      headers: { "X-Tansu-Server-Instance": serverInstanceId },
-      signal: controller.signal,
-    });
-    const reader = response.body!.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
-    while (true) {
-      const chunk = await reader.read();
-      if (chunk.done) return after;
-      buffer += decoder.decode(chunk.value, { stream: true });
-      const blocks = buffer.split("\n\n");
-      buffer = blocks.pop() ?? "";
-      for (const block of blocks) {
-        const data = block.split("\n").find((line) => line.startsWith("data: "));
-        if (data === undefined) continue;
-        const event = JSON.parse(data.slice(6)) as V2ServerEvent;
-        return event.resyncRequired ? event.eventVersion : after;
-      }
+async function currentEventVersion(): Promise<number> {
+  const response = await fetch(`${baseUrl}/api/v2/vaults/${encodeURIComponent(vaultOneId)}/events?after=${Number.MAX_SAFE_INTEGER}`, {
+    headers: { "X-Tansu-Server-Instance": serverInstanceId },
+  });
+  const reader = response.body!.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  while (true) {
+    const chunk = await reader.read();
+    if (chunk.done) throw new Error("event stream ended before reporting its version");
+    buffer += decoder.decode(chunk.value, { stream: true });
+    const blocks = buffer.split("\n\n");
+    buffer = blocks.pop() ?? "";
+    for (const block of blocks) {
+      const data = block.split("\n").find((line) => line.startsWith("data: "));
+      if (data === undefined) continue;
+      const event = JSON.parse(data.slice(6)) as V2ServerEvent;
+      if (!event.resyncRequired) throw new Error("event stream did not report a resync version");
+      await reader.cancel();
+      return event.eventVersion;
     }
-  } catch (error) {
-    if (error instanceof Error && error.name === "AbortError") return after;
-    throw error;
-  } finally {
-    clearTimeout(timeout);
-    controller.abort();
   }
 }
 
