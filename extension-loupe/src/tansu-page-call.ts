@@ -1,9 +1,5 @@
 export type TansuPageMethod = "waitForReady" | "requestImport";
 
-function isPageApiMethod(value: unknown): value is (...values: unknown[]) => unknown {
-  return typeof value === "function";
-}
-
 export function tansuPageCall(
   tabId: number,
   globalName: string,
@@ -27,7 +23,7 @@ export function tansuPageCall(
         throw new Error("The Tansu page API is not available.");
       }
       const apiMethod: unknown = (api as Record<string, unknown>)[methodName];
-      if (!isPageApiMethod(apiMethod)) {
+      if (typeof apiMethod !== "function") {
         throw new Error("The Tansu page API is not available.");
       }
       return apiMethod(...parsedArguments);

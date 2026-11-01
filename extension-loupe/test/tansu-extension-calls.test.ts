@@ -1,7 +1,13 @@
 import assert from "node:assert/strict";
+import { runInNewContext } from "node:vm";
 import { expect, test } from "vitest";
 import { tansuPageCall } from "../src/tansu-page-call.ts";
 import { readTansuSettings } from "../src/tansu-settings.ts";
+
+function runInPageWorld(call: ReturnType<typeof tansuPageCall>, page: Record<string, unknown> = {}): unknown {
+  const pageFunction = runInNewContext(`(${call.func.toString()})`, page) as typeof call.func;
+  return pageFunction(...structuredClone(call.args));
+}
 
 test("reads the saved origin from storage that returns nothing for an empty default object", async () => {
   const stored: Record<string, unknown> = { tansuOrigin: "http://localhost:3000" };
@@ -18,12 +24,12 @@ test("delivers null image bytes to the page API", () => {
   const payload = { images: [{ id: "a", url: "u", contentType: "image/png", base64: null }] };
   const call = tansuPageCall(1, "api", "requestImport", [payload, 5]);
   const received: unknown[][] = [];
-  (globalThis as Record<string, unknown>)["api"] = {
-    requestImport: (...values: unknown[]) => received.push(values),
-  };
-  call.func(...structuredClone(call.args));
-  delete (globalThis as Record<string, unknown>)["api"];
-  expect(received).toStrictEqual([[payload, 5]]);
+  runInPageWorld(call, {
+    api: {
+      requestImport: (...values: unknown[]) => received.push(values),
+    },
+  });
+  expect(JSON.stringify(received)).toBe(JSON.stringify([[payload, 5]]));
   expect(Object.hasOwn((received[0]![0] as typeof payload).images[0]!, "base64")).toBeTruthy();
 });
 
@@ -37,19 +43,15 @@ test("rejects malformed page calls with a descriptive error", () => {
     JSON.stringify(["api", "requestImport", {}]),
     JSON.stringify("requestImport"),
   ]) {
-    assert.throws(() => call.func(encoded), /malformed Tansu page call/, encoded);
+    assert.throws(() => runInPageWorld({ ...call, args: [encoded] }), /malformed Tansu page call/, encoded);
   }
 });
 
 test("rejects page calls when the page API or method is missing", () => {
   const missingApi = tansuPageCall(1, "missing-api", "requestImport", []);
-  expect(() => missingApi.func(missingApi.args[0])).toThrow(/page API is not available/);
+  expect(() => runInPageWorld(missingApi)).toThrow(/page API is not available/);
 
   const call = tansuPageCall(1, "api", "waitForReady", []);
-  (globalThis as Record<string, unknown>)["api"] = { requestImport: () => {} };
-  try {
-    expect(() => call.func(call.args[0])).toThrow(/page API is not available/);
-  } finally {
-    delete (globalThis as Record<string, unknown>)["api"];
-  }
+  expect(() => runInPageWorld(call, { api: { requestImport: () => {} } }))
+    .toThrow(/page API is not available/);
 });
