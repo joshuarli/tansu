@@ -294,7 +294,7 @@ describe("real server harness", () => {
     const saved = page.waitForResponse((response) =>
       response.request().method() === "PUT" && response.status() === 200
     );
-    await page.locator("#editor-mount .cm-content").fill(
+    await replaceEditorContent(page,
       "# Link Hover\n\nOpen [the destination label](https://example.test/article).",
     );
     await page.keyboard.press(`${shortcutModifier()}+s`);
@@ -366,7 +366,7 @@ describe("real server harness", () => {
     const plainSave = page.waitForResponse((response) =>
       response.request().method() === "PUT" && response.status() === 200
     );
-    await page.locator("#editor-mount .cm-content").fill("# Plain Article\n\nA body without a margin note.");
+    await replaceEditorContent(page, "# Plain Article\n\nA body without a margin note.");
     await page.keyboard.press(`${shortcutModifier()}+s`);
     await plainSave;
     const article = page.locator(".editor-mount .cm-content");
@@ -378,7 +378,7 @@ describe("real server harness", () => {
     const sidenoteSave = page.waitForResponse((response) =>
       response.request().method() === "PUT" && response.status() === 200
     );
-    await page.locator("#editor-mount .cm-content").fill(
+    await replaceEditorContent(page,
       "# Article with Margin Note\n\nA sentence with a margin note.[^margin]\n\n[^margin]: A note kept in the right margin.",
     );
     await page.keyboard.press(`${shortcutModifier()}+s`);
@@ -412,8 +412,8 @@ describe("real server harness", () => {
     });
     expect(railGeometry).not.toBeNull();
     if (railGeometry === null) throw new Error("article rails are not visible");
-    expect(railGeometry.outlineTransform).toBe("matrix(1, 0, 0, 1, -100, 0)");
-    expect(railGeometry.workspaceTransform).toBe("matrix(1, 0, 0, 1, -50, 50)");
+    expect(railGeometry.outlineTransform).toBe("matrix(1, 0, 0, 1, -52, 0)");
+    expect(railGeometry.workspaceTransform).toBe("matrix(1, 0, 0, 1, 52, 0)");
     expect(railGeometry.outlineRight).toBeLessThan(railGeometry.workspaceLeft);
     expect(railGeometry.sidenotePosition).toBe("absolute");
     expect(railGeometry.sidenoteLeft).toBeGreaterThan(railGeometry.articleRight);
@@ -537,7 +537,7 @@ describe("real server harness", () => {
     await page.waitForFunction(() =>
       document.querySelector(".cm-content")?.textContent?.includes("alpha") === true,
     );
-    await page.locator(".cm-content").fill("# One\n\nalpha edited in One\n");
+    await replaceEditorContent(page, "# One\n\nalpha edited in One\n");
 
     await openSearchNote(page, "Search Fixture");
     await page.waitForFunction(() =>
@@ -566,7 +566,7 @@ describe("real server harness", () => {
     const initialSave = page.waitForResponse((response) =>
       response.request().method() === "PUT" && response.status() === 200
     );
-    await page.locator(".cm-content").fill(source);
+    await replaceEditorContent(page, source);
     await page.keyboard.press(`${shortcutModifier()}+s`);
     await initialSave;
 
@@ -808,7 +808,7 @@ describe("real server harness", () => {
     const originalSave = page.waitForResponse((response) =>
       response.request().method() === "PUT" && response.status() === 200
     );
-    await page.locator(".cm-content").fill(originalContent);
+    await replaceEditorContent(page, originalContent);
     await page.keyboard.press(`${shortcutModifier()}+s`);
     await originalSave;
     const original = await loadNoteByPath(vaultOneId, "recover.md");
@@ -816,7 +816,7 @@ describe("real server harness", () => {
     const changedSave = page.waitForResponse((response) =>
       response.request().method() === "PUT" && response.status() === 200
     );
-    await page.locator(".cm-content").fill(changedContent);
+    await replaceEditorContent(page, changedContent);
     await page.keyboard.press(`${shortcutModifier()}+s`);
     await changedSave;
     const current = await loadNoteByPath(vaultOneId, "recover.md");
@@ -939,7 +939,7 @@ describe("real server harness", () => {
     const initialSave = page.waitForResponse((response) =>
       response.request().method() === "PUT" && response.status() === 200
     );
-    await page.locator(".cm-content").fill(baseContent);
+    await replaceEditorContent(page, baseContent);
     await page.keyboard.press(`${shortcutModifier()}+s`);
     await initialSave;
     const base = await loadNoteByPath(vaultOneId, "delta-body.md");
@@ -949,7 +949,7 @@ describe("real server harness", () => {
     const referenceSave = page.waitForResponse((response) =>
       response.request().method() === "PUT" && response.status() === 200
     );
-    await page.locator(".cm-content").fill(expected);
+    await replaceEditorContent(page, expected);
     await page.keyboard.press(`${shortcutModifier()}+s`);
     await referenceSave;
     const reference = await loadNoteByPath(vaultOneId, "delta-hash-reference.md");
@@ -994,7 +994,6 @@ describe("real server harness", () => {
         response.status() === 200,
     );
     await page.locator(".cm-content").click();
-    await page.keyboard.type("# Cross Engine Lifecycle");
     await page.keyboard.press("Enter");
     await page.keyboard.press("Enter");
     await page.keyboard.press("Enter");
@@ -1003,7 +1002,7 @@ describe("real server harness", () => {
     await uiSave;
     await expectSavedContent("cross-engine-lifecycle.md", edited);
 
-    await page.keyboard.press(`${shortcutModifier()}+Shift+f`);
+    await page.keyboard.press("Control+/");
     await page.locator(".search-panel input").fill("searchable lifecycle");
     await page.waitForSelector(".search-snippet mark");
     await expect
@@ -1031,7 +1030,7 @@ describe("real server harness", () => {
     const winningSave = page.waitForResponse((response) =>
       response.request().method() === "PUT" && response.status() === 200
     );
-    await page.locator(".cm-content").fill(winningContent);
+    await replaceEditorContent(page, winningContent);
     await page.keyboard.press(`${shortcutModifier()}+s`);
     await winningSave;
     const winningNote = await loadNoteByPath(vaultOneId, "cross-engine-renamed.md");
@@ -1040,7 +1039,7 @@ describe("real server harness", () => {
     const draftSave = page.waitForResponse((response) =>
       response.request().method() === "PUT" && response.status() === 200
     );
-    await page.locator(".cm-content").fill(draftContent);
+    await replaceEditorContent(page, draftContent);
     await page.keyboard.press(`${shortcutModifier()}+s`);
     await draftSave;
     const draftSource = await loadNoteByPath(vaultOneId, "conflict-draft-source.md");
@@ -1135,7 +1134,8 @@ describe("real server harness", () => {
     await createCodeMirrorNote(page, "Acceptance Close Tab");
     const content = "# Acceptance Close Tab\n\nwritten just before the tab closed\n";
 
-    await page.locator("#editor-mount .cm-content").fill(content);
+    await replaceEditorContent(page, content);
+    await page.locator(".tab.active").hover();
     await page.locator(".tab.active .tab-close").click();
     await page.waitForSelector(".tab", { state: "detached" });
 
@@ -1160,7 +1160,7 @@ describe("real server harness", () => {
     const content = "# Acceptance Restart\n\nsaved while the server restarted\n";
     const heldSave = holdNextNoteSave(page);
 
-    await page.locator("#editor-mount .cm-content").fill(content);
+    await replaceEditorContent(page, content);
     const route = await heldSave;
     await expect(readVaultFile("acceptance-restart.md")).resolves.not.toBe(content);
     await stopFixtureServer();
@@ -1186,7 +1186,7 @@ describe("real server harness", () => {
     const base = await waitForNoteByPath("acceptance-conflict.md");
     const heldSave = holdNextNoteSave(page);
 
-    await page.locator("#editor-mount .cm-content").fill(draftContent);
+    await replaceEditorContent(page, draftContent);
     const route = await heldSave;
     const winning = await v2Request(vaultOneId, `/notes/${base.meta.noteId}`, {
       method: "PUT",
@@ -1237,7 +1237,7 @@ describe("real server harness", () => {
       return mutationIds.length <= 2 ? route.abort("connectionfailed") : route.fallback();
     });
 
-    await page.locator("#editor-mount .cm-content").fill(content);
+    await replaceEditorContent(page, content);
 
     await expect.poll(() => readVaultFile("acceptance-retry.md"), { timeout: 15_000 }).toBe(content);
     expect(mutationIds).toHaveLength(3);
@@ -1275,7 +1275,10 @@ describe("real server harness", () => {
       await expectMatchesBaseline(page, `${theme}-note`);
 
       await page.keyboard.press(`${shortcutModifier()}+k`);
-      await page.locator(".command-panel .command-input").waitFor({ state: "visible" });
+      const paletteInput = page.locator(".command-panel .command-input");
+      await paletteInput.waitFor({ state: "visible" });
+      await paletteInput.fill(">");
+      await page.locator(".palette-command-row").first().waitFor();
       await page.evaluate(() => document.fonts.ready);
       await expectMatchesBaseline(page, `${theme}-command-palette`);
       await context.close();
@@ -1345,7 +1348,7 @@ describe("real server harness", () => {
     await cycle();
     await cycle();
     await createCodeMirrorNote(page, "Acceptance Leak Paste");
-    await page.locator("#editor-mount .cm-content").fill("# Acceptance Leak Paste\n\n");
+    await replaceEditorContent(page, "# Acceptance Leak Paste\n\n");
     for (let pasted = 0; pasted < 3; pasted += 1) {
       await page.keyboard.press("Control+End");
       const uploaded = page.waitForResponse((response) =>
@@ -1378,7 +1381,7 @@ describe("real server harness", () => {
     await createCodeMirrorNote(page, "Acceptance Auth Upload");
     await waitForNoteByPath("acceptance-auth-upload.md");
     const content = "# Acceptance Auth Upload\n\ntyped before the session expired\n";
-    await page.locator("#editor-mount .cm-content").fill(content);
+    await replaceEditorContent(page, content);
     await expect.poll(() => readVaultFile("acceptance-auth-upload.md"), { timeout: 15_000 }).toBe(content);
     let expired = false;
     await page.route("**/api/v2/**", (route) => expired ? route.fulfill(authRequiredResponse()) : route.fallback());
@@ -1722,6 +1725,12 @@ async function loadNoteByPath(vaultId: string, path: string): Promise<TestNoteDo
     .then((response) => response.json() as Promise<TestNoteDocument>);
 }
 
+async function replaceEditorContent(page: Page, content: string): Promise<void> {
+  await page.locator("#editor-mount .cm-content").click();
+  await page.keyboard.press(`${shortcutModifier()}+a`);
+  await page.keyboard.insertText(content);
+}
+
 async function createCodeMirrorNote(page: Page, title: string): Promise<void> {
   await runPaletteCommand(page, "create");
   await page.locator("#editor-mount .cm-editor .cm-content").click();
@@ -1732,6 +1741,8 @@ async function createCodeMirrorNote(page: Page, title: string): Promise<void> {
   );
   await expect.poll(() => page.locator("#editor-mount .cm-editor .cm-content").isVisible())
     .toBe(true);
+  await expect.poll(() => page.locator("#editor-mount .cm-editor .cm-content").textContent())
+    .toContain(`# ${title}`);
 }
 
 async function runPaletteCommand(page: Page, commandID: string): Promise<void> {
