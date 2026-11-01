@@ -1823,32 +1823,39 @@ async function readEventFramesUntil(
   after: number,
   done: (event: V2ServerEvent) => boolean,
 ): Promise<string[]> {
-  const controller = new AbortController();
-  const response = await fetch(`${baseUrl}/api/v2/vaults/${encodeURIComponent(vaultOneId)}/events?after=${after}`, {
-    headers: { "X-Tansu-Server-Instance": serverInstanceId },
-    signal: controller.signal,
-  });
-  const reader = response.body!.getReader();
-  const decoder = new TextDecoder();
   const frames: string[] = [];
-  let buffer = "";
-  try {
-    while (true) {
-      const chunk = await reader.read();
-      if (chunk.done) throw new Error("event stream ended before the awaited event");
-      buffer += decoder.decode(chunk.value, { stream: true });
-      const blocks = buffer.split("\n\n");
-      buffer = blocks.pop() ?? "";
-      for (const block of blocks) {
-        const data = block.split("\n").find((line) => line.startsWith("data: "));
-        if (data === undefined) continue;
-        frames.push(block);
-        if (done(JSON.parse(data.slice(6)))) return frames;
+  let cursor = after;
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    const controller = new AbortController();
+    try {
+      const response = await fetch(`${baseUrl}/api/v2/vaults/${encodeURIComponent(vaultOneId)}/events?after=${cursor}`, {
+        headers: { "X-Tansu-Server-Instance": serverInstanceId },
+        signal: controller.signal,
+      });
+      const reader = response.body!.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      while (true) {
+        const chunk = await reader.read();
+        if (chunk.done) break;
+        buffer += decoder.decode(chunk.value, { stream: true });
+        const blocks = buffer.split("\n\n");
+        buffer = blocks.pop() ?? "";
+        for (const block of blocks) {
+          const data = block.split("\n").find((line) => line.startsWith("data: "));
+          if (data === undefined) continue;
+          frames.push(block);
+          const event = JSON.parse(data.slice(6)) as V2ServerEvent;
+          cursor = event.eventVersion;
+          if (done(event)) return frames;
+        }
       }
+    } finally {
+      controller.abort();
     }
-  } finally {
-    controller.abort();
+    await new Promise((resolve) => setTimeout(resolve, 100));
   }
+  throw new Error("event stream ended before the awaited event");
 }
 
 async function pasteImage(page: Page): Promise<void> {
