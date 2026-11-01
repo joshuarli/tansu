@@ -1446,6 +1446,7 @@ describe("real server harness", () => {
     await page.waitForSelector(".main");
     await expect.poll(() => streamRequests.length).toBe(1);
     const after = Number(new URLSearchParams(streamRequests[0]).get("after"));
+    const replayFrom = await eventReplayStart(after);
 
     const original = "acceptance-replay-before.md";
     const renamed = "acceptance-replay-after.md";
@@ -1472,7 +1473,7 @@ describe("real server harness", () => {
       }),
     }).then((response) => response.json()) as { outcome: { state: string } };
     expect(rename.outcome.state).toBe("accepted");
-    replayFrames = await readEventFramesUntil(after, (event) =>
+    replayFrames = await readEventFramesUntil(replayFrom, (event) =>
       event.update.kind === "noteChanged" && event.update.note.noteId === meta.noteId &&
       event.update.note.path === renamed);
     staleFrame = replayFrames.find((frame) => frame.includes(`"path":"${original}"`)) ?? "";
@@ -1821,6 +1822,39 @@ function authRequiredResponse() {
     headers: { ...v2ResponseHeaders(), "Content-Type": "application/json" },
     body: JSON.stringify({ error: { code: "auth_required" } }),
   };
+}
+
+async function eventReplayStart(after: number): Promise<number> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 2000);
+  try {
+    const response = await fetch(`${baseUrl}/api/v2/vaults/${encodeURIComponent(vaultOneId)}/events?after=${after}`, {
+      headers: { "X-Tansu-Server-Instance": serverInstanceId },
+      signal: controller.signal,
+    });
+    const reader = response.body!.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    while (true) {
+      const chunk = await reader.read();
+      if (chunk.done) return after;
+      buffer += decoder.decode(chunk.value, { stream: true });
+      const blocks = buffer.split("\n\n");
+      buffer = blocks.pop() ?? "";
+      for (const block of blocks) {
+        const data = block.split("\n").find((line) => line.startsWith("data: "));
+        if (data === undefined) continue;
+        const event = JSON.parse(data.slice(6)) as V2ServerEvent;
+        return event.resyncRequired ? event.eventVersion : after;
+      }
+    }
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") return after;
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+    controller.abort();
+  }
 }
 
 async function readEventFramesUntil(
