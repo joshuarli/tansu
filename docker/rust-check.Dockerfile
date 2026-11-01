@@ -1,18 +1,18 @@
-FROM alpine:edge
+FROM alpine:edge@sha256:020dfcbaaf4cc1078bf2d9c7ba31a8466e334061dcd2f248001d68f79e52c000
 
 ARG TARGET=x86_64-unknown-linux-musl
 
 RUN apk add --no-cache \
-  ca-certificates \
-  clang22 \
-  curl \
-  gcc \
-  git \
-  lld22 \
-  llvm22 \
-  musl-dev \
-  openssl \
-  tar
+  ca-certificates=20261020-r0 \
+  clang22=22.1.8-r1 \
+  curl=8.23.0-r0 \
+  gcc=15.2.0-r9 \
+  git=2.56.0-r0 \
+  lld22=22.1.8-r1 \
+  llvm22=22.1.8-r1 \
+  musl-dev=1.2.6-r6 \
+  openssl=3.5.9-r0 \
+  tar=1.35-r5
 
 RUN curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain none
 
