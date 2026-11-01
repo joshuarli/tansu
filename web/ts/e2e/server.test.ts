@@ -796,6 +796,8 @@ describe("real server harness", () => {
     expect(document.meta.tags).toStrictEqual(["systems"]);
     expect(document.content.endsWith(body)).toBeTruthy();
     await page.reload();
+    await page.waitForSelector(".main");
+    await openSearchNote(page, "quasar current");
     await page.getByRole("button", { name: "Suggest tags", exact: true })
       .evaluate((button) => (button as HTMLButtonElement).click());
     await expect.poll(() => page.locator(".note-tag").allTextContents()).toContain("systems");
@@ -1827,8 +1829,9 @@ async function readEventFramesUntil(
 ): Promise<string[]> {
   const frames: string[] = [];
   let cursor = after;
-  for (let attempt = 0; attempt < 50; attempt += 1) {
+  for (let attempt = 0; attempt < 30; attempt += 1) {
     const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 1000);
     try {
       const response = await fetch(`${baseUrl}/api/v2/vaults/${encodeURIComponent(vaultOneId)}/events?after=${cursor}`, {
         headers: { "X-Tansu-Server-Instance": serverInstanceId },
@@ -1852,12 +1855,15 @@ async function readEventFramesUntil(
           if (done(event)) return frames;
         }
       }
+    } catch (error) {
+      if (!(error instanceof Error && error.name === "AbortError")) throw error;
     } finally {
+      clearTimeout(timeout);
       controller.abort();
     }
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
-  throw new Error("event stream ended before the awaited event");
+  throw new Error("event stream did not deliver the awaited event");
 }
 
 async function pasteImage(page: Page): Promise<void> {
