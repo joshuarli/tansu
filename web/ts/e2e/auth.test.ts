@@ -37,13 +37,19 @@ describe("authenticated Chromium server", () => {
       XDG_CONFIG_HOME: fixture.configHome,
       XDG_DATA_HOME: fixture.dataHome,
     };
-    execFileSync("cargo", ["build", "--quiet", "--bin", "tansu"], {
-      cwd: process.cwd(),
-      env: environment,
-      stdio: "pipe",
-    });
-    const targetDirectory = resolve(process.env["CARGO_TARGET_DIR"] ?? "target");
-    const serverBinary = join(targetDirectory, "debug", "tansu");
+    const supplied = process.env["TANSU_E2E_SERVER_BINARY"];
+    let serverBinary: string;
+    if (supplied === undefined || supplied === "") {
+      execFileSync("cargo", ["build", "--quiet", "--bin", "tansu"], {
+        cwd: process.cwd(),
+        env: environment,
+        stdio: "pipe",
+      });
+      const targetDirectory = resolve(process.env["CARGO_TARGET_DIR"] ?? "target");
+      serverBinary = join(targetDirectory, "debug", "tansu");
+    } else {
+      serverBinary = resolve(supplied);
+    }
     execFileSync(serverBinary, [
       "config", "init", "--vault", "One", fixture.vaultOne,
       "--vault", "Two", fixture.vaultTwo,
