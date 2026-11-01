@@ -1,6 +1,10 @@
 FROM alpine:edge@sha256:020dfcbaaf4cc1078bf2d9c7ba31a8466e334061dcd2f248001d68f79e52c000
 
 ARG TARGET=x86_64-unknown-linux-musl
+ARG TARGETARCH
+ARG RUSTUP_VERSION=1.29.1
+ARG RUSTUP_X86_64_SHA256=331228566cc931f32cd684f9bebc5956a5e5d7394c8d5de595f196a658ab98e6
+ARG RUSTUP_AARCH64_SHA256=1ddf36182ac5d1782dbeefcb9bea7f5f9412d88f4a0d5047b1564a223624e8c6
 
 RUN apk add --no-cache \
   ca-certificates=20261020-r0 \
@@ -14,7 +18,16 @@ RUN apk add --no-cache \
   openssl=3.5.9-r0 \
   tar=1.35-r5
 
-RUN curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain none
+RUN case "$TARGETARCH" in \
+        amd64) arch=x86_64; sum="$RUSTUP_X86_64_SHA256" ;; \
+        arm64) arch=aarch64; sum="$RUSTUP_AARCH64_SHA256" ;; \
+        *) echo "unsupported TARGETARCH: $TARGETARCH" >&2; exit 1 ;; \
+    esac \
+    && curl -fsSL -o /tmp/rustup-init "https://static.rust-lang.org/rustup/archive/${RUSTUP_VERSION}/${arch}-unknown-linux-musl/rustup-init" \
+    && echo "$sum  /tmp/rustup-init" | sha256sum -c - \
+    && chmod +x /tmp/rustup-init \
+    && /tmp/rustup-init -y --default-toolchain none \
+    && rm /tmp/rustup-init
 
 ENV PATH="/root/.cargo/bin:/usr/lib/llvm22/bin:${PATH}" \
   CC=clang \
