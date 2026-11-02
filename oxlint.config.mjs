@@ -5,6 +5,7 @@ export default defineConfig({
   ignorePatterns: [
     "web/dist/**",
     "web/ts/editor/vendor/atomic/**",
+    "web/ts/skin/vendor/alembic-ornaments/**",
     "web/ts/editor/vendor/jsquash-webp/codec/enc/webp_enc.js",
     "oxlint.config.mjs",
     "vitest*.config.ts",
