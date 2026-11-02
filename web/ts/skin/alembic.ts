@@ -1,4 +1,4 @@
-import { fitFrame, type FramePreset } from "./vendor/alembic-ornaments/index.ts";
+import { fitFrame, generateOrnament, type FramePreset, type OrnamentPreset } from "./vendor/alembic-ornaments/index.ts";
 
 type FrameSurface = {
   selector: string;
@@ -10,6 +10,18 @@ const FRAME_SURFACES: readonly FrameSurface[] = [
   { selector: ".command-panel", preset: "border", seed: 4 },
   { selector: ".modal-panel", preset: "border", seed: 9 },
   { selector: ".auth-card", preset: "corners", seed: 3 },
+];
+
+type NamedOrnament = {
+  name: string;
+  preset: OrnamentPreset;
+  seed: number;
+};
+
+const NAMED_ORNAMENTS: readonly NamedOrnament[] = [
+  { name: "vine", preset: "vine", seed: 7 },
+  { name: "garland", preset: "garland", seed: 5 },
+  { name: "sprig", preset: "sprig", seed: 11 },
 ];
 
 const FRAME_LAYER_CLASS = "skin-frame-layer";
@@ -97,7 +109,16 @@ function isFrameLayer(node: Node): boolean {
   return node instanceof Element && node.closest(`.${FRAME_LAYER_CLASS}`) !== null;
 }
 
+function publishOrnaments(target: HTMLElement): void {
+  for (const { name, preset, seed } of NAMED_ORNAMENTS) {
+    const ornament = generateOrnament({ preset, seed });
+    target.style.setProperty(`--skin-${name}`, `url("data:image/svg+xml,${encodeURIComponent(ornament.svg)}")`);
+    target.style.setProperty(`--skin-${name}-aspect`, String(ornament.width / ornament.height));
+  }
+}
+
 export function installAlembicSkin(root: HTMLElement): void {
+  publishOrnaments(document.documentElement);
   const decorator = new FrameDecorator();
   decorator.decorateTree(root);
   new MutationObserver((records) => {

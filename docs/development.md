@@ -54,17 +54,24 @@ administration, remote access, and backup procedures, see
 ## Skins
 
 A skin restyles the app chrome. It is separate from the `light`, `dark`, and
-`paper` color themes. `default` is the shipped look. `alembic` adds a serif
-face, square corners, and woodcut frames from the vendored
-[Alembic Ornaments](../web/ts/skin/vendor/alembic-ornaments/UPSTREAM.md)
-around the command palette, dialogs, and the auth card.
+`paper` color themes. `default` is the shipped look. `alembic` re-tunes each
+color theme (cream paper, or near-black), adds paper grain, sets prose in a
+Garamond stack and chrome in Inter, and draws woodcut ornaments from the
+vendored
+[Alembic Ornaments](../web/ts/skin/vendor/alembic-ornaments/UPSTREAM.md):
+frames around the command palette, dialogs, and the auth card; a vine under the
+note title; a sprig above the outline and a running tailpiece under the page;
+and a garland title page when no note is open.
 
 `TANSU_SKIN` selects the skin when the frontend is built. `pnpm run build`
 defaults to `default`, so the alembic code and its drawings stay out of release
 assets. `pnpm run build:dev`, and so `make dev`, defaults to `alembic`. The
 browser and Loupe e2e scripts pin `default`. The skin's CSS lives at the end of
 `web/static/app.css` under `:root[data-skin="alembic"]`. The frame size of each
-surface is its `--skin-frame-size` property.
+surface is its `--skin-frame-size` property. Fixed ornaments are published as
+`--skin-vine`, `--skin-garland`, and `--skin-sprig` masks, with matching
+`-aspect` properties, so CSS places them without touching the DOM that the view
+reconciler patches.
 
 ## Build
 
