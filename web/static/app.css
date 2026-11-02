@@ -2600,3 +2600,29 @@ button {
     max-height: min(68dvh, 680px);
   }
 }
+
+:root[data-skin="alembic"] {
+  --font-body: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
+  --radius-control: 2px;
+  --radius-panel: 0;
+}
+
+:root[data-skin="alembic"] .skin-frame-layer {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  color: var(--color-text-muted);
+}
+
+:root[data-skin="alembic"] :is(.command-panel, .modal-panel, .auth-card) {
+  --skin-frame-size: 22px;
+  padding: calc(var(--skin-frame-size) + 6px);
+  border: 0;
+  isolation: isolate;
+}
+
+:root[data-skin="alembic"] .auth-card {
+  --skin-frame-size: 26px;
+  position: relative;
+}

@@ -9,7 +9,7 @@
     "lint": "oxlint --config oxlint.config.mjs",
     "typecheck": "pnpm run loupe:wasm && tsc --noEmit --pretty false",
     "test": "vitest run",
-    "test:browser": "TANSU_LOGS=buffer pnpm run build:dev && PLAYWRIGHT_BROWSERS_PATH=${PLAYWRIGHT_BROWSERS_PATH:-.work/tmp/playwright-browsers} vitest run --config vitest.e2e.config.ts",
+    "test:browser": "TANSU_LOGS=buffer TANSU_SKIN=default pnpm run build:dev && PLAYWRIGHT_BROWSERS_PATH=${PLAYWRIGHT_BROWSERS_PATH:-.work/tmp/playwright-browsers} vitest run --config vitest.e2e.config.ts",
     "loupe:wasm": "node scripts/build-defuddle-wasm.mjs",
     "loupe:build": "pnpm run loupe:wasm && NODE_ENV=development node scripts/build-loupe.mjs",
     "loupe:dist": "pnpm run loupe:wasm && NODE_ENV=production node scripts/build-loupe.mjs",
@@ -23,7 +23,7 @@
     "test:acceptance": "pnpm run test:app-interleavings && pnpm run test:browser -- -t acceptance:",
     "test:e2e:chromium": "TANSU_E2E_BROWSER=chromium pnpm run test:browser",
     "test:e2e:webkit": "TANSU_E2E_BROWSER=webkit pnpm run test:browser",
-    "test:e2e:loupe": "pnpm run loupe:build && pnpm run build:dev && PLAYWRIGHT_BROWSERS_PATH=${PLAYWRIGHT_BROWSERS_PATH:-.work/tmp/playwright-browsers} vitest run --config vitest.loupe.config.ts",
+    "test:e2e:loupe": "pnpm run loupe:build && TANSU_SKIN=default pnpm run build:dev && PLAYWRIGHT_BROWSERS_PATH=${PLAYWRIGHT_BROWSERS_PATH:-.work/tmp/playwright-browsers} vitest run --config vitest.loupe.config.ts",
     "check": "pnpm run check:web && cargo check -q",
     "check:web": "pnpm run types:check && pnpm run lint && pnpm run typecheck && pnpm run test"
   },

@@ -51,6 +51,21 @@ For server settings, see [Configuration](configuration.md). For passkey
 administration, remote access, and backup procedures, see
 [Deployment](deployment.md).
 
+## Skins
+
+A skin restyles the app chrome. It is separate from the `light`, `dark`, and
+`paper` color themes. `default` is the shipped look. `alembic` adds a serif
+face, square corners, and woodcut frames from the vendored
+[Alembic Ornaments](../web/ts/skin/vendor/alembic-ornaments/UPSTREAM.md)
+around the command palette, dialogs, and the auth card.
+
+`TANSU_SKIN` selects the skin when the frontend is built. `pnpm run build`
+defaults to `default`, so the alembic code and its drawings stay out of release
+assets. `pnpm run build:dev`, and so `make dev`, defaults to `alembic`. The
+browser and Loupe e2e scripts pin `default`. The skin's CSS lives at the end of
+`web/static/app.css` under `:root[data-skin="alembic"]`. The frame size of each
+surface is its `--skin-frame-size` property.
+
 ## Build
 
 `pnpm run build` creates fingerprinted frontend assets and a manifest under

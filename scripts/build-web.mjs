@@ -8,6 +8,8 @@ const hmr = mode === "development" && process.env.TANSU_WEB_HMR === "1";
 const root = resolve("web");
 const dist = resolve(root, "dist");
 const logMode = process.env.TANSU_LOGS ?? (mode === "production" ? "off" : "pretty");
+const skin = process.env.TANSU_SKIN ?? (mode === "production" ? "default" : "alembic");
+if (skin !== "default" && skin !== "alembic") throw new Error(`Unsupported TANSU_SKIN: ${skin}`);
 const encoderBaseUrl = await webpEncoderBaseUrl();
 const encoderAssets = await webpEncoderAssets();
 
@@ -18,6 +20,7 @@ const bundles = await build({
   define: {
     "process.env.NODE_ENV": JSON.stringify(mode),
     "process.env.TANSU_LOGS": JSON.stringify(logMode),
+    "process.env.TANSU_SKIN": JSON.stringify(skin),
     "process.env.TANSU_WEBP_ENCODER_URL": JSON.stringify(`${encoderBaseUrl}/encode.js`),
   },
   build: {
