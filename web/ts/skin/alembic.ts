@@ -7,6 +7,8 @@ type FrameSurface = {
 };
 
 const FRAME_SURFACES: readonly FrameSurface[] = [
+  { selector: ".settings-panel", preset: "block", seed: 2 },
+  { selector: ".history-edge-panel", preset: "block", seed: 6 },
   { selector: ".command-panel", preset: "border", seed: 4 },
   { selector: ".modal-panel", preset: "border", seed: 9 },
   { selector: ".auth-card", preset: "corners", seed: 3 },
