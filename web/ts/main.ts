@@ -10,7 +10,7 @@ installClientLogCapture();
 if (process.env["TANSU_SKIN"] === "alembic") {
   document.documentElement.dataset["skin"] = "alembic";
   void import("./skin/alembic.ts").then(({ installAlembicSkin }) => {
-    installAlembicSkin(root);
+    installAlembicSkin(document.documentElement);
   });
 }
 startApp(root);

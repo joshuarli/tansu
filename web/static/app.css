@@ -2668,21 +2668,6 @@ button {
   --shadow-floating: 0 10px 34px rgb(0 0 0 / 70%);
 }
 
-:root[data-skin="alembic"] body::before {
-  content: "";
-  position: fixed;
-  inset: 0;
-  z-index: 1000;
-  pointer-events: none;
-  opacity: 0.09;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='1.1' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1.4 -0.2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
-}
-
-:root[data-skin="alembic"][data-theme="dark"] body::before {
-  filter: invert(1);
-  opacity: 0.07;
-}
-
 :root[data-skin="alembic"] :is(.topbar, .tab, .text-button, .primary-button, .modal-header, .command-field, .palette-entry, .note-outline, .floating-controls, .statusbar) {
   font-family: var(--font-chrome);
 }
@@ -2726,16 +2711,6 @@ button {
   letter-spacing: 0.01em;
 }
 
-:root[data-skin="alembic"] .note-outline::before {
-  content: "";
-  display: block;
-  width: 56px;
-  aspect-ratio: var(--skin-sprig-aspect);
-  margin: 0 0 10px 10px;
-  background: var(--color-text-subtle);
-  mask: var(--skin-sprig) center / 100% 100% no-repeat;
-}
-
 :root[data-skin="alembic"] .selection-toolbar {
   border-radius: 2px;
   box-shadow: inset 0 0 0 1px var(--color-border), var(--shadow-floating);
@@ -2750,18 +2725,16 @@ button {
 :root[data-skin="alembic"] .editor-mount .document-title::after {
   content: "";
   display: block;
-  width: min(100%, 380px);
+  width: min(100%, 240px);
   aspect-ratio: var(--skin-vine-aspect);
-  margin: 6px 0 -8px -2px;
-  background: var(--color-text);
+  margin: 4px 0 -4px -2px;
+  background: var(--color-text-muted);
   mask: var(--skin-vine) center / 100% 100% no-repeat;
-  opacity: 0.85;
 }
 
 :root[data-skin="alembic"] .workspace > .empty-state:not(.unavailable-state) {
   display: grid;
   min-height: 70vh;
-  gap: 22px;
 }
 
 :root[data-skin="alembic"] .empty-title {
@@ -2771,50 +2744,35 @@ button {
   font-style: italic;
 }
 
-:root[data-skin="alembic"] .empty-state::before {
-  content: "";
-  width: 280px;
-  aspect-ratio: var(--skin-garland-aspect);
-  background: var(--color-text);
-  mask: var(--skin-garland) center / 100% 100% no-repeat;
-  opacity: 0.85;
-}
-
-:root[data-skin="alembic"] .empty-state::after {
-  content: "";
-  width: 52px;
-  aspect-ratio: var(--skin-sprig-aspect);
-  background: var(--color-text-subtle);
-  mask: var(--skin-sprig) center / 100% 100% no-repeat;
-}
-
-:root[data-skin="alembic"] .workspace:has(> .editor-mount:not([hidden]))::after {
-  content: "";
-  flex: 0 0 auto;
-  align-self: center;
-  width: 38px;
-  aspect-ratio: var(--skin-sprig-aspect);
-  margin: 6px 0 14px;
-  background: var(--color-text-subtle);
-  mask: var(--skin-sprig) center / 100% 100% no-repeat;
-}
-
-:root[data-skin="alembic"] .skin-frame-layer {
-  position: absolute;
-  inset: 0;
-  z-index: -1;
-  pointer-events: none;
-  color: var(--color-text-muted);
+:root[data-skin="alembic"] .modal-panel :is(input, textarea, select) {
+  border: 1px solid var(--color-border);
+  border-radius: 2px;
+  padding: 6px 8px;
 }
 
 :root[data-skin="alembic"] :is(.command-panel, .modal-panel, .auth-card) {
-  --skin-frame-size: 22px;
-  padding: calc(var(--skin-frame-size) + 6px);
-  border: 0;
-  isolation: isolate;
+  border: 1px solid var(--color-border);
 }
 
-:root[data-skin="alembic"] .auth-card {
-  --skin-frame-size: 26px;
-  position: relative;
+:root[data-skin="alembic"] .editor-mount .cm-line.cm-atomic-hr::after {
+  top: 50%;
+  right: auto;
+  left: 50%;
+  width: 240px;
+  height: 38px;
+  margin-top: -19px;
+  transform: translateX(-50%);
+  border-top: 0;
+  background: var(--color-text-muted);
+  mask: var(--skin-vine) center / 100% 100% no-repeat;
+}
+
+:root[data-skin="alembic"] .editor-mount .cm-content::after {
+  content: "";
+  display: block;
+  width: 34px;
+  aspect-ratio: var(--skin-sprig-aspect);
+  margin: 56px auto 0;
+  background: var(--color-text-subtle);
+  mask: var(--skin-sprig) center / 100% 100% no-repeat;
 }

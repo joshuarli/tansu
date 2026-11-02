@@ -5,7 +5,9 @@ Commit: `ec6f48f574e8a1b43b184bfeddd0c4cea140c455` (0.1.0)
 License: MIT, retained in `LICENSE`.
 
 Imported from `src/`: `index.ts` and `internal/*.ts`. The React entry
-`react.tsx` is excluded; `skin/alembic.ts` draws frames with `fitFrame`.
+`react.tsx` is excluded; `skin/alembic.ts` uses only `generateOrnament`. The
+frame code in `internal/frames.ts` is kept so the closure stays identical to
+upstream.
 
 Local patch: every file starts with `// @ts-nocheck` because upstream is not
 written for `noUncheckedIndexedAccess` and `exactOptionalPropertyTypes`.

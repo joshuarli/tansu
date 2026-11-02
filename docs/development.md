@@ -54,24 +54,23 @@ administration, remote access, and backup procedures, see
 ## Skins
 
 A skin restyles the app chrome. It is separate from the `light`, `dark`, and
-`paper` color themes. `default` is the shipped look. `alembic` re-tunes each
-color theme (cream paper, or near-black), adds paper grain, sets prose in a
-Garamond stack and chrome in Inter, and draws woodcut ornaments from the
+`paper` color themes. `default` is the shipped look. `alembic` treats the note
+as a printed page. Chrome stays plain: Inter, hairlines, and square corners
+over re-tuned cream or near-black color themes, with prose set in a Garamond
+stack. Ornament appears only where a printer would put it, drawn from the
 vendored
-[Alembic Ornaments](../web/ts/skin/vendor/alembic-ornaments/UPSTREAM.md):
-frames around the command palette, dialogs, and the auth card; a vine under the
-note title; a sprig above the outline and a running tailpiece under the page;
-and a garland title page when no note is open.
+[Alembic Ornaments](../web/ts/skin/vendor/alembic-ornaments/UPSTREAM.md): a
+vine rule under the note title, a vine for a Markdown thematic break, and a
+sprig at the end of the note. With no note open, the title page is a plain
+italic line. Add ornament only for document structure, not for chrome.
 
 `TANSU_SKIN` selects the skin when the frontend is built. `pnpm run build`
 defaults to `default`, so the alembic code and its drawings stay out of release
 assets. `pnpm run build:dev`, and so `make dev`, defaults to `alembic`. The
-browser and Loupe e2e scripts pin `default`. The skin's CSS lives at the end of
-`web/static/app.css` under `:root[data-skin="alembic"]`. The frame size of each
-surface is its `--skin-frame-size` property. Fixed ornaments are published as
-`--skin-vine`, `--skin-garland`, and `--skin-sprig` masks, with matching
-`-aspect` properties, so CSS places them without touching the DOM that the view
-reconciler patches.
+browser and Loupe e2e scripts pin `default`. The skin's CSS lives at the end of `web/static/app.css` under
+`:root[data-skin="alembic"]`. The ornaments are published once as `--skin-vine`
+and `--skin-sprig` masks, with matching `-aspect` properties, so CSS places
+them without touching DOM that the view reconciler patches.
 
 ## Build
 
