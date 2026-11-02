@@ -54,23 +54,13 @@ administration, remote access, and backup procedures, see
 ## Skins
 
 A skin restyles the app chrome. It is separate from the `light`, `dark`, and
-`paper` color themes. `default` is the shipped look. `alembic` treats the note
-as a printed page. Chrome stays plain: Inter, hairlines, and square corners
-over re-tuned cream or near-black color themes, with prose set in a Garamond
-stack. Ornament appears only where a printer would put it, drawn from the
-vendored
-[Alembic Ornaments](../web/ts/skin/vendor/alembic-ornaments/UPSTREAM.md): a
-vine rule under the note title, a vine for a Markdown thematic break, and a
-sprig at the end of the note. With no note open, the title page is a plain
-italic line. Add ornament only for document structure, not for chrome.
+`paper` color themes. `default` is the shipped look.
 
-`TANSU_SKIN` selects the skin when the frontend is built. `pnpm run build`
-defaults to `default`, so the alembic code and its drawings stay out of release
-assets. `pnpm run build:dev`, and so `make dev`, defaults to `alembic`. The
-browser and Loupe e2e scripts pin `default`. The skin's CSS lives at the end of `web/static/app.css` under
-`:root[data-skin="alembic"]`. The ornaments are published once as `--skin-vine`
-and `--skin-sprig` masks, with matching `-aspect` properties, so CSS places
-them without touching DOM that the view reconciler patches.
+`TANSU_SKIN` selects the skin when the frontend is built and must name an entry
+in the `skins` list in `scripts/build-web.mjs`. The build defines the name as
+`process.env.TANSU_SKIN`, and `web/ts/main.ts` publishes a non-default name as
+`data-skin` on the root element. A skin's CSS lives at the end of
+`web/static/app.css` under `:root[data-skin="<name>"]`.
 
 ## Build
 
