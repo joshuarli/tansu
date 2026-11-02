@@ -59,12 +59,9 @@ color theme (cream paper, or near-black), adds paper grain, sets prose in a
 Garamond stack and chrome in Inter, and draws woodcut ornaments from the
 vendored
 [Alembic Ornaments](../web/ts/skin/vendor/alembic-ornaments/UPSTREAM.md):
-frames around the command palette, dialogs, history panels, and the auth card
-(settings and history use the `block` frame); a vine under the note title and
-each dialog header; a `tansu` wordmark with a garland in the topbar; a sprig
-above the outline and a running tailpiece under the page; a garland title page
-when no note is open; and a cream sheet on a darker backdrop in reading mode.
-A frame layer inside a scrolling panel scrolls with its content.
+frames around the command palette, dialogs, and the auth card; a vine under the
+note title; a sprig above the outline and a running tailpiece under the page;
+and a garland title page when no note is open.
 
 `TANSU_SKIN` selects the skin when the frontend is built. `pnpm run build`
 defaults to `default`, so the alembic code and its drawings stay out of release

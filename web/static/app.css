@@ -2611,8 +2611,7 @@ button {
   font-family: var(--font-chrome);
 }
 
-:root[data-skin="alembic"][data-theme="light"],
-:root[data-skin="alembic"] .main.reading-mode .workspace {
+:root[data-skin="alembic"][data-theme="light"] {
   --color-bg: #f4efe3;
   --color-bg-elevated: #faf6ec;
   --color-bg-hover: #e9e2d0;
@@ -2800,75 +2799,6 @@ button {
   mask: var(--skin-sprig) center / 100% 100% no-repeat;
 }
 
-:root[data-skin="alembic"] .topbar {
-  position: relative;
-}
-
-:root[data-skin="alembic"] .topbar::before {
-  content: "";
-  position: absolute;
-  top: 35px;
-  left: 50%;
-  width: 92px;
-  aspect-ratio: var(--skin-garland-aspect);
-  transform: translateX(-50%);
-  background: var(--color-text-subtle);
-  mask: var(--skin-garland) center / 100% 100% no-repeat;
-  pointer-events: none;
-}
-
-:root[data-skin="alembic"] .topbar::after {
-  content: "tansu";
-  position: absolute;
-  top: 6px;
-  left: 50%;
-  transform: translateX(-50%);
-  color: var(--color-text);
-  font-family: var(--font-body);
-  font-size: 23px;
-  font-style: italic;
-  line-height: 28px;
-  letter-spacing: 0.01em;
-  pointer-events: none;
-}
-
-:root[data-skin="alembic"] :is(.modal-header, .history-edge-header) {
-  position: relative;
-  padding-bottom: 30px;
-  margin-bottom: 6px;
-}
-
-:root[data-skin="alembic"] :is(.modal-header, .history-edge-header)::after {
-  content: "";
-  position: absolute;
-  bottom: 0;
-  left: 50%;
-  width: 190px;
-  aspect-ratio: var(--skin-vine-aspect);
-  transform: translateX(-50%);
-  background: var(--color-text-muted);
-  mask: var(--skin-vine) center / 100% 100% no-repeat;
-}
-
-:root[data-skin="alembic"] .main.reading-mode {
-  background: color-mix(in srgb, var(--color-bg) 80%, #000);
-}
-
-:root[data-skin="alembic"] .main.reading-mode .workspace {
-  width: min(880px, calc(100% - 48px));
-  margin: 14px auto 16px;
-  padding: 0 34px;
-  background: var(--color-bg);
-  color: var(--color-text);
-  box-shadow: inset 0 0 0 1px var(--color-border), var(--shadow-floating);
-}
-
-:root[data-skin="alembic"] .modal-panel :is(input, textarea, select) {
-  border: 1px solid var(--color-border);
-  border-radius: 2px;
-  padding: 6px 8px;
-}
-
 :root[data-skin="alembic"] .skin-frame-layer {
   position: absolute;
   inset: 0;
@@ -2877,15 +2807,11 @@ button {
   color: var(--color-text-muted);
 }
 
-:root[data-skin="alembic"] :is(.command-panel, .modal-panel, .auth-card, .history-edge-panel) {
+:root[data-skin="alembic"] :is(.command-panel, .modal-panel, .auth-card) {
   --skin-frame-size: 22px;
-  padding: calc(var(--skin-frame-size) + 14px);
+  padding: calc(var(--skin-frame-size) + 6px);
   border: 0;
   isolation: isolate;
-}
-
-:root[data-skin="alembic"] .history-edge-panel {
-  contain: layout paint;
 }
 
 :root[data-skin="alembic"] .auth-card {
