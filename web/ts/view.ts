@@ -15,7 +15,6 @@ import { vaultId } from "./app/identity.ts";
 import { excludedFoldersProblem, normalizeSettings, SETTINGS_LIMITS } from "./app/settings-policy.ts";
 import { KEYBOARD_SHORTCUTS } from "./app/keyboard-shortcuts.ts";
 import { sameTabIdentity, type TabIdentity } from "./app/tab-identity.ts";
-import { renderLinksRail } from "./links-rail.ts";
 import { paletteEntries, paletteRawQuery, parsePaletteQuery, type PaletteEntry, type PaletteMode } from "./app/commands.ts";
 import type { Settings, V2OverlayCoverage, V2RevisionMeta, V2SearchHit } from "./types.generated.ts";
 import type { FindMatch, Outline } from "./editor/source-navigation.js";
@@ -572,8 +571,6 @@ function renderMain(state: State, actions: ViewActions): HTMLElement {
   if (outline !== null) {
     main.append(outline);
   }
-  const linksRail = renderLinksRail(state, actions.dispatch);
-  if (linksRail !== null) main.append(linksRail);
   if (findBar !== null) main.append(findBar);
   return main;
 }

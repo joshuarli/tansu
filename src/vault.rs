@@ -24,7 +24,7 @@ use crate::api_types::{
     V2ConflictDraftDocument, V2SettingsRequest, V2SettingsResponse, V2ImageUploadResponse,
     V2SaveNoteDeltaRequest,
     V2SaveNoteRequest, V2ServerEvent, V2ServerEventUpdate, V2VaultBootstrapResponse,
-    V2VaultMeta, UnresolvedReason, V2Backlink, V2LinkedNote, V2NoteLinksResponse, V2NotePreview,
+    V2VaultMeta, UnresolvedReason, V2NotePreview,
 };
 use crate::catalog::{Catalog, InsertNote, MutationIntent, MutationRecord, NoteRow, now_ms};
 use crate::config::ResolvedVault;
@@ -1457,40 +1457,6 @@ impl VaultRuntime {
             note_id: note_id.to_string(),
             preview: links::preview(&content),
         })
-    }
-
-    pub fn v2_note_links(&self, note_id: &str) -> V2Result<V2NoteLinksResponse> {
-        let notes = self.live_notes_containing(note_id)?;
-        let linked = |note: &NoteMeta| V2LinkedNote {
-            note_id: note.note_id.clone(),
-            path: note.path.clone(),
-            title: note.title.clone(),
-        };
-        let mut backlinks = Vec::new();
-        let mut outgoing: Vec<V2LinkedNote> = Vec::new();
-        for source in &notes {
-            let Ok(content) = read_visible_or_snapshot(&self.root, source) else {
-                continue;
-            };
-            let mut mentions = Vec::new();
-            for link in links::extract_links(&content) {
-                let links::Resolution::Resolved(target) = links::resolve(&link.target, &source.path, &notes)
-                else {
-                    continue;
-                };
-                if source.note_id == note_id {
-                    if !outgoing.iter().any(|existing| existing.note_id == target.note_id) {
-                        outgoing.push(linked(target));
-                    }
-                } else if target.note_id == note_id {
-                    mentions.push(link.mention);
-                }
-            }
-            if !mentions.is_empty() {
-                backlinks.push(V2Backlink { note: linked(source), mentions });
-            }
-        }
-        Ok(V2NoteLinksResponse { backlinks, outgoing })
     }
 
     pub fn v2_save_note(
@@ -4583,66 +4549,6 @@ mod tests {
             .find(|note| note.path == path)
             .unwrap()
             .note_id
-    }
-
-    #[test]
-    fn v2_note_links_report_backlinks_and_outgoing_by_note_id() {
-        let vault = test_vault_with_notes(&[
-            ("A.md", "# A\nSee [[B]] and [again](B.md) here.\n[[Same]] [[Missing]]\n"),
-            ("B.md", "# B\nBack to [[/A|a]].\n"),
-            ("C.md", "# C\nNothing.\n"),
-            ("Same.md", "# Same\n"),
-        ]);
-        fs::create_dir_all(vault.root.join("x")).unwrap();
-        fs::write(vault.root.join("x/Same.md"), "# Same two\n").unwrap();
-        vault.reconcile_from_watcher().unwrap();
-
-        let b = note_id_at(&vault, "B.md");
-        let links = vault.v2_note_links(&b).unwrap();
-        assert_eq!(links.backlinks.len(), 1);
-        assert_eq!(links.backlinks[0].note.path, "A.md");
-        assert_eq!(links.backlinks[0].mentions.len(), 2);
-        assert_eq!(links.outgoing.iter().map(|n| n.path.as_str()).collect::<Vec<_>>(), vec!["A.md"]);
-
-        let a = note_id_at(&vault, "A.md");
-        let a_links = vault.v2_note_links(&a).unwrap();
-        assert_eq!(a_links.outgoing.iter().map(|n| n.path.as_str()).collect::<Vec<_>>(), vec!["B.md"]);
-        assert!(vault.v2_note_links("missing").is_err());
-    }
-
-    #[test]
-    fn v2_note_links_keep_backlink_after_source_rename() {
-        let vault = test_vault_with_notes(&[("A.md", "# A\n[[B]]\n"), ("B.md", "# B\n")]);
-        let a = vault.v2_open_note(&note_id_at(&vault, "A.md")).unwrap();
-        vault
-            .v2_rename_note(
-                &a.meta.note_id,
-                V2RenameNoteRequest {
-                    mutation_id: "rename-a".to_string(),
-                    precondition: V2NotePrecondition {
-                        base_revision: a.meta.revision,
-                        base_source_hash: a.meta.source_hash.clone(),
-                        base_disk_hash: a.meta.disk_hash.clone(),
-                    },
-                    path: "nested/A2.md".to_string(),
-                },
-            )
-            .unwrap();
-
-        let links = vault.v2_note_links(&note_id_at(&vault, "B.md")).unwrap();
-        assert_eq!(links.backlinks.len(), 1);
-        assert_eq!(links.backlinks[0].note.note_id, a.meta.note_id);
-        assert_eq!(links.backlinks[0].note.path, "nested/A2.md");
-    }
-
-    #[test]
-    fn v2_note_links_ignore_ambiguous_targets() {
-        let vault = test_vault_with_notes(&[("A.md", "# A\n[[Same]]\n"), ("Same.md", "# Same\n")]);
-        fs::create_dir_all(vault.root.join("x")).unwrap();
-        fs::write(vault.root.join("x/Same.md"), "# Same two\n").unwrap();
-        vault.reconcile_from_watcher().unwrap();
-        let a = note_id_at(&vault, "A.md");
-        assert!(vault.v2_note_links(&a).unwrap().outgoing.is_empty());
     }
 
     #[test]

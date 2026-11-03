@@ -14,8 +14,7 @@ import { logClientEvent } from "./dev-log.ts";
 import { V2ApiError } from "./app/v2-api.ts";
 import { titleFromSource } from "./app/note-title.ts";
 import { createExtensionImportReceiver, type ExtensionImportReceiver } from "./app/extension-import-receiver.ts";
-import { createNoteLinksLoader, createNotePreviewCache, type NoteLinksOutcome } from "./app/note-links.ts";
-import { linksRailNoteId } from "./links-rail.ts";
+import { createNotePreviewCache } from "./app/note-previews.ts";
 import type { EditorHandle, EditorSession, EditorSnapshot } from "./editor/codemirror-adapter.ts";
 import type { EditorConfig } from "./editor/tansu-extensions.ts";
 import { convertImageToWebp } from "./editor/image-webp.ts";
@@ -55,8 +54,6 @@ const COMMAND_SEARCH_LIMIT = 20;
 const ASSET_PREFETCH_CONCURRENCY = 4;
 const ASSET_CACHE_LIMIT = 64;
 const THEME_STORAGE_KEY = "tansu.theme.v1";
-const LINK_RAIL_STORAGE_KEY = "tansu.link-rail.v1";
-const NOTE_LINKS_REFRESH_DELAY_MS = 400;
 
 type TabCloseReason = "user" | "deleted" | "materialized";
 
@@ -80,13 +77,6 @@ function waitForAnimationFrame(signal: AbortSignal): Promise<void> {
 
 function savedTheme(): State["theme"] {
   return parseTheme(window.localStorage.getItem(THEME_STORAGE_KEY));
-}
-
-function savedLinkRailCollapsed(): boolean {
-  const value = window.localStorage.getItem(LINK_RAIL_STORAGE_KEY);
-  if (value === "open") return false;
-  if (value === null || value === "collapsed") return true;
-  throw new TypeError(`Unsupported saved link rail state: ${value}`);
 }
 
 function markdownPreview(source: string): string {
@@ -149,18 +139,10 @@ export class TansuApp {
   private commandSearchAbort: AbortController | null = null;
   private tagSuggestionAbort: AbortController | null = null;
   private tagFeature: typeof TagFeature | null = null;
-  private readonly noteLinksLoader = createNoteLinksLoader(
-    (id, signal) => {
-      if (this.vaultClient === null) return Promise.reject(new Error("No vault is open"));
-      return this.vaultClient.noteLinks(id, signal);
-    },
-    (outcome) => this.acceptNoteLinks(outcome),
-  );
   private readonly notePreviews = createNotePreviewCache(async (id) => {
     if (this.vaultClient === null) throw new Error("No vault is open");
     return (await this.vaultClient.notePreview(id)).preview;
   });
-  private noteLinksTimer: number | undefined;
   private bootGeneration = 0;
   private sessionGeneration = 0;
   private transitioningVault = false;
@@ -180,7 +162,6 @@ export class TansuApp {
     this.state = createState(vaultId("boot"));
     this.state.theme = savedTheme();
     document.documentElement.dataset["theme"] = this.state.theme;
-    this.state.linkRailCollapsed = savedLinkRailCollapsed();
     this.workspaceId = this.services.workspace.createWorkspaceId();
     this.journal = new JournalHandle(this.services.workspace, (error) => this.notifyStorageFailure(error));
     this.editorMount.className = "editor-mount";
@@ -273,8 +254,6 @@ export class TansuApp {
     this.state.serverInstanceId = global.serverInstanceId;
     this.identity = nextIdentity;
     this.vaultClient = nextClient;
-    this.noteLinksLoader.cancel();
-    this.state.noteLinks = null;
     this.notePreviews.clear();
     this.state.boot = { ...vaultBootstrap, serverInstanceId: global.serverInstanceId, vaults: global.vaults };
     this.state.authRequired = false;
@@ -457,10 +436,8 @@ export class TansuApp {
     if (this.disposeTask !== null) return this.disposeTask;
     this.disposed = true;
     this.cancelTagSuggestions();
-    window.clearTimeout(this.noteLinksTimer);
     for (const timer of this.draftPromotionTimers.values()) window.clearTimeout(timer);
     this.draftPromotionTimers.clear();
-    this.noteLinksLoader.cancel();
     this.cancelCommandSearch();
     this.transitioningVault = false;
     ++this.bootGeneration;
@@ -513,7 +490,6 @@ export class TansuApp {
             if (tab.kind === "saved") await this.reconcileTab(tab);
           }
           if (generation === this.bootGeneration && this.isCurrentVault(identity, client)) {
-            this.scheduleNoteLinksRefresh();
             this.render();
           }
         })());
@@ -546,7 +522,7 @@ export class TansuApp {
     } else if (event.update.kind === "searchChanged" && this.state.boot !== null) {
       this.state.boot.searchStatus = { dirty: event.update.dirty, degraded: event.update.degraded };
     }
-    if (event.update.kind !== "searchChanged") this.scheduleNoteLinksRefresh();
+    if (event.update.kind !== "searchChanged") this.notePreviews.clear();
     this.render();
   }
 
@@ -591,45 +567,8 @@ export class TansuApp {
     return this.notePreviews.load(id);
   }
 
-  private acceptNoteLinks(outcome: NoteLinksOutcome): void {
-    if (this.disposed || linksRailNoteId(this.state) !== outcome.noteId) return;
-    this.state.noteLinks = outcome;
-    this.render();
-  }
-
-  private syncNoteLinks(): void {
-    const id = this.state.boot === null || this.state.authRequired
-      ? null
-      : linksRailNoteId(this.state);
-    if (id === null) {
-      this.noteLinksLoader.cancel();
-      this.state.noteLinks = null;
-      return;
-    }
-    if (this.state.noteLinks?.noteId === id) return;
-    this.state.noteLinks = { noteId: id, phase: "loading" };
-    this.noteLinksLoader.load(id);
-  }
-
-  private reloadNoteLinks(): void {
-    const id = linksRailNoteId(this.state);
-    if (id === null) return;
-    this.notePreviews.clear();
-    if (this.state.noteLinks?.phase !== "ready") {
-      this.state.noteLinks = { noteId: id, phase: "loading" };
-      this.render();
-    }
-    this.noteLinksLoader.load(id);
-  }
-
-  private scheduleNoteLinksRefresh(): void {
-    window.clearTimeout(this.noteLinksTimer);
-    this.noteLinksTimer = window.setTimeout(() => this.reloadNoteLinks(), NOTE_LINKS_REFRESH_DELAY_MS);
-  }
-
   private render(): void {
     if (this.disposed) return;
-    this.syncNoteLinks();
     this.captureActiveEditor();
     const suggestions = this.state.tagSuggestions;
     const current = activeTab(this.state);
@@ -1734,7 +1673,6 @@ export class TansuApp {
           tab.title = title;
           tab.path = renamed.path;
           this.persistWorkspace();
-          this.scheduleNoteLinksRefresh();
           this.render();
           this.flashRenamedTitle();
         })) return false;
@@ -1759,7 +1697,6 @@ export class TansuApp {
           if (tab.doc !== null) tab.doc = { ...tab.doc, meta: accepted };
           this.state.notes.set(tab.noteId, accepted);
           this.persistWorkspace();
-          this.scheduleNoteLinksRefresh();
           this.render();
           this.flashRenamedTitle();
           this.notify(`Rename succeeded, but local recovery cleanup failed: ${errorSummary(error)}`);
@@ -2266,16 +2203,6 @@ export class TansuApp {
       }
       case "focus.toggle": {
         this.toggleFocusMode();
-        return;
-      }
-      case "linkRail.toggle": {
-        this.state.linkRailCollapsed = !this.state.linkRailCollapsed;
-        window.localStorage.setItem(LINK_RAIL_STORAGE_KEY, this.state.linkRailCollapsed ? "collapsed" : "open");
-        this.render();
-        return;
-      }
-      case "links.refresh": {
-        this.reloadNoteLinks();
         return;
       }
       case "theme.toggle": {

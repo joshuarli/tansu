@@ -135,33 +135,16 @@ and wiki-image Markdown after the asset write completes. Asset reads pass that
 name as the `name` query parameter and resolve only within the selected vault's
 `z-images/` directory.
 
-### Links and previews
-
-`GET .../notes/:noteId/links` returns `V2NoteLinksResponse`:
-`{ backlinks: [{ note: { noteId, path, title }, mentions: [string] }], outgoing: [{ noteId, path, title }] }`.
-A backlink is a live note whose Markdown contains a wiki link (`[[target]]`,
-`[[target|label]]`) or a Markdown link to a `.md` path that resolves to this
-note. Each `mentions` entry is the trimmed line holding the link, windowed to at
-most 200 characters around the link. `outgoing` lists the distinct notes this
-note's links resolve to, in first-mention order. Links in fenced code, inline
-code, frontmatter, and images are ignored, as are self-links in `backlinks`.
-
-Wiki targets resolve by the rules in [editor](editor.md): a leading `/` is a
-vault-root path, `./` and `../` resolve from the linking note's directory, a bare
-name matches a note basename only when exactly one note has it, and ambiguous or
-missing targets are unresolved and omitted. Markdown link destinations resolve
-as paths relative to the linking note, or from the vault root with a leading `/`.
-Results are keyed by `noteId`, so renaming a note updates `path` without losing
-its links.
+### Previews
 
 `GET .../notes/:noteId/preview` returns `{ noteId, preview }`: the note body
 with frontmatter stripped and whitespace collapsed, truncated to 280 characters.
 
-Both routes are read-only derived state computed from the catalog's live notes and
+Previews are read-only derived state computed from the catalog's live notes and
 their current files on each request; nothing is persisted. They hold the vault
 operation lock only while reading the note list, never while reading files, so
-they do not delay writes. A note whose file cannot be read is skipped. An unknown,
-deleted, or unresolved `noteId` returns `note_not_found`.
+they do not delay writes. An unknown, deleted, or unresolved `noteId` returns
+`note_not_found`.
 
 ### Search
 

@@ -7,10 +7,8 @@ import type {
   V2CreateNoteRequest,
   V2DeleteNoteRequest,
   V2ImageUploadResponse,
-  V2LinkedNote,
   V2MutationResponse,
   V2NoteDocument,
-  V2NoteLinksResponse,
   V2NoteMeta,
   V2NotePreview,
   V2RevisionDocument,
@@ -86,7 +84,6 @@ export type V2VaultClient = {
     request: V2DeleteNoteRequest,
     signal?: AbortSignal,
   ) => Promise<V2MutationResponse>;
-  noteLinks: (id: string, signal?: AbortSignal) => Promise<V2NoteLinksResponse>;
   notePreview: (id: string, signal?: AbortSignal) => Promise<V2NotePreview>;
   listRevisions: (id: string, signal?: AbortSignal) => Promise<V2RevisionMeta[]>;
   openRevision: (id: string, revision: number, signal?: AbortSignal) => Promise<V2RevisionDocument>;
@@ -293,7 +290,6 @@ export function createV2ApiClient(transport: Partial<V2Transport> = {}): V2ApiCl
           assertMutationIdentity(result, id);
           return result;
         },
-        noteLinks: (id, signal) => get(`${notePath(id)}/links`, decodeV2NoteLinksResponse, signal),
         notePreview: async (id, signal) => {
           const value = await get(`${notePath(id)}/preview`, decodeV2NotePreview, signal);
           if (value.noteId !== id) throw new V2ProtocolError("Preview identity does not match the request");
@@ -717,29 +713,6 @@ function decodeV2RevisionMeta(value: unknown): V2RevisionMeta {
       ? null
       : hash(field(body, "sourceHash"), "sourceHash", "source"),
     createdAtMs: integer(field(body, "createdAtMs"), "createdAtMs"),
-  };
-}
-
-function decodeV2LinkedNote(value: unknown): V2LinkedNote {
-  const body = record(value, "linked note");
-  return {
-    noteId: nonEmptyString(field(body, "noteId"), "noteId"),
-    path: nonEmptyString(field(body, "path"), "path"),
-    title: string(field(body, "title"), "title"),
-  };
-}
-
-function decodeV2NoteLinksResponse(value: unknown): V2NoteLinksResponse {
-  const body = record(value, "note links");
-  return {
-    backlinks: array(field(body, "backlinks"), "backlinks").map((item) => {
-      const backlink = record(item, "backlink");
-      return {
-        note: decodeV2LinkedNote(field(backlink, "note")),
-        mentions: array(field(backlink, "mentions"), "mentions").map((mention) => string(mention, "mention")),
-      };
-    }),
-    outgoing: array(field(body, "outgoing"), "outgoing").map(decodeV2LinkedNote),
   };
 }
 

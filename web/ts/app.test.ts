@@ -3072,7 +3072,6 @@ function createTestClient() {
     saveNote: vi.fn(async (note: string, request: V2SaveNoteRequest) => accepted(request.mutationId, noteMeta(note, `${note}.md`, note, [], request.precondition.baseRevision + 1, request.sourceHash))),
     renameNote: vi.fn(async (note: string, request: Parameters<V2VaultClient["renameNote"]>[1]) => accepted(request.mutationId, noteMeta(note, request.path, request.path.replace(/\.md$/i, ""), [], request.precondition.baseRevision + 1, HASH_B))),
     deleteNote: vi.fn(async (_note: string, request: Parameters<V2VaultClient["deleteNote"]>[1]) => ({ mutationId: request.mutationId, outcome: { state: "accepted", result: null } } as V2MutationResponse)),
-    noteLinks: vi.fn(async () => ({ backlinks: [], outgoing: [] })),
     notePreview: vi.fn(async (id: string) => ({ noteId: id, preview: "" })),
     listRevisions: vi.fn(async () => [] as V2RevisionMeta[]),
     openRevision: vi.fn(async (note: string, revision: number): Promise<V2RevisionDocument> => ({ revision: { noteId: note, revision, kind: "save", source: "user", sourceHash: HASH_A, createdAtMs: 1 }, content: "# Old\n" })),

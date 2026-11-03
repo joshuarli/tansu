@@ -72,8 +72,6 @@ export type ViewEvent =
   | { type: "reading.toggle" }
   | { type: "focus.toggle" }
   | { type: "theme.toggle" }
-  | { type: "linkRail.toggle" }
-  | { type: "links.refresh" }
   | { type: "tags.suggest" }
   | { type: "tags.close" }
   | { type: "tags.apply"; tag: string }

@@ -19,8 +19,8 @@ are vault-local opaque files.
 
 One server process owns a vault root at a time. Startup locks the root directory
 through reconciliation and runtime shutdown, so configs naming the same
-directory collide. Backlinks, outgoing links, and previews are derived from
-live notes and files in `src/links.rs`.
+directory collide. Previews are derived from live notes and files in
+`src/links.rs`.
 
 ## Server runtime
 

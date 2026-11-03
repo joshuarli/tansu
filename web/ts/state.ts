@@ -1,7 +1,6 @@
 import type {
   V2ConflictDraftDocument,
   V2NoteDocument,
-  V2NoteLinksResponse,
   V2NoteMeta,
   V2RevisionDocument,
   V2RevisionMeta,
@@ -68,11 +67,6 @@ export type ContextMenuState = {
   x: number;
   y: number;
 };
-
-export type NoteLinksState =
-  | { noteId: string; phase: "loading" }
-  | { noteId: string; phase: "ready"; links: V2NoteLinksResponse }
-  | { noteId: string; phase: "error"; message: string };
 
 type TagSuggestionsState = { tabKey: string; source: string } & (
   | { phase: "loading" }
@@ -142,8 +136,6 @@ export type State = {
   imageUploads: Set<number>;
   readingMode: boolean;
   focusMode: boolean;
-  linkRailCollapsed: boolean;
-  noteLinks: NoteLinksState | null;
   tagSuggestions: TagSuggestionsState | null;
 };
 
@@ -190,8 +182,6 @@ export function createState(vault: VaultId): State {
     imageUploads: new Set(),
     readingMode: false,
     focusMode: false,
-    linkRailCollapsed: true,
-    noteLinks: null,
     tagSuggestions: null,
   };
 }

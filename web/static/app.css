@@ -2295,103 +2295,12 @@ button {
   }
 }
 
-.link-rail {
-  position: absolute;
-  z-index: 5;
-  top: 106px;
-  right: 18px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  width: clamp(180px, calc((100vw - 790px) / 2 - 24px), 260px);
-  max-height: calc(100% - 140px);
-  overflow: auto;
-  font-size: 12px;
-  color: var(--color-text-muted);
-}
-
-.link-rail.collapsed {
-  width: auto;
-  overflow: visible;
-}
-
-.link-rail-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.link-rail-heading,
-.link-rail-label {
-  font-size: 11px;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  opacity: 0.6;
-}
-
-.link-rail-toggle,
-.link-rail-retry {
-  font-size: 11px;
-  opacity: 0.6;
-}
-
-.link-rail-toggle:hover,
-.link-rail-retry:hover { opacity: 1; }
-
-.link-rail-section {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.link-rail-hint,
-.link-rail-error {
-  margin: 0;
-  opacity: 0.55;
-}
-
-.link-card {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 6px 8px;
-  border-radius: 6px;
-  text-align: left;
-}
-
-.link-card-title { font-weight: 520; }
-
-.link-card-path {
-  font-size: 11px;
-  opacity: 0.55;
-  overflow-wrap: anywhere;
-}
-
-.link-card-mention {
-  margin-top: 3px;
-  padding-left: 7px;
-  border-left: 2px solid var(--color-border);
-  opacity: 0.8;
-  overflow-wrap: anywhere;
-}
-
-.link-card-mention em {
-  font-style: normal;
-  font-weight: 560;
-  color: var(--color-text);
-}
-
-@media (max-width: 1099.98px) {
-  .link-rail { display: none; }
-}
-
 .tab,
 .tab-close,
 .new-note,
 .floating-control-button,
 .outline-row,
-.text-button,
-.link-rail-toggle {
+.text-button {
   transition:
     background-color var(--dur-fast) var(--ease-out),
     color var(--dur-fast) var(--ease-out),
@@ -2441,15 +2350,13 @@ button {
   opacity: 1;
 }
 
-.main.focus-mode > .note-outline,
-.main.focus-mode > .link-rail {
+.main.focus-mode > .note-outline {
   opacity: 0;
   pointer-events: none;
   visibility: hidden;
 }
 
-.main > .note-outline,
-.main > .link-rail {
+.main > .note-outline {
   transition:
     opacity var(--dur-med) var(--ease-out),
     visibility var(--dur-med) var(--ease-out);
@@ -2509,8 +2416,7 @@ button {
   .main.has-history-edge.find-open > .history-edge-panel { grid-row: 3; }
 }
 
-.main.has-history-edge > .note-outline,
-.main.has-history-edge > .link-rail {
+.main.has-history-edge > .note-outline {
   display: none;
 }
 

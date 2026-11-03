@@ -142,9 +142,6 @@ fn dispatch_v2_api(app: &App, request: &HttpRequest) -> std::result::Result<Http
             let body = parse_v2_body::<V2DeleteNoteRequest>(&request.body)?;
             v2_json(200, &vault.v2_delete_note(note_id, body)?, "deleted note")
         }
-        ("GET", ["notes", note_id, "links"]) => {
-            v2_json(200, &vault.v2_note_links(note_id)?, "note links")
-        }
         ("GET", ["notes", note_id, "preview"]) => {
             v2_json(200, &vault.v2_note_preview(note_id)?, "note preview")
         }
@@ -271,10 +268,6 @@ fn percent_decode(value: &str) -> Result<String> {
         V2ApiErrorKind::BadRequest { message } => Error::BadRequest(message),
         _ => unreachable!(),
     })
-}
-
-pub(crate) fn percent_decode_path(value: &str) -> Option<String> {
-    percent_decode_bytes(value, false).ok()
 }
 
 fn percent_decode_bytes(value: &str, plus_as_space: bool) -> std::result::Result<String, V2ApiErrorKind> {
@@ -417,7 +410,7 @@ mod tests {
     }
 
     #[test]
-    fn v2_links_and_preview_routes_return_note_link_context() {
+    fn v2_preview_route_returns_note_preview() {
         let fixture = app_fixture(&[("One", &[("a.md", "# A\n[[b]]\n"), ("b.md", "---\ntags: [x]\n---\n# B\nbody\n")])]);
         let app = fixture.app();
         let server_id = app.server_instance_id().to_string();
@@ -425,16 +418,6 @@ mod tests {
         let vault = app.vault_by_id(&vault_id).unwrap();
         let notes = vault.v2_notes().unwrap();
         let b = notes.iter().find(|n| n.path == "b.md").unwrap().note_id.clone();
-
-        let links = handle_v2_api(
-            &app,
-            &v2_request("GET", &format!("/api/v2/vaults/{vault_id}/notes/{b}/links"), Some(&server_id), &[], &[]),
-            "req-1",
-        );
-        assert_eq!(links.status(), 200);
-        let links: crate::api_types::V2NoteLinksResponse = serde_json::from_slice(links.body()).unwrap();
-        assert_eq!(links.backlinks[0].note.path, "a.md");
-        assert_eq!(links.backlinks[0].mentions, vec!["[[b]]"]);
 
         let preview = handle_v2_api(
             &app,
@@ -447,7 +430,7 @@ mod tests {
 
         let missing = handle_v2_api(
             &app,
-            &v2_request("GET", &format!("/api/v2/vaults/{vault_id}/notes/nope/links"), Some(&server_id), &[], &[]),
+            &v2_request("GET", &format!("/api/v2/vaults/{vault_id}/notes/nope/preview"), Some(&server_id), &[], &[]),
             "req-3",
         );
         assert_eq!(missing.status(), 404);
