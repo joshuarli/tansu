@@ -844,19 +844,23 @@ mod tests {
         assert_eq!(hit.source_hash, "blake3-v3:7");
         assert!(!hit.excerpt.is_empty());
 
+        drop(index);
         let index = setup_index(vec![doc("a", "Hello World")]);
         let hit = &results(&index, "Hello World", options())[0];
         assert_eq!(hit.matched_terms, ["hello", "world"]);
 
+        drop(index);
         let index = setup_index(vec![doc("a", "Hello world, this is a test document")]);
         let hits = results(&index, "hello test", options());
         assert_eq!(hits[0].excerpt_ranges.len(), 2);
 
+        drop(index);
         let long = format!("{}needle{}", "before ".repeat(100), " after".repeat(100));
         let index = setup_index(vec![doc("long", &long), doc("filename", "other")]);
         let hit = results(&index, "needle", options()).remove(0);
         assert!(hit.excerpt.len() <= MAX_EXCERPT_BYTES);
         assert!(hit.source_reveal_range.is_some());
+        drop(index);
         let filename = setup_index(vec![make_doc(
             "file",
             "needle-file.md",
@@ -870,6 +874,7 @@ mod tests {
         assert!(hit.source_reveal_range.is_none());
         assert!(hit.excerpt.is_empty());
 
+        drop(filename);
         let content = "---\ntags: [one]\n---\n\te\u{301} 😀 needle needle";
         let index = setup_index(vec![make_doc("a", "a.md", "a", content, "", &["one"], 1)]);
         let hit = results(&index, "needle", options()).remove(0);
@@ -988,6 +993,7 @@ mod tests {
         assert_eq!(hits[0].note_id, "typo");
         assert!(hits[0].source_reveal_range.is_some());
 
+        drop(index);
         let index = setup_index(vec![make_doc(
             "typo-path",
             "pwoder.md",
@@ -1047,6 +1053,7 @@ mod tests {
         };
         assert_eq!(results(&index, "common", limited).len(), 3);
 
+        drop(index);
         let index = setup_index(vec![
             make_doc("best", "best.md", "Powder", "powder pwoder", "", &[], 1),
             doc("exact-1", "powder"),
