@@ -19,61 +19,80 @@ const current: Settings = {
 const form = { excludedFoldersText: "", autosaveDelayMs: 900, undoStackMax: 100, imageWebpQuality: 0.8 };
 
 describe("applySettingsForm", () => {
-  it("clamps each value to its shared limit", () => {
-    expect(applySettingsForm(current, { ...form, autosaveDelayMs: 1, undoStackMax: 1, imageWebpQuality: 7 })).toMatchObject({
-      autosaveDelayMs: SETTINGS_LIMITS.autosaveDelayMs.min,
-      undoStackMax: SETTINGS_LIMITS.undoStackMax.min,
-      imageWebpQuality: SETTINGS_LIMITS.imageWebpQuality.max,
-    });
-    expect(applySettingsForm(current, { ...form, imageWebpQuality: 0 }).imageWebpQuality)
-      .toBe(SETTINGS_LIMITS.imageWebpQuality.min);
-    expect(applySettingsForm(current, { ...form, autosaveDelayMs: 1e12, undoStackMax: 1e9 })).toMatchObject({
-      autosaveDelayMs: SETTINGS_LIMITS.autosaveDelayMs.max,
-      undoStackMax: SETTINGS_LIMITS.undoStackMax.max,
-    });
-  });
-
-  it("brings stored values the form does not edit into the server range", () => {
-    const stored = { ...current, searchTitleWeight: 5000, recencyBoost: -1, autosaveDelayMs: 0, undoStackMax: 1e7 };
-    expect(applySettingsForm(stored, form)).toMatchObject({
-      searchTitleWeight: SETTINGS_LIMITS.searchWeight.max,
-      recencyBoost: SETTINGS_LIMITS.searchWeight.min,
-    });
+  it("clamps, rounds, and carries stored values into range", () => {
+    const stored = {
+      ...current,
+      searchTitleWeight: 5000,
+      recencyBoost: -1,
+      autosaveDelayMs: 0,
+      undoStackMax: 1e7,
+    };
+    const cases: Array<{
+      stored?: Settings;
+      form?: Partial<typeof form>;
+      expected: Record<string, number | string[]>;
+    }> = [
+      {
+        form: { autosaveDelayMs: 1, undoStackMax: 1, imageWebpQuality: 7 },
+        expected: {
+          autosaveDelayMs: SETTINGS_LIMITS.autosaveDelayMs.min,
+          undoStackMax: SETTINGS_LIMITS.undoStackMax.min,
+          imageWebpQuality: SETTINGS_LIMITS.imageWebpQuality.max,
+        },
+      },
+      {
+        form: { imageWebpQuality: 0 },
+        expected: { imageWebpQuality: SETTINGS_LIMITS.imageWebpQuality.min },
+      },
+      {
+        form: { autosaveDelayMs: 1e12, undoStackMax: 1e9 },
+        expected: {
+          autosaveDelayMs: SETTINGS_LIMITS.autosaveDelayMs.max,
+          undoStackMax: SETTINGS_LIMITS.undoStackMax.max,
+        },
+      },
+      {
+        stored,
+        expected: {
+          searchTitleWeight: SETTINGS_LIMITS.searchWeight.max,
+          recencyBoost: SETTINGS_LIMITS.searchWeight.min,
+        },
+      },
+      {
+        form: { autosaveDelayMs: Number.NaN, undoStackMax: Infinity, imageWebpQuality: Number.NaN },
+        expected: { autosaveDelayMs: 900, undoStackMax: 100, imageWebpQuality: 0.8 },
+      },
+      {
+        form: { autosaveDelayMs: 400.6, undoStackMax: 50.4 },
+        expected: { autosaveDelayMs: 401, undoStackMax: 50 },
+      },
+    ];
+    for (const { stored: input, form: overrides, expected } of cases) {
+      expect(
+        applySettingsForm(input ?? current, { ...form, ...overrides }),
+      ).toMatchObject(expected);
+    }
     expect(normalizeSettings(stored)).toMatchObject({
       autosaveDelayMs: SETTINGS_LIMITS.autosaveDelayMs.min,
       undoStackMax: SETTINGS_LIMITS.undoStackMax.max,
       searchTitleWeight: SETTINGS_LIMITS.searchWeight.max,
     });
-  });
 
-  it("keeps the current value for a non-finite entry", () => {
-    expect(applySettingsForm(current, {
-      ...form,
-      autosaveDelayMs: Number.NaN,
-      undoStackMax: Infinity,
-      imageWebpQuality: Number.NaN,
-    })).toMatchObject({ autosaveDelayMs: 900, undoStackMax: 100, imageWebpQuality: 0.8 });
-  });
-
-  it("rounds integer settings so the backend can store them", () => {
-    expect(applySettingsForm(current, { ...form, autosaveDelayMs: 400.6, undoStackMax: 50.4 }))
-      .toMatchObject({ autosaveDelayMs: 401, undoStackMax: 50 });
-  });
-
-  it("splits excluded folders on commas and leaves other settings untouched", () => {
     const next = applySettingsForm(current, { ...form, excludedFoldersText: " a, ,b c " });
     expect(next.excludedFolders).toStrictEqual(["a", "b c"]);
     expect(next.searchTitleWeight).toBe(3);
   });
 
-  it.each(["a/b", String.raw`a\b`, "..", ".", "ok, nested/dir", "a\0b"])("rejects the excluded folder entry %j", (text) => {
-    expect(excludedFoldersProblem(text)).toMatch(/single folder name/);
-    expect(() => applySettingsForm(current, { ...form, excludedFoldersText: text })).toThrow(/single folder name/);
-  });
-
-  it("accepts an empty list and dotted names", () => {
-    expect(excludedFoldersProblem("")).toBeNull();
-    expect(excludedFoldersProblem(" .git, ..cache, a.b ")).toBeNull();
+  it("accepts only single folder names in the excluded list", () => {
+    for (const text of ["a/b", String.raw`a\b`, "..", ".", "ok, nested/dir", "a\0b"]) {
+      expect(excludedFoldersProblem(text)).toMatch(/single folder name/);
+      expect(() => applySettingsForm(current, { ...form, excludedFoldersText: text })).toThrow(
+        /single folder name/,
+      );
+    }
+    for (const text of ["", " .git, ..cache, a.b "]) {
+      expect(excludedFoldersProblem(text)).toBeNull();
+    }
   });
 });
 

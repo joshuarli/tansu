@@ -217,102 +217,68 @@ mod tests {
         out
     }
 
-    #[test]
-    fn basic_tokenization() {
-        let t = tokenize("hello world");
-        assert!(t.contains(&"hello".into()));
-        assert!(t.contains(&"world".into()));
+    fn tokenize_with_positions(text: &str) -> Vec<(String, usize, usize, usize)> {
+        let mut t = FerrisearchTokenizer::new();
+        let mut stream = t.token_stream(text);
+        let mut out = Vec::new();
+        while stream.advance() {
+            let token = stream.token();
+            out.push((
+                token.text.clone(),
+                token.position,
+                token.offset_from,
+                token.offset_to,
+            ));
+        }
+        out
     }
 
     #[test]
-    fn punctuation_split() {
-        let t = tokenize("foo.bar,baz");
-        assert!(t.contains(&"foo".into()));
-        assert!(t.contains(&"bar".into()));
-        assert!(t.contains(&"baz".into()));
+    fn segments_text_into_lowercase_terms() {
+        let cases: &[(&str, &[&str])] = &[
+            ("hello world", &["hello", "world"]),
+            ("foo.bar,baz", &["foo", "bar", "baz"]),
+            ("fooBarBaz", &["foobarbaz", "foo", "bar", "baz"]),
+            ("myVariableName", &["myvariablename", "my", "variable", "name"]),
+            ("foo-bar-baz", &["foo", "bar", "baz"]),
+            ("foo\u{2013}bar", &["foo", "bar"]),
+            ("", &[]),
+            ("HELLO World", &["hello", "world"]),
+            ("foo...bar!!!baz", &["foo", "bar", "baz"]),
+            ("  ...hello world...  ", &["hello", "world"]),
+            ("...   !!!", &[]),
+            ("hello 世界", &["hello", "世界"]),
+            ("foo\tbar\nbaz", &["foo", "bar", "baz"]),
+            ("foo|bar", &["foo", "bar"]),
+        ];
+        for (input, expected) in cases {
+            let expected: Vec<String> = expected.iter().map(|term| term.to_string()).collect();
+            assert_eq!(tokenize(input), expected, "input: {input:?}");
+        }
     }
 
     #[test]
-    fn camel_case_split() {
-        let t = tokenize("fooBarBaz");
-        assert!(t.contains(&"foobarbaz".into()));
-        assert!(t.contains(&"foo".into()));
-        assert!(t.contains(&"bar".into()));
-        assert!(t.contains(&"baz".into()));
+    fn shares_parent_position_and_reports_byte_offsets() {
+        assert_eq!(
+            tokenize_with_positions("fooBar baz"),
+            vec![
+                ("foobar".to_string(), 0, 0, 6),
+                ("foo".to_string(), 0, 0, 6),
+                ("bar".to_string(), 0, 0, 6),
+                ("baz".to_string(), 1, 7, 10),
+            ]
+        );
+        assert_eq!(
+            tokenize_with_positions("hello world"),
+            vec![
+                ("hello".to_string(), 0, 0, 5),
+                ("world".to_string(), 1, 6, 11),
+            ]
+        );
     }
 
     #[test]
-    fn hyphen_split() {
-        let t = tokenize("foo-bar-baz");
-        assert!(t.contains(&"foo".into()));
-        assert!(t.contains(&"bar".into()));
-        assert!(t.contains(&"baz".into()));
-    }
-
-    #[test]
-    fn unicode_separator() {
-        let t = tokenize("foo\u{2013}bar");
-        assert!(t.contains(&"foo".into()));
-        assert!(t.contains(&"bar".into()));
-    }
-
-    #[test]
-    fn empty_input() {
-        assert!(tokenize("").is_empty());
-    }
-
-    #[test]
-    fn lowercasing() {
-        let t = tokenize("HELLO World");
-        assert!(t.contains(&"hello".into()));
-        assert!(t.contains(&"world".into()));
-    }
-
-    #[test]
-    fn consecutive_separators() {
-        let t = tokenize("foo...bar!!!baz");
-        assert!(t.contains(&"foo".into()));
-        assert!(t.contains(&"bar".into()));
-        assert!(t.contains(&"baz".into()));
-    }
-
-    #[test]
-    fn leading_trailing_separators() {
-        let t = tokenize("  ...hello world...  ");
-        assert!(t.contains(&"hello".into()));
-        assert!(t.contains(&"world".into()));
-        assert!(!t.contains(&"".into()));
-    }
-
-    #[test]
-    fn only_separators() {
-        assert!(tokenize("...   !!!").is_empty());
-    }
-
-    #[test]
-    fn unicode_tokenization() {
-        let t = tokenize("hello 世界");
-        assert!(t.contains(&"hello".into()));
-        assert!(t.contains(&"世界".into()));
-    }
-
-    #[test]
-    fn tab_and_newline() {
-        let t = tokenize("foo\tbar\nbaz");
-        assert!(t.contains(&"foo".into()));
-        assert!(t.contains(&"bar".into()));
-        assert!(t.contains(&"baz".into()));
-    }
-
-    #[test]
-    fn pipe_separator() {
-        let t = tokenize("foo|bar");
-        assert!(t.contains(&"foo".into()));
-        assert!(t.contains(&"bar".into()));
-    }
-
-    #[test]
-    fn diacritic_filter() {
+    fn strips_diacritics_through_the_filter() {
         use tantivy::tokenizer::TokenFilter;
         let mut t = DiacriticFilter.transform(FerrisearchTokenizer::new());
         let mut stream = t.token_stream("café résumé");
@@ -320,58 +286,7 @@ mod tests {
         while stream.advance() {
             out.push(stream.token().text.clone());
         }
-        assert!(out.contains(&"cafe".into()));
-        assert!(out.contains(&"resume".into()));
+        assert_eq!(out, vec!["cafe".to_string(), "resume".to_string()]);
     }
 
-    #[test]
-    fn camel_case_in_tokenizer() {
-        let t = tokenize("myVariableName");
-        assert!(t.contains(&"myvariablename".into()));
-        assert!(t.contains(&"my".into()));
-        assert!(t.contains(&"variable".into()));
-        assert!(t.contains(&"name".into()));
-    }
-
-    #[test]
-    fn token_positions_increment() {
-        let mut t = FerrisearchTokenizer::new();
-        let mut stream = t.token_stream("hello world");
-        let mut positions = Vec::new();
-        while stream.advance() {
-            positions.push(stream.token().position);
-        }
-        for w in positions.windows(2) {
-            assert!(w[1] > w[0]);
-        }
-    }
-
-    #[test]
-    fn camel_case_shares_parent_position() {
-        let mut t = FerrisearchTokenizer::new();
-        let mut stream = t.token_stream("fooBar baz");
-        let mut tokens = Vec::new();
-        while stream.advance() {
-            tokens.push((stream.token().text.clone(), stream.token().position));
-        }
-        assert!(tokens.contains(&("foobar".into(), 0)));
-        assert!(tokens.contains(&("foo".into(), 0)));
-        assert!(tokens.contains(&("bar".into(), 0)));
-        assert!(tokens.contains(&("baz".into(), 1)));
-    }
-
-    #[test]
-    fn token_offsets() {
-        let mut t = FerrisearchTokenizer::new();
-        let mut stream = t.token_stream("hello world");
-        let mut found = false;
-        while stream.advance() {
-            if stream.token().text == "hello" {
-                assert_eq!(stream.token().offset_from, 0);
-                assert_eq!(stream.token().offset_to, 5);
-                found = true;
-            }
-        }
-        assert!(found);
-    }
 }

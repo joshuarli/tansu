@@ -196,35 +196,32 @@ describe("dirtySnapshot", () => {
     return created;
   }
 
-  it("has no draft and is not dirty while loading", () => {
-    expect(dirtySnapshot(loadingState)).toMatchObject({
-      draft: null, selection: undefined, dirty: false, saving: false, title: undefined, path: undefined,
-    });
-  });
-
-  it("is clean with the loaded source and the note's title and path", () => {
-    expect(dirtySnapshot(session().state)).toMatchObject({
-      draft: "# A\n", dirty: false, saving: false, conflict: false, title: "A", path: "a.md",
-    });
-  });
-
-  it("is dirty after an edit and prefers the title draft", () => {
+  it("maps session states to drafts", async () => {
     const edited = session();
     edited.edit("# B\n", { anchor: 1, head: 1 });
     edited.editTitle("Renamed");
-    expect(dirtySnapshot(edited.state)).toMatchObject({
-      draft: "# B\n", selection: { anchor: 1, head: 1 }, dirty: true, saving: false, title: "Renamed",
-    });
-  });
-
-  it("is dirty and saving while a save is in flight", async () => {
     const saving = session();
     saving.edit("# B\n", null);
     void saving.save();
     await Promise.resolve();
     await Promise.resolve();
     expect(saving.state.status).toBe("saving");
-    expect(dirtySnapshot(saving.state)).toMatchObject({ dirty: true, saving: true });
+
+    const cases: Array<[DocumentSessionState, object]> = [
+      [loadingState, {
+        draft: null, selection: undefined, dirty: false, saving: false, title: undefined, path: undefined,
+      }],
+      [session().state, {
+        draft: "# A\n", dirty: false, saving: false, conflict: false, title: "A", path: "a.md",
+      }],
+      [edited.state, {
+        draft: "# B\n", selection: { anchor: 1, head: 1 }, dirty: true, saving: false, title: "Renamed",
+      }],
+      [saving.state, { dirty: true, saving: true }],
+    ];
+    for (const [state, expected] of cases) {
+      expect(dirtySnapshot(state)).toMatchObject(expected);
+    }
   });
 });
 

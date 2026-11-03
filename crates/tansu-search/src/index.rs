@@ -418,123 +418,65 @@ mod tests {
     }
 
     #[test]
-    fn path_dir_extraction() {
-        let manager = setup_index(&[make_doc("folder/note.md", "body", 1)]);
-        assert!(manager.has_document("folder/note").unwrap());
-    }
-
-    #[test]
-    fn diacritics_disabled() {
-        let manager = setup_index(&[make_doc("note.md", "café", 1)]);
-        assert!(manager.has_document("note").unwrap());
-    }
-
-    #[test]
-    fn add_multiple() {
-        let docs = [make_doc("a.md", "one", 1), make_doc("b.md", "two", 1)];
-        let manager = setup_index(&docs);
-        assert_eq!(manager.document_count(), 2);
-    }
-
-    #[test]
-    fn add_document_with_all_fields() {
-        let manager = setup_index(&[make_doc("a.md", "body", 1)]);
-        assert_eq!(manager.read_identities().unwrap(), vec![identity("a.md", 1)]);
-    }
-
-    #[test]
-    fn has_document() {
-        let manager = setup_index(&[make_doc("a.md", "body", 1)]);
-        assert!(manager.has_document("a").unwrap());
+    fn manages_the_document_lifecycle() {
+        let mut manager = IndexManager::new_in_memory().unwrap();
+        assert_eq!(manager.document_count(), 0);
+        manager.upsert(&make_doc("a.md", "one", 1)).unwrap();
+        manager.upsert(&make_doc("b.md", "two", 1)).unwrap();
+        manager.upsert(&make_doc("folder/note.md", "body", 1)).unwrap();
+        manager.upsert(&make_doc("note.md", "café", 1)).unwrap();
+        assert_eq!(manager.document_count(), 4);
+        for id in ["a", "b", "folder/note", "note"] {
+            assert!(manager.has_document(id).unwrap(), "id: {id}");
+        }
         assert!(!manager.has_document("missing").unwrap());
-    }
 
-    #[test]
-    fn remove_document() {
-        let mut manager = setup_index(&[make_doc("a.md", "body", 1)]);
+        manager.upsert(&make_doc("c.md", "one", 1)).unwrap();
+        manager.upsert(&make_doc("c.md", "two", 2)).unwrap();
+        assert_eq!(manager.document_count(), 5);
+        let stored = manager.read_identities().unwrap();
+        assert_eq!(
+            stored
+                .iter()
+                .find(|stored| stored.note_id() == "c")
+                .unwrap()
+                .revision(),
+            2
+        );
+
         manager.remove("a", 2).unwrap();
         assert!(!manager.has_document("a").unwrap());
-    }
-
-    #[test]
-    fn remove_batch() {
-        let docs = [make_doc("a.md", "one", 1), make_doc("b.md", "two", 1)];
-        let mut manager = setup_index(&docs);
+        manager.remove("missing", 1).unwrap();
+        assert_eq!(manager.document_count(), 4);
         manager
-            .remove_batch(&[("a".into(), 2), ("b".into(), 2)])
+            .remove_batch(&[("b".into(), 2), ("folder/note".into(), 2), ("note".into(), 2), ("c".into(), 3)])
             .unwrap();
         assert_eq!(manager.document_count(), 0);
     }
 
     #[test]
-    fn add_and_count() {
-        let manager = setup_index(&[make_doc("a.md", "one", 1), make_doc("b.md", "two", 1)]);
-        assert_eq!(manager.document_count(), 2);
+    fn tracks_identity_and_currency() {
+        let manager = setup_index(&[make_doc("a.md", "body", 1)]);
+        assert_eq!(manager.read_identities().unwrap(), vec![identity("a.md", 1)]);
+        assert!(manager.is_current(&[identity("a.md", 1)]).unwrap());
     }
 
     #[test]
-    fn remove_nonexistent() {
-        let mut manager = setup_index(&[]);
-        manager.remove("missing", 1).unwrap();
-        assert_eq!(manager.document_count(), 0);
-    }
+    fn persists_the_index_to_disk() {
+        let empty = IndexManager::new_in_memory().unwrap();
+        assert_eq!(empty.document_count(), 0);
+        assert_eq!(empty.watermark(), 0);
 
-    #[test]
-    fn serialize_empty_index() {
-        let manager = IndexManager::new_in_memory().unwrap();
-        assert_eq!(manager.document_count(), 0);
-        assert_eq!(manager.watermark(), 0);
-    }
-
-    #[test]
-    fn serialize_and_load_blob() {
-        let input = identity("a.md", 3);
-        let docs = [DocumentInput::new(input, "body".into(), "heading".into()).unwrap()];
-        let manager = setup_index(&docs);
-        assert!(manager.is_current(&[identity("a.md", 3)]).unwrap());
-    }
-
-    #[test]
-    fn persist_to_disk() {
-        let tmp = tempfile::tempdir().unwrap();
-        let path = tmp.path().join("search");
-        let doc = make_doc("a.md", "body", 1);
-        {
-            let mut manager = IndexManager::open(&path).unwrap();
-            manager.upsert(&doc).unwrap();
-        }
-        let manager = IndexManager::open(&path).unwrap();
-        assert!(manager.has_document("a").unwrap());
-        assert_eq!(manager.watermark(), 1);
-    }
-
-    #[test]
-    fn disk_index_reopen_add_more() {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("search");
         {
             let mut manager = IndexManager::open(&path).unwrap();
-            manager.upsert(&make_doc("a.md", "one", 1)).unwrap();
+            manager.upsert(&make_doc("a.md", "body", 1)).unwrap();
         }
         let mut manager = IndexManager::open(&path).unwrap();
+        assert!(manager.has_document("a").unwrap());
+        assert_eq!(manager.watermark(), 1);
         manager.upsert(&make_doc("b.md", "two", 1)).unwrap();
         assert_eq!(manager.document_count(), 2);
-    }
-
-    #[test]
-    fn upsert() {
-        let mut manager = IndexManager::new_in_memory().unwrap();
-        manager.upsert(&make_doc("a.md", "one", 1)).unwrap();
-        manager.upsert(&make_doc("b.md", "two", 1)).unwrap();
-        assert_eq!(manager.document_count(), 2);
-    }
-
-    #[test]
-    fn upsert_replaces_content() {
-        let mut manager = IndexManager::new_in_memory().unwrap();
-        manager.upsert(&make_doc("a.md", "one", 1)).unwrap();
-        manager.upsert(&make_doc("a.md", "two", 2)).unwrap();
-        assert_eq!(manager.document_count(), 1);
-        assert_eq!(manager.read_identities().unwrap()[0].revision(), 2);
     }
 }

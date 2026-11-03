@@ -697,86 +697,136 @@ mod tests {
     }
 
     #[test]
-    fn basic_search() {
-        let index = setup_index(vec![doc("a", "hello world")]);
-        assert_eq!(results(&index, "hello", options())[0].note_id, "a");
+    fn resolves_term_queries() {
+        let cases: Vec<(Vec<DocumentInput>, &str, Vec<&str>)> = vec![
+            (vec![doc("a", "hello world")], "hello", vec!["a"]),
+            (
+                vec![doc("a", "hello world"), doc("b", "hello only")],
+                "hello world",
+                vec!["a"],
+            ),
+            (vec![doc("a", "hello world")], "", vec![]),
+            (vec![doc("a", "hello world")], " \t\n ", vec![]),
+            (vec![doc("a", "hello world")], "xyzzynonexistent", vec![]),
+            (vec![doc("a", "x marks the spot")], "x", vec!["a"]),
+            (
+                vec![doc("a", "internationalization is important")],
+                "intern",
+                vec!["a"],
+            ),
+            (
+                vec![make_doc("a", "a.md", "a", "body text", "", &[], 1)],
+                "nickname",
+                vec![],
+            ),
+            (
+                vec![make_doc("a", "a.md", "a", "body text", "", &[], 1)],
+                "programming",
+                vec![],
+            ),
+        ];
+        for (docs, query, expected) in cases {
+            let index = setup_index(docs);
+            let ids = results(&index, query, options())
+                .into_iter()
+                .map(|hit| hit.note_id)
+                .collect::<Vec<_>>();
+            assert_eq!(ids, expected, "query: {query:?}");
+        }
     }
 
     #[test]
-    fn multi_term_search() {
-        let index = setup_index(vec![doc("a", "hello world"), doc("b", "hello only")]);
-        let hits = results(&index, "hello world", options());
-        assert_eq!(hits.len(), 1);
-        assert_eq!(hits[0].note_id, "a");
-    }
-
-    #[test]
-    fn empty_query() {
-        let index = setup_index(vec![doc("a", "hello world")]);
-        assert!(results(&index, "", options()).is_empty());
-    }
-
-    #[test]
-    fn single_file_filter() {
-        let index = setup_index(vec![doc("one", "alpha"), doc("two", "alpha")]);
-        assert!(index.has_document("one").unwrap());
-        assert!(!index.has_document("missing").unwrap());
-    }
-
-    #[test]
-    fn display_title_boost() {
-        let index = setup_index(vec![
-            make_doc("body", "body.md", "other", "search", "", &[], 1),
-            make_doc("title", "title.md", "search", "other", "", &[], 1),
-        ]);
-        assert_eq!(results(&index, "search", options())[0].note_id, "title");
-    }
-
-    #[test]
-    fn fuzzy_search() {
-        let index = setup_index(vec![doc("typo", "pwoder")]);
-        let hits = results(
-            &index,
-            "powder",
-            SearchOptions {
-                fuzziness: Fuzziness::OneEdit,
-                ..options()
-            },
-        );
-        assert_eq!(hits.len(), 1);
-    }
-
-    #[test]
-    fn tags_in_result() {
-        let index = setup_index(vec![make_doc("a", "a.md", "a", "body", "", &["cooking"], 1)]);
-        assert_eq!(results(&index, "cooking", options())[0].note_id, "a");
-    }
-
-    #[test]
-    fn tag_match_outranks_single_body_mention() {
+    fn ranks_field_matches_by_weight() {
         let filler = "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu";
-        let index = setup_index(vec![
-            make_doc("body", "n1.md", "first", &format!("{filler} gardening {filler}"), "", &[], 1),
-            make_doc("tagged", "n2.md", "second", filler, "", &["gardening"], 1),
-        ]);
-        let hits = results(&index, "gardening", options());
-        assert_eq!(hits.len(), 2);
-        assert_eq!(hits[0].note_id, "tagged");
+        let cases: Vec<(Vec<DocumentInput>, &str, Option<SearchWeights>, Vec<&str>)> = vec![
+            (
+                vec![
+                    make_doc("body", "body.md", "other", "search", "", &[], 1),
+                    make_doc("title", "title.md", "search", "other", "", &[], 1),
+                ],
+                "search",
+                None,
+                vec!["title", "body"],
+            ),
+            (
+                vec![
+                    make_doc(
+                        "body",
+                        "n1.md",
+                        "first",
+                        &format!("{filler} gardening {filler}"),
+                        "",
+                        &[],
+                        1,
+                    ),
+                    make_doc("tagged", "n2.md", "second", filler, "", &["gardening"], 1),
+                ],
+                "gardening",
+                None,
+                vec!["tagged", "body"],
+            ),
+            (
+                vec![
+                    make_doc("partial", "n1.md", "first", "body", "", &["gardening"], 1),
+                    make_doc("exact", "n2.md", "second", "body", "", &["garden"], 1),
+                ],
+                "garden",
+                None,
+                vec!["exact", "partial"],
+            ),
+            (
+                vec![make_doc("a", "a.md", "a", "body", "Important Heading", &[], 1)],
+                "important",
+                None,
+                vec!["a"],
+            ),
+            (
+                vec![make_doc("a", "a.md", "a", "body", "", &["cooking"], 1)],
+                "cooking",
+                None,
+                vec!["a"],
+            ),
+            (
+                vec![
+                    make_doc("t", "t.md", "needle", "plain", "", &[], 1),
+                    make_doc("c", "c.md", "other", "needle", "", &[], 1),
+                ],
+                "needle",
+                None,
+                vec!["t", "c"],
+            ),
+            (
+                vec![
+                    make_doc("t", "t.md", "needle", "plain", "", &[], 1),
+                    make_doc("c", "c.md", "other", "needle", "", &[], 1),
+                ],
+                "needle",
+                Some(SearchWeights::new(1.0, 5.0, 2.0, 50.0, 0.0).unwrap()),
+                vec!["c", "t"],
+            ),
+        ];
+        for (docs, query, weights, expected) in cases {
+            let index = setup_index(docs);
+            let mut current = options();
+            if let Some(weights) = weights {
+                current = current.with_weights(weights);
+            }
+            let ids = results(&index, query, current)
+                .into_iter()
+                .map(|hit| hit.note_id)
+                .collect::<Vec<_>>();
+            assert_eq!(ids, expected, "query: {query:?}");
+        }
+
+        let index = setup_index(vec![make_doc("t", "t.md", "needle", "plain", "", &[], 1)]);
+        let explicit = SearchWeights::new(10.0, 5.0, 2.0, 1.0, 0.0).unwrap();
+        let default_hit = &results(&index, "needle", options())[0];
+        let explicit_hit = &results(&index, "needle", options().with_weights(explicit))[0];
+        assert_eq!(default_hit.score, explicit_hit.score);
     }
 
     #[test]
-    fn exact_tag_match_outranks_partial_tag_match() {
-        let index = setup_index(vec![
-            make_doc("partial", "n1.md", "first", "body", "", &["gardening"], 1),
-            make_doc("exact", "n2.md", "second", "body", "", &["garden"], 1),
-        ]);
-        let hits = results(&index, "garden", options());
-        assert_eq!(hits.len(), 2);
-        assert_eq!(hits[0].note_id, "exact");
-    }
-
-    #[test]
-    fn search_returns_stored_fields() {
+    fn shapes_result_hits() {
         let index = setup_index(vec![make_doc(
             "note-id",
             "folder/a.md",
@@ -793,84 +843,151 @@ mod tests {
         assert_eq!(hit.revision, 7);
         assert_eq!(hit.source_hash, "blake3-v3:7");
         assert!(!hit.excerpt.is_empty());
+
+        let index = setup_index(vec![doc("a", "Hello World")]);
+        let hit = &results(&index, "Hello World", options())[0];
+        assert_eq!(hit.matched_terms, ["hello", "world"]);
+
+        let index = setup_index(vec![doc("a", "Hello world, this is a test document")]);
+        let hits = results(&index, "hello test", options());
+        assert_eq!(hits[0].excerpt_ranges.len(), 2);
+
+        let long = format!("{}needle{}", "before ".repeat(100), " after".repeat(100));
+        let index = setup_index(vec![doc("long", &long), doc("filename", "other")]);
+        let hit = results(&index, "needle", options()).remove(0);
+        assert!(hit.excerpt.len() <= MAX_EXCERPT_BYTES);
+        assert!(hit.source_reveal_range.is_some());
+        let filename = setup_index(vec![make_doc(
+            "file",
+            "needle-file.md",
+            "needle-file",
+            "other words",
+            "",
+            &[],
+            1,
+        )]);
+        let hit = results(&filename, "needle", options()).remove(0);
+        assert!(hit.source_reveal_range.is_none());
+        assert!(hit.excerpt.is_empty());
+
+        let content = "---\ntags: [one]\n---\n\te\u{301} 😀 needle needle";
+        let index = setup_index(vec![make_doc("a", "a.md", "a", content, "", &["one"], 1)]);
+        let hit = results(&index, "needle", options()).remove(0);
+        assert_eq!(hit.source_reveal_range.as_ref().unwrap().start(), 27);
+        assert_eq!(hit.excerpt_ranges.len(), 2);
     }
 
     #[test]
-    fn fuzzy_distance_values() {
+    fn measures_edit_distance() {
+        for (left, right, expected) in [
+            ("powder", "powder", 0),
+            ("powder", "pwoder", 1),
+            ("powder", "powdr", 1),
+            ("powder", "poweder", 1),
+        ] {
+            assert_eq!(osa_distance(left, right), expected);
+        }
         assert_eq!(Fuzziness::OneEdit.distance_for("cat"), 0);
         assert_eq!(Fuzziness::OneEdit.distance_for("tacos"), 1);
         assert_eq!(Fuzziness::TwoEdits.distance_for("tacoshop"), 2);
     }
 
     #[test]
-    fn whitespace_only_query() {
-        let index = setup_index(vec![doc("a", "hello world")]);
-        assert!(results(&index, " \t\n ", options()).is_empty());
+    fn applies_fuzziness_levels() {
+        let cases: Vec<(Vec<DocumentInput>, &str, Fuzziness, Vec<&str>)> = vec![
+            (
+                vec![doc("typo", "pwoder")],
+                "powder",
+                Fuzziness::OneEdit,
+                vec!["typo"],
+            ),
+            (
+                vec![doc("typo", "pwoder")],
+                "powder",
+                Fuzziness::Disabled,
+                vec![],
+            ),
+            (
+                vec![doc("typo", "pwoder")],
+                "powder",
+                Fuzziness::TwoEdits,
+                vec!["typo"],
+            ),
+            (
+                vec![doc("exact", "powder"), doc("typo", "pwoder")],
+                "powder",
+                Fuzziness::TwoEdits,
+                vec!["exact", "typo"],
+            ),
+        ];
+        for (docs, query, fuzziness, mut expected) in cases {
+            let index = setup_index(docs);
+            let mut ids = results(
+                &index,
+                query,
+                SearchOptions {
+                    fuzziness,
+                    ..options()
+                },
+            )
+            .into_iter()
+            .map(|hit| hit.note_id)
+            .collect::<Vec<_>>();
+            ids.sort();
+            expected.sort();
+            assert_eq!(ids, expected, "query: {query:?}");
+        }
     }
 
     #[test]
-    fn osa_distance_values() {
-        assert_eq!(osa_distance("powder", "powder"), 0);
-        assert_eq!(osa_distance("powder", "pwoder"), 1);
-        assert_eq!(osa_distance("powder", "powdr"), 1);
-        assert_eq!(osa_distance("powder", "poweder"), 1);
-    }
+    fn searches_typo_only_mode() {
+        let typo_options = |fuzziness| SearchOptions {
+            mode: SearchMode::TypoOnly,
+            fuzziness,
+            ..options()
+        };
+        let cases: Vec<(Vec<DocumentInput>, &str, Fuzziness, Vec<&str>)> = vec![
+            (
+                vec![doc("typo", "pwoder")],
+                "powder",
+                Fuzziness::TwoEdits,
+                vec!["typo"],
+            ),
+            (
+                vec![doc("mixed", "powder pwoder")],
+                "powder",
+                Fuzziness::TwoEdits,
+                vec!["mixed"],
+            ),
+            (
+                vec![doc("exact", "powder"), doc("typo", "pwoder")],
+                "powder",
+                Fuzziness::TwoEdits,
+                vec!["typo"],
+            ),
+            (vec![doc("a", "fox")], "fox", Fuzziness::TwoEdits, vec![]),
+            (
+                vec![doc("typo", "pwoder milk")],
+                "\"powder milk\"",
+                Fuzziness::TwoEdits,
+                vec![],
+            ),
+        ];
+        for (docs, query, fuzziness, expected) in cases {
+            let index = setup_index(docs);
+            let ids = results(&index, query, typo_options(fuzziness))
+                .into_iter()
+                .map(|hit| hit.note_id)
+                .collect::<Vec<_>>();
+            assert_eq!(ids, expected, "query: {query:?}");
+        }
 
-    #[test]
-    fn fuzziness_zero_no_fuzzy() {
         let index = setup_index(vec![doc("typo", "pwoder")]);
-        assert!(results(&index, "powder", options()).is_empty());
-    }
-
-    #[test]
-    fn fuzziness2_finds_pwoder() {
-        let index = setup_index(vec![doc("typo", "pwoder")]);
-        let hits = results(
-            &index,
-            "powder",
-            SearchOptions {
-                fuzziness: Fuzziness::TwoEdits,
-                ..options()
-            },
-        );
-        assert_eq!(hits[0].note_id, "typo");
-    }
-
-    #[test]
-    fn fuzziness2_matches_both_exact_and_fuzzy() {
-        let index = setup_index(vec![doc("exact", "powder"), doc("typo", "pwoder")]);
-        let hits = results(
-            &index,
-            "powder",
-            SearchOptions {
-                fuzziness: Fuzziness::TwoEdits,
-                limit: SearchLimit::try_from(2).unwrap(),
-                ..options()
-            },
-        );
-        assert!(hits.iter().any(|hit| hit.note_id == "exact"));
-        assert!(hits.iter().any(|hit| hit.note_id == "typo"));
-    }
-
-    #[test]
-    fn fuzzy_only_matches_typo() {
-        let index = setup_index(vec![doc("typo", "pwoder")]);
-        let hits = results(
-            &index,
-            "powder",
-            SearchOptions {
-                mode: SearchMode::TypoOnly,
-                fuzziness: Fuzziness::TwoEdits,
-                ..options()
-            },
-        );
+        let hits = results(&index, "powder", typo_options(Fuzziness::TwoEdits));
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].note_id, "typo");
         assert!(hits[0].source_reveal_range.is_some());
-    }
 
-    #[test]
-    fn typo_only_search_matches_a_typo_in_the_path_without_source_ranges() {
         let index = setup_index(vec![make_doc(
             "typo-path",
             "pwoder.md",
@@ -880,93 +997,11 @@ mod tests {
             &[],
             1,
         )]);
-        let hits = results(
-            &index,
-            "powder",
-            SearchOptions {
-                mode: SearchMode::TypoOnly,
-                fuzziness: Fuzziness::OneEdit,
-                ..options()
-            },
-        );
+        let hits = results(&index, "powder", typo_options(Fuzziness::OneEdit));
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].path, "pwoder.md");
         assert!(hits[0].source_reveal_range.is_none());
         assert!(hits[0].excerpt_ranges.is_empty());
-    }
-
-    #[test]
-    fn typo_only_does_not_search_phrase_words_fuzzily() {
-        let index = setup_index(vec![doc("typo", "pwoder milk")]);
-        let hits = results(
-            &index,
-            "\"powder milk\"",
-            SearchOptions {
-                mode: SearchMode::TypoOnly,
-                fuzziness: Fuzziness::TwoEdits,
-                ..options()
-            },
-        );
-        assert!(hits.is_empty());
-    }
-
-    #[test]
-    fn fuzzy_only_finds_typo_in_mixed_doc() {
-        let index = setup_index(vec![doc("mixed", "powder pwoder")]);
-        let hits = results(
-            &index,
-            "powder",
-            SearchOptions {
-                mode: SearchMode::TypoOnly,
-                fuzziness: Fuzziness::TwoEdits,
-                ..options()
-            },
-        );
-        assert_eq!(hits.len(), 1);
-        assert!(!hits[0].excerpt_ranges.is_empty());
-    }
-
-    #[test]
-    fn fuzzy_only_matches_both_docs() {
-        let index = setup_index(vec![doc("exact", "powder"), doc("typo", "pwoder")]);
-        let hits = results(
-            &index,
-            "powder",
-            SearchOptions {
-                mode: SearchMode::TypoOnly,
-                fuzziness: Fuzziness::TwoEdits,
-                ..options()
-            },
-        );
-        assert_eq!(hits.iter().map(|hit| hit.note_id.as_str()).collect::<Vec<_>>(), ["typo"]);
-    }
-
-    #[test]
-    fn fuzzy_only_skips_short_terms() {
-        let index = setup_index(vec![doc("a", "fox")]);
-        let hits = results(
-            &index,
-            "fox",
-            SearchOptions {
-                mode: SearchMode::TypoOnly,
-                fuzziness: Fuzziness::TwoEdits,
-                ..options()
-            },
-        );
-        assert!(hits.is_empty());
-    }
-
-    #[test]
-    fn typed_options_keep_recency_out_of_search_state() {
-        assert_eq!(SearchOptions::default().mode, SearchMode::ExactPrefix);
-        assert_eq!(SearchOptions::default().fuzziness, Fuzziness::OneEdit);
-    }
-
-    #[test]
-    fn matched_terms_lowercased() {
-        let index = setup_index(vec![doc("a", "Hello World")]);
-        let hit = &results(&index, "Hello World", options())[0];
-        assert_eq!(hit.matched_terms, ["hello", "world"]);
     }
 
     #[test]
@@ -983,73 +1018,35 @@ mod tests {
     }
 
     #[test]
-    fn changed_field_weight_changes_ranking() {
-        let index = setup_index(vec![
-            make_doc("t", "t.md", "needle", "plain", "", &[], 1),
-            make_doc("c", "c.md", "other", "needle", "", &[], 1),
-        ]);
-        let order = |weights: SearchWeights| {
-            results(&index, "needle", options().with_weights(weights))
-                .into_iter()
-                .map(|hit| hit.note_id)
-                .collect::<Vec<_>>()
-        };
-        assert_eq!(order(SearchWeights::default()), ["t", "c"]);
-        let content_heavy = SearchWeights::new(1.0, 5.0, 2.0, 50.0, 0.0).unwrap();
-        assert_eq!(order(content_heavy), ["c", "t"]);
-    }
-
-    #[test]
-    fn default_weights_keep_fixed_scoring() {
-        let index = setup_index(vec![make_doc("t", "t.md", "needle", "plain", "", &[], 1)]);
-        let explicit = SearchWeights::new(10.0, 5.0, 2.0, 1.0, 0.0).unwrap();
-        let default_hit = &results(&index, "needle", options())[0];
-        let explicit_hit = &results(&index, "needle", options().with_weights(explicit))[0];
-        assert_eq!(default_hit.score, explicit_hit.score);
-    }
-
-    #[test]
-    fn invalid_weights_are_rejected() {
+    fn validates_search_options() {
+        assert_eq!(SearchOptions::default().mode, SearchMode::ExactPrefix);
+        assert_eq!(SearchOptions::default().fuzziness, Fuzziness::OneEdit);
         for bad in [f32::NAN, -1.0, f32::INFINITY, SearchWeights::MAX + 1.0] {
             assert!(SearchWeights::new(bad, 1.0, 1.0, 1.0, 0.0).is_err());
             assert!(SearchWeights::new(1.0, 1.0, 1.0, 1.0, bad).is_err());
         }
+
+        let index = setup_index(vec![doc("a", "body")]);
+        let query = "x".repeat(MAX_QUERY_BYTES + 1);
+        assert!(matches!(
+            execute(&index, &query, options()),
+            Err(SearchError::QueryTooLong {
+                bytes: 1025,
+                maximum: 1024
+            })
+        ));
     }
 
     #[test]
-    fn headings_search() {
-        let index = setup_index(vec![make_doc("a", "a.md", "a", "body", "Important Heading", &[], 1)]);
-        assert_eq!(results(&index, "important", options())[0].note_id, "a");
-    }
-
-    #[test]
-    fn disabled_fields_not_searched() {
-        let index = setup_index(vec![make_doc(
-            "a",
-            "a.md",
-            "a",
-            "body text",
-            "",
-            &[],
-            1,
-        )]);
-        assert!(results(&index, "nickname", options()).is_empty());
-        assert!(results(&index, "programming", options()).is_empty());
-    }
-
-    #[test]
-    fn limit_results() {
+    fn limits_results_before_sparse_fallback() {
         let docs = (0..10).map(|i| doc(&i.to_string(), "common search term")).collect();
         let index = setup_index(docs);
-        let options = SearchOptions {
+        let limited = SearchOptions {
             limit: SearchLimit::try_from(3).unwrap(),
             ..self::options()
         };
-        assert_eq!(results(&index, "common", options).len(), 3);
-    }
+        assert_eq!(results(&index, "common", limited).len(), 3);
 
-    #[test]
-    fn sparse_fallback_threshold_is_independent_of_output_limit() {
         let index = setup_index(vec![
             make_doc("best", "best.md", "Powder", "powder pwoder", "", &[], 1),
             doc("exact-1", "powder"),
@@ -1072,158 +1069,103 @@ mod tests {
     }
 
     #[test]
-    fn prefix_search() {
-        let index = setup_index(vec![doc("a", "internationalization is important")]);
-        assert_eq!(results(&index, "intern", options())[0].note_id, "a");
-    }
+    fn matches_phrases_against_documents() {
+        let cases: Vec<(Vec<DocumentInput>, &str, Vec<&str>)> = vec![
+            (
+                vec![doc("a", "the quick brown fox"), doc("b", "brown quick fox")],
+                "\"quick brown\"",
+                vec!["a"],
+            ),
+            (
+                vec![doc("a", "the brown quick fox")],
+                "\"quick brown\"",
+                vec![],
+            ),
+            (
+                vec![doc("a", "quick red brown fox")],
+                "\"quick brown\"",
+                vec![],
+            ),
+            (
+                vec![
+                    doc("a", "quick brown fox lazy dog"),
+                    doc("b", "lazy dog sleeps"),
+                ],
+                "\"quick brown\" lazy",
+                vec!["a"],
+            ),
+            (vec![doc("a", "hello world")], "\"hello\"", vec!["a"]),
+            (
+                vec![
+                    doc("a", "quick brown fox and lazy dog"),
+                    doc("b", "quick brown fox and busy cat"),
+                ],
+                "\"quick brown\" \"lazy dog\"",
+                vec!["a"],
+            ),
+            (vec![doc("a", "hello world")], "\"\"", vec![]),
+            (
+                vec![doc("a", "hello beautiful world")],
+                "\"hello world",
+                vec!["a"],
+            ),
+            (
+                vec![make_doc("a", "a.md", "a", "body", "quick brown fox", &[], 1)],
+                "\"quick brown\"",
+                vec!["a"],
+            ),
+            (
+                vec![doc("a", "myVariable is great")],
+                "\"variable is\"",
+                vec!["a"],
+            ),
+        ];
+        for (docs, query, expected) in cases {
+            let index = setup_index(docs);
+            let ids = results(&index, query, options())
+                .into_iter()
+                .map(|hit| hit.note_id)
+                .collect::<Vec<_>>();
+            assert_eq!(ids, expected, "query: {query:?}");
+        }
 
-    #[test]
-    fn no_results_for_nonexistent() {
-        let index = setup_index(vec![doc("a", "hello world")]);
-        assert!(results(&index, "xyzzynonexistent", options()).is_empty());
-    }
-
-    #[test]
-    fn single_char_query() {
-        let index = setup_index(vec![doc("a", "x marks the spot")]);
-        assert_eq!(results(&index, "x", options()).len(), 1);
-    }
-
-    #[test]
-    fn phrase_basic_match() {
-        let index = setup_index(vec![doc("a", "the quick brown fox"), doc("b", "brown quick fox")]);
-        let hits = results(&index, "\"quick brown\"", options());
-        assert_eq!(hits.len(), 1);
-        assert_eq!(hits[0].note_id, "a");
-    }
-
-    #[test]
-    fn phrase_no_match_reversed() {
-        let index = setup_index(vec![doc("a", "the brown quick fox")]);
-        assert!(results(&index, "\"quick brown\"", options()).is_empty());
-    }
-
-    #[test]
-    fn phrase_no_match_non_adjacent() {
-        let index = setup_index(vec![doc("a", "quick red brown fox")]);
-        assert!(results(&index, "\"quick brown\"", options()).is_empty());
-    }
-
-    #[test]
-    fn phrase_with_extra_terms() {
-        let index = setup_index(vec![
-            doc("a", "quick brown fox lazy dog"),
-            doc("b", "lazy dog sleeps"),
-        ]);
-        let hits = results(&index, "\"quick brown\" lazy", options());
-        assert_eq!(hits.len(), 1);
-        assert_eq!(hits[0].note_id, "a");
-    }
-
-    #[test]
-    fn single_word_phrase_as_term() {
-        let index = setup_index(vec![doc("a", "hello world")]);
-        assert_eq!(results(&index, "\"hello\"", options()).len(), 1);
-    }
-
-    #[test]
-    fn multiple_phrases() {
-        let index = setup_index(vec![
-            doc("a", "quick brown fox and lazy dog"),
-            doc("b", "quick brown fox and busy cat"),
-        ]);
-        let hits = results(&index, "\"quick brown\" \"lazy dog\"", options());
-        assert_eq!(hits.len(), 1);
-        assert_eq!(hits[0].note_id, "a");
-    }
-
-    #[test]
-    fn empty_phrase_ignored() {
-        let index = setup_index(vec![doc("a", "hello world")]);
-        assert!(results(&index, "\"\"", options()).is_empty());
-    }
-
-    #[test]
-    fn unclosed_quote_as_terms() {
-        let index = setup_index(vec![doc("a", "hello beautiful world")]);
-        assert_eq!(results(&index, "\"hello world", options()).len(), 1);
-    }
-
-    #[test]
-    fn phrase_in_headings() {
-        let index = setup_index(vec![make_doc("a", "a.md", "a", "body", "quick brown fox", &[], 1)]);
-        assert_eq!(results(&index, "\"quick brown\"", options()).len(), 1);
-    }
-
-    #[test]
-    fn phrase_across_camel_case_boundary() {
-        let index = setup_index(vec![doc("a", "myVariable is great")]);
-        assert_eq!(results(&index, "\"variable is\"", options()).len(), 1);
-    }
-
-    #[test]
-    fn phrase_matched_terms_include_phrase_words() {
         let index = setup_index(vec![doc("a", "quick brown fox")]);
         let hit = &results(&index, "\"quick brown\" fox", options())[0];
-        assert!(hit.matched_terms.contains(&"quick".into()));
-        assert!(hit.matched_terms.contains(&"brown".into()));
-        assert!(hit.matched_terms.contains(&"fox".into()));
+        assert!(hit.matched_terms.contains(&"quick".to_string()));
+        assert!(hit.matched_terms.contains(&"brown".to_string()));
+        assert!(hit.matched_terms.contains(&"fox".to_string()));
     }
 
     #[test]
-    fn parse_query_simple_terms() {
-        let parsed = parse_query("hello world");
-        assert_eq!(parsed.terms, ["hello", "world"]);
-        assert!(parsed.phrases.is_empty());
-    }
-
-    #[test]
-    fn parse_query_single_phrase() {
-        let parsed = parse_query("\"quick brown\"");
-        assert!(parsed.terms.is_empty());
-        assert_eq!(parsed.phrases, [vec!["quick", "brown"]]);
-    }
-
-    #[test]
-    fn parse_query_phrase_and_terms() {
-        let parsed = parse_query("hello \"quick brown\" world");
-        assert_eq!(parsed.terms, ["hello", "world"]);
-        assert_eq!(parsed.phrases, [vec!["quick", "brown"]]);
-    }
-
-    #[test]
-    fn parse_query_single_word_phrase_promoted() {
-        let parsed = parse_query("\"hello\"");
-        assert_eq!(parsed.terms, ["hello"]);
-        assert!(parsed.phrases.is_empty());
-    }
-
-    #[test]
-    fn parse_query_empty_phrase_ignored() {
-        let parsed = parse_query("\"\"");
-        assert!(parsed.terms.is_empty());
-        assert!(parsed.phrases.is_empty());
-    }
-
-    #[test]
-    fn parse_query_unclosed_quote() {
-        let parsed = parse_query("\"hello world");
-        assert_eq!(parsed.terms, ["hello", "world"]);
-        assert!(parsed.phrases.is_empty());
-    }
-
-    #[test]
-    fn parse_query_multiple_phrases() {
-        let parsed = parse_query("\"foo bar\" \"baz qux\"");
-        assert!(parsed.terms.is_empty());
-        assert_eq!(parsed.phrases, [vec!["foo", "bar"], vec!["baz", "qux"]]);
-    }
-
-    #[test]
-    fn parse_query_lowercases() {
-        let parsed = parse_query("Hello \"FOO Bar\"");
-        assert_eq!(parsed.terms, ["hello"]);
-        assert_eq!(parsed.phrases, [vec!["foo", "bar"]]);
+    fn parses_search_queries() {
+        let cases: &[(&str, &[&str], &[&[&str]])] = &[
+            ("hello world", &["hello", "world"], &[]),
+            ("\"quick brown\"", &[], &[&["quick", "brown"]]),
+            (
+                "hello \"quick brown\" world",
+                &["hello", "world"],
+                &[&["quick", "brown"]],
+            ),
+            ("\"hello\"", &["hello"], &[]),
+            ("\"\"", &[], &[]),
+            ("\"hello world", &["hello", "world"], &[]),
+            (
+                "\"foo bar\" \"baz qux\"",
+                &[],
+                &[&["foo", "bar"], &["baz", "qux"]],
+            ),
+            ("Hello \"FOO Bar\"", &["hello"], &[&["foo", "bar"]]),
+        ];
+        for (input, terms, phrases) in cases {
+            let parsed = parse_query(input);
+            assert_eq!(parsed.terms, terms.to_vec(), "input: {input:?}");
+            let parsed_phrases = parsed
+                .phrases
+                .iter()
+                .map(|phrase| phrase.iter().map(String::as_str).collect::<Vec<_>>())
+                .collect::<Vec<_>>();
+            assert_eq!(parsed_phrases, phrases.to_vec(), "input: {input:?}");
+        }
     }
 
     fn extract(content: &str, terms: &[String], _ignore_diacritics: bool) -> Vec<MatchInfo> {
@@ -1244,139 +1186,103 @@ mod tests {
     }
 
     #[test]
-    fn find_matches_basic() {
-        let matches = extract("hello world hello", &["hello".into()], true);
-        assert_eq!(matches.len(), 2);
-        assert_eq!(matches[0].match_text, "hello");
-        assert_eq!(matches[0].range.start(), 0);
-        assert_eq!(matches[1].range.start(), 12);
+    fn finds_exact_matches_with_source_offsets() {
+        let capped_content = "word ".repeat(200);
+        let capped_expected: Vec<(String, u32, u32)> = (0..MAX_MATCHES)
+            .map(|i| ("word".to_string(), 5 * i as u32, 5 * i as u32 + 4))
+            .collect();
+        let cases: Vec<(String, Vec<String>, bool, Vec<(String, u32, u32)>)> = vec![
+            (
+                "hello world hello".to_string(),
+                vec!["hello".to_string()],
+                true,
+                vec![
+                    ("hello".to_string(), 0, 5),
+                    ("hello".to_string(), 12, 17),
+                ],
+            ),
+            (
+                "Hello WORLD".to_string(),
+                vec!["hello".to_string(), "world".to_string()],
+                true,
+                vec![
+                    ("Hello".to_string(), 0, 5),
+                    ("WORLD".to_string(), 6, 11),
+                ],
+            ),
+            (
+                capped_content,
+                vec!["word".to_string()],
+                true,
+                capped_expected,
+            ),
+            ("hello world".to_string(), vec![], true, vec![]),
+            ("".to_string(), vec!["hello".to_string()], true, vec![]),
+            (
+                "hello world".to_string(),
+                vec!["xyz".to_string()],
+                true,
+                vec![],
+            ),
+            (
+                "café résumé".to_string(),
+                vec!["cafe".to_string(), "resume".to_string()],
+                true,
+                vec![
+                    ("café".to_string(), 0, 4),
+                    ("résumé".to_string(), 5, 11),
+                ],
+            ),
+            (
+                "x e\u{301} 😀".to_string(),
+                vec!["e".to_string()],
+                true,
+                vec![("e\u{301}".to_string(), 2, 4)],
+            ),
+            (
+                "hello world".to_string(),
+                vec!["hello".to_string()],
+                true,
+                vec![("hello".to_string(), 0, 5)],
+            ),
+            (
+                "世界hello".to_string(),
+                vec!["hello".to_string()],
+                false,
+                vec![("hello".to_string(), 2, 7)],
+            ),
+            (
+                "😀hello".to_string(),
+                vec!["hello".to_string()],
+                false,
+                vec![("hello".to_string(), 2, 7)],
+            ),
+            (
+                "the quick brown fox".to_string(),
+                vec!["quick".to_string(), "fox".to_string()],
+                false,
+                vec![
+                    ("quick".to_string(), 4, 9),
+                    ("fox".to_string(), 16, 19),
+                ],
+            ),
+        ];
+        for (content, terms, ignore_diacritics, expected) in cases {
+            let actual = extract(&content, &terms, ignore_diacritics)
+                .iter()
+                .map(|matched| {
+                    (
+                        matched.match_text.clone(),
+                        matched.range.start(),
+                        matched.range.end(),
+                    )
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(actual, expected, "content: {content:?}");
+        }
     }
 
-    #[test]
-    fn find_matches_case_insensitive() {
-        let matches = extract("Hello WORLD", &["hello".into(), "world".into()], true);
-        assert_eq!(matches.len(), 2);
-        assert_eq!(matches[0].match_text, "Hello");
-        assert_eq!(matches[1].match_text, "WORLD");
-    }
 
-    #[test]
-    fn find_matches_cap_at_100() {
-        let content = "word ".repeat(200);
-        assert_eq!(extract(&content, &["word".into()], true).len(), MAX_MATCHES);
-    }
 
-    #[test]
-    fn find_matches_empty_terms() {
-        assert!(extract("hello world", &[], true).is_empty());
-    }
 
-    #[test]
-    fn find_matches_empty_content() {
-        assert!(extract("", &["hello".into()], true).is_empty());
-    }
-
-    #[test]
-    fn find_matches_no_match() {
-        assert!(extract("hello world", &["xyz".into()], true).is_empty());
-    }
-
-    #[test]
-    fn find_matches_diacritics() {
-        let matches = extract("café résumé", &["cafe".into(), "resume".into()], true);
-        assert_eq!(matches.len(), 2);
-        assert_eq!(matches[0].match_text, "café");
-        assert_eq!(matches[1].match_text, "résumé");
-    }
-
-    #[test]
-    fn find_matches_combining_mark_preserves_source_offsets() {
-        let matches = extract("x e\u{301} 😀", &["e".into()], true);
-        assert_eq!(matches.len(), 1);
-        assert_eq!(matches[0].match_text, "e\u{301}");
-        assert_eq!((matches[0].range.start(), matches[0].range.end()), (2, 4));
-    }
-
-    #[test]
-    fn find_matches_ascii_skips_diacritics() {
-        assert_eq!(extract("hello world", &["hello".into()], true).len(), 1);
-    }
-
-    #[test]
-    fn find_matches_utf16_offsets() {
-        let matches = extract("世界hello", &["hello".into()], false);
-        assert_eq!((matches[0].range.start(), matches[0].range.end()), (2, 7));
-    }
-
-    #[test]
-    fn find_matches_emoji_utf16_offsets() {
-        let matches = extract("😀hello", &["hello".into()], false);
-        assert_eq!(matches[0].range.start(), 2);
-    }
-
-    #[test]
-    fn find_matches_multiple_terms() {
-        let matches = extract("the quick brown fox", &["quick".into(), "fox".into()], false);
-        assert_eq!(matches.len(), 2);
-        assert_eq!(matches[0].range.start(), 4);
-        assert_eq!(matches[1].range.start(), 16);
-    }
-
-    #[test]
-    fn search_returns_matches() {
-        let index = setup_index(vec![doc("a", "Hello world, this is a test document")]);
-        let hits = results(&index, "hello test", options());
-        assert_eq!(hits[0].excerpt_ranges.len(), 2);
-    }
-
-    #[test]
-    fn query_limit_returns_a_typed_error() {
-        let index = setup_index(vec![doc("a", "body")]);
-        let query = "x".repeat(MAX_QUERY_BYTES + 1);
-        assert!(matches!(
-            execute(&index, &query, options()),
-            Err(SearchError::QueryTooLong {
-                bytes: 1025,
-                maximum: 1024
-            })
-        ));
-    }
-
-    #[test]
-    fn excerpt_is_bounded_and_filename_only_has_no_offset() {
-        let long = format!("{}needle{}", "before ".repeat(100), " after".repeat(100));
-        let index = setup_index(vec![doc("long", &long), doc("filename", "other")]);
-        let hit = results(&index, "needle", options()).remove(0);
-        assert!(hit.excerpt.len() <= MAX_EXCERPT_BYTES);
-        assert!(hit.source_reveal_range.is_some());
-        let filename = setup_index(vec![make_doc(
-            "file",
-            "needle-file.md",
-            "needle-file",
-            "other words",
-            "",
-            &[],
-            1,
-        )]);
-        let hit = results(&filename, "needle", options()).remove(0);
-        assert!(hit.source_reveal_range.is_none());
-        assert!(hit.excerpt.is_empty());
-    }
-
-    #[test]
-    fn combining_marks_tabs_frontmatter_and_repeated_text_keep_source_offsets() {
-        let content = "---\ntags: [one]\n---\n\te\u{301} 😀 needle needle";
-        let index = setup_index(vec![make_doc(
-            "a",
-            "a.md",
-            "a",
-            content,
-            "",
-            &["one"],
-            1,
-        )]);
-        let hit = results(&index, "needle", options()).remove(0);
-        assert_eq!(hit.source_reveal_range.as_ref().unwrap().start(), 27);
-        assert_eq!(hit.excerpt_ranges.len(), 2);
-    }
 }

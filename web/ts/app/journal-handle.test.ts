@@ -12,47 +12,34 @@ function workspace() {
 }
 
 describe("JournalHandle", () => {
-  it("creates the journal lazily, once, and attaches visibility flush once", () => {
+  it("creates the journal lazily and tears it down exactly once", async () => {
     const fake = workspace();
     const handle = new JournalHandle(fake, () => {});
     expect(fake.createJournal).not.toHaveBeenCalled();
 
-    expect(handle.get()).toBe(fake.journal);
-    expect(handle.get()).toBe(fake.journal);
+    await handle.flushAll();
+    expect(fake.flushAll).not.toHaveBeenCalled();
 
+    expect(handle.get()).toBe(fake.journal);
+    expect(handle.get()).toBe(fake.journal);
     expect(fake.createJournal).toHaveBeenCalledTimes(1);
     expect(fake.attachVisibilityFlush).toHaveBeenCalledTimes(1);
-  });
-
-  it("flushes nothing before the journal exists", async () => {
-    const fake = workspace();
-    await new JournalHandle(fake, () => {}).flushAll();
-    expect(fake.flushAll).not.toHaveBeenCalled();
-  });
-
-  it("dispose flushes, detaches visibility flush, and refuses to recreate a journal", async () => {
-    const fake = workspace();
-    const handle = new JournalHandle(fake, () => {});
-    handle.get();
 
     await handle.dispose();
     await handle.dispose();
-
     expect(fake.flushAll).toHaveBeenCalledTimes(1);
     expect(fake.detach).toHaveBeenCalledTimes(1);
     expect(() => handle.get()).toThrow("disposed");
     expect(fake.createJournal).toHaveBeenCalledTimes(1);
   });
 
-  it("dispose before first use never creates a journal", async () => {
-    const fake = workspace();
-    const handle = new JournalHandle(fake, () => {});
-    await handle.dispose();
-    expect(() => handle.get()).toThrow("disposed");
-    expect(fake.createJournal).not.toHaveBeenCalled();
-  });
+  it("never creates an unused journal and reports a failed flush", async () => {
+    const unused = workspace();
+    const pristine = new JournalHandle(unused, () => {});
+    await pristine.dispose();
+    expect(() => pristine.get()).toThrow("disposed");
+    expect(unused.createJournal).not.toHaveBeenCalled();
 
-  it("reports a failed flush to the caller of dispose", async () => {
     const fake = workspace();
     fake.flushAll.mockRejectedValueOnce(new Error("quota"));
     const handle = new JournalHandle(fake, () => {});
