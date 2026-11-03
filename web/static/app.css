@@ -2381,72 +2381,8 @@ button {
   color: var(--color-text);
 }
 
-.link-rail-graph { display: flex; justify-content: center; }
-
-.local-graph {
-  width: 100%;
-  max-width: 220px;
-  height: auto;
-  overflow: visible;
-}
-
-.graph-node,
-.graph-edge {
-  transition: transform 260ms ease, opacity 220ms ease;
-  animation: graph-enter 260ms ease both;
-}
-
-.graph-node.leaving,
-.graph-edge.leaving { opacity: 0; }
-
-.graph-node { cursor: pointer; }
-
-.graph-node[data-hop="0"] { cursor: default; }
-
-.graph-dot { fill: var(--color-text); opacity: 0.75; }
-
-.graph-node[data-hop="2"] .graph-dot { opacity: 0.25; }
-
-.graph-node:hover .graph-dot { opacity: 1; }
-
-.graph-label {
-  fill: var(--color-text);
-  font-size: 7px;
-  text-anchor: middle;
-  transform: translateY(-10px);
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 120ms ease;
-}
-
-.graph-node[data-hop="0"] .graph-label,
-.graph-node:hover .graph-label { opacity: 0.8; }
-
-.graph-edge {
-  stroke: var(--color-text);
-  stroke-width: 1;
-  vector-effect: non-scaling-stroke;
-  opacity: 0.22;
-}
-
-.graph-edge[data-hop="2"] { opacity: 0.1; }
-
-.graph-edge.leaving { opacity: 0; }
-
-@keyframes graph-enter {
-  from { opacity: 0; }
-}
-
 @media (max-width: 1099.98px) {
   .link-rail { display: none; }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .graph-node,
-  .graph-edge {
-    transition: none;
-    animation: none;
-  }
 }
 
 .tab,

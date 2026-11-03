@@ -144,7 +144,6 @@ export type State = {
   focusMode: boolean;
   linkRailCollapsed: boolean;
   noteLinks: NoteLinksState | null;
-  knownLinks: Map<string, V2NoteLinksResponse>;
   tagSuggestions: TagSuggestionsState | null;
 };
 
@@ -193,7 +192,6 @@ export function createState(vault: VaultId): State {
     focusMode: false,
     linkRailCollapsed: true,
     noteLinks: null,
-    knownLinks: new Map(),
     tagSuggestions: null,
   };
 }

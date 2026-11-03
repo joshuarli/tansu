@@ -3,7 +3,6 @@ import { describe, expect, it, vi } from "vitest";
 import type { ViewEvent } from "./app/events.ts";
 import { vaultId } from "./app/identity.ts";
 import { EMPTY_BACKLINKS_HINT, mentionSegments, renderLinksRail } from "./links-rail.ts";
-import { LocalGraphView } from "./local-graph.ts";
 import { createState, tabFromDocument, tabIdentity, type State } from "./state.ts";
 import type { V2NoteLinksResponse, V2NoteMeta } from "./types.generated.ts";
 
@@ -48,14 +47,13 @@ describe("links rail", () => {
     const state = stateWithActive();
     state.noteLinks = { noteId: "n1", phase: "ready", links };
     const dispatch = vi.fn<(event: ViewEvent) => void>();
-    const rail = renderLinksRail(state, dispatch, new LocalGraphView())!;
+    const rail = renderLinksRail(state, dispatch)!;
     const cards = rail.querySelectorAll<HTMLButtonElement>(".link-card");
     expect(cards).toHaveLength(2);
     expect(cards[0]!.textContent).toContain("Two");
     expect(cards[0]!.textContent).toContain("dir/two.md");
     expect([...cards[0]!.querySelectorAll("em")].map((node) => node.textContent)).toStrictEqual(["the one", "One"]);
     expect(rail.textContent).toContain("Outgoing");
-    expect(rail.querySelectorAll(".graph-node")).toHaveLength(3);
     cards[1]!.click();
     expect(dispatch).toHaveBeenCalledWith({ type: "note.open", noteId: "n3" });
   });
@@ -65,7 +63,6 @@ describe("links rail", () => {
     state.noteLinks = { noteId: "n1", phase: "ready", links: { backlinks: [], outgoing: [] } };
     const rail = renderLinksRail(state, vi.fn())!;
     expect(rail.querySelector(".link-rail-hint")?.textContent).toBe(EMPTY_BACKLINKS_HINT);
-    expect(rail.querySelector(".local-graph")).toBeNull();
 
     state.noteLinks = { noteId: "n1", phase: "error", message: "boom" };
     const dispatch = vi.fn<(event: ViewEvent) => void>();

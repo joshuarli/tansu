@@ -1,6 +1,5 @@
 import type { ViewEvent } from "./app/events.ts";
 import { button, el, span } from "./dom.ts";
-import { LocalGraphView, layoutLocalGraph } from "./local-graph.ts";
 import { activeTab, loadedDraft, toNoteId, type State } from "./state.ts";
 import type { V2Backlink, V2LinkedNote } from "./types.generated.ts";
 
@@ -30,13 +29,7 @@ export function linksRailNoteId(state: State): string | null {
   return tab.noteId;
 }
 
-const sharedGraphView = new LocalGraphView();
-
-export function renderLinksRail(
-  state: State,
-  dispatch: (event: ViewEvent) => void,
-  graphView: LocalGraphView = sharedGraphView,
-): HTMLElement | null {
+export function renderLinksRail(state: State, dispatch: (event: ViewEvent) => void): HTMLElement | null {
   const noteId = linksRailNoteId(state);
   if (noteId === null) return null;
   const links = state.noteLinks;
@@ -67,12 +60,6 @@ export function renderLinksRail(
       button("retry", "Retry loading links", () => dispatch({ type: "links.refresh" }), "link-rail-retry"),
     ));
     return aside;
-  }
-  const meta = state.notes.get(noteId);
-  const title = meta?.title ?? activeTab(state)?.title ?? noteId;
-  const layout = layoutLocalGraph({ noteId, title }, links.links, state.knownLinks);
-  if (layout.nodes.length > 1) {
-    aside.append(el("div", "link-rail-graph", graphView.update(layout, open)));
   }
   const backlinks = el("section", "link-rail-section");
   backlinks.append(span(`Backlinks${links.links.backlinks.length === 0 ? "" : ` · ${links.links.backlinks.length}`}`, "link-rail-label"));

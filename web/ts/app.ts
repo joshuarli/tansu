@@ -275,7 +275,6 @@ export class TansuApp {
     this.vaultClient = nextClient;
     this.noteLinksLoader.cancel();
     this.state.noteLinks = null;
-    this.state.knownLinks.clear();
     this.notePreviews.clear();
     this.state.boot = { ...vaultBootstrap, serverInstanceId: global.serverInstanceId, vaults: global.vaults };
     this.state.authRequired = false;
@@ -595,7 +594,6 @@ export class TansuApp {
   private acceptNoteLinks(outcome: NoteLinksOutcome): void {
     if (this.disposed || linksRailNoteId(this.state) !== outcome.noteId) return;
     this.state.noteLinks = outcome;
-    if (outcome.phase === "ready") this.state.knownLinks.set(outcome.noteId, outcome.links);
     this.render();
   }
 
@@ -616,7 +614,6 @@ export class TansuApp {
   private reloadNoteLinks(): void {
     const id = linksRailNoteId(this.state);
     if (id === null) return;
-    for (const known of this.state.knownLinks.keys()) if (known !== id) this.state.knownLinks.delete(known);
     this.notePreviews.clear();
     if (this.state.noteLinks?.phase !== "ready") {
       this.state.noteLinks = { noteId: id, phase: "loading" };
