@@ -44,6 +44,18 @@ uses isolated settings, data, and a copied vault under `.dev/`. See
 [Fixtures](fixtures.md) for fixture setup and [Logging](logging.md) for the dev
 and e2e log stream.
 
+To serve your own notes at `notes/` in place instead of the fixtures, run:
+
+```sh
+make notes
+```
+
+The first run registers `notes/` as the `Notes` vault. Its settings and data
+live under `.dev/notes/`, so `make dev` and `make dev-config` do not touch them.
+Delete `.dev/notes/` to reset that state. Set `NOTES_DIR` to point at a
+different vault, but a changed path reuses the existing registration until you
+reset `.dev/notes/`.
+
 `make dev` watches the frontend source and rebuilds it after changes. CSS changes
 apply without reloading the page. TypeScript changes reload the page.
 

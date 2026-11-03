@@ -1,7 +1,11 @@
 NAME := tansu
 DEV_DIR := $(CURDIR)/.dev
-DEV_CONFIG_HOME := $(DEV_DIR)/config
-DEV_DATA_HOME := $(DEV_DIR)/data
+DEV_CONFIG_HOME ?= $(DEV_DIR)/config
+DEV_DATA_HOME ?= $(DEV_DIR)/data
+NOTES_DIR ?= $(CURDIR)/notes
+NOTES_DEV_DIR := $(DEV_DIR)/notes
+NOTES_CONFIG_HOME := $(NOTES_DEV_DIR)/config
+NOTES_DATA_HOME := $(NOTES_DEV_DIR)/data
 DEPLOY_HOST ?= ubuntu@oracle
 SQLITE_STATIC_DIR ?= $(CURDIR)/.work/sqlite-static
 AUTH_DRILL_BIN ?= $(CURDIR)/.work/dist/x86_64-unknown-linux-musl/tansu
@@ -13,10 +17,21 @@ dev: setup
 	TANSU_WEB_HMR=1 pnpm run build:dev
 	$(MAKE) types-generated
 	node scripts/dev-fixture.mjs "$(DEV_DIR)"
+	$(MAKE) dev-serve
+
+dev-serve:
 	@node scripts/dev-hmr.mjs & \
 	watcher=$$!; \
 	trap 'kill -TERM "$$watcher" 2>/dev/null; wait "$$watcher" 2>/dev/null' EXIT INT TERM; \
 	TANSU_WEB_HMR=1 TANSU_LOGS=pretty XDG_CONFIG_HOME="$(DEV_CONFIG_HOME)" XDG_DATA_HOME="$(DEV_DATA_HOME)" cargo run --bin $(NAME) -- --port 3000
+
+notes: setup
+	TANSU_WEB_HMR=1 pnpm run build:dev
+	$(MAKE) types-generated
+	@if [ ! -f "$(NOTES_CONFIG_HOME)/tansu/settings.sqlite3" ]; then \
+		XDG_CONFIG_HOME="$(NOTES_CONFIG_HOME)" XDG_DATA_HOME="$(NOTES_DATA_HOME)" cargo run --quiet --bin $(NAME) -- config init --vault Notes "$(NOTES_DIR)"; \
+	fi
+	$(MAKE) dev-serve DEV_CONFIG_HOME="$(NOTES_CONFIG_HOME)" DEV_DATA_HOME="$(NOTES_DATA_HOME)"
 
 dev-config: setup
 	pnpm run build:dev
@@ -145,7 +160,7 @@ bench-full: setup
 	TMPDIR="$(CURDIR)/.work/tmp" node bench/integrated-bench.mjs --browser=chromium,webkit --warmups=5 --runs=20
 	$(PERF_GATE_AFTER)
 
-.PHONY: auth-recovery-drill bench bench-full build-linux-musl-aarch64 build-linux-musl-docker build-linux-musl-x86_64 deploy dev dev-config check lint loupe setup test-loupe-browser types types-check types-generated ts test test-e2e-chromium test-e2e-webkit update-e2e-baselines-linux test-e2e-loupe test-rs test-sqlite-static test-acceptance web-build publish-mynpm
+.PHONY: auth-recovery-drill bench bench-full build-linux-musl-aarch64 build-linux-musl-docker build-linux-musl-x86_64 deploy dev dev-config dev-serve check lint loupe notes setup test-loupe-browser types types-check types-generated ts test test-e2e-chromium test-e2e-webkit update-e2e-baselines-linux test-e2e-loupe test-rs test-sqlite-static test-acceptance web-build publish-mynpm
 
 # Publish the TS dependency closure to our private npm registry as well.
 # TARGETS adds non-host targets (the default pass already covers the host);

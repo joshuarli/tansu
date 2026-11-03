@@ -3,7 +3,9 @@
 The dev app copies `tests/fixtures/demo-vault/` to `.dev/vault` and
 `tests/fixtures/demo-vault-field-notes/` to `.dev/vault-field-notes`. It
 registers them as `Demo` and `Field Notes` and initializes isolated SQLite
-settings and data under `.dev/`.
+settings and data under `.dev/`. `make notes` skips these fixtures and serves
+`notes/` in place with its own state under `.dev/notes/`; see
+[Development](development.md).
 
 ## Dev state
 
