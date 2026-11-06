@@ -169,9 +169,11 @@ WORK_DIR ?= .work/registry-pub
 TARGETS ?= linux-x64-gnu
 PUBLIC_URL ?= https://npm.17166969.xyz
 BUCKET ?= stuff-mynpm
+STUFF_DIR ?= ../stuff
 publish-mynpm:
-	STUFF_DIR=../stuff \
+	@test -x "$(STUFF_DIR)/deploy/publish-mynpm.sh" || { echo "STUFF_DIR does not point at a stuff checkout: $(STUFF_DIR)" >&2; exit 2; }
+	STUFF_DIR="$(STUFF_DIR)" \
 	LOCKFILE=pnpm-lock.yaml PROJECT=tansu \
 	WORK_DIR="$(WORK_DIR)" TARGETS="$(TARGETS)" \
 	PUBLIC_URL="$(PUBLIC_URL)" BUCKET="$(BUCKET)" \
-	../stuff/deploy/publish-mynpm.sh
+	"$(STUFF_DIR)/deploy/publish-mynpm.sh"
