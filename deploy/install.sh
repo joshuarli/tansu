@@ -60,7 +60,7 @@ config = json.loads(row[0])
 auth = config.get("auth", {})
 expected_origin = f"https://{sys.argv[2]}"
 if auth.get("externalOrigin") != expected_origin or auth.get("rpId") != sys.argv[2]:
-    raise SystemExit("Tansu config must use authenticated mode with the current Oracle HTTPS origin and RP ID")
+    raise SystemExit("Tansu config must use authenticated mode with the current HTTPS origin and RP ID")
 CONFIG_CHECK
 
 chown tansu:tansu "$settings_database"
@@ -178,4 +178,4 @@ tailscale serve --yes --bg --https=443 3001
 tailscale serve --yes --bg --http=3000 3002
 tailscale serve status
 printf 'Tansu deployed at %s\n' "$origin"
-printf 'HTTP entry point: http://oracle:3000\n'
+printf 'HTTP entry point: http://%s:3000\n' "${tailnet_dns_name%%.*}"

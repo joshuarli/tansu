@@ -6,7 +6,7 @@ NOTES_DIR ?= $(CURDIR)/notes
 NOTES_DEV_DIR := $(DEV_DIR)/notes
 NOTES_CONFIG_HOME := $(NOTES_DEV_DIR)/config
 NOTES_DATA_HOME := $(NOTES_DEV_DIR)/data
-DEPLOY_HOST ?= ubuntu@oracle
+DEPLOY_HOST ?= josh@lisa
 SQLITE_STATIC_DIR ?= $(CURDIR)/.work/sqlite-static
 AUTH_DRILL_BIN ?= $(CURDIR)/.work/dist/x86_64-unknown-linux-musl/tansu
 
@@ -143,7 +143,7 @@ build-linux-musl-aarch64:
 	$(MAKE) build-linux-musl-docker TARGET=aarch64-unknown-linux-musl PLATFORM=linux/amd64
 
 deploy:
-	DEPLOY_HOST="$(DEPLOY_HOST)" TMPDIR="$(CURDIR)/.work/tmp" deploy/deploy-oracle.sh
+	DEPLOY_HOST="$(DEPLOY_HOST)" TMPDIR="$(CURDIR)/.work/tmp" deploy/deploy.sh
 
 PERF_GATE_BEFORE := scripts/perf-gate.sh before
 PERF_GATE_AFTER := scripts/perf-gate.sh after

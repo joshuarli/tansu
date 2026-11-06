@@ -34,26 +34,32 @@ access to your tailnet and its access controls. Do not run `tailscale funnel`;
 Funnel exposes the service to the public internet. Tailscale identity headers
 do not replace Tansu passkey authentication.
 
-## Deploy to Oracle
+## Deploy to a remote host
 
-Run `make deploy` from the repository root. The command builds a static Linux
-binary for Oracle's architecture, installs it as a systemd service, and keeps
-the config, vault, and app data under `/var/lib/tansu/`.
+Run `make deploy` from the repository root. It connects to `DEPLOY_HOST` over
+SSH, builds a static Linux binary for the remote architecture, installs it as a
+systemd service, and keeps the config, vault, and app data under
+`/var/lib/tansu/`. `DEPLOY_HOST` defaults to `josh@lisa`; override it with
+`make deploy DEPLOY_HOST=user@host`.
+
+The remote host must run systemd with Tailscale, and the SSH user must have
+passwordless sudo because the deployment runs `sudo bash` without a terminal.
 
 Tailscale Serve exposes the app to your tailnet over HTTPS. The URL
-`http://oracle:3000` redirects to `https://oracle.<tailnet>.ts.net`, where the
+`http://<host>:3000` redirects to `https://<host>.<tailnet>.ts.net`, where the
 server uses authenticated mode. The HTTP endpoint only redirects. Tailscale
 HTTPS must be enabled for your tailnet. See the
 [Tailscale Serve documentation](https://tailscale.com/docs/reference/tailscale-cli/serve).
 
 The deployment initializes SQLite settings for an empty `Personal` vault. Enroll the first
 passkey before editing notes. Stop the service, issue a one-time capability,
-then start the service again:
+then start the service again, replacing `user@host` with the `DEPLOY_HOST`
+target:
 
 ```sh
-ssh ubuntu@oracle 'sudo systemctl stop tansu'
-ssh ubuntu@oracle 'sudo -u tansu env HOME=/var/lib/tansu XDG_CONFIG_HOME=/var/lib/tansu/config XDG_DATA_HOME=/var/lib/tansu/data /opt/tansu/tansu auth enroll'
-ssh ubuntu@oracle 'sudo systemctl start tansu'
+ssh user@host 'sudo systemctl stop tansu'
+ssh user@host 'sudo -u tansu env HOME=/var/lib/tansu XDG_CONFIG_HOME=/var/lib/tansu/config XDG_DATA_HOME=/var/lib/tansu/data /opt/tansu/tansu auth enroll'
+ssh user@host 'sudo systemctl start tansu'
 ```
 
 Enter the printed capability at the authenticated HTTPS URL and complete

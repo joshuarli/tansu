@@ -2,7 +2,8 @@
 set -euo pipefail
 
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-deploy_host=${DEPLOY_HOST:-ubuntu@oracle}
+: "${DEPLOY_HOST:?DEPLOY_HOST must name the SSH target, for example user@host}"
+deploy_host=$DEPLOY_HOST
 
 remote_metadata=$(ssh -o BatchMode=yes -o ConnectTimeout=10 "$deploy_host" bash -s <<'PREFLIGHT'
 set -euo pipefail
@@ -16,7 +17,7 @@ PREFLIGHT
 read -r remote_arch tailnet_dns_name <<< "$remote_metadata"
 
 case "$tailnet_dns_name" in
-  oracle.*.ts.net) ;;
+  *.ts.net) ;;
   *) printf 'unexpected Tailscale DNS name: %s\n' "$tailnet_dns_name" >&2; exit 1 ;;
 esac
 
@@ -29,7 +30,7 @@ case "$remote_arch" in
     rust_target=aarch64-unknown-linux-musl
     make_target=build-linux-musl-aarch64
     ;;
-  *) printf 'unsupported Oracle architecture: %s\n' "$remote_arch" >&2; exit 1 ;;
+  *) printf 'unsupported remote architecture: %s\n' "$remote_arch" >&2; exit 1 ;;
 esac
 
 mkdir -p "$repo_root/.work/tmp"
@@ -39,7 +40,7 @@ test -s "$artifact"
 
 remote_stage=$(ssh -o BatchMode=yes "$deploy_host" 'mkdir -p "$HOME/.cache/tansu" && chmod 700 "$HOME/.cache/tansu" && mktemp -d "$HOME/.cache/tansu/deploy.XXXXXXXX"')
 case "$remote_stage" in
-  /home/*/.cache/tansu/deploy.*) ;;
+  */.cache/tansu/deploy.*) ;;
   *) printf 'unexpected remote staging path: %s\n' "$remote_stage" >&2; exit 1 ;;
 esac
 
@@ -55,4 +56,4 @@ trap cleanup EXIT
 
 scp -q "$artifact" "$deploy_host:$remote_stage/tansu"
 scp -q "$repo_root/deploy/http-redirect.py" "$deploy_host:$remote_stage/http-redirect.py"
-ssh -o BatchMode=yes "$deploy_host" sudo bash -s -- "$tailnet_dns_name" "$remote_stage" < "$repo_root/deploy/install-oracle.sh"
+ssh -o BatchMode=yes "$deploy_host" sudo bash -s -- "$tailnet_dns_name" "$remote_stage" < "$repo_root/deploy/install.sh"
