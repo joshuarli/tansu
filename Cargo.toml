@@ -28,8 +28,9 @@ pulldown-cmark = { version = "0.13", default-features = false }
 psl = "2.1.241"
 rusqlite = { version = "0.41", features = ["backup", "modern_sqlite"] }
 rustix = { version = "1.1", default-features = false, features = ["fs", "std"] }
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
+deser = { version = "0.10.2", features = ["derive"] }
+deser-json = "0.10.2"
+deser-value = "0.10.2"
 tantivy = { version = "0.27", default-features = false, features = ["mmap", "lz4-compression"] }
 tansu-search = { path = "crates/tansu-search" }
 tansu-api-types = { path = "crates/tansu-api-types" }
@@ -42,7 +43,8 @@ hyper = { package = "laputa-hyper-futures-lite", version = "=1.12.0-beta.1", def
 tempfile = "3.27"
 
 [build-dependencies]
-serde_json = "1.0"
+deser-json = "0.10.2"
+deser-value = "0.10.2"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 notify = { version = "8.2", default-features = false, features = ["macos_fsevent"] }

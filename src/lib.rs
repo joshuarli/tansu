@@ -33,6 +33,10 @@ pub mod vault;
 
 use crate::api_types::ApiErrorKind;
 
+pub(crate) fn json_bytes<T: deser::Serialize + ?Sized>(value: &T) -> std::result::Result<Vec<u8>, deser::Error> {
+    deser_json::to_string(value).map(String::into_bytes)
+}
+
 pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug)]
@@ -40,7 +44,7 @@ pub enum Error {
     Api(Box<ApiErrorKind>),
     BadRequest(String),
     Io(std::io::Error),
-    Json(serde_json::Error),
+    Json(deser::Error),
     Sql(rusqlite::Error),
     NotFound(String),
     Internal(String),
@@ -80,8 +84,8 @@ impl From<std::io::Error> for Error {
     }
 }
 
-impl From<serde_json::Error> for Error {
-    fn from(value: serde_json::Error) -> Self {
+impl From<deser::Error> for Error {
+    fn from(value: deser::Error) -> Self {
         Self::Json(value)
     }
 }
@@ -122,7 +126,7 @@ mod tests {
 
     #[test]
     fn errors_preserve_display_and_dependency_context() {
-        let json_error = serde_json::from_str::<serde_json::Value>("{").unwrap_err();
+        let json_error = deser_json::from_str::<deser_value::Value>("{").unwrap_err();
         let errors = [
             Error::api(ApiErrorKind::PathCollision { path: "A.md".to_string() }),
             Error::BadRequest("bad request".to_string()),

@@ -91,7 +91,7 @@ impl ConfigStore {
         let value = connection
             .query_row("SELECT value FROM settings WHERE key='app'", [], |row| row.get::<_, String>(0))
             .optional()?;
-        value.map(|value| serde_json::from_str(&value).map_err(Into::into)).transpose()
+        value.map(|value| deser_json::from_str(&value).map_err(Into::into)).transpose()
     }
 
     pub fn config(&self) -> Result<Option<Config>> {
@@ -104,7 +104,7 @@ impl ConfigStore {
         let transaction = connection.transaction()?;
         transaction.execute(
             "INSERT INTO settings(key, value) VALUES('app', ?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-            params![serde_json::to_string(settings)?],
+            params![deser_json::to_string(settings)?],
         )?;
         transaction.commit()?;
         Ok(())
@@ -120,7 +120,7 @@ impl ConfigStore {
         if existing.is_some() {
             return Err(Error::BadRequest("application settings are already initialized".to_string()));
         }
-        transaction.execute("INSERT INTO settings(key, value) VALUES('app', ?1)", params![serde_json::to_string(settings)?])?;
+        transaction.execute("INSERT INTO settings(key, value) VALUES('app', ?1)", params![deser_json::to_string(settings)?])?;
         transaction.commit()?;
         Ok(())
     }
@@ -212,7 +212,7 @@ fn read_root_mappings(path: &Path) -> Result<std::collections::BTreeMap<String, 
         ));
     }
     match fs::read(path) {
-        Ok(bytes) => serde_json::from_slice(&bytes).map_err(Into::into),
+        Ok(bytes) => deser_json::from_slice(&bytes).map_err(Into::into),
         Err(error) if error.kind() == ErrorKind::NotFound => Ok(std::collections::BTreeMap::new()),
         Err(error) => Err(Error::Io(error)),
     }
@@ -240,8 +240,8 @@ fn persistent_id(path: &Path) -> Result<String> {
     }
 }
 
-fn write_json_atomic(path: &Path, value: &impl serde::Serialize) -> Result<()> {
-    write_atomic(path, &serde_json::to_vec(value)?)
+fn write_json_atomic(path: &Path, value: &impl deser::Serialize) -> Result<()> {
+    write_atomic(path, &crate::json_bytes(value)?)
 }
 
 fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {

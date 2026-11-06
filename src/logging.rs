@@ -3,8 +3,8 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value};
+use deser::{Deserialize, Serialize};
+use deser_value::{Kind, Map, Value};
 
 const DEFAULT_MAX_EVENTS: usize = 100_000;
 const DEFAULT_MAX_BYTES: usize = 64 * 1024 * 1024;
@@ -33,7 +33,7 @@ impl LogMode {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[deser(rename_all = "snake_case")]
 pub enum LogSource {
     Server,
     Client,
@@ -41,7 +41,7 @@ pub enum LogSource {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[deser(rename_all = "snake_case")]
 pub enum LogLevel {
     Debug,
     Info,
@@ -50,38 +50,38 @@ pub enum LogLevel {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[deser(rename_all = "camelCase")]
 pub struct LogEvent {
     pub seq: u64,
     pub ts: u64,
     pub source: LogSource,
     pub level: LogLevel,
     pub kind: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[deser(skip_serializing_if = Option::is_none)]
     pub request_id: Option<String>,
-    #[serde(flatten)]
-    pub fields: Map<String, Value>,
+    #[deser(flatten)]
+    pub fields: Map,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[deser(rename_all = "camelCase")]
 pub struct IncomingLogEvent {
     pub source: LogSource,
     pub level: LogLevel,
     pub kind: String,
     pub request_id: Option<String>,
-    #[serde(flatten)]
-    pub fields: Map<String, Value>,
+    #[deser(flatten)]
+    pub fields: Map,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[deser(rename_all = "camelCase")]
 pub struct IncomingLogBatch {
     pub events: Vec<IncomingLogEvent>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[deser(rename_all = "camelCase")]
 pub struct LogSnapshot {
     pub events: Vec<LogEvent>,
 }
@@ -182,7 +182,7 @@ impl LogHub {
         level: LogLevel,
         kind: &str,
         request_id: Option<String>,
-        fields: Map<String, Value>,
+        fields: Map,
     ) {
         self.ingest(IncomingLogEvent {
             source: LogSource::Server,
@@ -257,7 +257,7 @@ impl LogHub {
     }
 }
 
-pub fn fields(items: impl IntoIterator<Item = (&'static str, Value)>) -> Map<String, Value> {
+pub fn fields(items: impl IntoIterator<Item = (&'static str, Value)>) -> Map {
     items
         .into_iter()
         .map(|(key, value)| (key.to_string(), value))
@@ -276,32 +276,43 @@ fn sanitize_event(mut event: LogEvent) -> LogEvent {
     if bytes <= MAX_EVENT_BYTES {
         return event;
     }
-    let summary = Value::String(truncate_string(
-        serde_json::to_string(&event.fields).unwrap_or_default(),
+    let summary = Value::from(truncate_string(
+        deser_json::to_string(&event.fields).unwrap_or_default(),
         MAX_EVENT_BYTES / 2,
     ));
     event.fields = fields([
-        ("truncated", Value::Bool(true)),
+        ("truncated", Value::from(true)),
         ("originalBytes", Value::from(bytes as u64)),
         ("summary", summary),
     ]);
     event
 }
 
-fn sanitize_map(map: Map<String, Value>) -> Map<String, Value> {
+fn sanitize_map(map: Map) -> Map {
     map.into_iter()
-        .map(|(key, value)| (truncate_string(key, 128), sanitize_value(value)))
+        .map(|(key, value)| {
+            let key = match key.as_str() {
+                Some(text) => Value::from(truncate_string(text.to_string(), 128)),
+                None => key,
+            };
+            (key, sanitize_value(value))
+        })
         .collect()
 }
 
 fn sanitize_value(value: Value) -> Value {
-    match value {
-        Value::String(value) => Value::String(truncate_string(value, MAX_STRING_BYTES)),
-        Value::Array(values) => {
-            Value::Array(values.into_iter().take(32).map(sanitize_value).collect())
-        }
-        Value::Object(map) => Value::Object(sanitize_map(map.into_iter().take(32).collect())),
-        other => other,
+    match value.into_kind() {
+        Kind::Str(value) => Value::from(truncate_string(value, MAX_STRING_BYTES)),
+        Kind::Seq(values) => Value::from(
+            values
+                .into_vec()
+                .into_iter()
+                .take(32)
+                .map(sanitize_value)
+                .collect::<Vec<_>>(),
+        ),
+        Kind::Map(map) => Value::from(sanitize_map(map.into_iter().take(32).collect())),
+        other => Value::new(other),
     }
 }
 
@@ -319,14 +330,14 @@ fn truncate_string(mut value: String, max_bytes: usize) -> String {
 }
 
 fn serialized_len<T: Serialize>(value: &T) -> usize {
-    serde_json::to_vec(value)
+    crate::json_bytes(value)
         .map(|bytes| bytes.len())
         .unwrap_or(0)
 }
 
 #[cfg(debug_assertions)]
 fn print_event(event: &LogEvent) {
-    println!("{}", serde_json::to_string(event).expect("log event is serializable"));
+    println!("{}", deser_json::to_string(event).expect("log event is serializable"));
 }
 
 #[cfg(test)]
@@ -353,7 +364,7 @@ mod tests {
         assert_eq!(events.len(), 2);
         assert_eq!(events[0].seq, 1);
         assert_eq!(events[1].seq, 2);
-        assert_eq!(events[0].fields["one"], Value::from(1));
+        assert_eq!(events[0].fields.get("one").unwrap(), &Value::from(1));
     }
 
     #[test]
@@ -374,12 +385,12 @@ mod tests {
             LogLevel::Info,
             "system.event",
             None,
-            fields([("large", Value::String("x".repeat(MAX_STRING_BYTES + 100)))]),
+            fields([("large", Value::from("x".repeat(MAX_STRING_BYTES + 100)))]),
         );
 
         let mut events = hub.snapshot().events;
         let event = events.remove(0);
-        assert!(event.fields["large"].as_str().unwrap().len() <= MAX_STRING_BYTES + 3);
+        assert!(event.fields.get("large").unwrap().as_str().unwrap().len() <= MAX_STRING_BYTES + 3);
     }
 
     #[test]
@@ -388,18 +399,18 @@ mod tests {
         let mut nested = Map::new();
         nested.insert(
             "long-key-".to_string() + &"x".repeat(140),
-            Value::String("三".repeat(1000)),
+            Value::from("三".repeat(1000)),
         );
         nested.insert(
             "items".to_string(),
-            Value::Array((0..40).map(Value::from).collect()),
+            Value::from((0..40).map(Value::from).collect::<Vec<_>>()),
         );
         let mut fields = Map::new();
-        fields.insert("nested".to_string(), Value::Object(nested));
+        fields.insert("nested".to_string(), Value::from(nested));
         for index in 0..10 {
             fields.insert(
                 format!("large-{index}"),
-                Value::String("x".repeat(MAX_STRING_BYTES)),
+                Value::from("x".repeat(MAX_STRING_BYTES)),
             );
         }
         hub.ingest(IncomingLogEvent {
@@ -418,16 +429,16 @@ mod tests {
 
         let nested_event = sanitize_map(Map::from_iter([(
             "nested".to_string(),
-            Value::Object(Map::from_iter([
-                ("key-".to_string() + &"x".repeat(140), Value::String("三".repeat(1000))),
-                ("items".to_string(), Value::Array((0..40).map(Value::from).collect())),
+            Value::from(Map::from_iter([
+                ("key-".to_string() + &"x".repeat(140), Value::from("三".repeat(1000))),
+                ("items".to_string(), Value::from((0..40).map(Value::from).collect::<Vec<_>>())),
             ])),
         )]));
-        let nested = nested_event["nested"].as_object().unwrap();
-        let (key, value) = nested.iter().find(|(key, _)| key.starts_with("key-")).unwrap();
-        assert!(key.len() <= 131);
+        let nested = nested_event.get("nested").unwrap().as_map().unwrap();
+        let (key, value) = nested.iter().find(|(key, _)| key.as_str().unwrap().starts_with("key-")).unwrap();
+        assert!(key.as_str().unwrap().len() <= 131);
         assert_eq!(value.as_str().unwrap().len(), 2049);
-        assert_eq!(nested["items"].as_array().unwrap().len(), 32);
+        assert_eq!(nested.get("items").unwrap().as_seq().unwrap().len(), 32);
     }
 
     #[test]
@@ -450,7 +461,7 @@ mod tests {
 
     #[test]
     fn accepts_structured_client_payload_fields() {
-        let batch: IncomingLogBatch = serde_json::from_value(serde_json::json!({
+        let batch: IncomingLogBatch = deser_value::from_value(&deser_value::value!({
             "events": [
                 {
                     "source": "client",
@@ -470,8 +481,8 @@ mod tests {
 
         assert_eq!(event.source, LogSource::Client);
         assert_eq!(event.request_id.as_deref(), Some("cli-1"));
-        assert_eq!(event.fields["client"]["seq"], Value::from(1));
-        assert_eq!(event.fields["http"]["path"], Value::from("/api/v2/bootstrap"));
+        assert_eq!(event.fields.get("client").unwrap()["seq"], Value::from(1));
+        assert_eq!(event.fields.get("http").unwrap()["path"], Value::from("/api/v2/bootstrap"));
     }
 
 }

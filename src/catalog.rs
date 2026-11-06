@@ -231,7 +231,7 @@ impl Catalog {
         let now = now_ms();
         tx.execute(
             "UPDATE notes SET title=?2, tags_json=?3, seq=?4, content_hash=?5, visible_hash=?6, updated_at_ms=?7, tombstoned=0, unresolved_reason=NULL WHERE note_id=?1",
-            params![note_id, title, serde_json::to_string(tags)?, seq, content_hash, visible_hash, now],
+            params![note_id, title, deser_json::to_string(&tags)?, seq, content_hash, visible_hash, now],
         )?;
         tx.execute(
             "INSERT INTO note_events(note_id, seq, kind, source, path, content_hash, created_at_ms) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7)",
@@ -356,7 +356,7 @@ impl Catalog {
         let now = now_ms();
         tx.execute(
             "UPDATE notes SET title=?2, tags_json=?3, seq=?4, content_hash=?5, visible_hash=?6, updated_at_ms=?7, tombstoned=0, unresolved_reason=NULL WHERE note_id=?1",
-            params![note_id, title, serde_json::to_string(tags)?, seq, source_hash, visible_hash_before_materialization, now],
+            params![note_id, title, deser_json::to_string(&tags)?, seq, source_hash, visible_hash_before_materialization, now],
         )?;
         tx.execute(
             "INSERT INTO note_events(note_id, seq, kind, source, path, content_hash, created_at_ms) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7)",
@@ -582,7 +582,7 @@ impl Catalog {
         let now = now_ms();
         tx.execute(
             "UPDATE notes SET title=?2, tags_json=?3, seq=?4, content_hash=?5, visible_hash=?6, updated_at_ms=?7 WHERE note_id=?1",
-            params![note_id, external.title, serde_json::to_string(external.tags)?, seq, external.content_hash, external.visible_hash, now],
+            params![note_id, external.title, deser_json::to_string(&external.tags)?, seq, external.content_hash, external.visible_hash, now],
         )?;
         tx.execute(
             "INSERT INTO note_events(note_id, seq, kind, source, path, content_hash, created_at_ms) VALUES(?1, ?2, 'external_edit', 'external', ?3, ?4, ?5)",
@@ -999,7 +999,7 @@ impl Catalog {
             )
             .optional()?;
         match value {
-            Some(value) => Ok(serde_json::from_str(&value)?),
+            Some(value) => Ok(deser_json::from_str(&value)?),
             None => Ok(Settings::default()),
         }
     }
@@ -1007,7 +1007,7 @@ impl Catalog {
     pub fn save_settings(&mut self, settings: &ValidatedSettings) -> Result<()> {
         self.conn.execute(
             "INSERT INTO settings(key, value) VALUES('settings', ?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-            params![serde_json::to_string(settings.as_settings())?],
+            params![deser_json::to_string(settings.as_settings())?],
         )?;
         self.set_search_dirty(true, false)?;
         self.advance_sync()
@@ -1068,7 +1068,7 @@ fn insert_note_tx(tx: &Transaction<'_>, note_id: &str, note: InsertNote<'_>) -> 
             note.path,
             note.path_key,
             note.title,
-            serde_json::to_string(note.tags)?,
+            deser_json::to_string(&note.tags)?,
             note.content_hash,
             note.visible_hash,
             now,
@@ -1132,7 +1132,7 @@ fn note_by_id_tx(tx: &Transaction<'_>, note_id: &str) -> Result<Option<NoteRow>>
 
 fn row_from_sql(row: &rusqlite::Row<'_>) -> rusqlite::Result<NoteRow> {
     let tags_json: String = row.get(3)?;
-    let tags = serde_json::from_str(&tags_json).map_err(|error| invalid_column(3, error))?;
+    let tags = deser_json::from_str(&tags_json).map_err(|error| invalid_column(3, error))?;
     let tombstoned = match row.get::<_, i64>(8)? {
         0 => false,
         1 => true,

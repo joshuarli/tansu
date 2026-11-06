@@ -7,10 +7,10 @@ fn main() {
     let dist = Path::new("web/dist");
     let manifest_path = dist.join("manifest.json");
     println!("cargo:rerun-if-changed={}", manifest_path.display());
-    let manifest: serde_json::Value = serde_json::from_slice(
+    let manifest: deser_value::Value = deser_json::from_slice(
         &fs::read(&manifest_path).expect("run `pnpm run build` before compiling the server"),
     ).expect("web asset manifest must be valid JSON");
-    let files = manifest["files"].as_array().expect("web asset manifest requires a files array");
+    let files = manifest["files"].as_seq().expect("web asset manifest requires a files array");
     let mut entries = Vec::with_capacity(files.len());
     let mut listed_paths = BTreeSet::new();
     let mut listed_urls = BTreeSet::new();

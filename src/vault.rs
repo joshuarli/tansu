@@ -10,7 +10,7 @@ use std::thread;
 
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use rusqlite::ErrorCode;
-use serde::de::DeserializeOwned;
+use deser::de::DeserializeOwned;
 
 use crate::api_types::{
     ApiErrorKind, NoteEventKind, NoteEventSource, NoteMeta, Settings,
@@ -208,8 +208,8 @@ impl From<Error> for V2VaultError {
     }
 }
 
-impl From<serde_json::Error> for V2VaultError {
-    fn from(error: serde_json::Error) -> Self {
+impl From<deser::Error> for V2VaultError {
+    fn from(error: deser::Error) -> Self {
         Self::Internal(Error::Json(error))
     }
 }
@@ -223,8 +223,8 @@ impl std::fmt::Display for V2VaultError {
     }
 }
 
-fn v2_request_hash<T: serde::Serialize>(kind: &str, target: Option<&str>, request: &T) -> V2Result<String> {
-    let bytes = serde_json::to_vec(&(kind, target, request))?;
+fn v2_request_hash<T: deser::Serialize>(kind: &str, target: Option<&str>, request: &T) -> V2Result<String> {
+    let bytes = crate::json_bytes(&(kind, target, request))?;
     Ok(tansu_note_core::disk_hash(&bytes))
 }
 
@@ -250,7 +250,7 @@ fn v2_existing_result<T: DeserializeOwned>(
             let result = record.result_json.ok_or_else(|| {
                 Error::Internal(format!("mutation {mutation_id} has no result"))
             })?;
-            Ok(Some(serde_json::from_str(&result)?))
+            Ok(Some(deser_json::from_str(&result)?))
         }
         _ => Err(Error::Internal(format!(
             "mutation {mutation_id} has unsupported state {}",
@@ -289,7 +289,7 @@ fn v2_existing_mutation(
         .result_json
         .as_deref()
         .ok_or_else(|| Error::Internal(format!("mutation {mutation_id} has no result")))?;
-    Ok(Some(serde_json::from_str(response)?))
+    Ok(Some(deser_json::from_str(response)?))
 }
 
 fn v2_pending_response(mutation_id: &str) -> V2MutationResponse {
@@ -602,8 +602,8 @@ fn repair_pending_mutation(
             },
         }
     };
-    let event_json = serde_json::to_string(&update)?;
-    let result_json = serde_json::to_string(&response)?;
+    let event_json = deser_json::to_string(&update)?;
+    let result_json = deser_json::to_string(&response)?;
     let version = catalog.complete_mutation(
         &mutation.mutation_id,
         &result_json,
@@ -637,7 +637,7 @@ fn abandon_pending_unresolved(
         &mutation.mutation_id,
         note_id,
         reason,
-        &serde_json::to_string(&update)?,
+        &deser_json::to_string(&update)?,
         EVENT_REPLAY_LIMIT,
     )?;
     Ok((version, update))
@@ -660,7 +660,7 @@ fn revert_pending_rename(
             let changed = V2ServerEventUpdate::NoteChanged {
                 note: v2_note_meta(&row.meta, &row.visible_hash)?,
             };
-            let json = serde_json::to_string(&changed)?;
+            let json = deser_json::to_string(&changed)?;
             update = Some(changed);
             Ok(json)
         },
@@ -732,8 +732,8 @@ fn complete_pending_as_conflict(
                 note: v2_note_meta(meta, &visible_disk_hash)?,
             };
             let json = crate::catalog::PendingOutcomeJson {
-                result: serde_json::to_string(&response)?,
-                event: serde_json::to_string(&changed)?,
+                result: deser_json::to_string(&response)?,
+                event: deser_json::to_string(&changed)?,
             };
             update = Some(changed);
             Ok(json)
@@ -834,7 +834,7 @@ impl V2EventSubscription {
 #[derive(Debug, Clone)]
 pub struct V2EventEnvelope {
     pub event_version: u64,
-    pub payload: serde_json::Value,
+    pub payload: deser_value::Value,
 }
 
 pub struct EventSubscription {
@@ -848,7 +848,7 @@ fn event_envelope(version: u64, update: V2ServerEventUpdate) -> Result<V2EventEn
     let event = V2ServerEvent::new(version, update);
     Ok(V2EventEnvelope {
         event_version: version,
-        payload: serde_json::to_value(event)?,
+        payload: deser_value::to_value(&event)?,
     })
 }
 
@@ -982,7 +982,7 @@ impl VaultRuntime {
         repair_pending_mutations(&config.path, &config.state_path, &mut catalog)?;
         reconcile_vault(&config.path, &config.state_path, &mut catalog, &excluded)?;
         if catalog.watcher_reconcile_pending()? {
-            let payload_json = serde_json::to_string(&V2ServerEventUpdate::ResyncRequired)?;
+            let payload_json = deser_json::to_string(&V2ServerEventUpdate::ResyncRequired)?;
             catalog.append_watcher_resync_event(&payload_json, EVENT_REPLAY_LIMIT)?;
         }
         let notes = catalog.live_notes()?;
@@ -1002,15 +1002,15 @@ impl VaultRuntime {
                 fields([
                     (
                         "system",
-                        serde_json::json!({ "component": "vault", "action": "open" }),
+                        deser_value::value!({ "component": "vault", "action": "open" }),
                     ),
-                    ("vault", serde_json::json!(index)),
-                    ("path", serde_json::json!(config.path.to_string_lossy())),
+                    ("vault", deser_value::value!(index)),
+                    ("path", deser_value::value!(config.path.to_string_lossy())),
                     (
                         "statePath",
-                        serde_json::json!(config.state_path.to_string_lossy()),
+                        deser_value::value!(config.state_path.to_string_lossy()),
                     ),
-                    ("notes", serde_json::json!(notes.len())),
+                    ("notes", deser_value::value!(notes.len())),
                 ]),
             );
         }
@@ -1159,13 +1159,13 @@ impl VaultRuntime {
                 fields([
                     (
                         "system",
-                        serde_json::json!({
+                        deser_value::value!({
                             "component": "vault",
                             "action": "worker_panic",
                             "worker": worker,
                         }),
                     ),
-                    ("vault", serde_json::json!(self.index)),
+                    ("vault", deser_value::value!(self.index)),
                 ]),
             );
         }
@@ -1180,13 +1180,13 @@ impl VaultRuntime {
                 fields([
                     (
                         "system",
-                        serde_json::json!({
+                        deser_value::value!({
                             "component": "watcher",
                             "action": "reconcile_error",
                         }),
                     ),
-                    ("vault", serde_json::json!(self.index)),
-                    ("error", serde_json::json!(error.to_string())),
+                    ("vault", deser_value::value!(self.index)),
+                    ("error", deser_value::value!(error.to_string())),
                 ]),
             );
         }
@@ -1352,7 +1352,7 @@ impl VaultRuntime {
         };
         catalog.complete_noop_mutation(
             &request.mutation_id,
-            &serde_json::to_string(&response)?,
+            &deser_json::to_string(&response)?,
         )?;
         drop(catalog);
         if excluded_folders_changed {
@@ -1389,7 +1389,7 @@ impl VaultRuntime {
                     let result = record.result_json.ok_or_else(|| {
                         Error::Internal(format!("mutation {mutation_id} has no result"))
                     })?;
-                    return Ok(serde_json::from_str(&result)?);
+                    return Ok(deser_json::from_str(&result)?);
                 }
                 "prepared" => {
                     let name = record.path.as_deref().ok_or_else(|| {
@@ -1400,7 +1400,7 @@ impl VaultRuntime {
                             let response = v2_image_upload_response(mutation_id, name);
                             catalog.complete_noop_mutation(
                                 mutation_id,
-                                &serde_json::to_string(&response)?,
+                                &deser_json::to_string(&response)?,
                             )?;
                             return Ok(response);
                         }
@@ -1443,7 +1443,7 @@ impl VaultRuntime {
         })?;
         write_vault_asset_new(&self.root, &name, bytes)?;
         let response = v2_image_upload_response(mutation_id, &name);
-        catalog.complete_noop_mutation(mutation_id, &serde_json::to_string(&response)?)?;
+        catalog.complete_noop_mutation(mutation_id, &deser_json::to_string(&response)?)?;
         drop(catalog);
         if self.logs.enabled() {
             self.logs.server_event(
@@ -1452,7 +1452,7 @@ impl VaultRuntime {
                 None,
                 fields([(
                     "asset",
-                    serde_json::json!({
+                    deser_value::value!({
                         "name": name,
                         "bytes": bytes.len(),
                         "vault": self.index,
@@ -1700,7 +1700,7 @@ impl VaultRuntime {
                 );
                 catalog.complete_noop_mutation(
                     mutation_id,
-                    &serde_json::to_string(&response)?,
+                    &deser_json::to_string(&response)?,
                 )?;
                 return Ok(response);
             }
@@ -1744,7 +1744,7 @@ impl VaultRuntime {
             );
         }
         let pending = v2_pending_response(mutation_id);
-        let pending_json = serde_json::to_string(&pending)?;
+        let pending_json = deser_json::to_string(&pending)?;
         let parsed = parse_markdown(&current.path, &content);
         let accepted_meta = catalog.accept_note_content_mutation(
             mutation_id,
@@ -1770,8 +1770,8 @@ impl VaultRuntime {
         let note_meta = v2_note_meta(&accepted_meta, &candidate_disk_hash)?;
         let response = v2_accepted_response(mutation_id, Some(note_meta.clone()));
         let update = V2ServerEventUpdate::NoteChanged { note: note_meta };
-        let update_json = serde_json::to_string(&update)?;
-        let result_json = serde_json::to_string(&response)?;
+        let update_json = deser_json::to_string(&update)?;
+        let result_json = deser_json::to_string(&response)?;
         let version = catalog.complete_mutation(
             mutation_id,
             &result_json,
@@ -1841,7 +1841,7 @@ impl VaultRuntime {
         }
         let parsed = parse_markdown(&path, content);
         let pending = v2_pending_response(&request.mutation_id);
-        let pending_json = serde_json::to_string(&pending)?;
+        let pending_json = deser_json::to_string(&pending)?;
         catalog
             .accept_new_note_mutation(
                 &request.mutation_id,
@@ -1876,8 +1876,8 @@ impl VaultRuntime {
         let update = V2ServerEventUpdate::NoteChanged { note: note_meta };
         let version = catalog.complete_mutation(
             &request.mutation_id,
-            &serde_json::to_string(&response)?,
-            Some(&serde_json::to_string(&update)?),
+            &deser_json::to_string(&response)?,
+            Some(&deser_json::to_string(&update)?),
             EVENT_REPLAY_LIMIT,
             Some((&note_id, &disk_hash)),
         )?;
@@ -1929,7 +1929,7 @@ impl VaultRuntime {
             })?;
             catalog.complete_noop_mutation(
                 &request.mutation_id,
-                &serde_json::to_string(&response)?,
+                &deser_json::to_string(&response)?,
             )?;
             return Ok(response);
         }
@@ -1998,7 +1998,7 @@ impl VaultRuntime {
         }
         let parsed = parse_markdown(&path, &source_document.source);
         let pending = v2_pending_response(&request.mutation_id);
-        let pending_json = serde_json::to_string(&pending)?;
+        let pending_json = deser_json::to_string(&pending)?;
         let accepted_meta = catalog
             .accept_rename_mutation(
                 &request.mutation_id,
@@ -2029,8 +2029,8 @@ impl VaultRuntime {
         let update = V2ServerEventUpdate::NoteChanged { note: note_meta };
         let version = catalog.complete_mutation(
             &request.mutation_id,
-            &serde_json::to_string(&response)?,
-            Some(&serde_json::to_string(&update)?),
+            &deser_json::to_string(&response)?,
+            Some(&deser_json::to_string(&update)?),
             EVENT_REPLAY_LIMIT,
             None,
         )?;
@@ -2105,7 +2105,7 @@ impl VaultRuntime {
         let tombstone = catalog.accept_delete_mutation(
             &request.mutation_id,
             note_id,
-            &serde_json::to_string(&pending)?,
+            &deser_json::to_string(&pending)?,
         )?;
         let check = read_visible_bytes(&self.root, &row.meta.path)?;
         if tansu_note_core::disk_hash(&check) != disk_hash
@@ -2119,8 +2119,8 @@ impl VaultRuntime {
         };
         let version = catalog.complete_mutation(
             &request.mutation_id,
-            &serde_json::to_string(&response)?,
-            Some(&serde_json::to_string(&update)?),
+            &deser_json::to_string(&response)?,
+            Some(&deser_json::to_string(&update)?),
             EVENT_REPLAY_LIMIT,
             None,
         )?;
@@ -2144,9 +2144,9 @@ impl VaultRuntime {
                                 "note.pending_materialization",
                                 None,
                                 fields([
-                                    ("mutationId", serde_json::json!(mutation.mutation_id)),
-                                    ("error", serde_json::json!(error.to_string())),
-                                    ("vault", serde_json::json!(self.index)),
+                                    ("mutationId", deser_value::value!(&mutation.mutation_id)),
+                                    ("error", deser_value::value!(error.to_string())),
+                                    ("vault", deser_value::value!(self.index)),
                                 ]),
                             );
                         }
@@ -2226,7 +2226,7 @@ impl VaultRuntime {
         };
         catalog.record_conflict_mutation(
             mutation_id,
-            &serde_json::to_string(&response)?,
+            &deser_json::to_string(&response)?,
             draft_id,
             note_id,
             base_revision,
@@ -2265,7 +2265,7 @@ impl VaultRuntime {
         } else {
             let mut replay = Vec::with_capacity(events.len());
             for event in events {
-                let update = serde_json::from_str(&event.payload_json)?;
+                let update = deser_json::from_str(&event.payload_json)?;
                 replay.push(event_envelope(event.event_version, update)?);
             }
             replay
@@ -2306,7 +2306,7 @@ impl VaultRuntime {
     }
 
     fn record_v2_event(&self, update: V2ServerEventUpdate) -> Result<V2EventEnvelope> {
-        let payload_json = serde_json::to_string(&update)?;
+        let payload_json = deser_json::to_string(&update)?;
         let version = self
             .lock_catalog()
             .append_vault_event(&payload_json, EVENT_REPLAY_LIMIT)?;
@@ -2315,7 +2315,7 @@ impl VaultRuntime {
 
     fn record_watcher_resync_event(&self) -> Result<V2EventEnvelope> {
         let update = V2ServerEventUpdate::ResyncRequired;
-        let payload_json = serde_json::to_string(&update)?;
+        let payload_json = deser_json::to_string(&update)?;
         let version = self
             .lock_catalog()
             .append_watcher_resync_event(&payload_json, EVENT_REPLAY_LIMIT)?;
@@ -2662,14 +2662,14 @@ impl VaultRuntime {
                 fields([
                     (
                         "system",
-                        serde_json::json!({
+                        deser_value::value!({
                             "component": "vault",
                             "action": "search_failure",
                             "operation": action,
                             "detail": detail,
                         }),
                     ),
-                    ("vault", serde_json::json!(self.index)),
+                    ("vault", deser_value::value!(self.index)),
                 ]),
             );
         }
@@ -2752,10 +2752,10 @@ impl VaultRuntime {
                 fields([
                     (
                         "system",
-                        serde_json::json!({ "component": "watcher", "action": "reconcile" }),
+                        deser_value::value!({ "component": "watcher", "action": "reconcile" }),
                     ),
-                    ("vault", serde_json::json!(self.index)),
-                    ("notes", serde_json::json!(notes.len())),
+                    ("vault", deser_value::value!(self.index)),
+                    ("notes", deser_value::value!(notes.len())),
                 ]),
             );
         }
@@ -2773,16 +2773,16 @@ impl VaultRuntime {
             fields([
                 (
                     "note",
-                    serde_json::json!({
-                        "id": meta.note_id,
-                        "path": meta.path,
+                    deser_value::value!({
+                        "id": &meta.note_id,
+                        "path": &meta.path,
                         "vault": self.index,
-                        "contentHash": meta.content_hash,
+                        "contentHash": &meta.content_hash,
                         "seq": meta.seq,
                     }),
                 ),
-                ("mutation", serde_json::json!({ "action": action })),
-                ("contentBytes", serde_json::json!(content_bytes)),
+                ("mutation", deser_value::value!({ "action": action })),
+                ("contentBytes", deser_value::value!(content_bytes)),
             ]),
         );
     }
@@ -2904,7 +2904,7 @@ mod tests {
             V2VaultError::from(Error::BadRequest("invalid".to_string())),
             V2VaultError::Internal(Error::BadRequest(_))
         ));
-        let json_error = serde_json::from_slice::<serde_json::Value>(b"{").unwrap_err();
+        let json_error = deser_json::from_slice::<deser_value::Value>(b"{").unwrap_err();
         assert!(matches!(
             V2VaultError::from(json_error),
             V2VaultError::Internal(Error::Json(_))
@@ -2921,8 +2921,8 @@ mod tests {
         let accepted = vault.v2_save_settings(request.clone()).unwrap();
         let replay = vault.v2_save_settings(request.clone()).unwrap();
         assert_eq!(
-            serde_json::to_value(accepted).unwrap(),
-            serde_json::to_value(replay).unwrap()
+            deser_value::to_value(&accepted).unwrap(),
+            deser_value::to_value(&replay).unwrap()
         );
 
         let mut changed = request;
@@ -2957,7 +2957,7 @@ mod tests {
     #[test]
     fn v2_save_settings_rejects_invalid_values_without_persisting() {
         let vault = test_vault();
-        let before = serde_json::to_value(vault.settings().unwrap()).unwrap();
+        let before = deser_value::to_value(&vault.settings().unwrap()).unwrap();
         for (label, settings) in invalid_settings_variants() {
             let result = vault.v2_save_settings(V2SettingsRequest {
                 mutation_id: "settings-invalid".to_string(),
@@ -2967,7 +2967,7 @@ mod tests {
                 matches!(result, Err(V2VaultError::Api(V2ApiErrorKind::BadRequest { .. }))),
                 "{label}"
             );
-            assert_eq!(serde_json::to_value(vault.settings().unwrap()).unwrap(), before, "{label}");
+            assert_eq!(deser_value::to_value(&vault.settings().unwrap()).unwrap(), before, "{label}");
         }
         vault
             .v2_save_settings(V2SettingsRequest {
@@ -3344,8 +3344,8 @@ mod tests {
         );
         let retried = vault.v2_create_note(create.clone()).unwrap();
         assert_eq!(
-            serde_json::to_value(&created).unwrap(),
-            serde_json::to_value(&retried).unwrap()
+            deser_value::to_value(&created).unwrap(),
+            deser_value::to_value(&retried).unwrap()
         );
 
         fs::write(vault.root.join("A.md"), "\u{feff}# A\r\nold\r\n").unwrap();
@@ -3383,8 +3383,8 @@ mod tests {
 
         let retry = vault.v2_save_note(&meta.note_id, save.clone()).unwrap();
         assert_eq!(
-            serde_json::to_value(&saved).unwrap(),
-            serde_json::to_value(&retry).unwrap()
+            deser_value::to_value(&saved).unwrap(),
+            deser_value::to_value(&retry).unwrap()
         );
         let reused = V2SaveNoteRequest {
             mutation_id: save.mutation_id.clone(),
@@ -3408,8 +3408,8 @@ mod tests {
         assert!(matches!(conflict.outcome, V2MutationOutcome::Conflict { .. }));
         let retried_conflict = vault.v2_save_note(&meta.note_id, stale).unwrap();
         assert_eq!(
-            serde_json::to_value(&conflict).unwrap(),
-            serde_json::to_value(&retried_conflict).unwrap()
+            deser_value::to_value(&conflict).unwrap(),
+            deser_value::to_value(&retried_conflict).unwrap()
         );
         assert_eq!(
             fs::read(vault.root.join("A.md")).unwrap(),
@@ -3476,8 +3476,8 @@ mod tests {
             first_content
         );
         assert_eq!(
-            serde_json::to_value(&restored).unwrap(),
-            serde_json::to_value(
+            deser_value::to_value(&restored).unwrap(),
+            deser_value::to_value(&
                 vault
                     .v2_restore_revision(&created.note_id, first_revision.event_id, request)
                     .unwrap()
@@ -3554,8 +3554,8 @@ mod tests {
             draft_content
         );
         assert_eq!(
-            serde_json::to_value(&restored).unwrap(),
-            serde_json::to_value(
+            deser_value::to_value(&restored).unwrap(),
+            deser_value::to_value(&
                 vault
                     .v2_restore_conflict(&created.note_id, draft.draft_id, request)
                     .unwrap()
@@ -3599,8 +3599,8 @@ mod tests {
         assert!(!vault.root.join("A.md").exists());
         assert_eq!(fs::read(vault.root.join("nested/B.md")).unwrap(), content.as_bytes());
         assert_eq!(
-            serde_json::to_value(&renamed).unwrap(),
-            serde_json::to_value(vault.v2_rename_note(&created.note_id, rename).unwrap()).unwrap()
+            deser_value::to_value(&renamed).unwrap(),
+            deser_value::to_value(&vault.v2_rename_note(&created.note_id, rename).unwrap()).unwrap()
         );
 
         let opened = vault.v2_open_note(&created.note_id).unwrap();
@@ -3621,8 +3621,8 @@ mod tests {
         ));
         assert!(!vault.root.join("nested/B.md").exists());
         assert_eq!(
-            serde_json::to_value(&deleted).unwrap(),
-            serde_json::to_value(vault.v2_delete_note(&created.note_id, delete).unwrap()).unwrap()
+            deser_value::to_value(&deleted).unwrap(),
+            deser_value::to_value(&vault.v2_delete_note(&created.note_id, delete).unwrap()).unwrap()
         );
     }
 
@@ -3678,7 +3678,7 @@ mod tests {
                     &row.visible_hash,
                     NoteEventKind::Save,
                     NoteEventSource::User,
-                    &serde_json::to_string(&pending).unwrap(),
+                    &deser_json::to_string(&pending).unwrap(),
                 )
                 .unwrap();
         }
@@ -3698,7 +3698,7 @@ mod tests {
             .unwrap();
         assert_eq!(mutation.state, "accepted");
         let result: V2MutationResponse =
-            serde_json::from_str(mutation.result_json.as_deref().unwrap()).unwrap();
+            deser_json::from_str(mutation.result_json.as_deref().unwrap()).unwrap();
         assert!(matches!(result.outcome, V2MutationOutcome::Accepted { .. }));
     }
 
@@ -3838,8 +3838,8 @@ mod tests {
                 .unwrap();
             assert!(matches!(retried.outcome, V2MutationOutcome::Accepted { .. }));
             assert_eq!(
-                serde_json::to_value(&retried).unwrap(),
-                serde_json::to_value(reopened.v2_save_note(&note.note_id, request).unwrap())
+                deser_value::to_value(&retried).unwrap(),
+                deser_value::to_value(&reopened.v2_save_note(&note.note_id, request).unwrap())
                     .unwrap(),
                 "{point:?}"
             );
@@ -4233,7 +4233,7 @@ mod tests {
                 .accept_delete_mutation(
                     "delete-pending",
                     &row.meta.note_id,
-                    &serde_json::to_string(&v2_pending_response("delete-pending")).unwrap(),
+                    &deser_json::to_string(&v2_pending_response("delete-pending")).unwrap(),
                 )
                 .unwrap();
         }
@@ -4276,7 +4276,7 @@ mod tests {
             disk_bytes,
         )
         .unwrap();
-        let pending = serde_json::to_string(&v2_pending_response("retry-pending-save")).unwrap();
+        let pending = deser_json::to_string(&v2_pending_response("retry-pending-save")).unwrap();
         {
             let mut catalog = vault.lock_catalog();
             catalog
@@ -4369,7 +4369,7 @@ mod tests {
         assert_eq!(added.payload["update"]["kind"], "vaultChanged");
         let added_note = &added.payload["update"]["notes"][0];
         assert_eq!(added_note["path"], "outside.md");
-        assert_eq!(added.payload["update"]["notes"].as_array().unwrap().len(), 1);
+        assert_eq!(added.payload["update"]["notes"].as_seq().unwrap().len(), 1);
         let note_id = added_note["noteId"].as_str().unwrap();
         let source_hash = added_note["sourceHash"].as_str().unwrap();
         let disk_hash = added_note["diskHash"].as_str().unwrap();
@@ -4383,7 +4383,7 @@ mod tests {
         assert_eq!(line_endings.payload["update"]["kind"], "vaultChanged");
         let changed_note = &line_endings.payload["update"]["notes"][0];
         assert_eq!(changed_note["path"], "outside.md");
-        assert_eq!(line_endings.payload["update"]["notes"].as_array().unwrap().len(), 1);
+        assert_eq!(line_endings.payload["update"]["notes"].as_seq().unwrap().len(), 1);
         assert_eq!(changed_note["sourceHash"], source_hash);
         assert_ne!(changed_note["diskHash"], disk_hash);
 
@@ -4793,9 +4793,9 @@ mod tests {
 
         let event = events.recv_timeout(Duration::from_secs(2)).unwrap();
         assert_eq!(event.level, LogLevel::Error);
-        assert_eq!(event.fields["system"]["component"], "watcher");
-        assert_eq!(event.fields["system"]["action"], "reconcile_error");
-        assert!(event.fields["error"].as_str().is_some_and(|error| !error.is_empty()));
+        assert_eq!(event.fields.get("system").unwrap()["component"], "watcher");
+        assert_eq!(event.fields.get("system").unwrap()["action"], "reconcile_error");
+        assert!(event.fields.get("error").unwrap().as_str().is_some_and(|error| !error.is_empty()));
     }
 
     #[test]

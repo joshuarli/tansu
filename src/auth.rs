@@ -10,7 +10,7 @@ use blake3::hash as blake3_hash;
 use rusqlite::backup::Backup;
 use rusqlite::{Connection, OpenFlags, OptionalExtension, Transaction, TransactionBehavior, params};
 use rustix::fs::{AtFlags, Mode, OFlags, RenameFlags, openat, renameat_with, unlinkat};
-use serde::{Deserialize, Serialize};
+use deser::{Deserialize, Serialize};
 use tansu_webauthn::{AuthChallenge, AuthenticationFinish, CounterResult, RegChallenge, StoredCredential};
 
 use crate::CancellationToken;
@@ -406,7 +406,7 @@ impl AuthStore {
             transaction.commit().map_err(storage)?;
             return Err(AuthError::CeremonyLimit);
         }
-        let state = serde_json::to_vec(&StoredRegistration { state: state.clone() }).map_err(storage)?;
+        let state = crate::json_bytes(&StoredRegistration { state: state.clone() }).map_err(storage)?;
         transaction.execute(
             "INSERT INTO ceremonies(id_hash, kind, state, expires_at, capability_hash, session_hash) VALUES (?1, 'registration', ?2, ?3, ?4, ?5)",
             params![id_hash, state, to_i64(expires_at)?, capability_hash, session_hash],
@@ -434,7 +434,7 @@ impl AuthStore {
             transaction.commit().map_err(storage)?;
             return Err(AuthError::InvalidRequest("wrong ceremony type".into()));
         }
-        let state: StoredRegistration = serde_json::from_slice(&row.state).map_err(storage)?;
+        let state: StoredRegistration = deser_json::from_slice(&row.state).map_err(storage)?;
         transaction.execute("DELETE FROM ceremonies WHERE id_hash = ?1", params![id_hash]).map_err(storage)?;
         let capability_expiry = if let Some(capability_hash) = &row.capability_hash {
             transaction.query_row(
@@ -498,7 +498,7 @@ impl AuthStore {
             transaction.commit().map_err(storage)?;
             return Err(AuthError::CeremonyLimit);
         }
-        let state = serde_json::to_vec(&StoredAuthentication { state: state.clone() }).map_err(storage)?;
+        let state = crate::json_bytes(&StoredAuthentication { state: state.clone() }).map_err(storage)?;
         transaction.execute(
             "INSERT INTO ceremonies(id_hash, kind, state, expires_at) VALUES (?1, 'authentication', ?2, ?3)",
             params![id_hash, state, to_i64(expires_at)?],
@@ -526,7 +526,7 @@ impl AuthStore {
             transaction.commit().map_err(storage)?;
             return Err(AuthError::InvalidRequest("wrong ceremony type".into()));
         }
-        let state: StoredAuthentication = serde_json::from_slice(&row.state).map_err(storage)?;
+        let state: StoredAuthentication = deser_json::from_slice(&row.state).map_err(storage)?;
         transaction.execute("DELETE FROM ceremonies WHERE id_hash = ?1", params![id_hash]).map_err(storage)?;
         let (result, credentials) = if row.expires_at <= now {
             (Err(AuthError::Expired), Vec::new())
@@ -1110,12 +1110,12 @@ fn read_credentials(connection: &Connection) -> Result<Vec<StoredCredential>, Au
     let values = statement.query_map([], |row| row.get::<_, Vec<u8>>(0)).map_err(storage)?;
     values.map(|value| {
         let value = value.map_err(storage)?;
-        serde_json::from_slice(&value).map_err(storage)
+        deser_json::from_slice(&value).map_err(storage)
     }).collect()
 }
 
 fn store_credential(transaction: &Transaction<'_>, credential: &StoredCredential) -> Result<(), AuthError> {
-    let value = serde_json::to_vec(credential).map_err(storage)?;
+    let value = crate::json_bytes(credential).map_err(storage)?;
     transaction.execute(
         "INSERT INTO credentials(credential_id, value) VALUES (?1, ?2) ON CONFLICT(credential_id) DO UPDATE SET value = excluded.value",
         params![credential.cred_id, value],

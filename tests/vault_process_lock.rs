@@ -131,7 +131,7 @@ fn server_command(config: &ServerConfig) -> Command {
 }
 
 fn is_listening_event(line: &str) -> bool {
-    serde_json::from_str::<serde_json::Value>(line)
+    deser_json::from_str::<deser_value::Value>(line)
         .is_ok_and(|event| event["system"]["action"] == "listen")
 }
 

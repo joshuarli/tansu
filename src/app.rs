@@ -53,9 +53,9 @@ impl App {
                 fields([
                     (
                         "system",
-                        serde_json::json!({ "component": "startup", "action": "app_open" }),
+                        deser_value::value!({ "component": "startup", "action": "app_open" }),
                     ),
-                    ("vaultCount", serde_json::json!(app.vaults.len())),
+                    ("vaultCount", deser_value::value!(app.vaults.len())),
                 ]),
             );
         }
@@ -148,8 +148,8 @@ mod tests {
         let app = App::from_config(config(&root), logs.clone(), None).unwrap();
         let startup = logs.snapshot();
         assert!(startup.events.iter().any(|event| {
-            event.fields["system"]["component"] == "startup"
-                && event.fields["system"]["action"] == "app_open"
+            event.fields.get("system").unwrap()["component"] == "startup"
+                && event.fields.get("system").unwrap()["action"] == "app_open"
         }));
 
         let vault_id = app.v2_bootstrap().vaults[0].vault_id.clone();

@@ -1,9 +1,10 @@
-use serde::{Deserialize, Serialize};
+use deser::{Deserialize, Serialize};
 use std::ops::RangeInclusive;
 use ts_rs::TS;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
+#[deser(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct NoteMeta {
     pub note_id: String,
     pub path: String,
@@ -17,7 +18,8 @@ pub struct NoteMeta {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
+#[deser(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct RevisionMeta {
     #[ts(type = "number")]
     pub event_id: i64,
@@ -32,7 +34,8 @@ pub struct RevisionMeta {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[serde(rename_all = "snake_case")]
+#[deser(rename_all = "snake_case")]
+#[ts(rename_all = "snake_case")]
 pub enum NoteEventKind {
     Baseline,
     Create,
@@ -47,7 +50,8 @@ pub enum NoteEventKind {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[serde(rename_all = "snake_case")]
+#[deser(rename_all = "snake_case")]
+#[ts(rename_all = "snake_case")]
 pub enum NoteEventSource {
     User,
     Import,
@@ -56,7 +60,8 @@ pub enum NoteEventSource {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
+#[deser(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct ConflictDraftMeta {
     #[ts(type = "number")]
     pub draft_id: i64,
@@ -70,8 +75,9 @@ pub struct ConflictDraftMeta {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[serde(default)]
+#[deser(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+#[deser(default)]
 pub struct Settings {
     pub excluded_folders: Vec<String>,
     pub search_title_weight: f32,
@@ -185,14 +191,16 @@ where
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[deser(rename_all = "camelCase", deny_unknown_fields)]
+#[ts(rename_all = "camelCase")]
 pub struct AppVaultSettings {
     pub name: String,
     pub path: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[deser(rename_all = "camelCase", deny_unknown_fields)]
+#[ts(rename_all = "camelCase")]
 pub struct AppAuthSettings {
     pub external_origin: String,
     pub rp_id: String,
@@ -200,14 +208,16 @@ pub struct AppAuthSettings {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[deser(rename_all = "camelCase", deny_unknown_fields)]
+#[ts(rename_all = "camelCase")]
 pub struct AppSettings {
     pub vaults: Vec<AppVaultSettings>,
     pub auth: Option<AppAuthSettings>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
+#[deser(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct V2AppSettingsResponse {
     pub settings: Option<AppSettings>,
     pub restart_required: bool,
@@ -231,15 +241,17 @@ impl Default for Settings {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
+#[deser(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct SearchStatus {
     pub dirty: bool,
     pub degraded: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[serde(deny_unknown_fields)]
+#[deser(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+#[deser(deny_unknown_fields)]
 pub struct TextEdit {
     pub start: TextPosition,
     pub end: TextPosition,
@@ -247,8 +259,9 @@ pub struct TextEdit {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[serde(deny_unknown_fields)]
+#[deser(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+#[deser(deny_unknown_fields)]
 pub struct TextPosition {
     #[ts(type = "number")]
     pub line: usize,
@@ -257,7 +270,8 @@ pub struct TextPosition {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[serde(tag = "code", rename_all = "snake_case")]
+#[deser(tag = "code", rename_all = "snake_case")]
+#[ts(tag = "code", rename_all = "snake_case")]
 pub enum ApiErrorKind {
     PathInvalid {
         reason: PathValidationReason,
@@ -281,7 +295,8 @@ pub enum ApiErrorKind {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[serde(rename_all = "snake_case")]
+#[deser(rename_all = "snake_case")]
+#[ts(rename_all = "snake_case")]
 pub enum PathValidationReason {
     Empty,
     Absolute,
@@ -292,7 +307,8 @@ pub enum PathValidationReason {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[serde(rename_all = "snake_case")]
+#[deser(rename_all = "snake_case")]
+#[ts(rename_all = "snake_case")]
 pub enum UnresolvedReason {
     CaseFoldCollision,
     InvalidUtf8,
@@ -302,14 +318,16 @@ pub enum UnresolvedReason {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
+#[deser(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct V2VaultMeta {
     pub vault_id: String,
     pub name: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
+#[deser(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct V2BootstrapResponse {
     #[ts(type = "number")]
     pub api_version: u32,
@@ -318,7 +336,8 @@ pub struct V2BootstrapResponse {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
+#[deser(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct V2VaultBootstrapResponse {
     pub vault: V2VaultMeta,
     pub notes: Vec<V2NoteMeta>,
@@ -327,7 +346,8 @@ pub struct V2VaultBootstrapResponse {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
+#[deser(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct V2NoteMeta {
     pub note_id: String,
     pub path: String,
@@ -346,14 +366,16 @@ pub struct V2NoteMeta {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
+#[deser(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct V2NoteDocument {
     pub meta: V2NoteMeta,
     pub content: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
+#[deser(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct V2LinkedNote {
     pub note_id: String,
     pub path: String,
@@ -361,14 +383,16 @@ pub struct V2LinkedNote {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
+#[deser(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct V2NotePreview {
     pub note_id: String,
     pub preview: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
+#[deser(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct V2NotePrecondition {
     #[ts(type = "number")]
     pub base_revision: i64,
@@ -377,8 +401,9 @@ pub struct V2NotePrecondition {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[serde(deny_unknown_fields)]
+#[deser(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+#[deser(deny_unknown_fields)]
 pub struct V2CreateNoteRequest {
     pub mutation_id: String,
     pub path: String,
@@ -387,8 +412,9 @@ pub struct V2CreateNoteRequest {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[serde(deny_unknown_fields)]
+#[deser(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+#[deser(deny_unknown_fields)]
 pub struct V2SaveNoteRequest {
     pub mutation_id: String,
     pub precondition: V2NotePrecondition,
@@ -397,8 +423,9 @@ pub struct V2SaveNoteRequest {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[serde(deny_unknown_fields)]
+#[deser(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+#[deser(deny_unknown_fields)]
 pub struct V2SaveNoteDeltaRequest {
     pub mutation_id: String,
     pub precondition: V2NotePrecondition,
@@ -407,8 +434,9 @@ pub struct V2SaveNoteDeltaRequest {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[serde(deny_unknown_fields)]
+#[deser(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+#[deser(deny_unknown_fields)]
 pub struct V2RenameNoteRequest {
     pub mutation_id: String,
     pub precondition: V2NotePrecondition,
@@ -416,31 +444,35 @@ pub struct V2RenameNoteRequest {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[serde(deny_unknown_fields)]
+#[deser(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+#[deser(deny_unknown_fields)]
 pub struct V2DeleteNoteRequest {
     pub mutation_id: String,
     pub precondition: V2NotePrecondition,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[serde(deny_unknown_fields)]
+#[deser(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+#[deser(deny_unknown_fields)]
 pub struct V2RestoreRevisionRequest {
     pub mutation_id: String,
     pub precondition: V2NotePrecondition,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[serde(deny_unknown_fields)]
+#[deser(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+#[deser(deny_unknown_fields)]
 pub struct V2RestoreConflictRequest {
     pub mutation_id: String,
     pub precondition: V2NotePrecondition,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
+#[deser(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct V2ConflictDraftMeta {
     #[ts(type = "number")]
     pub draft_id: i64,
@@ -454,14 +486,16 @@ pub struct V2ConflictDraftMeta {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
+#[deser(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct V2ConflictDraftDocument {
     pub draft: V2ConflictDraftMeta,
     pub content: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
+#[deser(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct V2RevisionMeta {
     #[ts(type = "number")]
     pub revision: i64,
@@ -474,29 +508,33 @@ pub struct V2RevisionMeta {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
+#[deser(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct V2RevisionDocument {
     pub revision: V2RevisionMeta,
     pub content: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[serde(deny_unknown_fields)]
+#[deser(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+#[deser(deny_unknown_fields)]
 pub struct V2SettingsRequest {
     pub mutation_id: String,
     pub settings: Settings,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
+#[deser(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct V2SettingsResponse {
     pub mutation_id: String,
     pub settings: Settings,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
+#[deser(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct V2ImageUploadResponse {
     pub mutation_id: String,
     pub name: String,
@@ -504,11 +542,12 @@ pub struct V2ImageUploadResponse {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[serde(
+#[deser(
     tag = "state",
     rename_all = "camelCase",
     rename_all_fields = "camelCase"
 )]
+#[ts(tag = "state", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum V2MutationOutcome {
     Accepted { result: Option<V2NoteMeta> },
     PendingMaterialization {
@@ -521,21 +560,24 @@ pub enum V2MutationOutcome {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
+#[deser(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct V2MutationResponse {
     pub mutation_id: String,
     pub outcome: V2MutationOutcome,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[serde(rename_all = "snake_case")]
+#[deser(rename_all = "snake_case")]
+#[ts(rename_all = "snake_case")]
 pub enum V2SearchMode {
     Default,
     TypoOnly,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[deser(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[ts(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum V2SearchOverlay {
     Saved {
         note_id: String,
@@ -559,8 +601,9 @@ pub enum V2SearchOverlay {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[serde(deny_unknown_fields)]
+#[deser(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+#[deser(deny_unknown_fields)]
 pub struct V2SearchRequest {
     pub query: String,
     pub mode: V2SearchMode,
@@ -569,7 +612,8 @@ pub struct V2SearchRequest {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
+#[deser(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct V2ExcerptRange {
     #[ts(type = "number")]
     pub start_utf16: u32,
@@ -578,7 +622,8 @@ pub struct V2ExcerptRange {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
+#[deser(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct V2SourceRange {
     #[ts(type = "number")]
     pub start_utf16: u32,
@@ -587,7 +632,8 @@ pub struct V2SourceRange {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[deser(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[ts(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum V2SearchHitIdentity {
     Canonical {
         note_id: String,
@@ -610,7 +656,8 @@ pub enum V2SearchHitIdentity {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
+#[deser(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct V2SearchHit {
     pub identity: V2SearchHitIdentity,
     pub title: String,
@@ -622,21 +669,24 @@ pub struct V2SearchHit {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[serde(tag = "status", rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[deser(tag = "status", rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[ts(tag = "status", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum V2OverlayCoverage {
     Complete,
     Partial { skipped_note_count: u16 },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
+#[deser(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct V2SearchResponse {
     pub hits: Vec<V2SearchHit>,
     pub overlay_coverage: V2OverlayCoverage,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[deser(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[ts(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum V2ServerEventUpdate {
     Ready,
     VaultChanged { notes: Vec<V2NoteMeta> },
@@ -647,7 +697,8 @@ pub enum V2ServerEventUpdate {
 }
 
 #[derive(Debug, Clone, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
+#[deser(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct V2ServerEvent {
     #[ts(type = "number")]
     event_version: u64,
@@ -667,17 +718,19 @@ impl V2ServerEvent {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
+#[deser(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct V2ApiErrorResponse {
     pub error: V2ApiErrorKind,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[serde(
+#[deser(
     tag = "code",
     rename_all = "snake_case",
     rename_all_fields = "camelCase"
 )]
+#[ts(tag = "code", rename_all = "snake_case", rename_all_fields = "camelCase")]
 pub enum V2ApiErrorKind {
     ApiVersionUnsupported {
         requested_version: Option<u32>,
@@ -757,7 +810,7 @@ pub enum V2ApiErrorKind {
 #[cfg(test)]
 mod v2_tests {
     use super::{V2ApiErrorKind, V2ServerEvent, V2ServerEventUpdate};
-    use serde_json::json;
+    use deser_value::value as json;
 
     #[test]
     fn v2_error_uses_code_discriminator_and_camel_case_fields() {
@@ -766,7 +819,7 @@ mod v2_tests {
         };
 
         assert_eq!(
-            serde_json::to_value(error).unwrap(),
+            deser_value::to_value(&error).unwrap(),
             json!({"code": "mutation_id_reuse", "mutationId": "mutation-1"})
         );
     }
@@ -777,7 +830,7 @@ mod v2_tests {
         let resync = V2ServerEvent::new(8, V2ServerEventUpdate::ResyncRequired);
 
         assert_eq!(
-            serde_json::to_value(ordinary).unwrap(),
+            deser_value::to_value(&ordinary).unwrap(),
             json!({
                 "eventVersion": 7,
                 "resyncRequired": false,
@@ -785,7 +838,7 @@ mod v2_tests {
             })
         );
         assert_eq!(
-            serde_json::to_value(resync).unwrap(),
+            deser_value::to_value(&resync).unwrap(),
             json!({
                 "eventVersion": 8,
                 "resyncRequired": true,
@@ -822,11 +875,11 @@ mod settings_tests {
 
     #[test]
     fn serialized_representation_is_unchanged() {
-        let value = serde_json::to_value(Settings::default()).unwrap();
+        let value = deser_value::to_value(&Settings::default()).unwrap();
         assert_eq!(value["autosaveDelayMs"], 900);
         assert_eq!(value["undoStackMax"], 200);
-        assert_eq!(value["excludedFolders"], serde_json::json!([]));
-        assert!(value["imageWebpQuality"].is_number());
+        assert_eq!(value["excludedFolders"], deser_value::value!([]));
+        assert!(value["imageWebpQuality"].as_f64().is_some());
     }
 
     #[test]
@@ -847,28 +900,28 @@ mod wire_format_tests {
     #[test]
     fn default_settings_serialize_to_the_stored_json() {
         let text = r#"{"excludedFolders":[],"searchTitleWeight":10.0,"searchHeadingWeight":5.0,"searchTagWeight":2.0,"searchContentWeight":1.0,"recencyBoost":0.0,"autosaveDelayMs":900,"undoStackMax":200,"imageWebpQuality":0.85}"#;
-        assert_eq!(serde_json::to_string(&Settings::default()).unwrap(), text);
-        let parsed: Settings = serde_json::from_str(text).unwrap();
-        assert_eq!(serde_json::to_string(&parsed).unwrap(), text);
+        assert_eq!(deser_json::to_string(&Settings::default()).unwrap(), text);
+        let parsed: Settings = deser_json::from_str(text).unwrap();
+        assert_eq!(deser_json::to_string(&parsed).unwrap(), text);
     }
 
     #[test]
     fn internally_tagged_variants_round_trip_through_their_wire_text() {
         let overlay = r#"{"kind":"saved","noteId":"n","baseRevision":3,"baseSourceHash":"h","localRevision":2,"title":"t","path":"p.md","content":"c"}"#;
-        let parsed: V2SearchOverlay = serde_json::from_str(overlay).unwrap();
-        assert_eq!(serde_json::to_string(&parsed).unwrap(), overlay);
+        let parsed: V2SearchOverlay = deser_json::from_str(overlay).unwrap();
+        assert_eq!(deser_json::to_string(&parsed).unwrap(), overlay);
 
         let coverage = r#"{"status":"partial","skippedNoteCount":4}"#;
-        let parsed: V2OverlayCoverage = serde_json::from_str(coverage).unwrap();
-        assert_eq!(serde_json::to_string(&parsed).unwrap(), coverage);
-        assert_eq!(serde_json::to_string(&V2OverlayCoverage::Complete).unwrap(), r#"{"status":"complete"}"#);
+        let parsed: V2OverlayCoverage = deser_json::from_str(coverage).unwrap();
+        assert_eq!(deser_json::to_string(&parsed).unwrap(), coverage);
+        assert_eq!(deser_json::to_string(&V2OverlayCoverage::Complete).unwrap(), r#"{"status":"complete"}"#);
     }
 
     #[test]
     fn unknown_fields_are_rejected_where_denied() {
-        assert!(serde_json::from_str::<TextPosition>(r#"{"line":1,"character":2,"extra":3}"#).is_err());
-        assert!(serde_json::from_str::<AppSettings>(r#"{"vaults":[],"auth":null,"extra":1}"#).is_err());
-        let settings: AppSettings = serde_json::from_str(r#"{"vaults":[],"auth":null}"#).unwrap();
-        assert_eq!(serde_json::to_string(&settings).unwrap(), r#"{"vaults":[],"auth":null}"#);
+        assert!(deser_json::from_str::<TextPosition>(r#"{"line":1,"character":2,"extra":3}"#).is_err());
+        assert!(deser_json::from_str::<AppSettings>(r#"{"vaults":[],"auth":null,"extra":1}"#).is_err());
+        let settings: AppSettings = deser_json::from_str(r#"{"vaults":[],"auth":null}"#).unwrap();
+        assert_eq!(deser_json::to_string(&settings).unwrap(), r#"{"vaults":[],"auth":null}"#);
     }
 }

@@ -24,7 +24,7 @@ use hyper::header::{CACHE_CONTROL, CONTENT_LENGTH, CONTENT_TYPE, COOKIE, HOST, O
 use hyper::server::conn::{http1, http2};
 use hyper::service::service_fn;
 use hyper::{HeaderMap, Method, Request, Response, StatusCode};
-use serde::{Deserialize, Serialize};
+use deser::{Deserialize, Serialize};
 
 use crate::api::{decode_path_segment, handle_v2_api, validate_v2_server_instance, v2_api_error_response};
 use crate::api_types::{AppSettings, V2AppSettingsResponse, V2ApiErrorKind};
@@ -57,13 +57,13 @@ type ConnectionError = Box<dyn std::error::Error + Send + Sync>;
 type ConnectionTaskResult = std::result::Result<Option<ConnectionError>, Box<dyn Any + Send>>;
 
 #[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[deser(rename_all = "camelCase")]
 struct DevAssetManifest {
     files: Vec<DevAsset>,
 }
 
 #[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[deser(rename_all = "camelCase")]
 struct DevAsset {
     url: String,
     file: String,
@@ -88,12 +88,12 @@ pub struct HttpResponse {
 }
 
 impl HttpResponse {
-    pub fn json<T: Serialize>(status: u16, value: &T) -> std::result::Result<Self, serde_json::Error> {
+    pub fn json<T: Serialize>(status: u16, value: &T) -> std::result::Result<Self, deser::Error> {
         Ok(Self {
             status,
             content_type: "application/json; charset=utf-8".to_string(),
             headers: Vec::new(),
-            body: serde_json::to_vec(value)?,
+            body: crate::json_bytes(value)?,
         })
     }
 
@@ -164,10 +164,10 @@ impl HttpResponse {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[deser(rename_all = "camelCase")]
 pub struct EventEnvelope {
     pub event_version: u64,
-    pub payload: serde_json::Value,
+    pub payload: deser_value::Value,
 }
 
 pub struct EventSubscription {
@@ -415,8 +415,8 @@ fn log_listen(app: &App, port: u16) {
             "system.event",
             None,
             fields([
-                ("system", serde_json::json!({ "component": "startup", "action": "listen" })),
-                ("address", serde_json::json!(format!("127.0.0.1:{port}"))),
+                ("system", deser_value::value!({ "component": "startup", "action": "listen" })),
+                ("address", deser_value::value!(format!("127.0.0.1:{port}"))),
             ]),
         );
     }
@@ -428,7 +428,7 @@ fn log_connection_error(app: &App, error: String) {
             LogLevel::Debug,
             "http.connection",
             None,
-            fields([("error", serde_json::json!(error))]),
+            fields([("error", deser_value::value!(error))]),
         );
     }
 }
@@ -787,13 +787,13 @@ async fn collect_body(
 }
 
 #[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[deser(rename_all = "camelCase", deny_unknown_fields)]
 struct RegistrationStart {
     capability: Option<String>,
 }
 
 #[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[deser(rename_all = "camelCase", deny_unknown_fields)]
 struct CeremonyFinish<T> {
     ceremony_id: String,
     credential: T,
@@ -855,7 +855,7 @@ fn handle_auth_route_sync(
         let Some(session) = verified_session else {
             return auth_error(AuthError::Unauthorized, request_id);
         };
-        return HttpResponse::json(200, &serde_json::json!({
+        return HttpResponse::json(200, &deser_value::value!({
             "authenticated": true,
             "verifiedAt": session.verified_at,
             "expiresAt": session.expires_at,
@@ -870,7 +870,7 @@ fn handle_auth_route_sync(
     let rp = RelyingParty::new(rp_id, origin, rp_name);
     match (method, path) {
         ("POST", "/api/v2/auth/enrollment/options") => {
-            let start: RegistrationStart = match serde_json::from_slice(body) {
+            let start: RegistrationStart = match deser_json::from_slice(body) {
                 Ok(start) => start,
                 Err(error) => return auth_error(AuthError::InvalidRequest(error.to_string()), request_id),
             };
@@ -883,16 +883,16 @@ fn handle_auth_route_sync(
                 Err(_) => return v2_internal_error(request_id),
             };
             match auth.begin_registration(&state, start.capability.as_deref(), session_cookie, now, 300) {
-                Ok(ticket) => HttpResponse::json(200, &serde_json::json!({
-                    "ceremonyId": ticket.id,
-                    "expiresAt": ticket.expires_at,
-                    "publicKey": options,
-                })).unwrap_or_else(|_| v2_internal_error(request_id)),
+                Ok(ticket) => HttpResponse::json(200, &CeremonyOptions {
+                    ceremony_id: &ticket.id,
+                    expires_at: ticket.expires_at,
+                    public_key: &options,
+                }).unwrap_or_else(|_| v2_internal_error(request_id)),
                 Err(error) => auth_error(error, request_id),
             }
         }
         ("POST", "/api/v2/auth/enrollment/finish") => {
-            let finish: CeremonyFinish<RegistrationResponse> = match serde_json::from_slice(body) {
+            let finish: CeremonyFinish<RegistrationResponse> = match deser_json::from_slice(body) {
                 Ok(finish) => finish,
                 Err(error) => return auth_error(AuthError::InvalidRequest(error.to_string()), request_id),
             };
@@ -906,7 +906,7 @@ fn handle_auth_route_sync(
             }) {
                 Ok(session) => {
                     let csrf = session.as_ref().map(|session| session.csrf_token.as_str());
-                    let mut response = HttpResponse::json(200, &serde_json::json!({ "ok": true, "csrfToken": csrf }))
+                    let mut response = HttpResponse::json(200, &deser_value::value!({ "ok": true, "csrfToken": csrf }))
                         .unwrap_or_else(|_| v2_internal_error(request_id));
                     if let Some(session) = session {
                         response = response.with_header("Set-Cookie", &auth.session_cookie(&session));
@@ -932,16 +932,16 @@ fn handle_auth_route_sync(
                 Err(_) => return v2_internal_error(request_id),
             };
             match auth.begin_authentication(&state, now, 300) {
-                Ok(ticket) => HttpResponse::json(200, &serde_json::json!({
-                    "ceremonyId": ticket.id,
-                    "expiresAt": ticket.expires_at,
-                    "publicKey": options,
-                })).unwrap_or_else(|_| v2_internal_error(request_id)),
+                Ok(ticket) => HttpResponse::json(200, &CeremonyOptions {
+                    ceremony_id: &ticket.id,
+                    expires_at: ticket.expires_at,
+                    public_key: &options,
+                }).unwrap_or_else(|_| v2_internal_error(request_id)),
                 Err(error) => auth_error(error, request_id),
             }
         }
         ("POST", "/api/v2/auth/login/finish") => {
-            let finish: CeremonyFinish<AuthenticationResponse> = match serde_json::from_slice(body) {
+            let finish: CeremonyFinish<AuthenticationResponse> = match deser_json::from_slice(body) {
                 Ok(finish) => finish,
                 Err(error) => return auth_error(AuthError::InvalidRequest(error.to_string()), request_id),
             };
@@ -959,7 +959,7 @@ fn handle_auth_route_sync(
                 }
                 Err(last_error)
             }) {
-                Ok(session) => HttpResponse::json(200, &serde_json::json!({ "ok": true, "csrfToken": session.csrf_token }))
+                Ok(session) => HttpResponse::json(200, &deser_value::value!({ "ok": true, "csrfToken": &session.csrf_token }))
                     .unwrap_or_else(|_| v2_internal_error(request_id))
                     .with_header("Set-Cookie", &auth.session_cookie(&session))
                     .with_header("Set-Cookie", &csrf_cookie(&session.csrf_token)),
@@ -969,7 +969,7 @@ fn handle_auth_route_sync(
         ("POST", "/api/v2/auth/logout") => {
             let Some(session_cookie) = session_cookie else { return auth_error(AuthError::Unauthorized, request_id); };
             match auth.revoke_session(session_cookie) {
-                Ok(()) => HttpResponse::json(200, &serde_json::json!({ "ok": true }))
+                Ok(()) => HttpResponse::json(200, &deser_value::value!({ "ok": true }))
                     .unwrap_or_else(|_| v2_internal_error(request_id))
                     .with_header("Set-Cookie", "__Host-tansu_session=; HttpOnly; Secure; Path=/; SameSite=Strict; Max-Age=0")
                     .with_header("Set-Cookie", "__Host-tansu_csrf=; Secure; Path=/; SameSite=Strict; Max-Age=0"),
@@ -1388,15 +1388,23 @@ impl Drop for SseBodyState {
     }
 }
 
+#[derive(Serialize)]
+#[deser(rename_all = "camelCase")]
+struct CeremonyOptions<'a, T> {
+    ceremony_id: &'a str,
+    expires_at: u64,
+    public_key: &'a T,
+}
+
 fn sse_event_bytes(event: &EventEnvelope) -> Option<Bytes> {
-    if event.payload.get("eventVersion").and_then(serde_json::Value::as_u64) != Some(event.event_version) {
+    if event.payload.get("eventVersion").and_then(|v| v.as_u64()) != Some(event.event_version) {
         return None;
     }
-    let json = serde_json::to_vec(&event.payload).ok()?;
+    let json = crate::json_bytes(&event.payload).ok()?;
     if json.len() > MAX_SSE_EVENT_BYTES {
         return None;
     }
-    let event_name = if event.payload.get("resyncRequired").and_then(serde_json::Value::as_bool) == Some(true) {
+    let event_name = if event.payload.get("resyncRequired").and_then(|v| v.as_bool()) == Some(true) {
         "resyncRequired"
     } else {
         "message"
@@ -1405,11 +1413,12 @@ fn sse_event_bytes(event: &EventEnvelope) -> Option<Bytes> {
 }
 
 fn sse_resync_event(event_version: u64) -> Bytes {
-    let payload = serde_json::json!({
+    let payload = deser_value::value!({
         "eventVersion": event_version,
         "resyncRequired": true,
         "update": { "kind": "resyncRequired" },
     });
+    let payload = deser_json::to_string(&payload).expect("resync payload serializes");
     Bytes::from(format!("id: {event_version}\nevent: resyncRequired\ndata: {payload}\n\n"))
 }
 
@@ -1449,7 +1458,7 @@ fn handle_app_settings(app: &App, request: &HttpRequest) -> HttpResponse {
             }).unwrap_or_else(|error| HttpResponse::text(500, &error.to_string())),
             Err(error) => HttpResponse::text(500, &error.to_string()),
         },
-        "PUT" => match serde_json::from_slice::<AppSettings>(&request.body) {
+        "PUT" => match deser_json::from_slice::<AppSettings>(&request.body) {
             Ok(settings) => match app.save_app_settings(&settings) {
                 Ok(()) => HttpResponse::json(200, &V2AppSettingsResponse {
                     settings: Some(settings),
@@ -1470,12 +1479,12 @@ fn handle_dev_logs(app: &App, request: &HttpRequest) -> HttpResponse {
     match (request.method.as_str(), request.path.as_str()) {
         ("GET", "/api/dev/logs") => HttpResponse::json(200, &app.logs().snapshot())
             .unwrap_or_else(|error| HttpResponse::text(500, &format!("internal serialization error: {error}"))),
-        ("POST", "/api/dev/logs") => match serde_json::from_slice::<IncomingLogBatch>(&request.body) {
+        ("POST", "/api/dev/logs") => match deser_json::from_slice::<IncomingLogBatch>(&request.body) {
             Ok(batch) => {
                 for event in batch.events {
                     app.logs().ingest(event);
                 }
-                HttpResponse::json(200, &serde_json::json!({ "ok": true }))
+                HttpResponse::json(200, &deser_value::value!({ "ok": true }))
                     .unwrap_or_else(|error| HttpResponse::text(500, &format!("internal serialization error: {error}")))
             }
             Err(error) => HttpResponse::text(400, &error.to_string()),
@@ -1524,7 +1533,7 @@ fn serve_dev_hmr_response() -> HttpResponse {
         Ok(modified) => modified.as_nanos().to_string(),
         Err(error) => return HttpResponse::text(503, &format!("development assets unavailable: {error}")),
     };
-    HttpResponse::json(200, &serde_json::json!({ "id": id }))
+    HttpResponse::json(200, &deser_value::value!({ "id": id }))
         .unwrap_or_else(|error| HttpResponse::text(500, &format!("HMR response serialization failed: {error}")))
 }
 
@@ -1532,7 +1541,7 @@ fn serve_dev_static_path(path: &str) -> Result<HttpResponse> {
     let root = dev_dist_path();
     let manifest_bytes = std::fs::read(root.join("manifest.json"))
         .map_err(|error| Error::Internal(format!("read development asset manifest: {error}")))?;
-    let manifest: DevAssetManifest = serde_json::from_slice(&manifest_bytes)
+    let manifest: DevAssetManifest = deser_json::from_slice(&manifest_bytes)
         .map_err(|error| Error::Internal(format!("decode development asset manifest: {error}")))?;
     let asset = manifest.files.into_iter().find(|asset| asset.url == path)
         .ok_or_else(|| Error::NotFound(path.to_string()))?;
@@ -1581,9 +1590,9 @@ fn log_request(
         fields([
             (
                 "http",
-                serde_json::json!({
-                    "method": request.method,
-                    "path": request.path,
+                deser_value::value!({
+                    "method": &request.method,
+                    "path": &request.path,
                     "status": response.status,
                     "durationMs": duration_ms,
                     "vault": request_vault(request),
@@ -1609,13 +1618,13 @@ fn request_vault(request: &HttpRequest) -> Option<usize> {
     })
 }
 
-fn api_error_field(response: &HttpResponse) -> serde_json::Value {
+fn api_error_field(response: &HttpResponse) -> deser_value::Value {
     if response.status < 400 || !response.content_type.starts_with("application/json") {
-        return serde_json::Value::Null;
+        return deser_value::Value::null();
     }
-    serde_json::from_slice::<serde_json::Value>(&response.body).ok()
+    deser_json::from_slice::<deser_value::Value>(&response.body).ok()
         .and_then(|value| value.get("error").cloned())
-        .unwrap_or(serde_json::Value::Null)
+        .unwrap_or(deser_value::Value::null())
 }
 
 fn unix_time_seconds() -> Result<u64> {
@@ -1662,7 +1671,7 @@ mod tests {
         let header_vault = HttpRequest { path: "/api/v2/health".to_string(), ..request };
         assert_eq!(request_vault(&header_vault), Some(5));
 
-        assert!(api_error_field(&HttpResponse::json(200, &serde_json::json!({"error": "ignored"})).unwrap()).is_null());
+        assert!(api_error_field(&HttpResponse::json(200, &deser_value::value!({"error": "ignored"})).unwrap()).is_null());
         assert!(api_error_field(&HttpResponse::text(500, "broken")).is_null());
         let malformed_json = HttpResponse {
             status: 500,
@@ -1701,7 +1710,7 @@ mod tests {
         assert_eq!(response.status(), 429);
         assert_eq!(
             api_error_field(&response),
-            serde_json::json!({ "code": "rate_limited", "retryAfterMs": 1000 }),
+            deser_value::value!({ "code": "rate_limited", "retryAfterMs": 1000 }),
         );
     }
 
@@ -1794,17 +1803,17 @@ mod tests {
         assert!(String::from_utf8_lossy(setup.body()).contains("Set up Tansu"));
 
         let initial = route(&app, &request("GET", "/api/v2/app/settings", &[]));
-        let initial: serde_json::Value = serde_json::from_slice(initial.body()).unwrap();
-        assert_eq!(initial["settings"], serde_json::Value::Null);
+        let initial: deser_value::Value = deser_json::from_slice(initial.body()).unwrap();
+        assert_eq!(initial["settings"], deser_value::Value::null());
         assert_eq!(initial["restartRequired"], false);
 
-        let body = serde_json::json!({
-            "vaults": [{ "name": "Notes", "path": root.path().join("notes") }],
+        let body = deser_json::to_string(&deser_value::value!({
+            "vaults": [{ "name": "Notes", "path": root.path().join("notes").to_string_lossy() }],
             "auth": null,
-        }).to_string();
+        })).unwrap();
         let saved = route(&app, &request("PUT", "/api/v2/app/settings", body.as_bytes()));
         assert_eq!(saved.status(), 200, "{}", String::from_utf8_lossy(saved.body()));
-        let saved: serde_json::Value = serde_json::from_slice(saved.body()).unwrap();
+        let saved: deser_value::Value = deser_json::from_slice(saved.body()).unwrap();
         assert_eq!(saved["restartRequired"], true);
         assert_eq!(saved["settings"]["vaults"][0]["name"], "Notes");
         assert!(app.setup_mode());
@@ -1900,7 +1909,7 @@ mod tests {
 
     #[test]
     fn response_security_headers_are_restrictive_and_api_no_store() {
-        let response = HttpResponse::json(200, &serde_json::json!({ "ok": true })).unwrap().with_no_store();
+        let response = HttpResponse::json(200, &deser_value::value!({ "ok": true })).unwrap().with_no_store();
         let response = response.into_hyper();
         assert_eq!(response.headers()[CACHE_CONTROL], "no-store");
         assert_eq!(response.headers()["X-Content-Type-Options"], "nosniff");
@@ -1912,7 +1921,7 @@ mod tests {
 
     #[test]
     fn all_v2_transport_responses_receive_version_and_build_headers() {
-        let mut response = HttpResponse::json(401, &serde_json::json!({ "error": "auth_required" }))
+        let mut response = HttpResponse::json(401, &deser_value::value!({ "error": "auth_required" }))
             .unwrap()
             .with_no_store()
             .into_hyper();
@@ -1931,7 +1940,7 @@ mod tests {
 
     #[test]
     fn hyper_response_preserves_both_auth_cookies() {
-        let response = HttpResponse::json(200, &serde_json::json!({ "ok": true }))
+        let response = HttpResponse::json(200, &deser_value::value!({ "ok": true }))
             .unwrap()
             .with_header("Set-Cookie", "__Host-tansu_session=session")
             .with_header("Set-Cookie", "__Host-tansu_csrf=csrf")
@@ -2066,7 +2075,7 @@ mod tests {
             "request-test",
         );
         assert_eq!(session_response.status(), 200);
-        let body: serde_json::Value = serde_json::from_slice(session_response.body()).unwrap();
+        let body: deser_value::Value = deser_json::from_slice(session_response.body()).unwrap();
         assert_eq!(body["authenticated"], true);
         assert!(body["expiresAt"].as_u64().is_some());
     }
@@ -2403,7 +2412,7 @@ mod tests {
     fn event(version: u64) -> EventEnvelope {
         EventEnvelope {
             event_version: version,
-            payload: serde_json::json!({
+            payload: deser_value::value!({
                 "eventVersion": version,
                 "resyncRequired": false,
                 "update": { "kind": "ready" },

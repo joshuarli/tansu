@@ -97,7 +97,7 @@ pub(crate) fn validate_v2_server_instance(
 fn dispatch_v2_api(app: &App, request: &HttpRequest) -> std::result::Result<HttpResponse, V2VaultError> {
     let path = request.path.split_once('?').map_or(request.path.as_str(), |(path, _)| path);
     if path == "/api/v2/health" {
-        return v2_json(200, &serde_json::json!({ "ok": true, "apiVersion": 2 }), "health");
+        return v2_json(200, &deser_value::value!({ "ok": true, "apiVersion": 2 }), "health");
     }
     if path == "/api/v2/bootstrap" {
         return v2_json(200, &app.v2_bootstrap(), "bootstrap");
@@ -206,14 +206,14 @@ fn map_v2_vault_lookup_error(error: Error, vault_id: &str) -> V2VaultError {
     }
 }
 
-fn v2_json<T: serde::Serialize>(status: u16, value: &T, operation: &str) -> std::result::Result<HttpResponse, V2VaultError> {
+fn v2_json<T: deser::Serialize>(status: u16, value: &T, operation: &str) -> std::result::Result<HttpResponse, V2VaultError> {
     HttpResponse::json(status, value).map_err(|error| {
         V2VaultError::Internal(Error::Internal(format!("could not serialize {operation}: {error}")))
     })
 }
 
-fn parse_v2_body<T: serde::de::DeserializeOwned>(body: &[u8]) -> std::result::Result<T, V2VaultError> {
-    serde_json::from_slice(body).map_err(|error| {
+fn parse_v2_body<T: deser::de::DeserializeOwned>(body: &[u8]) -> std::result::Result<T, V2VaultError> {
+    deser_json::from_slice(body).map_err(|error| {
         V2VaultError::Api(V2ApiErrorKind::BadRequest { message: error.to_string() })
     })
 }
@@ -340,7 +340,7 @@ mod tests {
 
         let bootstrap = handle_v2_api(&app, &v2_request("GET", "/api/v2/bootstrap", None, &[], &[]), "req-1");
         assert_eq!(bootstrap.status(), 200);
-        let bootstrap_body: crate::api_types::V2BootstrapResponse = serde_json::from_slice(bootstrap.body()).unwrap();
+        let bootstrap_body: crate::api_types::V2BootstrapResponse = deser_json::from_slice(bootstrap.body()).unwrap();
         assert_eq!(bootstrap_body.server_instance_id, server_id);
 
         let mismatch = handle_v2_api(
@@ -426,7 +426,7 @@ mod tests {
             "req-2",
         );
         assert_eq!(preview.status(), 200);
-        let preview: crate::api_types::V2NotePreview = serde_json::from_slice(preview.body()).unwrap();
+        let preview: crate::api_types::V2NotePreview = deser_json::from_slice(preview.body()).unwrap();
         assert_eq!(preview.preview, "# B body");
 
         let missing = handle_v2_api(
@@ -588,7 +588,7 @@ mod tests {
             content: content.to_string(),
             source_hash: tansu_note_core::source_hash(content),
         };
-        let body = serde_json::to_vec(&create).unwrap();
+        let body = crate::json_bytes(&create).unwrap();
         let path = format!("/api/v2/vaults/{vault_id}/notes");
         let created = handle_v2_api(
             &app,
@@ -613,13 +613,13 @@ mod tests {
         };
         let reuse = handle_v2_api(
             &app,
-            &v2_request("POST", &path, Some(&server_id), &serde_json::to_vec(&changed).unwrap(), &[]),
+            &v2_request("POST", &path, Some(&server_id), &crate::json_bytes(&changed).unwrap(), &[]),
             "req-reuse",
         );
         assert_eq!(reuse.status(), 409);
         assert!(String::from_utf8_lossy(reuse.body()).contains("mutation_id_reuse"));
 
-        let settings_body = serde_json::to_vec(&crate::api_types::V2SettingsRequest {
+        let settings_body = crate::json_bytes(&crate::api_types::V2SettingsRequest {
             mutation_id: "mutation-settings".to_string(),
             settings: crate::api_types::Settings::default(),
         }).unwrap();
@@ -662,7 +662,7 @@ mod tests {
         );
         assert_eq!(image_reuse.status(), 409);
         assert!(String::from_utf8_lossy(image_reuse.body()).contains("mutation_id_reuse"));
-        let uploaded: crate::api_types::V2ImageUploadResponse = serde_json::from_slice(image.body()).unwrap();
+        let uploaded: crate::api_types::V2ImageUploadResponse = deser_json::from_slice(image.body()).unwrap();
         let asset_path = format!("/api/v2/vaults/{vault_id}/assets?name={}", uploaded.name.replace('/', "%2F"));
         let asset = handle_v2_api(
             &app,
@@ -684,7 +684,7 @@ mod tests {
         let app = fixture.app();
         let server_id = app.server_instance_id().to_string();
         let vault_id = app.v2_bootstrap().vaults[0].vault_id.clone();
-        let bootstrap: V2BootstrapResponse = serde_json::from_slice(
+        let bootstrap: V2BootstrapResponse = deser_json::from_slice(
             handle_v2_api(&app, &v2_request("GET", "/api/v2/bootstrap", None, &[], &[]), "req")
                 .body(),
         )
@@ -693,7 +693,7 @@ mod tests {
         assert_eq!(bootstrap.vaults[0].vault_id, vault_id);
 
         let vault_path = format!("/api/v2/vaults/{vault_id}");
-        let vault: V2VaultBootstrapResponse = serde_json::from_slice(
+        let vault: V2VaultBootstrapResponse = deser_json::from_slice(
             handle_v2_api(
                 &app,
                 &v2_request("GET", &format!("{vault_path}/bootstrap"), Some(&server_id), &[], &[]),
@@ -705,7 +705,7 @@ mod tests {
         assert_eq!(vault.notes.len(), 1);
         let note_id = vault.notes[0].note_id.clone();
 
-        let note: V2NoteDocument = serde_json::from_slice(
+        let note: V2NoteDocument = deser_json::from_slice(
             handle_v2_api(
                 &app,
                 &v2_request("GET", &format!("{vault_path}/notes/{note_id}"), Some(&server_id), &[], &[]),
@@ -716,7 +716,7 @@ mod tests {
         .unwrap();
         assert_eq!(note.content, "# One\n\nalpha\n");
 
-        let revisions: Vec<V2RevisionMeta> = serde_json::from_slice(
+        let revisions: Vec<V2RevisionMeta> = deser_json::from_slice(
             handle_v2_api(
                 &app,
                 &v2_request(
@@ -731,7 +731,7 @@ mod tests {
             .body(),
         )
         .unwrap();
-        let revision: V2RevisionDocument = serde_json::from_slice(
+        let revision: V2RevisionDocument = deser_json::from_slice(
             handle_v2_api(
                 &app,
                 &v2_request(
@@ -760,18 +760,16 @@ mod tests {
                 "PUT",
                 &format!("{vault_path}/settings"),
                 Some(&server_id),
-                &serde_json::json!({
+                &crate::json_bytes(&deser_value::value!({
                     "mutationId": "settings-route",
-                    "settings": crate::api_types::Settings::default()
-                })
-                .to_string()
-                .into_bytes(),
+                    "settings": deser_value::to_value(&crate::api_types::Settings::default()).unwrap()
+                })).unwrap(),
                 &[],
             ),
             "req",
         );
         assert_eq!(saved_settings.status(), 200);
-        let search: V2SearchResponse = serde_json::from_slice(
+        let search: V2SearchResponse = deser_json::from_slice(
             handle_v2_api(
                 &app,
                 &v2_request(
@@ -808,21 +806,19 @@ mod tests {
         let original = vault.v2_open_note(&note_id).unwrap();
 
         let saved_content = "# One\n\nchanged\n";
-        let saved: V2MutationResponse = serde_json::from_slice(
+        let saved: V2MutationResponse = deser_json::from_slice(
             handle_v2_api(
                 &app,
                 &v2_request(
                     "PUT",
                     &note_path,
                     Some(&server_id),
-                    &serde_json::json!({
+                    &crate::json_bytes(&deser_value::value!({
                         "mutationId": "save-route",
-                        "precondition": v2_precondition(&original.meta),
+                        "precondition": deser_value::to_value(&v2_precondition(&original.meta)).unwrap(),
                         "content": saved_content,
                         "sourceHash": tansu_note_core::source_hash(saved_content)
-                    })
-                    .to_string()
-                    .into_bytes(),
+                    })).unwrap(),
                     &[],
                 ),
                 "req",
@@ -835,25 +831,23 @@ mod tests {
         };
 
         let delta_content = "# One\n\ndelta\n";
-        let delta: V2MutationResponse = serde_json::from_slice(
+        let delta: V2MutationResponse = deser_json::from_slice(
             handle_v2_api(
                 &app,
                 &v2_request(
                     "PATCH",
                     &note_path,
                     Some(&server_id),
-                    &serde_json::json!({
+                    &crate::json_bytes(&deser_value::value!({
                         "mutationId": "delta-route",
-                        "precondition": v2_precondition(&saved_meta),
+                        "precondition": deser_value::to_value(&v2_precondition(&saved_meta)).unwrap(),
                         "sourceHash": tansu_note_core::source_hash(delta_content),
                         "edits": [{
                             "start": {"line": 2, "character": 0},
                             "end": {"line": 2, "character": 7},
                             "text": "delta"
                         }]
-                    })
-                    .to_string()
-                    .into_bytes(),
+                    })).unwrap(),
                     &[],
                 ),
                 "req",
@@ -866,21 +860,19 @@ mod tests {
         };
 
         let stale_content = "# One\n\nstale\n";
-        let conflict: V2MutationResponse = serde_json::from_slice(
+        let conflict: V2MutationResponse = deser_json::from_slice(
             handle_v2_api(
                 &app,
                 &v2_request(
                     "PUT",
                     &note_path,
                     Some(&server_id),
-                    &serde_json::json!({
+                    &crate::json_bytes(&deser_value::value!({
                         "mutationId": "conflict-route",
-                        "precondition": v2_precondition(&original.meta),
+                        "precondition": deser_value::to_value(&v2_precondition(&original.meta)).unwrap(),
                         "content": stale_content,
                         "sourceHash": tansu_note_core::source_hash(stale_content)
-                    })
-                    .to_string()
-                    .into_bytes(),
+                    })).unwrap(),
                     &[],
                 ),
                 "req",
@@ -891,7 +883,7 @@ mod tests {
         let V2MutationOutcome::Conflict { current, draft } = conflict.outcome else {
             panic!("stale save did not return a recoverable conflict");
         };
-        let draft_document: V2ConflictDraftDocument = serde_json::from_slice(
+        let draft_document: V2ConflictDraftDocument = deser_json::from_slice(
             handle_v2_api(
                 &app,
                 &v2_request(
@@ -907,19 +899,17 @@ mod tests {
         )
         .unwrap();
         assert_eq!(draft_document.content, stale_content);
-        let conflict_restored: V2MutationResponse = serde_json::from_slice(
+        let conflict_restored: V2MutationResponse = deser_json::from_slice(
             handle_v2_api(
                 &app,
                 &v2_request(
                     "POST",
                     &format!("{note_path}/conflicts/{}/restore", draft.draft_id),
                     Some(&server_id),
-                    &serde_json::json!({
+                    &crate::json_bytes(&deser_value::value!({
                         "mutationId": "restore-conflict-route",
-                        "precondition": v2_precondition(&current.meta)
-                    })
-                    .to_string()
-                    .into_bytes(),
+                        "precondition": deser_value::to_value(&v2_precondition(&current.meta)).unwrap()
+                    })).unwrap(),
                     &[],
                 ),
                 "req",
@@ -932,7 +922,7 @@ mod tests {
             V2MutationOutcome::Accepted { .. }
         ));
 
-        let revisions: Vec<V2RevisionMeta> = serde_json::from_slice(
+        let revisions: Vec<V2RevisionMeta> = deser_json::from_slice(
             handle_v2_api(
                 &app,
                 &v2_request(
@@ -951,7 +941,7 @@ mod tests {
             .iter()
             .find(|revision| revision.source_hash.as_deref() == Some(&original.meta.source_hash))
             .unwrap();
-        let current_after_conflict: V2NoteDocument = serde_json::from_slice(
+        let current_after_conflict: V2NoteDocument = deser_json::from_slice(
             handle_v2_api(
                 &app,
                 &v2_request("GET", &note_path, Some(&server_id), &[], &[]),
@@ -960,19 +950,17 @@ mod tests {
             .body(),
         )
         .unwrap();
-        let restored: V2MutationResponse = serde_json::from_slice(
+        let restored: V2MutationResponse = deser_json::from_slice(
             handle_v2_api(
                 &app,
                 &v2_request(
                     "POST",
                     &format!("{vault_path}/notes/{note_id}/revisions/{}/restore", original_revision.revision),
                     Some(&server_id),
-                    &serde_json::json!({
+                    &crate::json_bytes(&deser_value::value!({
                         "mutationId": "restore-route",
-                        "precondition": v2_precondition(&current_after_conflict.meta)
-                    })
-                    .to_string()
-                    .into_bytes(),
+                        "precondition": deser_value::to_value(&v2_precondition(&current_after_conflict.meta)).unwrap()
+                    })).unwrap(),
                     &[],
                 ),
                 "req",
@@ -982,7 +970,7 @@ mod tests {
         .unwrap();
         assert!(matches!(restored.outcome, V2MutationOutcome::Accepted { .. }));
 
-        let current: V2NoteDocument = serde_json::from_slice(
+        let current: V2NoteDocument = deser_json::from_slice(
             handle_v2_api(
                 &app,
                 &v2_request("GET", &note_path, Some(&server_id), &[], &[]),
@@ -991,20 +979,18 @@ mod tests {
             .body(),
         )
         .unwrap();
-        let renamed: V2MutationResponse = serde_json::from_slice(
+        let renamed: V2MutationResponse = deser_json::from_slice(
             handle_v2_api(
                 &app,
                 &v2_request(
                     "POST",
                     &format!("{note_path}/rename"),
                     Some(&server_id),
-                    &serde_json::json!({
+                    &crate::json_bytes(&deser_value::value!({
                         "mutationId": "rename-route",
-                        "precondition": v2_precondition(&current.meta),
+                        "precondition": deser_value::to_value(&v2_precondition(&current.meta)).unwrap(),
                         "path": "nested/renamed.md"
-                    })
-                    .to_string()
-                    .into_bytes(),
+                    })).unwrap(),
                     &[],
                 ),
                 "req",
@@ -1023,12 +1009,10 @@ mod tests {
                 "DELETE",
                 &note_path,
                 Some(&server_id),
-                &serde_json::json!({
+                &crate::json_bytes(&deser_value::value!({
                     "mutationId": "delete-route",
-                    "precondition": v2_precondition(&renamed_meta)
-                })
-                .to_string()
-                .into_bytes(),
+                    "precondition": deser_value::to_value(&v2_precondition(&renamed_meta)).unwrap()
+                })).unwrap(),
                 &[],
             ),
             "req",
@@ -1037,11 +1021,11 @@ mod tests {
         assert!(!vault.root().join("nested/renamed.md").exists());
     }
 
-    fn v2_precondition(meta: &crate::api_types::V2NoteMeta) -> serde_json::Value {
-        serde_json::json!({
+    fn v2_precondition(meta: &crate::api_types::V2NoteMeta) -> deser_value::Value {
+        deser_value::value!({
             "baseRevision": meta.revision,
-            "baseSourceHash": meta.source_hash,
-            "baseDiskHash": meta.disk_hash
+            "baseSourceHash": &meta.source_hash,
+            "baseDiskHash": &meta.disk_hash
         })
     }
 
