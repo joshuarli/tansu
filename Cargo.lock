@@ -38,12 +38,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "atomic-waker"
-version = "1.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1505bd5d3d116872e7271a6d4e16d81d0c8570876c8de68093a09ac269d8aac0"
-
-[[package]]
 name = "autocfg"
 version = "1.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -443,19 +437,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "53c0fa8157de1303bfffdaa1cc2a673bfffb60102f76b0ef4441659124373fed"
 
 [[package]]
-name = "futures-lite"
-version = "2.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f78e10609fe0e0b3f4157ffab1876319b5b0db102a2c60dc4626306dc46b44ad"
-dependencies = [
- "fastrand",
- "futures-core",
- "futures-io",
- "parking",
- "pin-project-lite",
-]
-
-[[package]]
 name = "futures-macro"
 version = "0.3.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -849,19 +830,19 @@ dependencies = [
 
 [[package]]
 name = "laputa-h2-futures-lite"
-version = "0.4.20-beta.0"
+version = "0.4.20-beta.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2d26dcbb89718ab44652ef9cf634a7082c6700f4b060069de08cad304e7da0ef"
+checksum = "7ab2267e9473f8c2262683370b9f16fbab20cc8f914be08f0aa976c2c72989cd"
 dependencies = [
- "atomic-waker",
  "bytes",
  "fnv",
  "futures-core",
  "futures-io",
- "futures-lite",
  "futures-sink",
  "http",
  "indexmap",
+ "laputa-atomic-waker",
+ "laputa-futures-lite",
  "log",
  "pin-project-lite",
  "slab",
@@ -869,21 +850,21 @@ dependencies = [
 
 [[package]]
 name = "laputa-hyper-futures-lite"
-version = "1.12.0-beta.0"
+version = "1.12.0-beta.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cf2f825e7b83ea97d3c32efe96cd423c2dee61fd735224da9577cef59ad68bc7"
+checksum = "90f0c32d9d90f65367d225d7dc3ec5d2ccbdd33c00043402a5aa7718af771fb5"
 dependencies = [
- "atomic-waker",
  "bytes",
  "futures-channel",
  "futures-core",
  "futures-io",
- "futures-lite",
  "http",
  "http-body",
  "httparse",
  "httpdate",
  "itoa",
+ "laputa-atomic-waker",
+ "laputa-futures-lite",
  "laputa-h2-futures-lite",
  "pin-project-lite",
  "smallvec",
@@ -1146,12 +1127,6 @@ checksum = "2fbd56f7631767e61784dc43f8580f403f4475bd4aaa4da003e6295e1bab4a7e"
 dependencies = [
  "stable_deref_trait",
 ]
-
-[[package]]
-name = "parking"
-version = "2.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f38d5652c16fde515bb1ecef450ab0f6a219d619a7274976324d5e377f7dceba"
 
 [[package]]
 name = "pin-project-lite"
