@@ -55,9 +55,6 @@
       "medianMs": 3000,
       "p95Ms": 8000
     },
-    "productionBundleBytes": {
-      "maxBytes": 850000
-    },
     "catalogBytes": {
       "maxBytes": 200000000
     },

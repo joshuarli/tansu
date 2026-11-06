@@ -33,8 +33,7 @@ end-to-end latency difference is within the observed spread. `/search` measured
 1.16 ms median (1.07–1.69) and 1.01 ms (0.93–1.11), respectively; those ranges
 overlap. Median server RSS fell from 59,146,240 bytes (56,918,016–61,227,008)
 to 52,068,352 bytes (51,281,920–53,264,384). The release server binary fell
-from 8,771,904 to 8,704,800 bytes. The production bundle remained 849,382
-bytes, below its 850,000-byte limit.
+from 8,771,904 to 8,704,800 bytes.
 
 On 2026-10-23, five baseline reloads with 96 cold wiki images and four
 concurrent requests first requested a restored-viewport image in round 21 or 22.

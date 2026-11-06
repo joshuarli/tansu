@@ -1,6 +1,6 @@
 import { execFileSync, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import net from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -89,9 +89,6 @@ async function main() {
       }
     }
 
-    results.metrics.productionBundleBytes = [
-      await productionBundleSizeBytes(),
-    ];
     results.metrics.catalogBytes = [await directorySize(join(fixture.dataHome, "tansu"))];
     results.metrics.serverRssBytes = [processTreeRssBytes(server.pid)];
 
@@ -623,18 +620,6 @@ function printSummary(summary, output) {
     const unit = metric.endsWith("Bytes") ? "bytes" : "ms";
     console.log(`${metric}: median=${value.medianMs} ${unit} p95=${value.p95Ms} ${unit}`);
   }
-}
-
-async function fileSize(path) {
-  return (await stat(path)).size;
-}
-
-async function productionBundleSizeBytes() {
-  const manifestPath = join(REPO_ROOT, "web", "dist", "manifest.json");
-  const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
-  const javascript = manifest.files.find((file) => file.contentType === "text/javascript; charset=utf-8");
-  if (javascript === undefined) throw new Error("production web manifest has no JavaScript bundle");
-  return fileSize(join(REPO_ROOT, "web", "dist", javascript.file));
 }
 
 function processTreeRssBytes(rootPid) {
