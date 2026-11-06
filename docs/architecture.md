@@ -41,8 +41,41 @@ the next start rebuilds search from canonical content.
 The editor source uses LF line endings. Content writes maintain a compressed
 snapshot, catalog state, and visible Markdown file. Delta saves reconstruct the
 candidate from an exact base snapshot, verify the submitted final hash, and use
-the same recoverable write path. Startup repair uses catalog and history state
-to finish interrupted writes conservatively.
+the same recoverable write path.
+
+### Pending materialization
+
+A mutation commits its catalog row and snapshot before the visible file step.
+If that step fails, the mutation stays `pending_materialization` and the pending
+repair owns the note until it ends the mutation. Startup, watcher
+reconciliation, mutation replay, and every per-note read or write run the repair
+before anything else touches the note. A per-note request whose repair still
+fails with an I/O error returns `409 pending_materialization` and leaves the
+note unchanged.
+
+The repair resolves each kind against the visible bytes:
+
+| Kind | Visible state | Result |
+| --- | --- | --- |
+| any | accepted snapshot missing or corrupt | note unresolved |
+| save, save delta, restore | candidate, pre-image, or missing | candidate written; `accepted` |
+| save, save delta, restore | other valid UTF-8 | external edit recorded; candidate kept as a conflict draft; `conflict` |
+| save, save delta, restore | invalid UTF-8 | note unresolved |
+| create | candidate or missing | candidate written; `accepted` |
+| create | other bytes | note unresolved; reconciliation imports the file as a separate note |
+| rename | destination free or candidate | move finished; an externally edited source file stays; `accepted` |
+| rename | destination occupied and source intact, or source edited and destination free | catalog path reverted to the source |
+| rename | destination occupied and source not intact | note unresolved |
+| delete | expected bytes or missing | file removed; `accepted` |
+| delete | other bytes | file kept; `accepted`; reconciliation imports it as a new note |
+
+The conflict outcome commits the external-edit revision, the draft, the mutation
+state, and the vault event in one catalog transaction, and its draft is based on
+the content revision before the accepted save. The unresolved and
+reverted-rename outcomes delete the mutation record with the note change, so a
+replay runs as a new request and fails with `unresolved_note` or
+`path_collision`. A missing visible file is written from the snapshot, matching
+reconciliation's rule for files whose last event came from the user.
 
 Create, save, import, restore, delete, rename, and conflict recovery all keep
 history under `noteId`, not the current path.
