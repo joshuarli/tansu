@@ -107,9 +107,10 @@ export const slashMenuField = StateField.define<SlashState | null>({
     if (current !== null) {
       current = { ...current, from: transaction.changes.mapPos(current.from, -1) };
       const query = slashQuery(state, current);
-      if (query === null) current = null;
-      else if (filterSlashBlocks(query).length === 0) current = null;
+      const count = query === null ? 0 : filterSlashBlocks(query).length;
+      if (count === 0) current = null;
       else if (transaction.docChanged) current = { ...current, selected: 0 };
+      else current = { ...current, selected: Math.min(current.selected, count - 1) };
     }
     if (current === null && transaction.isUserEvent("input.type") && transaction.docChanged) {
       const head = state.selection.main.head;

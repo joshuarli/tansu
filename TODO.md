@@ -13,11 +13,3 @@ Next: 108
 - **Effort:** M
 - **Design:** [docs/rfc/TNS-085-pending-materialization.md](docs/rfc/TNS-085-pending-materialization.md)
 
-### TNS-106 · P4 · Slash menu selection goes out of range when a cursor move shrinks the list
-
-- **Area:** Types
-- **Where:** `web/ts/editor/slash-menu.ts:105-128`, `web/ts/editor/slash-menu.ts:222`
-- **Problem:** `selected` resets only on `docChanged`, and it is clamped only when a `moveSlash` effect applies. With text after the cursor (`/|head`), the user arrows down to item 3, and ArrowRight extends the query to `h` without changing the document. The list shrinks, `selected` stays 3, and no row is highlighted. `selectedBlock` then returns null, so Enter inserts a newline. Priority assumed.
-- **Recommendation:** Reset or clamp `selected` whenever the filtered list changes, not only on `docChanged`.
-- **Fix with:** none
-- **Effort:** S

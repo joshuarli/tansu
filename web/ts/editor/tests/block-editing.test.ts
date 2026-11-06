@@ -116,6 +116,20 @@ describe("slash menu", () => {
     expect(container.querySelector(".tansu-slash-menu.is-visible")).toBeNull();
   });
 
+  it("clamps the selection when a cursor move shrinks the filtered list", () => {
+    const { view, container, editor, session } = mounted("quote");
+    view.dispatch({ selection: { anchor: 0 } });
+    type(view, "/");
+    press(view, "ArrowDown");
+    press(view, "ArrowDown");
+    press(view, "ArrowDown");
+    view.dispatch({ selection: { anchor: 2 } });
+
+    expect(container.querySelector(".tansu-slash-row.is-selected")?.textContent).toBe("Quote");
+    press(view, "Enter");
+    expect(editor.getSessionSnapshot(session).source).toBe("> uote");
+  });
+
   it("opens after whitespace, inserting the block on a new line", () => {
     const { view, editor, session } = mounted("note ");
     view.dispatch({ selection: { anchor: 5 } });
