@@ -49,7 +49,7 @@ import type { OutlineHeading } from "./editor/source-navigation.js";
 const SESSION_SAVE_DELAY_MS = 250;
 const EDITOR_CAPTURE_DELAY_MS = 150;
 const MIN_SEARCH_QUERY_CHARS = 1;
-const COMMAND_SEARCH_DEBOUNCE_MS = 60;
+const SEARCH_DEBOUNCE_MS = 60;
 const COMMAND_SEARCH_LIMIT = 20;
 const ASSET_PREFETCH_CONCURRENCY = 4;
 const ASSET_CACHE_LIMIT = 64;
@@ -133,6 +133,8 @@ export class TansuApp {
   private noticeTimer: number | undefined;
   private disposeTask: Promise<void> | null = null;
   private searchOverlayRequestSeq = 0;
+  private searchOverlayTimer: number | undefined;
+  private searchOverlayAbort: AbortController | null = null;
   private revisionRequestToken = 0;
   private commandSearchSeq = 0;
   private commandSearchTimer: number | undefined;
@@ -174,7 +176,7 @@ export class TansuApp {
     this.transitioningVault = true;
     this.extensionImport?.cancel();
     this.state.imageUploads.clear();
-    this.searchOverlayRequestSeq += 1;
+    this.cancelOverlaySearch();
     this.cancelCommandSearch();
     this.eventSubscription?.close();
     this.eventSubscription = null;
@@ -438,6 +440,7 @@ export class TansuApp {
     this.cancelTagSuggestions();
     for (const timer of this.draftPromotionTimers.values()) window.clearTimeout(timer);
     this.draftPromotionTimers.clear();
+    this.cancelOverlaySearch();
     this.cancelCommandSearch();
     this.transitioningVault = false;
     ++this.bootGeneration;
@@ -1201,26 +1204,48 @@ export class TansuApp {
     }, SESSION_SAVE_DELAY_MS);
   }
 
-  private async updateSearchOverlay(): Promise<void> {
-    const request = ++this.searchOverlayRequestSeq;
+  private cancelOverlaySearch(): void {
+    this.searchOverlayRequestSeq += 1;
+    if (this.searchOverlayTimer !== undefined) window.clearTimeout(this.searchOverlayTimer);
+    this.searchOverlayTimer = undefined;
+    this.searchOverlayAbort?.abort();
+    this.searchOverlayAbort = null;
+  }
+
+  private scheduleOverlaySearch(): void {
+    this.cancelOverlaySearch();
+    if (this.disposed) return;
+    const request = this.searchOverlayRequestSeq;
     const query = this.state.searchOverlayQuery.trim();
-    const client = this.vaultClient;
-    const serverIdentity = this.identity;
-    if (query.length < MIN_SEARCH_QUERY_CHARS || client === null || serverIdentity === null) {
-      this.state.searchOverlayHits = null;
-      this.state.searchOverlayCoverage = null;
-      this.render();
-      return;
-    }
     this.state.searchOverlayHits = null;
     this.state.searchOverlayCoverage = null;
     this.render();
-    const response = await client.search({ query, mode: "default", limit: 50, overlays: this.searchOverlays() });
-    if (request !== this.searchOverlayRequestSeq || this.state.searchOverlayQuery.trim() !== query ||
-      !this.isCurrentVault(serverIdentity, client)) return;
-    this.state.searchOverlayHits = response.hits;
-    this.state.searchOverlayCoverage = response.overlayCoverage;
-    this.render();
+    if (query.length < MIN_SEARCH_QUERY_CHARS) return;
+    this.searchOverlayTimer = window.setTimeout(() => {
+      this.searchOverlayTimer = undefined;
+      this.runAsync(this.runOverlaySearch(request, query), "Search failed");
+    }, SEARCH_DEBOUNCE_MS);
+  }
+
+  private async runOverlaySearch(request: number, query: string): Promise<void> {
+    const client = this.vaultClient;
+    const serverIdentity = this.identity;
+    if (client === null || serverIdentity === null) return;
+    const abort = new AbortController();
+    this.searchOverlayAbort = abort;
+    try {
+      const response = await client.search({ query, mode: "default", limit: 50, overlays: this.searchOverlays() }, abort.signal);
+      if (request !== this.searchOverlayRequestSeq || this.state.activeOverlay !== "search" ||
+        !this.isCurrentVault(serverIdentity, client)) return;
+      this.state.searchOverlayHits = response.hits;
+      this.state.searchOverlayCoverage = response.overlayCoverage;
+      this.render();
+    } catch (error) {
+      if (abort.signal.aborted) return;
+      throw error;
+    } finally {
+      if (this.searchOverlayAbort === abort) this.searchOverlayAbort = null;
+    }
   }
 
   private cancelTagSuggestions(): void {
@@ -1325,7 +1350,7 @@ export class TansuApp {
     this.commandSearchTimer = window.setTimeout(() => {
       this.commandSearchTimer = undefined;
       this.runAsync(this.runCommandSearch(request, query), "Search failed");
-    }, COMMAND_SEARCH_DEBOUNCE_MS);
+    }, SEARCH_DEBOUNCE_MS);
   }
 
   private async runCommandSearch(request: number, query: string): Promise<void> {
@@ -1361,9 +1386,9 @@ export class TansuApp {
     this.render();
   }
 
-  private refreshSearchResults(): Promise<void> {
+  private refreshSearchResults(): void {
     if (this.state.activeOverlay === "command") this.scheduleCommandSearch();
-    return this.state.activeOverlay === "search" ? this.updateSearchOverlay() : Promise.resolve();
+    if (this.state.activeOverlay === "search") this.scheduleOverlaySearch();
   }
 
   private async openSearchHit(hit: V2SearchHit): Promise<void> {
@@ -1372,7 +1397,7 @@ export class TansuApp {
       const tab = this.state.tabs.find((candidate) => candidate.kind === "local-draft" && candidate.localDraftId === identity.localId);
       const source = tab === undefined ? null : loadedDraft(tab);
       if (tab === undefined || source === null || await canonicalSourceHash(source) !== identity.sourceHash) {
-        await this.refreshSearchResults();
+        this.refreshSearchResults();
         return;
       }
       await this.openLocalDraft(localDraftId(identity.localId));
@@ -1380,7 +1405,7 @@ export class TansuApp {
       const tab = tabById(this.state, identity.noteId);
       const source = tab === undefined ? null : loadedDraft(tab);
       if (tab === undefined || source === null || await canonicalSourceHash(source) !== identity.sourceHash) {
-        await this.refreshSearchResults();
+        this.refreshSearchResults();
         return;
       }
       await this.openNote(toNoteId(identity.noteId));
@@ -1394,7 +1419,7 @@ export class TansuApp {
         const document = await client.openNote(identity.noteId);
         if (!this.isCurrentVault(serverIdentity, client)) return;
         if (document.meta.sourceHash !== identity.sourceHash) {
-          await this.refreshSearchResults();
+          this.refreshSearchResults();
           return;
         }
         this.state.notes.set(document.meta.noteId, document.meta);
@@ -1404,7 +1429,7 @@ export class TansuApp {
     const active = activeTab(this.state);
     const source = active === undefined ? null : loadedDraft(active);
     if (source === null || await canonicalSourceHash(source) !== identity.sourceHash) {
-      await this.refreshSearchResults();
+      this.refreshSearchResults();
       return;
     }
     if (hit.sourceRange !== null) {
@@ -2014,6 +2039,7 @@ export class TansuApp {
         this.captureOverlayReturn();
         this.clearFindHighlights();
         this.state.activeOverlay = "search";
+        this.cancelOverlaySearch();
         this.state.searchOverlayQuery = "";
         this.state.searchOverlayHits = null;
         this.state.searchOverlayCoverage = null;
@@ -2022,7 +2048,7 @@ export class TansuApp {
       }
       case "search.overlayInput": {
         this.state.searchOverlayQuery = event.query;
-        this.runAsync(this.updateSearchOverlay(), "Search failed");
+        this.scheduleOverlaySearch();
         return;
       }
       case "search.overlaySubmit": {
@@ -2035,8 +2061,7 @@ export class TansuApp {
       }
       case "search.historySelect": {
         this.state.searchOverlayQuery = event.query;
-        this.runAsync(this.updateSearchOverlay(), "Search failed");
-        this.render();
+        this.scheduleOverlaySearch();
         return;
       }
       case "search.hitOpen": {

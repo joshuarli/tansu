@@ -644,8 +644,11 @@ describe("v2 desktop shell", () => {
     const input = root.querySelector<HTMLInputElement>(".search-panel input")!;
     input.value = "one";
     input.dispatchEvent(new Event("input", { bubbles: true }));
+    await settleSearchDebounce();
     await until(() => root.querySelector(".search-panel .search-result-row") !== null);
     root.querySelector<HTMLButtonElement>(".search-panel .search-result-row")?.click();
+    await flushAsync();
+    await settleSearchDebounce();
     await until(() => client.search.mock.calls.length === 2);
 
     expect(editorMock.instances[0]?.revealSelection).not.toHaveBeenCalled();
@@ -1251,6 +1254,7 @@ describe("v2 desktop shell", () => {
     const overlay = root.querySelector<HTMLInputElement>(".search-panel .command-input")!;
     overlay.value = "two";
     overlay.dispatchEvent(new Event("input", { bubbles: true }));
+    await settleSearchDebounce();
     await until(() => root.querySelector(".search-result-row") !== null);
     root.querySelector<HTMLButtonElement>(".search-result-row")!.click();
     await until(() => client.openNote.mock.calls.some(([id]) => id === two.noteId));
@@ -1280,9 +1284,10 @@ describe("v2 desktop shell", () => {
     const search = root.querySelector<HTMLInputElement>(".command-input")!;
     search.value = "alpha";
     search.dispatchEvent(new Event("input", { bubbles: true }));
+    await settleSearchDebounce();
     search.value = "beta";
     search.dispatchEvent(new Event("input", { bubbles: true }));
-    await flushAsync();
+    await settleSearchDebounce();
     expect(client.search.mock.calls[1]?.[0]).toMatchObject({ query: "beta", overlays: [expect.objectContaining({ kind: "saved", noteId: note.noteId, content: "# Edited\n" })] });
     latest.resolve(searchResponse([searchHit(other)]));
     await flushAsync();
@@ -1290,6 +1295,33 @@ describe("v2 desktop shell", () => {
     await flushAsync();
     expect(root.textContent).toContain("two.md");
     expect(root.textContent).not.toContain("one.md");
+  });
+
+  it("debounces note search and aborts a request that a newer query replaces", async () => {
+    useFakeTimers();
+    const client = configureVault([noteMeta("note-1", "one.md", "One")]);
+    const replaced = deferred<V2SearchResponse>();
+    client.search.mockReturnValueOnce(replaced.promise).mockResolvedValue(searchResponse([]));
+    const { app, root } = mountApp();
+    await app.boot();
+    await openSearch(root);
+    const input = root.querySelector<HTMLInputElement>(".search-panel .command-input")!;
+    for (const query of ["a", "al", "alp"]) {
+      input.value = query;
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+    await flushAsync();
+    expect(client.search).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(60);
+    expect(client.search.mock.calls.map(([request]) => request.query)).toStrictEqual(["alp"]);
+    input.value = "alpha";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    await vi.advanceTimersByTimeAsync(60);
+
+    expect(client.search.mock.calls.map(([request]) => request.query)).toStrictEqual(["alp", "alpha"]);
+    expect(client.search.mock.calls[0]![1]?.aborted).toBeTruthy();
+    await app.dispose();
   });
 
   it("shows skipped draft coverage in note search", async () => {
@@ -1303,7 +1335,7 @@ describe("v2 desktop shell", () => {
     const overlaySearch = root.querySelector<HTMLInputElement>(".search-panel input")!;
     overlaySearch.value = "alpha";
     overlaySearch.dispatchEvent(new Event("input", { bubbles: true }));
-    await flushAsync();
+    await settleSearchDebounce();
 
     expect(root.querySelector(".search-panel")?.textContent).toContain("Draft search skipped 2 drafts");
   });
@@ -1323,11 +1355,11 @@ describe("v2 desktop shell", () => {
     const overlay = root.querySelector<HTMLInputElement>(".search-panel .command-input")!;
     overlay.value = "o";
     overlay.dispatchEvent(new Event("input", { bubbles: true }));
-    await flushAsync();
+    await settleSearchDebounce();
     expect(client.search).toHaveBeenCalledTimes(1);
     overlay.value = "one";
     overlay.dispatchEvent(new Event("input", { bubbles: true }));
-    await flushAsync();
+    await settleSearchDebounce();
     expect(client.search).toHaveBeenCalledTimes(2);
     root.querySelector<HTMLButtonElement>(".search-result-row")?.click();
     await until(() => editorMock.instances[0]?.getSnapshot()?.source === "# Cached\n");
@@ -3368,6 +3400,12 @@ async function flushEditorCapture(): Promise<void> {
 }
 function useFakeTimers(): void { vi.useFakeTimers({ toNotFake: ["setImmediate", "clearImmediate"] }); }
 async function until(predicate: () => boolean | Promise<boolean>): Promise<void> { for (let index = 0; index < 80; index += 1) { if (await predicate()) return; await flushAsync(); } throw new Error(`Expected asynchronous work did not finish: ${document.body.textContent}`); }
+const SEARCH_DEBOUNCE_MS = 60;
+async function settleSearchDebounce(): Promise<void> {
+  if (vi.isFakeTimers()) await vi.advanceTimersByTimeAsync(SEARCH_DEBOUNCE_MS);
+  else await new Promise<void>((resolve) => setTimeout(resolve, SEARCH_DEBOUNCE_MS));
+  await flushAsync();
+}
 async function openSearch(root: HTMLElement): Promise<void> {
   window.dispatchEvent(new KeyboardEvent("keydown", { key: "/", ctrlKey: true, cancelable: true }));
   await until(() => root.querySelector(".search-panel") !== null);
