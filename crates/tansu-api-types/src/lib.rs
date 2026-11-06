@@ -839,3 +839,36 @@ mod settings_tests {
         assert!(error.message().contains("searchTagWeight"), "{error}");
     }
 }
+
+#[cfg(test)]
+mod wire_format_tests {
+    use super::*;
+
+    #[test]
+    fn default_settings_serialize_to_the_stored_json() {
+        let text = r#"{"excludedFolders":[],"searchTitleWeight":10.0,"searchHeadingWeight":5.0,"searchTagWeight":2.0,"searchContentWeight":1.0,"recencyBoost":0.0,"autosaveDelayMs":900,"undoStackMax":200,"imageWebpQuality":0.85}"#;
+        assert_eq!(serde_json::to_string(&Settings::default()).unwrap(), text);
+        let parsed: Settings = serde_json::from_str(text).unwrap();
+        assert_eq!(serde_json::to_string(&parsed).unwrap(), text);
+    }
+
+    #[test]
+    fn internally_tagged_variants_round_trip_through_their_wire_text() {
+        let overlay = r#"{"kind":"saved","noteId":"n","baseRevision":3,"baseSourceHash":"h","localRevision":2,"title":"t","path":"p.md","content":"c"}"#;
+        let parsed: V2SearchOverlay = serde_json::from_str(overlay).unwrap();
+        assert_eq!(serde_json::to_string(&parsed).unwrap(), overlay);
+
+        let coverage = r#"{"status":"partial","skippedNoteCount":4}"#;
+        let parsed: V2OverlayCoverage = serde_json::from_str(coverage).unwrap();
+        assert_eq!(serde_json::to_string(&parsed).unwrap(), coverage);
+        assert_eq!(serde_json::to_string(&V2OverlayCoverage::Complete).unwrap(), r#"{"status":"complete"}"#);
+    }
+
+    #[test]
+    fn unknown_fields_are_rejected_where_denied() {
+        assert!(serde_json::from_str::<TextPosition>(r#"{"line":1,"character":2,"extra":3}"#).is_err());
+        assert!(serde_json::from_str::<AppSettings>(r#"{"vaults":[],"auth":null,"extra":1}"#).is_err());
+        let settings: AppSettings = serde_json::from_str(r#"{"vaults":[],"auth":null}"#).unwrap();
+        assert_eq!(serde_json::to_string(&settings).unwrap(), r#"{"vaults":[],"auth":null}"#);
+    }
+}
