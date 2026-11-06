@@ -407,7 +407,7 @@ function renderMain(state: State, actions: ViewActions): HTMLElement {
   const historyPanel = renderHistoryPanel(state, actions);
   const main = el(
     "main",
-    ["main", reading ? "reading-mode" : "", state.focusMode ? "focus-mode" : "", state.findOpen ? "find-open" : ""]
+    ["main", reading ? "reading-mode" : "", state.focusMode ? "focus-mode" : "", state.activeOverlay === "find" ? "find-open" : ""]
       .filter(Boolean)
       .join(" "),
   );
@@ -460,7 +460,7 @@ function renderMain(state: State, actions: ViewActions): HTMLElement {
   create.setAttribute("aria-label", "New note");
   create.append(controlIcon(["M12 5v14", "M5 12h14"]));
   const topbar = el("div", "topbar", el("div", "tab-strip", tabs, create));
-  const findBar = state.findOpen ? renderFindBar(state, actions) : null;
+  const findBar = state.activeOverlay === "find" ? renderFindBar(state, actions) : null;
   const workspace = el("section", "workspace");
   if (active === undefined) {
     workspace.append(emptyState(), renderEditorMount(true));
@@ -632,8 +632,8 @@ function activeDraftStorageFailed(tab: Tab): boolean {
 
 function renderOverlays(state: State, actions: ViewActions): HTMLElement {
   const host = el("div", "overlay-host");
-  if (state.commandOpen) host.append(backdrop(actions), renderCommandPalette(state, actions));
-  if (state.searchOpen) {
+  if (state.activeOverlay === "command") host.append(backdrop(actions), renderCommandPalette(state, actions));
+  if (state.activeOverlay === "search") {
     const input = document.createElement("input");
     input.className = "command-input";
     input.dataset["key"] = "search-overlay";
@@ -712,10 +712,10 @@ function renderOverlays(state: State, actions: ViewActions): HTMLElement {
     host.append(backdrop(actions), panel);
     focusOnOpen(input);
   }
-  if (state.settingsOpen && state.boot !== null) {
+  if (state.activeOverlay === "settings" && state.boot !== null) {
     host.append(backdrop(actions), renderSettingsPanel(state.boot.settings, state.storagePersisted, actions));
   }
-  if (state.helpOpen) {
+  if (state.activeOverlay === "help") {
     const rows = KEYBOARD_SHORTCUTS.map((shortcut) =>
       el(
         "div",
@@ -881,7 +881,7 @@ function renderHistoryPanel(state: State, actions: ViewActions): HTMLElement | n
   if (state.conflictDraft !== null && active?.kind === "saved" && active.noteId === state.conflictDraft.draft.noteId) {
     return renderConflictPanel(state, actions);
   }
-  if (state.revisionsOpen && active?.kind === "saved" && state.revisionNoteId === active.noteId) {
+  if (state.activeOverlay === "revisions" && active?.kind === "saved" && state.revisionNoteId === active.noteId) {
     return renderRevisionsPanel(state, actions);
   }
   return null;

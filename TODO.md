@@ -13,15 +13,6 @@ Next: 108
 - **Effort:** M
 - **Design:** [docs/rfc/TNS-085-pending-materialization.md](docs/rfc/TNS-085-pending-materialization.md)
 
-### TNS-086 · P3 · Help and settings overlays open on top of other overlays
-
-- **Area:** Types
-- **Where:** `web/ts/state.ts:113-135`, `web/ts/view.ts:633-745`, `web/ts/app.ts:361`, `web/ts/app.ts:2337`
-- **Problem:** Overlay state is six independent booleans plus nullable `noteDialog` and `contextMenu`. `search.open`, `find.open`, and `command.open` clear each other, but the help shortcut (`app.ts:361`) and the settings command (`app.ts:2337`) set their flag without clearing any other. For example, with settings open, pressing the help shortcut leaves both flags true, and `renderOverlays` appends two panels with two backdrops. Priority assumed.
-- **Recommendation:** Replace the overlay flags with one `activeOverlay` union so that opening any overlay replaces the current one.
-- **Fix with:** make-invalid-states-unrepresentable
-- **Effort:** S
-
 ### TNS-098 · P3 · Block drag moves the wrong block if the document changes mid-drag
 
 - **Area:** Concurrency

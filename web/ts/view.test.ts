@@ -57,7 +57,7 @@ describe("view rendering", () => {
     state.notes.set(active.noteId, active.doc!.meta);
     state.pinned.add("n1");
     state.contextMenu = { noteId: toNoteId("n1"), x: 12, y: 24 };
-    state.searchOpen = true;
+    state.activeOverlay = "search";
     const actions = actionSpies();
     const root = render(state, actions);
 
@@ -135,7 +135,7 @@ describe("view rendering", () => {
     const tab = tabFromDocument({ meta: note("n1", "one.md", "One"), content: "# One\nbody\n" });
     state.tabs = [tab];
     state.activeTab = tabIdentity(tab);
-    state.findOpen = true;
+    state.activeOverlay = "find";
     state.findQuery = "body";
     const actions = actionSpies();
     actions.outline.mockReturnValue({
@@ -174,7 +174,7 @@ describe("view rendering", () => {
     state.tabs = [tab];
     state.activeTab = tabIdentity(tab);
     state.readingMode = true;
-    state.commandOpen = true;
+    state.activeOverlay = "command";
     state.commandFilter = "reading";
     const actions = actionSpies();
     actions.commandItems.mockReturnValue([{ id: "reading", label: "Reading mode" }]);
@@ -190,7 +190,7 @@ describe("view rendering", () => {
 
   it("shows the mode chip and clears the mode with backspace on empty text", () => {
     const state = baseState();
-    state.commandOpen = true;
+    state.activeOverlay = "command";
     state.commandFilter = ">";
     const actions = actionSpies();
     const root = render(state, actions);
@@ -205,7 +205,7 @@ describe("view rendering", () => {
 
   it("moves the selection with arrows and opens the selected row on enter", () => {
     const state = baseState();
-    state.commandOpen = true;
+    state.activeOverlay = "command";
     const actions = actionSpies();
     const root = render(state, actions);
     const input = root.querySelector<HTMLInputElement>(".command-input")!;
@@ -274,51 +274,56 @@ describe("view rendering", () => {
     const tab = tabFromDocument({ meta: noteData, content: "# One\n" });
     state.tabs = [tab];
     state.activeTab = tabIdentity(tab);
-    state.commandOpen = true;
     state.commandFilter = "open";
-    state.searchOpen = true;
-    state.searchOverlayQuery = "alpha";
-    state.searchOverlayHits = [searchHit(noteData, "hit alpha", [{ startUtf16: 4, endUtf16: 9 }])];
-    state.revisionsOpen = true;
-    state.revisionNoteId = toNoteId(noteData.noteId);
-    state.revisionList = [revision];
-    state.revisionSelectedEventId = toRevisionEventId(revision.revision);
-    state.revisionDocument = { revision, content: "# Old\n" };
-    state.settingsOpen = true;
-    state.noteDialog = { kind: "delete", noteId: toNoteId("n1") };
-    state.notice = "Saved";
+    state.activeOverlay = "command";
     const actions = actionSpies();
-    const root = render(state, actions);
+    let root = render(state, actions);
 
     root.querySelector<HTMLInputElement>(".command-input")!.value = "save";
     root.querySelector<HTMLInputElement>(".command-input")!.dispatchEvent(new Event("input"));
     root.querySelector<HTMLButtonElement>(".command-row")!.click();
-    root.querySelectorAll<HTMLInputElement>(".command-input")[1]!.value = "beta";
-    root.querySelectorAll<HTMLInputElement>(".command-input")[1]!.dispatchEvent(new Event("input"));
-    root.querySelector<HTMLButtonElement>(".search-result-row")!.click();
-    root.querySelector<HTMLButtonElement>(".revision-row")!.click();
-    root.querySelector<HTMLInputElement>(".revision-timeline-range")!.dispatchEvent(new Event("input", { bubbles: true }));
-    root.querySelector<HTMLButtonElement>('[title="Branch from selected revision"]')!.click();
-    root.querySelector<HTMLButtonElement>('[title="Restore selected revision"]')!.click();
-    root.querySelector<HTMLButtonElement>('[title="Save settings"]')!.click();
-    root.querySelector<HTMLButtonElement>(".note-dialog-panel .danger-button")!.click();
-    root.querySelector<HTMLButtonElement>(".overlay-backdrop")!.click();
-
-    expect(root.textContent).toContain("Revision preview");
-    expect(root.textContent).toContain("Settings");
-    expect(root.querySelector(".diff-added")?.textContent).toContain("# Old");
-    expect(root.querySelector(".diff-removed")?.textContent).toContain("# One");
-    expect(root.textContent).toContain("Saved");
     expect(actions.commandItems).toHaveBeenCalledWith();
+
+    state.activeOverlay = "search";
+    state.searchOverlayQuery = "alpha";
+    state.searchOverlayHits = [searchHit(noteData, "hit alpha", [{ startUtf16: 4, endUtf16: 9 }])];
+    root = render(state, actions);
+    root.querySelector<HTMLInputElement>(".command-input")!.value = "beta";
+    root.querySelector<HTMLInputElement>(".command-input")!.dispatchEvent(new Event("input"));
+    root.querySelector<HTMLButtonElement>(".search-result-row")!.click();
     expectDispatched(actions, { type: "search.overlayInput", query: "beta" });
-    expectDispatched(actions, { type: "overlay.close" });
     expect(actions.dispatch).toHaveBeenCalledWith(expect.objectContaining({
       type: "search.hitOpen",
       hit: expect.objectContaining({ excerpt: "hit alpha", identity: expect.objectContaining({ noteId: "n1" }) }),
     }));
+
+    state.activeOverlay = "revisions";
+    state.revisionNoteId = toNoteId(noteData.noteId);
+    state.revisionList = [revision];
+    state.revisionSelectedEventId = toRevisionEventId(revision.revision);
+    state.revisionDocument = { revision, content: "# Old\n" };
+    root = render(state, actions);
+    root.querySelector<HTMLButtonElement>(".revision-row")!.click();
+    root.querySelector<HTMLInputElement>(".revision-timeline-range")!.dispatchEvent(new Event("input", { bubbles: true }));
+    root.querySelector<HTMLButtonElement>('[title="Branch from selected revision"]')!.click();
+    root.querySelector<HTMLButtonElement>('[title="Restore selected revision"]')!.click();
+    expect(root.textContent).toContain("Revision preview");
+    expect(root.querySelector(".diff-added")?.textContent).toContain("# Old");
+    expect(root.querySelector(".diff-removed")?.textContent).toContain("# One");
     expectDispatched(actions, { type: "revisions.select", eventId: toRevisionEventId(7) });
     expectDispatched(actions, { type: "revisions.branch" });
     expectDispatched(actions, { type: "revisions.restore" });
+
+    state.activeOverlay = "settings";
+    state.noteDialog = { kind: "delete", noteId: toNoteId("n1") };
+    state.notice = "Saved";
+    root = render(state, actions);
+    root.querySelector<HTMLButtonElement>('[title="Save settings"]')!.click();
+    root.querySelector<HTMLButtonElement>(".note-dialog-panel .danger-button")!.click();
+    root.querySelector<HTMLButtonElement>(".overlay-backdrop")!.click();
+    expect(root.textContent).toContain("Settings");
+    expect(root.textContent).toContain("Saved");
+    expectDispatched(actions, { type: "overlay.close" });
     expectDispatched(actions, {
       type: "settings.submit",
       settings: {
@@ -330,7 +335,7 @@ describe("view rendering", () => {
     });
     expectDispatched(actions, { type: "dialog.submit" });
 
-    state.revisionsOpen = false;
+    state.activeOverlay = null;
     state.conflictDraft = conflictDocument("n1");
     tab.conflict = true;
     const conflictRoot = render(state, actions);
@@ -352,7 +357,7 @@ describe("view rendering", () => {
     const tab = tabFromDocument({ meta: noteData, content: "before\nkeep\nafter\n" });
     state.tabs = [tab];
     state.activeTab = tabIdentity(tab);
-    state.revisionsOpen = true;
+    state.activeOverlay = "revisions";
     state.revisionNoteId = toNoteId(noteData.noteId);
     state.revisionList = [newer, older];
     state.revisionSelectedEventId = toRevisionEventId(newer.revision);
@@ -387,7 +392,7 @@ describe("view rendering", () => {
     const tab = tabFromDocument({ meta: noteData, content: before });
     state.tabs = [tab];
     state.activeTab = tabIdentity(tab);
-    state.revisionsOpen = true;
+    state.activeOverlay = "revisions";
     state.revisionNoteId = toNoteId(noteData.noteId);
     state.revisionList = [revision];
     state.revisionSelectedEventId = toRevisionEventId(revision.revision);
@@ -403,7 +408,7 @@ describe("view rendering", () => {
 
   it("bounds the settings inputs with the shared limits", () => {
     const state = baseState();
-    state.settingsOpen = true;
+    state.activeOverlay = "settings";
     const root = render(state, actionSpies());
     const attributes = (title: string) => {
       const field = root.querySelector<HTMLInputElement>(`input[title="${title}"]`)!;
@@ -429,7 +434,7 @@ describe("view rendering", () => {
 
   it("shows an inline error and dispatches nothing for an invalid excluded folder", () => {
     const state = baseState();
-    state.settingsOpen = true;
+    state.activeOverlay = "settings";
     const actions = actionSpies();
     const root = render(state, actions);
     root.querySelector<HTMLInputElement>('input[title="Excluded folders"]')!.value = "ok, a/b";
@@ -446,7 +451,7 @@ describe("view rendering", () => {
 
   it("shows stored values outside the server range clamped", () => {
     const state = baseState();
-    state.settingsOpen = true;
+    state.activeOverlay = "settings";
     state.boot!.settings = { ...state.boot!.settings, autosaveDelayMs: 0, undoStackMax: 10_000_000 };
     const root = render(state, actionSpies());
 
@@ -459,7 +464,7 @@ describe("view rendering", () => {
   it("renders empty search and delete dialogs", () => {
     const state = baseState();
     state.notes.set("n1", note("n1", "one.md", "One"));
-    state.searchOpen = true;
+    state.activeOverlay = "search";
     state.searchOverlayQuery = "no matching note";
     state.noteDialog = { kind: "delete", noteId: toNoteId("n1") };
     const actions = actionSpies();
@@ -472,7 +477,7 @@ describe("view rendering", () => {
 
   it("renders search excerpts as text and preserves highlighted ranges", () => {
     const state = baseState();
-    state.searchOpen = true;
+    state.activeOverlay = "search";
     state.searchOverlayQuery = "quote";
     state.searchOverlayHits = [searchHit(note("n1", "one.md", "One"), '"quote" <tag>', [{ startUtf16: 1, endUtf16: 6 }])];
 
@@ -486,7 +491,7 @@ describe("view rendering", () => {
 
   it("keeps search snippets within the matched paragraph and removes a repeated heading", () => {
     const state = baseState();
-    state.searchOpen = true;
+    state.activeOverlay = "search";
     state.searchOverlayQuery = "Claude";
     const excerpt = "# Claude Search Notes\n\nSearch in Tansu should keep the surrounding text visible.\nA second Claude result makes the result list geometry stable.\nThis fixture covers source context.\n\nAnother paragraph.";
     const headingStart = excerpt.indexOf("Claude");

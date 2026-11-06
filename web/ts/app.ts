@@ -358,10 +358,10 @@ export class TansuApp {
         this.dispatch({ type: "command.open" });
       } else if (shortcut.action === "help.open") {
         event.preventDefault();
-        this.state.helpOpen = true;
+        this.state.activeOverlay = "help";
         this.render();
       } else if (shortcut.action === "search") {
-        if (!this.state.searchOpen) this.dispatch({ type: "search.open" });
+        if (this.state.activeOverlay !== "search") this.dispatch({ type: "search.open" });
       } else if (shortcut.action === "find") {
         this.dispatch({ type: "find.open" });
       } else {
@@ -1335,7 +1335,7 @@ export class TansuApp {
         { query, mode: "default", limit: COMMAND_SEARCH_LIMIT, overlays: this.searchOverlays() },
         abort.signal,
       );
-      if (request !== this.commandSearchSeq || !this.state.commandOpen ||
+      if (request !== this.commandSearchSeq || this.state.activeOverlay !== "command" ||
         !this.isCurrentVault(serverIdentity, client)) return;
       this.state.commandHits = response.hits;
       this.render();
@@ -1349,16 +1349,17 @@ export class TansuApp {
 
   private async openRecentNote(noteId: ReturnType<typeof toNoteId>): Promise<void> {
     await this.openNote(noteId);
-    this.state.commandOpen = false;
-    this.state.searchOpen = false;
+    if (this.state.activeOverlay === "command" || this.state.activeOverlay === "search") {
+      this.state.activeOverlay = null;
+    }
     this.overlayReturn = null;
     this.editor?.focus();
     this.render();
   }
 
   private refreshSearchResults(): Promise<void> {
-    if (this.state.commandOpen) this.scheduleCommandSearch();
-    return this.state.searchOpen ? this.updateSearchOverlay() : Promise.resolve();
+    if (this.state.activeOverlay === "command") this.scheduleCommandSearch();
+    return this.state.activeOverlay === "search" ? this.updateSearchOverlay() : Promise.resolve();
   }
 
   private async openSearchHit(hit: V2SearchHit): Promise<void> {
@@ -1405,9 +1406,10 @@ export class TansuApp {
     if (hit.sourceRange !== null) {
       this.editor?.revealSelection({ anchor: hit.sourceRange.startUtf16, head: hit.sourceRange.endUtf16 });
     }
-    this.state.searchOpen = false;
-    this.state.commandOpen = false;
-    this.state.findOpen = false;
+    if (this.state.activeOverlay === "search" || this.state.activeOverlay === "command" ||
+      this.state.activeOverlay === "find") {
+      this.state.activeOverlay = null;
+    }
     this.overlayReturn = null;
     this.editor?.focus();
     this.render();
@@ -1756,7 +1758,7 @@ export class TansuApp {
     const client = this.vaultClient;
     if (tab?.kind !== "saved" || identity === null || client === null) return;
     const requestToken = ++this.revisionRequestToken;
-    this.state.revisionsOpen = true;
+    this.state.activeOverlay = "revisions";
     this.state.conflictDraft = null;
     this.state.revisionNoteId = tab.noteId;
     this.state.revisionList = null;
@@ -1810,7 +1812,7 @@ export class TansuApp {
     selectedEventId?: RevisionEventId,
   ): boolean {
     return requestToken === this.revisionRequestToken && this.isCurrentVault(identity, client) &&
-      activeTab(this.state) === tab && this.state.revisionsOpen && this.state.revisionNoteId === tab.noteId &&
+      activeTab(this.state) === tab && this.state.activeOverlay === "revisions" && this.state.revisionNoteId === tab.noteId &&
       (selectedEventId === undefined || this.state.revisionSelectedEventId === selectedEventId);
   }
 
@@ -1823,7 +1825,7 @@ export class TansuApp {
       this.state.revisionSelectedEventId !== toRevisionEventId(selected.revision.revision)) return;
     const title = `${tab.title} branch`;
     this.revisionRequestToken += 1;
-    this.state.revisionsOpen = false;
+    if (this.state.activeOverlay === "revisions") this.state.activeOverlay = null;
     this.state.revisionNoteId = null;
     this.state.revisionList = null;
     this.state.revisionSelectedEventId = null;
@@ -1851,8 +1853,9 @@ export class TansuApp {
       });
       await this.handleMutation(response, { identity, client, tab, session }, status.draft.localRevision, selected.content);
     })());
-    if (this.isCurrentVault(identity, client) && activeTab(this.state) === tab && this.state.revisionNoteId === tab.noteId) {
-      this.state.revisionsOpen = false;
+    if (this.isCurrentVault(identity, client) && activeTab(this.state) === tab && this.state.revisionNoteId === tab.noteId &&
+      this.state.activeOverlay === "revisions") {
+      this.state.activeOverlay = null;
     }
   }
 
@@ -1865,7 +1868,7 @@ export class TansuApp {
     if (tab?.kind !== "saved" || status?.status !== "conflict" || status.conflictDraft === null ||
       identity === null || client === null) return;
     this.revisionRequestToken += 1;
-    this.state.revisionsOpen = false;
+    if (this.state.activeOverlay === "revisions") this.state.activeOverlay = null;
     this.state.revisionNoteId = null;
     this.state.revisionList = null;
     this.state.revisionSelectedEventId = null;
@@ -1973,7 +1976,7 @@ export class TansuApp {
     const next = applySettingsForm(current, form);
     const response = await this.vaultClient.saveSettings({ mutationId: mutationId(), settings: next });
     if (this.state.boot !== null) this.state.boot.settings = response.settings;
-    this.state.settingsOpen = false;
+    if (this.state.activeOverlay === "settings") this.state.activeOverlay = null;
     this.render();
   }
 
@@ -2006,9 +2009,7 @@ export class TansuApp {
       case "search.open": {
         this.captureOverlayReturn();
         this.clearFindHighlights();
-        this.state.searchOpen = true;
-        this.state.findOpen = false;
-        this.state.commandOpen = false;
+        this.state.activeOverlay = "search";
         this.state.searchOverlayQuery = "";
         this.state.searchOverlayHits = null;
         this.state.searchOverlayCoverage = null;
@@ -2044,10 +2045,8 @@ export class TansuApp {
       }
       case "find.open": {
         this.captureOverlayReturn();
-        this.state.findOpen = true;
+        this.state.activeOverlay = "find";
         this.state.findIndex = 0;
-        this.state.searchOpen = false;
-        this.state.commandOpen = false;
         this.setFindHighlights(this.editor?.find(this.state.findQuery) ?? [], 0);
         this.render();
         return;
@@ -2073,7 +2072,7 @@ export class TansuApp {
         return;
       }
       case "find.close": {
-        this.state.findOpen = false;
+        if (this.state.activeOverlay === "find") this.state.activeOverlay = null;
         this.clearFindHighlights();
         this.render();
         this.restoreOverlayReturn();
@@ -2114,9 +2113,7 @@ export class TansuApp {
       case "command.open": {
         this.captureOverlayReturn();
         this.clearFindHighlights();
-        this.state.commandOpen = true;
-        this.state.searchOpen = false;
-        this.state.findOpen = false;
+        this.state.activeOverlay = "command";
         this.state.commandFilter = "";
         this.state.commandHits = null;
         this.state.commandIndex = 0;
@@ -2275,7 +2272,7 @@ export class TansuApp {
   }
 
   private executeCommand(id: CommandId): void {
-    this.state.commandOpen = false;
+    if (this.state.activeOverlay === "command") this.state.activeOverlay = null;
     this.render();
     if (["save", "pin", "reopen", "reading", "focus", "source"].includes(id)) this.restoreOverlayReturn();
     switch (id) {
@@ -2334,7 +2331,7 @@ export class TansuApp {
         break;
       }
       case "settings": {
-        this.state.settingsOpen = true;
+        this.state.activeOverlay = "settings";
         this.render();
         break;
       }
@@ -2610,14 +2607,9 @@ export class TansuApp {
   private async closeOverlays(): Promise<void> {
     this.revisionRequestToken += 1;
     this.clearFindHighlights();
-    this.state.commandOpen = false;
-    this.state.searchOpen = false;
-    this.state.findOpen = false;
-    this.state.revisionsOpen = false;
+    this.state.activeOverlay = null;
     this.state.revisionSelectedEventId = null;
     this.state.revisionDocument = null;
-    this.state.settingsOpen = false;
-    this.state.helpOpen = false;
     this.state.conflictDraft = null;
     this.state.noteDialog = null;
     this.state.contextMenu = null;
@@ -2626,7 +2618,7 @@ export class TansuApp {
   }
 
   private hasOverlay(): boolean {
-    return this.state.commandOpen || this.state.searchOpen || this.state.findOpen || this.state.revisionsOpen || this.state.settingsOpen || this.state.helpOpen || this.state.conflictDraft !== null || this.state.noteDialog !== null || this.state.contextMenu !== null;
+    return this.state.activeOverlay !== null || this.state.conflictDraft !== null || this.state.noteDialog !== null || this.state.contextMenu !== null;
   }
 
   private captureOverlayReturn(): void {
@@ -2726,12 +2718,7 @@ export class TansuApp {
     this.state.authBusy = null;
     this.state.authError = null;
     this.state.boot = null;
-    this.state.searchOpen = false;
-    this.state.findOpen = false;
-    this.state.commandOpen = false;
-    this.state.revisionsOpen = false;
-    this.state.settingsOpen = false;
-    this.state.helpOpen = false;
+    this.state.activeOverlay = null;
     this.state.conflictDraft = null;
     this.state.noteDialog = null;
     this.state.contextMenu = null;

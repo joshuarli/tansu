@@ -427,6 +427,28 @@ describe("v2 desktop shell", () => {
     expect(root.textContent).not.toContain("Keyboard shortcuts");
   });
 
+  it("replaces an open overlay when another one opens", async () => {
+    configureVault([]);
+    const { app, root } = mountApp();
+    await app.boot();
+
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", cancelable: true }));
+    await flushAsync();
+    expect(root.textContent).toContain("Keyboard shortcuts");
+    expect(root.querySelectorAll(".overlay-backdrop")).toHaveLength(1);
+
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true, cancelable: true }));
+    await flushAsync();
+    expect(root.querySelector(".command-panel")).not.toBeNull();
+    expect(root.textContent).not.toContain("Keyboard shortcuts");
+    expect(root.querySelectorAll(".overlay-backdrop")).toHaveLength(1);
+
+    await runCommand(root, "settings");
+    expect(root.querySelector(".settings-panel")).not.toBeNull();
+    expect(root.querySelector(".command-panel")).toBeNull();
+    expect(root.querySelectorAll(".overlay-backdrop")).toHaveLength(1);
+  });
+
   it("cycles light, dark and paper themes and persists the choice", async () => {
     window.localStorage.removeItem("tansu.theme.v1");
     configureVault([]);

@@ -59,6 +59,8 @@ export type LocalDraftTab = TabFields & {
 
 export type Tab = SavedTab | LocalDraftTab;
 
+export type Overlay = "search" | "find" | "command" | "revisions" | "settings" | "help";
+
 export type NoteDialog =
   | { kind: "delete"; noteId: NoteId };
 
@@ -110,25 +112,20 @@ export type State = {
   tabs: Tab[];
   closedTabs: WorkspaceTab[];
   activeTab: TabIdentity | null;
-  searchOpen: boolean;
-  findOpen: boolean;
+  activeOverlay: Overlay | null;
   findQuery: string;
   findIndex: number;
   searchOverlayQuery: string;
   searchOverlayHits: V2SearchHit[] | null;
   searchOverlayCoverage: V2OverlayCoverage | null;
-  commandOpen: boolean;
   commandFilter: string;
   commandHits: V2SearchHit[] | null;
   commandIndex: number;
-  revisionsOpen: boolean;
   revisionNoteId: NoteId | null;
   revisionList: V2RevisionMeta[] | null;
   revisionSelectedEventId: RevisionEventId | null;
   revisionDocument: V2RevisionDocument | null;
   conflictDraft: V2ConflictDraftDocument | null;
-  settingsOpen: boolean;
-  helpOpen: boolean;
   storagePersisted: boolean | null;
   noteDialog: NoteDialog | null;
   contextMenu: ContextMenuState | null;
@@ -156,25 +153,20 @@ export function createState(vault: VaultId): State {
     tabs: [],
     closedTabs: [],
     activeTab: null,
-    searchOpen: false,
-    findOpen: false,
+    activeOverlay: null,
     findQuery: "",
     findIndex: 0,
     searchOverlayQuery: "",
     searchOverlayHits: null,
     searchOverlayCoverage: null,
-    commandOpen: false,
     commandFilter: "",
     commandHits: null,
     commandIndex: 0,
-    revisionsOpen: false,
     revisionNoteId: null,
     revisionList: null,
     revisionSelectedEventId: null,
     revisionDocument: null,
     conflictDraft: null,
-    settingsOpen: false,
-    helpOpen: false,
     storagePersisted: null,
     noteDialog: null,
     contextMenu: null,
