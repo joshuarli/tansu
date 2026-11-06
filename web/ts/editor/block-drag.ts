@@ -95,7 +95,8 @@ class BlockDragHandles {
   }
 
   update(update: ViewUpdate): void {
-    if (update.docChanged || update.state.facet(readOnlyFacet)) this.hideGrip();
+    if (update.docChanged) this.endDrag();
+    else if (update.state.facet(readOnlyFacet)) this.hideGrip();
     if (update.transactions.some((transaction) => transaction.effects.some((effect) => effect.is(settleBlock)))) {
       if (this.settleTimer !== null) window.clearTimeout(this.settleTimer);
       this.settleTimer = window.setTimeout(() => {

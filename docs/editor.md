@@ -52,7 +52,7 @@ selection toolbar and a `/` block menu for headings, lists, quotes, callouts,
 code blocks, tables, and dividers. Dividers use `***` so a divider at the start
 of a document cannot be read as an opening frontmatter delimiter. Moving a
 top-level block rewrites its full source span as one undoable edit; frontmatter
-cannot be moved.
+cannot be moved, and an edit during a drag cancels it.
 
 Inline preview caches decoration-relevant syntax nodes for the current parse
 tree. Selection changes reuse that list while recalculating active-line and link

@@ -1,5 +1,5 @@
 import { EditorView } from "@codemirror/view";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createCodeMirrorEditor } from "../codemirror-adapter.js";
 import { moveBlock } from "../block-drag.js";
 import { undo } from "@codemirror/commands";
@@ -70,6 +70,22 @@ describe("block reorder", () => {
     expect(moveBlock(view, 0, 1)).toBeFalsy();
     expect(moveBlock(view, 1, 0)).toBeTruthy();
     expect(editor.getSessionSnapshot(session).source).toBe("---\ntags: [a]\n---\n\ntwo\n\none\n");
+  });
+
+  it("cancels a drag when the document changes before the drop", () => {
+    const { view, container } = mounted("alpha\n\nbeta\n\ngamma\n");
+    vi.spyOn(view, "posAtCoords").mockReturnValue(0);
+    vi.spyOn(view, "coordsAtPos").mockReturnValue({ left: 0, right: 10, top: 0, bottom: 10 });
+    view.contentDOM.dispatchEvent(new MouseEvent("mousemove", { bubbles: true, clientX: 5, clientY: 5 }));
+    const grip = container.querySelector<HTMLElement>(".tansu-block-grip")!;
+    expect(grip.classList.contains("is-visible")).toBeTruthy();
+
+    grip.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, button: 0, pointerId: 1 }));
+    view.dispatch({ changes: { from: 0, insert: "x" } });
+    const changed = view.state.doc.toString();
+    grip.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, button: 0, pointerId: 1, clientY: 5 }));
+
+    expect(view.state.doc.toString()).toBe(changed);
   });
 
   it("refuses to reorder and shows no handle in a read-only session", () => {

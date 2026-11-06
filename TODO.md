@@ -13,15 +13,6 @@ Next: 108
 - **Effort:** M
 - **Design:** [docs/rfc/TNS-085-pending-materialization.md](docs/rfc/TNS-085-pending-materialization.md)
 
-### TNS-098 · P3 · Block drag moves the wrong block if the document changes mid-drag
-
-- **Area:** Concurrency
-- **Where:** `web/ts/editor/block-drag.ts:97-99`, `web/ts/editor/block-drag.ts:166`, `web/ts/editor/block-drag.ts:192-198`
-- **Problem:** `pointerdown` on the grip stores `dragging = { index, gap }`. On `docChanged`, `update` hides the grip but leaves `dragging` set. On `pointerup`, `moveBlock(view, drag.index, drag.gap)` reads the current blocks, so if typing or a remote reload changed the document during the drag, it moves whatever block now sits at the old index. Priority assumed.
-- **Recommendation:** End the drag in `update` when `docChanged`.
-- **Fix with:** none
-- **Effort:** S
-
 ### TNS-106 · P4 · Slash menu selection goes out of range when a cursor move shrinks the list
 
 - **Area:** Types
