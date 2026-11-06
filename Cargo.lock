@@ -850,7 +850,8 @@ dependencies = [
 [[package]]
 name = "laputa-h2-futures-lite"
 version = "0.4.20-beta.0"
-source = "git+https://github.com/joshuarli/h2-futures-lite?rev=32d106fca1249b731c4169dc8f9115f55abe995b#32d106fca1249b731c4169dc8f9115f55abe995b"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2d26dcbb89718ab44652ef9cf634a7082c6700f4b060069de08cad304e7da0ef"
 dependencies = [
  "atomic-waker",
  "bytes",
@@ -869,7 +870,8 @@ dependencies = [
 [[package]]
 name = "laputa-hyper-futures-lite"
 version = "1.12.0-beta.0"
-source = "git+https://github.com/joshuarli/hyper-futures-lite?rev=770427abdcafc516531dd275423ceee0c0b1fb2e#770427abdcafc516531dd275423ceee0c0b1fb2e"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cf2f825e7b83ea97d3c32efe96cd423c2dee61fd735224da9577cef59ad68bc7"
 dependencies = [
  "atomic-waker",
  "bytes",
