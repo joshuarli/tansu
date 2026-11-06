@@ -557,7 +557,11 @@ export class TansuApp {
       });
       if (materialization !== null) await materialization;
     } catch (error) {
-      if (!task.signal.aborted) throw error;
+      if (task.signal.aborted) return;
+      const state = session.state;
+      const stillMaterializing = error instanceof V2ApiError && error.kind?.code === "pending_materialization" &&
+        state.status === "saving" && state.phase === "pendingMaterialization";
+      if (!stillMaterializing) throw error;
     } finally {
       task.finish();
     }

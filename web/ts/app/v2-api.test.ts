@@ -246,6 +246,7 @@ describe("v2 API client", () => {
       { code: "asset_not_found", name: "z-images/missing.webp" },
       { code: "save_conflict", current, draft },
       { code: "unresolved_note", noteId: "note-1", reason: "missing_snapshot" },
+      { code: "pending_materialization", noteId: "note-1", operationId: "operation-1" },
       { code: "source_hash_mismatch", expected: sourceHash, received: hash("c") },
       { code: "disk_hash_mismatch", expected: diskHash, received: hash("c", "blake3-v2:") },
       { code: "request_too_large", limitBytes: 4096 },

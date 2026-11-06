@@ -92,7 +92,10 @@ bytes. Mutation records hash the request payload with BLAKE3.
 An accepted content change has a complete recoverable snapshot before its
 revision commits. `accepted` means both catalog and visible-file steps finished.
 `pendingMaterialization` identifies a durable accepted operation whose visible
-file step still needs completion; clients must show it as pending. `conflict`
+file step still needs completion; clients must show it as pending. Any later
+read or write of that note first retries the visible step. If it still fails,
+the request returns `409 pending_materialization` with the note and operation
+IDs, and the note is left unchanged. `conflict`
 preserves the submitted draft and canonical content. Before accepting a write,
 the server rechecks the visible file against `baseDiskHash`; an external change
 creates a conflict draft instead of being overwritten. These checks do not

@@ -723,6 +723,10 @@ pub enum V2ApiErrorKind {
         note_id: String,
         reason: UnresolvedReason,
     },
+    PendingMaterialization {
+        note_id: String,
+        operation_id: String,
+    },
     SourceHashMismatch {
         expected: String,
         received: String,

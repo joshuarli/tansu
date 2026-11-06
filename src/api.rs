@@ -50,6 +50,7 @@ fn v2_api_error_status(error: &V2ApiErrorKind) -> u16 {
         | V2ApiErrorKind::PathCollision { .. }
         | V2ApiErrorKind::SaveConflict { .. }
         | V2ApiErrorKind::UnresolvedNote { .. }
+        | V2ApiErrorKind::PendingMaterialization { .. }
         | V2ApiErrorKind::DiskHashMismatch { .. } => 409,
         V2ApiErrorKind::RequestTooLarge { .. } => 413,
         V2ApiErrorKind::AuthRequired => 401,

@@ -516,6 +516,11 @@ export function decodeV2ApiErrorResponse(value: unknown): V2ApiErrorResponse {
       decoded["reason"] = oneOf(field(error, "reason"), "reason", ["case_fold_collision", "invalid_utf8", "missing_snapshot", "corrupt_snapshot", "file_catalog_mismatch"]);
       break;
     }
+    case "pending_materialization": {
+      decoded["noteId"] = nonEmptyString(field(error, "noteId"), "noteId");
+      decoded["operationId"] = nonEmptyString(field(error, "operationId"), "operationId");
+      break;
+    }
     case "source_hash_mismatch": {
       decoded["expected"] = hash(field(error, "expected"), "expected", "source");
       decoded["received"] = hash(field(error, "received"), "received", "source");

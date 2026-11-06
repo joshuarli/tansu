@@ -3734,6 +3734,34 @@ describe("saved tab load completions", () => {
     expect(root.querySelector('.tab[title="First"]')).toBeNull();
   });
 
+  it("completes a resync while the open note's save is still materializing", async () => {
+    const client = configureVault([first], workspaceSeed([
+      { noteId: first.noteId, title: first.title, path: first.path, cursorOffset: null, sourceMode: false },
+    ], first.noteId));
+    client.openNote.mockResolvedValue(documentFor(first, "# First\n"));
+    client.saveNote.mockImplementation(async (_id, request) => ({
+      mutationId: request.mutationId,
+      outcome: { state: "pendingMaterialization", operationId: "operation-1" },
+    }));
+    const { app, root } = mountApp();
+    await app.boot();
+    editorMock.instances[0]!.simulateEdit("# First edited\n");
+    await flushEditorCapture();
+    await runCommand(root, "save");
+    await until(() => client.saveNote.mock.calls.length === 1);
+    await flushAsync();
+    const later = noteMeta(first.noteId, first.path, first.title, [], 2, HASH_B);
+    client.openNote.mockRejectedValue(
+      new V2ApiError("pending", 409, { code: "pending_materialization", noteId: first.noteId, operationId: "operation-1" }),
+    );
+
+    await client.eventHandlers!.onResync({ bootstrap: vaultBootstrap([later]), notes: [later], eventVersion: 2 });
+
+    expect(client.openNote).toHaveBeenCalledTimes(2);
+    expect(root.querySelector(".statusbar")?.textContent).toContain("Saving");
+    await app.dispose();
+  });
+
   it("cancels a watcher reconciliation when its tab closes", async () => {
     const client = configureVault([first], workspaceSeed([
       { noteId: first.noteId, title: first.title, path: first.path, cursorOffset: null, sourceMode: false },

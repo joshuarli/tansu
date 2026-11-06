@@ -262,8 +262,6 @@ fn v2_existing_result<T: DeserializeOwned>(
 
 fn v2_existing_mutation(
     vault: &VaultRuntime,
-    root: &Path,
-    state_root: &Path,
     catalog: &mut Catalog,
     mutation_id: &str,
     payload_hash: &str,
@@ -281,34 +279,11 @@ fn v2_existing_mutation(
         return Ok(None);
     }
     if record.state == "pending_materialization" {
-        let note_id = record.note_id.as_deref().ok_or_else(|| {
-            Error::Internal("pending mutation has no note ID".to_string())
-        })?;
-        let (version, update) = repair_pending_mutation(root, state_root, catalog, &record)?;
-        vault.broadcast_v2_event(version, update.clone())?;
-        if record.kind == "delete" {
-            let revision = catalog
-                .note_row_by_id(note_id)?
-                .ok_or_else(|| Error::Internal("pending delete note is unavailable".to_string()))?
-                .meta
-                .seq;
-            vault.enqueue_search_with_catalog(
-                catalog,
-                SearchJob::Remove(note_id.to_string(), revision),
-            );
-        } else {
-            let meta = catalog
-                .note_by_id(note_id)?
-                .ok_or_else(|| Error::Internal("pending mutation note is unavailable".to_string()))?;
-            let source_hash = record.source_hash.as_deref().ok_or_else(|| {
-                Error::Internal("pending mutation has no source hash".to_string())
-            })?;
-            let content = history::read_snapshot(state_root, note_id, source_hash)?;
-            vault.enqueue_search_with_catalog(catalog, SearchJob::Upsert(meta, content));
-        }
-        record = catalog
-            .mutation(mutation_id)?
-            .ok_or_else(|| Error::Internal(format!("repaired mutation {mutation_id} disappeared")))?;
+        vault.settle_pending_mutation(catalog, &record)?;
+        let Some(settled) = catalog.mutation(mutation_id)? else {
+            return Ok(None);
+        };
+        record = settled;
     }
     let response = record
         .result_json
@@ -466,16 +441,6 @@ fn v2_note_error(note_id: &str, error: Error) -> V2VaultError {
     }
 }
 
-fn v2_reconcile_note_before_write(
-    root: &Path,
-    state_root: &Path,
-    catalog: &mut Catalog,
-    note_id: &str,
-) -> V2Result<bool> {
-    reconcile_note_before_write(root, state_root, catalog, note_id)
-        .map_err(|error| v2_note_error(note_id, error))
-}
-
 fn v2_document(meta: &NoteMeta, disk_hash: &str, content: String) -> Result<V2NoteDocument> {
     Ok(V2NoteDocument {
         meta: v2_note_meta(meta, disk_hash)?,
@@ -502,18 +467,20 @@ fn repair_pending_mutation(
         .ok_or_else(|| Error::Internal("pending mutation has no note ID".to_string()))?;
     let candidate_bytes = match mutation.source_hash.as_deref() {
         Some(source_hash) => {
-            let bytes = history::read_snapshot_bytes(state_root, note_id, source_hash)?;
             let expected_disk_hash = mutation
                 .disk_hash
                 .as_deref()
                 .ok_or_else(|| Error::Internal("pending mutation has no disk hash".to_string()))?;
-            if tansu_note_core::disk_hash(&bytes) != expected_disk_hash {
-                return Err(Error::Internal(format!(
-                    "pending mutation {} snapshot disk hash mismatch",
-                    mutation.mutation_id
-                )));
+            match history::read_snapshot_bytes_for_reconciliation(state_root, note_id, source_hash) {
+                Ok(bytes) if tansu_note_core::disk_hash(&bytes) == expected_disk_hash => Some(bytes),
+                Ok(_) | Err(history::SnapshotReadError::Corrupt(_)) => {
+                    return abandon_pending_unresolved(catalog, mutation, note_id, UnresolvedReason::CorruptSnapshot);
+                }
+                Err(history::SnapshotReadError::Missing(_)) => {
+                    return abandon_pending_unresolved(catalog, mutation, note_id, UnresolvedReason::MissingSnapshot);
+                }
+                Err(history::SnapshotReadError::Other(error)) => return Err(error),
             }
-            Some(bytes)
         }
         None if mutation.kind == "delete" => None,
         None => {
@@ -523,63 +490,80 @@ fn repair_pending_mutation(
             )));
         }
     };
+    let candidate_disk_hash = mutation.disk_hash.as_deref();
     let mut disk_hash_update = None;
     match mutation.kind.as_str() {
         "create" => {
-            let path = mutation.path.as_deref().ok_or_else(|| {
-                Error::Internal("pending create has no destination path".to_string())
-            })?;
-            materialize_pending_file(
-                root,
-                path,
-                candidate_bytes.as_deref().unwrap(),
-                None,
-            )?;
-            disk_hash_update = mutation.disk_hash.as_deref();
+            let path = pending_field(mutation, mutation.path.as_deref(), "destination path")?;
+            let candidate = candidate_bytes.as_deref().expect("create has a candidate");
+            match read_optional_visible_bytes(root, path)? {
+                Some(bytes) if Some(tansu_note_core::disk_hash(&bytes).as_str()) == candidate_disk_hash => {
+                    sync_visible_note_parent(root, path)?;
+                }
+                Some(_) => {
+                    return abandon_pending_unresolved(catalog, mutation, note_id, UnresolvedReason::FileCatalogMismatch);
+                }
+                None => write_visible_note_bytes_new(root, path, candidate)?,
+            }
+            disk_hash_update = candidate_disk_hash;
         }
         "save" | "save_delta" | "restore_revision" | "restore_conflict" => {
-            let path = mutation.path.as_deref().ok_or_else(|| {
-                Error::Internal("pending content mutation has no path".to_string())
-            })?;
-            materialize_pending_file(
-                root,
-                path,
-                candidate_bytes.as_deref().unwrap(),
-                mutation.expected_disk_hash.as_deref(),
-            )?;
-            disk_hash_update = mutation.disk_hash.as_deref();
+            let path = pending_field(mutation, mutation.path.as_deref(), "path")?;
+            let candidate = candidate_bytes.as_deref().expect("content mutation has a candidate");
+            match read_optional_visible_bytes(root, path)? {
+                Some(bytes) => {
+                    let found = tansu_note_core::disk_hash(&bytes);
+                    if Some(found.as_str()) == candidate_disk_hash {
+                        sync_visible_note_parent(root, path)?;
+                    } else if mutation.expected_disk_hash.as_deref() == Some(found.as_str()) {
+                        write_visible_note_bytes_atomic(root, path, candidate)?;
+                    } else {
+                        return match SourceDocument::from_disk(&bytes) {
+                            Ok(document) => complete_pending_as_conflict(
+                                state_root, catalog, mutation, note_id, candidate, &bytes, document,
+                            ),
+                            Err(_) => abandon_pending_unresolved(catalog, mutation, note_id, UnresolvedReason::InvalidUtf8),
+                        };
+                    }
+                }
+                None => write_visible_note_bytes_new(root, path, candidate)?,
+            }
+            disk_hash_update = candidate_disk_hash;
         }
         "rename" => {
-            let path = mutation.path.as_deref().ok_or_else(|| {
-                Error::Internal("pending rename has no destination path".to_string())
-            })?;
-            let old_path = mutation.old_path.as_deref().ok_or_else(|| {
-                Error::Internal("pending rename has no source path".to_string())
-            })?;
-            move_pending_file(
-                root,
-                old_path,
-                path,
-                candidate_bytes.as_deref().unwrap(),
-                mutation.disk_hash.as_deref().ok_or_else(|| {
-                    Error::Internal("pending rename has no disk hash".to_string())
-                })?,
-            )?;
+            let path = pending_field(mutation, mutation.path.as_deref(), "destination path")?;
+            let old_path = pending_field(mutation, mutation.old_path.as_deref(), "source path")?;
+            let candidate = candidate_bytes.as_deref().expect("rename has a candidate");
+            let matches = |bytes: &Option<Vec<u8>>| {
+                bytes.as_deref().map(|bytes| Some(tansu_note_core::disk_hash(bytes).as_str()) == candidate_disk_hash)
+            };
+            let old_bytes = read_optional_visible_bytes(root, old_path)?;
+            let new_bytes = read_optional_visible_bytes(root, path)?;
+            match (matches(&old_bytes), matches(&new_bytes)) {
+                (Some(true), Some(false)) | (Some(false), None) => {
+                    return revert_pending_rename(catalog, mutation, note_id, old_path);
+                }
+                (_, Some(false)) => {
+                    return abandon_pending_unresolved(catalog, mutation, note_id, UnresolvedReason::FileCatalogMismatch);
+                }
+                (old, new) => {
+                    if new.is_none() {
+                        write_visible_note_bytes_new(root, path, candidate)?;
+                    }
+                    if old == Some(true) {
+                        remove_visible_note_file(root, old_path)?;
+                    }
+                    sync_visible_note_parent(root, path)?;
+                    sync_visible_note_parent(root, old_path)?;
+                }
+            }
         }
         "delete" => {
-            let path = mutation.old_path.as_deref().ok_or_else(|| {
-                Error::Internal("pending delete has no source path".to_string())
-            })?;
-            let expected = mutation.expected_disk_hash.as_deref().ok_or_else(|| {
-                Error::Internal("pending delete has no expected disk hash".to_string())
-            })?;
-            if let Some(bytes) = read_optional_visible_bytes(root, path)? {
-                if tansu_note_core::disk_hash(&bytes) != expected {
-                    return Err(Error::Internal(format!(
-                        "pending delete {} found unexpected file bytes",
-                        mutation.mutation_id
-                    )));
-                }
+            let path = pending_field(mutation, mutation.old_path.as_deref(), "source path")?;
+            let expected = pending_field(mutation, mutation.expected_disk_hash.as_deref(), "expected disk hash")?;
+            if read_optional_visible_bytes(root, path)?
+                .is_some_and(|bytes| tansu_note_core::disk_hash(&bytes) == expected)
+            {
                 remove_visible_note_file(root, path)?;
             }
             sync_visible_note_parent(root, path)?;
@@ -600,7 +584,7 @@ fn repair_pending_mutation(
             &mutation.mutation_id,
             Some(v2_note_meta(
                 &meta,
-                mutation.disk_hash.as_deref().ok_or_else(|| {
+                candidate_disk_hash.ok_or_else(|| {
                     Error::Internal("pending mutation has no disk hash".to_string())
                 })?,
             )?),
@@ -631,63 +615,131 @@ fn repair_pending_mutation(
     Ok((version, update))
 }
 
-fn materialize_pending_file(
-    root: &Path,
-    path: &str,
-    candidate_bytes: &[u8],
-    expected_before: Option<&str>,
-) -> Result<()> {
-    let expected = tansu_note_core::disk_hash(candidate_bytes);
-    match read_optional_visible_bytes(root, path)? {
-        Some(bytes) if tansu_note_core::disk_hash(&bytes) == expected => {
-            sync_visible_note_parent(root, path)
-        }
-        Some(bytes) => {
-            if expected_before.is_none_or(|hash| tansu_note_core::disk_hash(&bytes) != hash) {
-                return Err(Error::Internal(format!(
-                    "pending mutation found unexpected bytes at {path}"
-                )));
-            }
-            write_visible_note_bytes_atomic(root, path, candidate_bytes)
-        }
-        None => {
-            write_visible_note_bytes_new(root, path, candidate_bytes)
-        }
-    }
+fn pending_field<'a>(mutation: &MutationRecord, value: Option<&'a str>, name: &str) -> Result<&'a str> {
+    value.ok_or_else(|| {
+        Error::Internal(format!(
+            "pending {} {} has no {name}",
+            mutation.kind, mutation.mutation_id
+        ))
+    })
 }
 
-fn move_pending_file(
-    root: &Path,
+fn abandon_pending_unresolved(
+    catalog: &mut Catalog,
+    mutation: &MutationRecord,
+    note_id: &str,
+    reason: UnresolvedReason,
+) -> Result<(u64, V2ServerEventUpdate)> {
+    let update = V2ServerEventUpdate::NoteDeleted {
+        note_id: note_id.to_string(),
+    };
+    let version = catalog.abandon_pending_mutation_unresolved(
+        &mutation.mutation_id,
+        note_id,
+        reason,
+        &serde_json::to_string(&update)?,
+        EVENT_REPLAY_LIMIT,
+    )?;
+    Ok((version, update))
+}
+
+fn revert_pending_rename(
+    catalog: &mut Catalog,
+    mutation: &MutationRecord,
+    note_id: &str,
     old_path: &str,
-    new_path: &str,
-    candidate_bytes: &[u8],
-    expected_hash: &str,
-) -> Result<()> {
-    let old_bytes = read_optional_visible_bytes(root, old_path)?;
-    let new_bytes = read_optional_visible_bytes(root, new_path)?;
-    if let Some(bytes) = &new_bytes {
-        if tansu_note_core::disk_hash(bytes) != expected_hash {
-            return Err(Error::Internal(format!(
-                "pending rename found unexpected bytes at {new_path}"
-            )));
-        }
-    }
-    if let Some(bytes) = &old_bytes {
-        if tansu_note_core::disk_hash(bytes) != expected_hash {
-            return Err(Error::Internal(format!(
-                "pending rename found unexpected bytes at {old_path}"
-            )));
-        }
-    }
-    if new_bytes.is_none() {
-        write_visible_note_bytes_new(root, new_path, candidate_bytes)?;
-    }
-    if old_bytes.is_some() {
-        remove_visible_note_file(root, old_path)?;
-    }
-    sync_visible_note_parent(root, new_path)?;
-    sync_visible_note_parent(root, old_path)?;
-    Ok(())
+) -> Result<(u64, V2ServerEventUpdate)> {
+    let mut update = None;
+    let version = catalog.revert_pending_rename(
+        &mutation.mutation_id,
+        note_id,
+        old_path,
+        &path_key(old_path),
+        EVENT_REPLAY_LIMIT,
+        |row| {
+            let changed = V2ServerEventUpdate::NoteChanged {
+                note: v2_note_meta(&row.meta, &row.visible_hash)?,
+            };
+            let json = serde_json::to_string(&changed)?;
+            update = Some(changed);
+            Ok(json)
+        },
+    )?;
+    Ok((version, update.expect("revert recorded its event")))
+}
+
+fn complete_pending_as_conflict(
+    state_root: &Path,
+    catalog: &mut Catalog,
+    mutation: &MutationRecord,
+    note_id: &str,
+    candidate: &[u8],
+    visible: &[u8],
+    document: SourceDocument,
+) -> Result<(u64, V2ServerEventUpdate)> {
+    let row = catalog
+        .note_row_by_id(note_id)?
+        .ok_or_else(|| Error::Internal("pending save note is unavailable".to_string()))?;
+    let (base_seq, base_hash) = catalog
+        .content_revision_before(note_id, row.meta.seq)?
+        .ok_or_else(|| {
+            Error::Internal(format!("pending save {} has no base revision", mutation.mutation_id))
+        })?;
+    let visible_source_hash = tansu_note_core::source_hash(&document.source);
+    let visible_disk_hash = tansu_note_core::disk_hash(visible);
+    history::write_snapshot_bytes(state_root, note_id, &visible_source_hash, visible)?;
+    let draft_id = catalog.next_conflict_draft_id()?;
+    let draft_hash = history::write_conflict_draft(
+        state_root,
+        note_id,
+        draft_id,
+        &history::validate_and_canonicalize(candidate)?,
+    )?;
+    let parsed = parse_markdown(&row.meta.path, &document.source);
+    let mut update = None;
+    let version = catalog.complete_pending_conflict(
+        &mutation.mutation_id,
+        note_id,
+        crate::catalog::PendingExternalEdit {
+            title: &parsed.title,
+            tags: &parsed.tags,
+            content_hash: &visible_source_hash,
+            visible_hash: &visible_disk_hash,
+        },
+        crate::catalog::PendingConflictDraft {
+            draft_id,
+            base_seq,
+            base_hash: &base_hash,
+            content_hash: &draft_hash,
+        },
+        EVENT_REPLAY_LIMIT,
+        |meta, draft| {
+            let response = V2MutationResponse {
+                mutation_id: mutation.mutation_id.clone(),
+                outcome: V2MutationOutcome::Conflict {
+                    current: Box::new(v2_document(meta, &visible_disk_hash, document.source.clone())?),
+                    draft: crate::api_types::V2ConflictDraftMeta {
+                        draft_id: draft.draft_id,
+                        note_id: draft.note_id.clone(),
+                        base_revision: draft.base_seq,
+                        base_source_hash: draft.base_hash.clone(),
+                        source_hash: draft.content_hash.clone(),
+                        created_at_ms: draft.created_at_ms,
+                    },
+                },
+            };
+            let changed = V2ServerEventUpdate::NoteChanged {
+                note: v2_note_meta(meta, &visible_disk_hash)?,
+            };
+            let json = crate::catalog::PendingOutcomeJson {
+                result: serde_json::to_string(&response)?,
+                event: serde_json::to_string(&changed)?,
+            };
+            update = Some(changed);
+            Ok(json)
+        },
+    )?;
+    Ok((version, update.expect("conflict recorded its event")))
 }
 
 fn read_optional_visible_bytes(root: &Path, path: &str) -> Result<Option<Vec<u8>>> {
@@ -1427,7 +1479,7 @@ impl VaultRuntime {
         let _op = self.lock_op();
         let mut catalog = self.lock_catalog();
         v2_note_row(&catalog, note_id)?;
-        v2_reconcile_note_before_write(&self.root, &self.state_root, &mut catalog, note_id)?;
+        self.v2_reconcile_note_before_write(&mut catalog, note_id)?;
         let row = v2_live_note_row(&catalog, note_id)?;
         let content = read_visible_or_snapshot(&self.root, &row.meta)
             .map_err(|error| v2_note_error(note_id, error))?;
@@ -1525,7 +1577,7 @@ impl VaultRuntime {
             let _op = self.lock_op();
             let mut catalog = self.lock_catalog();
             if let Some(response) =
-                v2_existing_mutation(self, &self.root, &self.state_root, &mut catalog, &request.mutation_id, &payload_hash)?
+                v2_existing_mutation(self, &mut catalog, &request.mutation_id, &payload_hash)?
             {
                 return Ok(response);
             }
@@ -1561,7 +1613,7 @@ impl VaultRuntime {
             let _op = self.lock_op();
             let mut catalog = self.lock_catalog();
             if let Some(response) =
-                v2_existing_mutation(self, &self.root, &self.state_root, &mut catalog, &request.mutation_id, &payload_hash)?
+                v2_existing_mutation(self, &mut catalog, &request.mutation_id, &payload_hash)?
             {
                 return Ok(response);
             }
@@ -1600,14 +1652,14 @@ impl VaultRuntime {
     ) -> V2Result<V2MutationResponse> {
         let _op = self.lock_op();
         let mut catalog = self.lock_catalog();
-        if let Some(response) = v2_existing_mutation(self, &self.root, &self.state_root, &mut catalog, mutation_id, payload_hash)? {
+        if let Some(response) = v2_existing_mutation(self, &mut catalog, mutation_id, payload_hash)? {
             return Ok(response);
         }
-        v2_reconcile_note_before_write(&self.root, &self.state_root, &mut catalog, note_id)?;
+        self.v2_reconcile_note_before_write(&mut catalog, note_id)?;
         let mut row = v2_live_note_row(&catalog, note_id)?;
         let mut on_disk = v2_read_source_document(&self.root, note_id, &row.meta)?;
         if on_disk.disk_hash() != row.visible_hash {
-            v2_reconcile_note_before_write(&self.root, &self.state_root, &mut catalog, note_id)?;
+            self.v2_reconcile_note_before_write(&mut catalog, note_id)?;
             row = v2_live_note_row(&catalog, note_id)?;
             on_disk = v2_read_source_document(&self.root, note_id, &row.meta)?;
         }
@@ -1663,7 +1715,7 @@ impl VaultRuntime {
         let current_check = read_visible_bytes(&self.root, &current.path)?;
         if tansu_note_core::disk_hash(&current_check) != row.visible_hash {
             catalog.clear_prepared_mutation(mutation_id)?;
-            v2_reconcile_note_before_write(&self.root, &self.state_root, &mut catalog, note_id)?;
+            self.v2_reconcile_note_before_write(&mut catalog, note_id)?;
             let latest = catalog.note_row_by_id(note_id)?.ok_or_else(|| {
                 V2VaultError::Api(V2ApiErrorKind::NoteNotFound {
                     note_id: note_id.to_string(),
@@ -1754,7 +1806,7 @@ impl VaultRuntime {
         let _op = self.lock_op();
         let mut catalog = self.lock_catalog();
         if let Some(response) =
-            v2_existing_mutation(self, &self.root, &self.state_root, &mut catalog, &request.mutation_id, &payload_hash)?
+            v2_existing_mutation(self, &mut catalog, &request.mutation_id, &payload_hash)?
         {
             return Ok(response);
         }
@@ -1850,11 +1902,11 @@ impl VaultRuntime {
         let _op = self.lock_op();
         let mut catalog = self.lock_catalog();
         if let Some(response) =
-            v2_existing_mutation(self, &self.root, &self.state_root, &mut catalog, &request.mutation_id, &payload_hash)?
+            v2_existing_mutation(self, &mut catalog, &request.mutation_id, &payload_hash)?
         {
             return Ok(response);
         }
-        v2_reconcile_note_before_write(&self.root, &self.state_root, &mut catalog, note_id)?;
+        self.v2_reconcile_note_before_write(&mut catalog, note_id)?;
         let row = v2_live_note_row(&catalog, note_id)?;
         row.recorded()
             .check(&request.precondition)
@@ -1893,7 +1945,7 @@ impl VaultRuntime {
         }
         let source_bytes = read_visible_bytes(&self.root, &row.meta.path)?;
         if tansu_note_core::disk_hash(&source_bytes) != row.visible_hash {
-            v2_reconcile_note_before_write(&self.root, &self.state_root, &mut catalog, note_id)?;
+            self.v2_reconcile_note_before_write(&mut catalog, note_id)?;
             return Err(V2VaultError::Api(V2ApiErrorKind::DiskHashMismatch {
                 expected: catalog
                     .note_row_by_id(note_id)?
@@ -1935,7 +1987,7 @@ impl VaultRuntime {
         let current_check = read_visible_bytes(&self.root, &row.meta.path)?;
         if tansu_note_core::disk_hash(&current_check) != row.visible_hash {
             catalog.clear_prepared_mutation(&request.mutation_id)?;
-            v2_reconcile_note_before_write(&self.root, &self.state_root, &mut catalog, note_id)?;
+            self.v2_reconcile_note_before_write(&mut catalog, note_id)?;
             return Err(V2VaultError::Api(V2ApiErrorKind::DiskHashMismatch {
                 expected: catalog
                     .note_row_by_id(note_id)?
@@ -2001,11 +2053,11 @@ impl VaultRuntime {
         let _op = self.lock_op();
         let mut catalog = self.lock_catalog();
         if let Some(response) =
-            v2_existing_mutation(self, &self.root, &self.state_root, &mut catalog, &request.mutation_id, &payload_hash)?
+            v2_existing_mutation(self, &mut catalog, &request.mutation_id, &payload_hash)?
         {
             return Ok(response);
         }
-        v2_reconcile_note_before_write(&self.root, &self.state_root, &mut catalog, note_id)?;
+        self.v2_reconcile_note_before_write(&mut catalog, note_id)?;
         let row = v2_live_note_row(&catalog, note_id)?;
         row.recorded()
             .check(&request.precondition)
@@ -2038,7 +2090,7 @@ impl VaultRuntime {
         let check = read_visible_bytes(&self.root, &row.meta.path)?;
         if tansu_note_core::disk_hash(&check) != disk_hash {
             catalog.clear_prepared_mutation(&request.mutation_id)?;
-            v2_reconcile_note_before_write(&self.root, &self.state_root, &mut catalog, note_id)?;
+            self.v2_reconcile_note_before_write(&mut catalog, note_id)?;
             let current = catalog.note_row_by_id(note_id)?.ok_or_else(|| {
                 V2VaultError::Api(V2ApiErrorKind::NoteNotFound {
                     note_id: note_id.to_string(),
@@ -2079,6 +2131,62 @@ impl VaultRuntime {
         self.enqueue_search(SearchJob::Remove(note_id.to_string(), tombstone.seq));
         self.log_note_mutation("delete_v2", &row.meta, None);
         Ok(response)
+    }
+
+    fn v2_reconcile_note_before_write(&self, catalog: &mut Catalog, note_id: &str) -> V2Result<bool> {
+        for mutation in catalog.pending_mutations_for_note(note_id)? {
+            if let Err(error) = self.settle_pending_mutation(catalog, &mutation) {
+                return Err(match error {
+                    Error::Io(error) => {
+                        if self.logs.enabled() {
+                            self.logs.server_event(
+                                LogLevel::Warn,
+                                "note.pending_materialization",
+                                None,
+                                fields([
+                                    ("mutationId", serde_json::json!(mutation.mutation_id)),
+                                    ("error", serde_json::json!(error.to_string())),
+                                    ("vault", serde_json::json!(self.index)),
+                                ]),
+                            );
+                        }
+                        V2VaultError::Api(V2ApiErrorKind::PendingMaterialization {
+                            note_id: note_id.to_string(),
+                            operation_id: mutation.mutation_id,
+                        })
+                    }
+                    error => V2VaultError::Internal(error),
+                });
+            }
+        }
+        reconcile_note_before_write(&self.root, &self.state_root, catalog, note_id)
+            .map_err(|error| v2_note_error(note_id, error))
+    }
+
+    fn settle_pending_mutation(&self, catalog: &mut Catalog, mutation: &MutationRecord) -> Result<()> {
+        let (version, update) = repair_pending_mutation(&self.root, &self.state_root, catalog, mutation)?;
+        self.broadcast_v2_event(version, update.clone())?;
+        match update {
+            V2ServerEventUpdate::NoteDeleted { note_id } => {
+                let revision = catalog
+                    .note_row_by_id(&note_id)?
+                    .ok_or_else(|| Error::Internal("settled note is unavailable".to_string()))?
+                    .meta
+                    .seq;
+                self.enqueue_search_with_catalog(catalog, SearchJob::Remove(note_id, revision));
+            }
+            V2ServerEventUpdate::NoteChanged { note } => {
+                let meta = catalog
+                    .note_by_id(&note.note_id)?
+                    .ok_or_else(|| Error::Internal("settled note is unavailable".to_string()))?;
+                let content = history::read_snapshot(&self.state_root, &meta.note_id, &meta.content_hash)?;
+                self.enqueue_search_with_catalog(catalog, SearchJob::Upsert(meta, content));
+            }
+            update => {
+                return Err(Error::Internal(format!("pending repair published {update:?}")));
+            }
+        }
+        Ok(())
     }
 
     fn v2_record_conflict(
@@ -2574,6 +2682,9 @@ impl VaultRuntime {
 
     fn reconcile_with_op_lock_held(&self) -> Result<()> {
         let mut catalog = self.lock_catalog();
+        for mutation in catalog.pending_mutations()? {
+            self.settle_pending_mutation(&mut catalog, &mutation)?;
+        }
         let pending_resync = catalog.watcher_reconcile_pending()?;
         catalog.mark_watcher_reconcile_pending()?;
         let before = catalog
@@ -3613,76 +3724,6 @@ mod tests {
     }
 
     #[test]
-    fn startup_pending_repair_preserves_unexpected_external_bytes() {
-        let dir = tempfile::tempdir().unwrap().keep();
-        let state_path = dir.join("state");
-        let visible = dir.join("A.md");
-        fs::write(&visible, "# A\nold\n").unwrap();
-        let config = ResolvedVault {
-            name: "Test".to_string(),
-            path: dir.clone(),
-            vault_id: "test-vault".to_string(),
-            state_path: state_path.clone(),
-
-        };
-        let vault = VaultRuntime::open(
-            0,
-            &config,
-            LogHub::new(crate::logging::LogMode::Off),
-        )
-        .unwrap();
-        let row = vault.lock_catalog().all_rows().unwrap().remove(0);
-        let candidate = "# A\naccepted before crash\n";
-        let source_hash = tansu_note_core::source_hash(candidate);
-        let disk_bytes = candidate.as_bytes();
-        let disk_hash = tansu_note_core::disk_hash(disk_bytes);
-        history::write_snapshot_bytes(&state_path, &row.meta.note_id, &source_hash, disk_bytes)
-            .unwrap();
-        let pending = v2_pending_response("pending-save");
-        {
-            let mut catalog = vault.lock_catalog();
-            catalog
-                .prepare_mutation(MutationIntent {
-                    mutation_id: "pending-save",
-                    payload_hash: "payload",
-                    kind: "save",
-                    note_id: Some(&row.meta.note_id),
-                    path: Some(&row.meta.path),
-                    old_path: None,
-                    expected_disk_hash: Some(&row.visible_hash),
-                    source_hash: Some(&source_hash),
-                    disk_hash: Some(&disk_hash),
-                })
-                .unwrap();
-            let parsed = parse_markdown(&row.meta.path, candidate);
-            catalog
-                .accept_note_content_mutation(
-                    "pending-save",
-                    &row.meta.note_id,
-                    &parsed.title,
-                    &parsed.tags,
-                    &source_hash,
-                    &row.visible_hash,
-                    NoteEventKind::Save,
-                    NoteEventSource::User,
-                    &serde_json::to_string(&pending).unwrap(),
-                )
-                .unwrap();
-        }
-        let external = b"# A\nexternal after acceptance\n";
-        fs::write(&visible, external).unwrap();
-        drop(vault);
-
-        assert!(VaultRuntime::open(
-            0,
-            &config,
-            LogHub::new(crate::logging::LogMode::Off),
-        )
-        .is_err());
-        assert_eq!(fs::read(&visible).unwrap(), external);
-    }
-
-    #[test]
     fn v2_save_restart_recovers_at_each_durable_boundary() {
         use crate::failure_point::{self, FailurePoint};
 
@@ -3937,6 +3978,277 @@ mod tests {
         }
     }
 
+    fn reopenable_vault(files: &[(&str, &[u8])]) -> (ResolvedVault, VaultRuntime) {
+        let dir = tempfile::tempdir().unwrap().keep();
+        for (path, bytes) in files {
+            fs::write(dir.join(path), bytes).unwrap();
+        }
+        let config = ResolvedVault {
+            name: "Test".to_string(),
+            path: dir.clone(),
+            vault_id: "test-vault".to_string(),
+            state_path: dir.join("state"),
+        };
+        let vault = reopen(&config);
+        (config, vault)
+    }
+
+    fn reopen(config: &ResolvedVault) -> VaultRuntime {
+        VaultRuntime::open(0, config, LogHub::new(crate::logging::LogMode::Off)).unwrap()
+    }
+
+    fn precondition_of(document: &V2NoteDocument) -> V2NotePrecondition {
+        V2NotePrecondition {
+            base_revision: document.meta.revision,
+            base_source_hash: document.meta.source_hash.clone(),
+            base_disk_hash: document.meta.disk_hash.clone(),
+        }
+    }
+
+    fn pending_save(vault: &VaultRuntime, note_id: &str, mutation_id: &str, content: &str) -> V2SaveNoteRequest {
+        use crate::failure_point::{self, FailurePoint};
+        let base = vault.v2_open_note(note_id).unwrap();
+        let request = V2SaveNoteRequest {
+            mutation_id: mutation_id.to_string(),
+            precondition: precondition_of(&base),
+            content: content.to_string(),
+            source_hash: tansu_note_core::source_hash(content),
+        };
+        failure_point::inject(FailurePoint::VisibleFileStorageFull);
+        let response = vault.v2_save_note(note_id, request.clone()).unwrap();
+        assert!(matches!(response.outcome, V2MutationOutcome::PendingMaterialization { .. }));
+        request
+    }
+
+    fn mutation_state(vault: &VaultRuntime, mutation_id: &str) -> Option<String> {
+        vault.lock_catalog().mutation(mutation_id).unwrap().map(|record| record.state)
+    }
+
+    #[test]
+    fn opening_a_note_during_a_pending_save_completes_the_save() {
+        let (_, vault) = reopenable_vault(&[("A.md", b"# A\nold\n")]);
+        let note_id = vault.v2_notes().unwrap().remove(0).note_id;
+        let request = pending_save(&vault, &note_id, "save-pending", "# A\nnew\n");
+
+        let opened = vault.v2_open_note(&note_id).unwrap();
+
+        assert_eq!(opened.content, "# A\nnew\n");
+        assert_eq!(opened.meta.disk_hash, tansu_note_core::disk_hash(b"# A\nnew\n"));
+        assert_eq!(fs::read(vault.root.join("A.md")).unwrap(), b"# A\nnew\n");
+        assert_eq!(mutation_state(&vault, "save-pending").as_deref(), Some("accepted"));
+        assert!(vault.v2_notes().unwrap().iter().any(|note| note.note_id == note_id));
+        let replay = vault.v2_save_note(&note_id, request).unwrap();
+        assert!(matches!(replay.outcome, V2MutationOutcome::Accepted { result: Some(_) }));
+    }
+
+    #[test]
+    fn opening_a_note_during_a_pending_create_completes_the_create() {
+        use crate::failure_point::{self, FailurePoint};
+        let (_, vault) = reopenable_vault(&[]);
+        failure_point::inject(FailurePoint::VisibleFileStorageFull);
+        let created = vault
+            .v2_create_note(V2CreateNoteRequest {
+                mutation_id: "create-pending".to_string(),
+                path: "A.md".to_string(),
+                content: "# A\n".to_string(),
+                source_hash: tansu_note_core::source_hash("# A\n"),
+            })
+            .unwrap();
+        assert!(matches!(created.outcome, V2MutationOutcome::PendingMaterialization { .. }));
+        let note_id = vault.v2_notes().unwrap().remove(0).note_id;
+
+        let opened = vault.v2_open_note(&note_id).unwrap();
+
+        assert_eq!(opened.content, "# A\n");
+        assert_eq!(fs::read(vault.root.join("A.md")).unwrap(), b"# A\n");
+        assert_eq!(mutation_state(&vault, "create-pending").as_deref(), Some("accepted"));
+    }
+
+    #[test]
+    fn opening_a_note_whose_pending_write_still_fails_reports_pending_without_changing_it() {
+        use crate::failure_point::{self, FailurePoint};
+        let (_, vault) = reopenable_vault(&[("A.md", b"# A\nold\n")]);
+        let note_id = vault.v2_notes().unwrap().remove(0).note_id;
+        pending_save(&vault, &note_id, "save-pending", "# A\nnew\n");
+
+        failure_point::inject(FailurePoint::VisibleFileStorageFull);
+        let blocked = vault.v2_open_note(&note_id);
+
+        assert!(matches!(
+            blocked,
+            Err(V2VaultError::Api(V2ApiErrorKind::PendingMaterialization { note_id: ref id, ref operation_id }))
+                if *id == note_id && operation_id == "save-pending"
+        ));
+        assert_eq!(mutation_state(&vault, "save-pending").as_deref(), Some("pending_materialization"));
+        assert!(vault.v2_notes().unwrap().iter().any(|note| note.note_id == note_id));
+        assert_eq!(vault.v2_open_note(&note_id).unwrap().content, "# A\nnew\n");
+    }
+
+    #[test]
+    fn watcher_reconcile_completes_a_pending_save_and_publishes_it() {
+        let (_, vault) = reopenable_vault(&[("A.md", b"# A\nold\n")]);
+        let note_id = vault.v2_notes().unwrap().remove(0).note_id;
+        pending_save(&vault, &note_id, "save-pending", "# A\nnew\n");
+        let baseline = vault.lock_catalog().latest_vault_event_version().unwrap();
+        let subscription = vault.subscribe_v2_events(Some(baseline)).unwrap();
+
+        vault.reconcile_from_watcher().unwrap();
+
+        assert_eq!(mutation_state(&vault, "save-pending").as_deref(), Some("accepted"));
+        let event = subscription.events.recv_timeout(Duration::from_millis(100)).unwrap();
+        assert_eq!(event.payload["update"]["kind"], "noteChanged");
+        assert_eq!(
+            event.payload["update"]["note"]["sourceHash"],
+            tansu_note_core::source_hash("# A\nnew\n")
+        );
+    }
+
+    #[test]
+    fn startup_turns_an_external_edit_over_a_pending_save_into_a_conflict_draft() {
+        let (config, vault) = reopenable_vault(&[("A.md", b"# A\nold\n")]);
+        let note_id = vault.v2_notes().unwrap().remove(0).note_id;
+        let base_revision = vault.v2_open_note(&note_id).unwrap().meta.revision;
+        let request = pending_save(&vault, &note_id, "save-pending", "# A\naccepted\n");
+        drop(vault);
+        let external = b"# A\nexternal\n";
+        fs::write(config.path.join("A.md"), external).unwrap();
+
+        let vault = reopen(&config);
+
+        assert_eq!(fs::read(config.path.join("A.md")).unwrap(), external);
+        let notes = vault.v2_notes().unwrap();
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0].note_id, note_id);
+        assert_eq!(vault.v2_open_note(&note_id).unwrap().content, "# A\nexternal\n");
+        assert_eq!(mutation_state(&vault, "save-pending").as_deref(), Some("conflict"));
+        let replay = vault.v2_save_note(&note_id, request).unwrap();
+        let V2MutationOutcome::Conflict { current, draft } = replay.outcome else {
+            panic!("expected the replayed save to report its conflict");
+        };
+        assert_eq!(current.content, "# A\nexternal\n");
+        assert_eq!(draft.base_revision, base_revision);
+        assert_eq!(
+            vault.v2_open_conflict_draft(&note_id, draft.draft_id).unwrap().content,
+            "# A\naccepted\n"
+        );
+    }
+
+    #[test]
+    fn startup_marks_a_pending_save_unresolved_when_the_visible_file_is_not_utf8() {
+        let (config, vault) = reopenable_vault(&[("A.md", b"# A\nold\n")]);
+        let note_id = vault.v2_notes().unwrap().remove(0).note_id;
+        let request = pending_save(&vault, &note_id, "save-pending", "# A\naccepted\n");
+        drop(vault);
+        fs::write(config.path.join("A.md"), [0xff, 0xfe]).unwrap();
+
+        let vault = reopen(&config);
+
+        assert_eq!(fs::read(config.path.join("A.md")).unwrap(), [0xff, 0xfe]);
+        assert_eq!(mutation_state(&vault, "save-pending"), None);
+        assert!(matches!(
+            vault.v2_save_note(&note_id, request),
+            Err(V2VaultError::Api(V2ApiErrorKind::UnresolvedNote { reason: UnresolvedReason::InvalidUtf8, .. }))
+        ));
+    }
+
+    #[test]
+    fn startup_marks_a_pending_create_unresolved_when_its_path_is_occupied() {
+        use crate::failure_point::{self, FailurePoint};
+        let (config, vault) = reopenable_vault(&[]);
+        failure_point::inject(FailurePoint::VisibleFileStorageFull);
+        vault
+            .v2_create_note(V2CreateNoteRequest {
+                mutation_id: "create-pending".to_string(),
+                path: "A.md".to_string(),
+                content: "# A\nmine\n".to_string(),
+                source_hash: tansu_note_core::source_hash("# A\nmine\n"),
+            })
+            .unwrap();
+        let created_id = vault.v2_notes().unwrap().remove(0).note_id;
+        drop(vault);
+        fs::write(config.path.join("A.md"), b"# A\nexternal\n").unwrap();
+
+        let vault = reopen(&config);
+
+        assert_eq!(fs::read(config.path.join("A.md")).unwrap(), b"# A\nexternal\n");
+        assert!(matches!(
+            vault.v2_open_note(&created_id),
+            Err(V2VaultError::Api(V2ApiErrorKind::UnresolvedNote { reason: UnresolvedReason::FileCatalogMismatch, .. }))
+        ));
+        let notes = vault.v2_notes().unwrap();
+        assert_eq!(notes.len(), 1);
+        assert_ne!(notes[0].note_id, created_id);
+        assert_eq!(vault.v2_open_note(&notes[0].note_id).unwrap().content, "# A\nexternal\n");
+    }
+
+    #[test]
+    fn startup_reverts_a_pending_rename_whose_destination_is_occupied() {
+        use crate::failure_point::{self, FailurePoint};
+        let (config, vault) = reopenable_vault(&[("A.md", b"# A\n")]);
+        let note_id = vault.v2_notes().unwrap().remove(0).note_id;
+        let base = vault.v2_open_note(&note_id).unwrap();
+        failure_point::inject(FailurePoint::VisibleFileStorageFull);
+        let renamed = vault
+            .v2_rename_note(&note_id, V2RenameNoteRequest {
+                mutation_id: "rename-pending".to_string(),
+                precondition: precondition_of(&base),
+                path: "B.md".to_string(),
+            })
+            .unwrap();
+        assert!(matches!(renamed.outcome, V2MutationOutcome::PendingMaterialization { .. }));
+        drop(vault);
+        fs::write(config.path.join("B.md"), b"# B\nexternal\n").unwrap();
+
+        let vault = reopen(&config);
+
+        assert_eq!(fs::read(config.path.join("A.md")).unwrap(), b"# A\n");
+        assert_eq!(fs::read(config.path.join("B.md")).unwrap(), b"# B\nexternal\n");
+        let opened = vault.v2_open_note(&note_id).unwrap();
+        assert_eq!(opened.meta.path, "A.md");
+        assert_eq!(opened.content, "# A\n");
+        assert_eq!(mutation_state(&vault, "rename-pending"), None);
+        assert_eq!(vault.v2_notes().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn startup_keeps_a_changed_file_after_a_pending_delete() {
+        let (config, vault) = reopenable_vault(&[("A.md", b"# A\n")]);
+        let row = vault.lock_catalog().all_rows().unwrap().remove(0);
+        {
+            let mut catalog = vault.lock_catalog();
+            catalog
+                .prepare_mutation(MutationIntent {
+                    mutation_id: "delete-pending",
+                    payload_hash: "payload",
+                    kind: "delete",
+                    note_id: Some(&row.meta.note_id),
+                    path: None,
+                    old_path: Some(&row.meta.path),
+                    expected_disk_hash: Some(&row.visible_hash),
+                    source_hash: None,
+                    disk_hash: None,
+                })
+                .unwrap();
+            catalog
+                .accept_delete_mutation(
+                    "delete-pending",
+                    &row.meta.note_id,
+                    &serde_json::to_string(&v2_pending_response("delete-pending")).unwrap(),
+                )
+                .unwrap();
+        }
+        drop(vault);
+        fs::write(config.path.join("A.md"), b"# A\nexternal\n").unwrap();
+
+        let vault = reopen(&config);
+
+        assert_eq!(fs::read(config.path.join("A.md")).unwrap(), b"# A\nexternal\n");
+        assert_eq!(mutation_state(&vault, "delete-pending").as_deref(), Some("accepted"));
+        let notes = vault.v2_notes().unwrap();
+        assert_eq!(notes.len(), 1);
+        assert_ne!(notes[0].note_id, row.meta.note_id);
+    }
+
     #[test]
     fn retry_repairs_pending_mutation_and_publishes_its_event() {
         let vault = test_vault();
@@ -4000,8 +4312,6 @@ mod tests {
             let mut catalog = vault.lock_catalog();
             v2_existing_mutation(
                 &vault,
-                &vault.root,
-                &vault.state_root,
                 &mut catalog,
                 "retry-pending-save",
                 "payload",

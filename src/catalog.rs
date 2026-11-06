@@ -64,6 +64,25 @@ pub struct Catalog {
     conn: Connection,
 }
 
+pub struct PendingExternalEdit<'a> {
+    pub title: &'a str,
+    pub tags: &'a [String],
+    pub content_hash: &'a str,
+    pub visible_hash: &'a str,
+}
+
+pub struct PendingConflictDraft<'a> {
+    pub draft_id: i64,
+    pub base_seq: i64,
+    pub base_hash: &'a str,
+    pub content_hash: &'a str,
+}
+
+pub struct PendingOutcomeJson {
+    pub result: String,
+    pub event: String,
+}
+
 pub struct InsertNote<'a> {
     pub path: &'a str,
     pub path_key: &'a str,
@@ -550,35 +569,113 @@ impl Catalog {
     pub fn complete_pending_conflict(
         &mut self,
         mutation_id: &str,
-        result_json: &str,
-        draft_id: i64,
         note_id: &str,
-        base_seq: i64,
-        base_hash: &str,
-        content_hash: &str,
-        created_at_ms: i64,
-    ) -> Result<ConflictDraftMeta> {
+        external: PendingExternalEdit<'_>,
+        draft: PendingConflictDraft<'_>,
+        retain_events: usize,
+        outcome: impl FnOnce(&NoteMeta, &ConflictDraftMeta) -> Result<PendingOutcomeJson>,
+    ) -> Result<u64> {
         let tx = self.conn.transaction()?;
+        let current = note_by_id_tx(&tx, note_id)?
+            .ok_or_else(|| Error::NotFound(note_id.to_string()))?;
+        let seq = current.meta.seq + 1;
+        let now = now_ms();
+        tx.execute(
+            "UPDATE notes SET title=?2, tags_json=?3, seq=?4, content_hash=?5, visible_hash=?6, updated_at_ms=?7 WHERE note_id=?1",
+            params![note_id, external.title, serde_json::to_string(external.tags)?, seq, external.content_hash, external.visible_hash, now],
+        )?;
+        tx.execute(
+            "INSERT INTO note_events(note_id, seq, kind, source, path, content_hash, created_at_ms) VALUES(?1, ?2, 'external_edit', 'external', ?3, ?4, ?5)",
+            params![note_id, seq, current.meta.path, external.content_hash, now],
+        )?;
+        advance_sync_tx(&tx)?;
         tx.execute(
             "INSERT INTO conflict_drafts(draft_id, note_id, base_seq, base_hash, content_hash, created_at_ms) VALUES(?1, ?2, ?3, ?4, ?5, ?6)",
-            params![draft_id, note_id, base_seq, base_hash, content_hash, created_at_ms],
+            params![draft.draft_id, note_id, draft.base_seq, draft.base_hash, draft.content_hash, now],
         )?;
+        let meta = note_by_id_tx(&tx, note_id)?
+            .ok_or_else(|| Error::NotFound(note_id.to_string()))?
+            .meta;
+        let draft_meta = ConflictDraftMeta {
+            draft_id: draft.draft_id,
+            note_id: note_id.to_string(),
+            base_seq: draft.base_seq,
+            base_hash: draft.base_hash.to_string(),
+            content_hash: draft.content_hash.to_string(),
+            created_at_ms: now,
+        };
+        let json = outcome(&meta, &draft_meta)?;
         let changed = tx.execute(
             "UPDATE mutation_operations SET state='conflict', result_json=?2 WHERE mutation_id=?1 AND state='pending_materialization'",
-            params![mutation_id, result_json],
+            params![mutation_id, json.result],
         )?;
         if changed != 1 {
             return Err(Error::Internal(format!("mutation {mutation_id} is not pending")));
         }
+        let event_version = append_vault_event_tx(&tx, &json.event, retain_events)?;
         tx.commit()?;
-        Ok(ConflictDraftMeta {
-            draft_id,
-            note_id: note_id.to_string(),
-            base_seq,
-            base_hash: base_hash.to_string(),
-            content_hash: content_hash.to_string(),
-            created_at_ms,
-        })
+        Ok(event_version as u64)
+    }
+
+    pub fn abandon_pending_mutation_unresolved(
+        &mut self,
+        mutation_id: &str,
+        note_id: &str,
+        reason: UnresolvedReason,
+        event_update_json: &str,
+        retain_events: usize,
+    ) -> Result<u64> {
+        let tx = self.conn.transaction()?;
+        tx.execute(
+            "UPDATE notes SET unresolved_reason=?2 WHERE note_id=?1",
+            params![note_id, unresolved_reason(reason)],
+        )?;
+        advance_sync_tx(&tx)?;
+        let event_version = delete_pending_mutation_tx(&tx, mutation_id, event_update_json, retain_events)?;
+        tx.commit()?;
+        Ok(event_version)
+    }
+
+    pub fn revert_pending_rename(
+        &mut self,
+        mutation_id: &str,
+        note_id: &str,
+        old_path: &str,
+        old_path_key: &str,
+        retain_events: usize,
+        event: impl FnOnce(&NoteRow) -> Result<String>,
+    ) -> Result<u64> {
+        let tx = self.conn.transaction()?;
+        let current = note_by_id_tx(&tx, note_id)?
+            .ok_or_else(|| Error::NotFound(note_id.to_string()))?;
+        let seq = current.meta.seq + 1;
+        let now = now_ms();
+        tx.execute(
+            "UPDATE notes SET path=?2, path_key=?3, seq=?4, updated_at_ms=?5 WHERE note_id=?1",
+            params![note_id, old_path, old_path_key, seq, now],
+        )?;
+        tx.execute(
+            "INSERT INTO note_events(note_id, seq, kind, source, path, content_hash, created_at_ms) VALUES(?1, ?2, 'rename', 'repair', ?3, NULL, ?4)",
+            params![note_id, seq, old_path, now],
+        )?;
+        advance_sync_tx(&tx)?;
+        let row = note_by_id_tx(&tx, note_id)?
+            .ok_or_else(|| Error::NotFound(note_id.to_string()))?;
+        let event_json = event(&row)?;
+        let event_version = delete_pending_mutation_tx(&tx, mutation_id, &event_json, retain_events)?;
+        tx.commit()?;
+        Ok(event_version)
+    }
+
+    pub fn content_revision_before(&self, note_id: &str, seq: i64) -> Result<Option<(i64, String)>> {
+        self.conn
+            .query_row(
+                "SELECT seq, content_hash FROM note_events WHERE note_id=?1 AND seq<?2 AND content_hash IS NOT NULL ORDER BY seq DESC LIMIT 1",
+                params![note_id, seq],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()
+            .map_err(Into::into)
     }
 
     pub fn finish_repaired_mutation(
@@ -602,21 +699,7 @@ impl Catalog {
             .query_row(
                 "SELECT mutation_id, payload_hash, state, kind, note_id, path, old_path, expected_disk_hash, source_hash, disk_hash, result_json FROM mutation_operations WHERE mutation_id=?1",
                 params![mutation_id],
-                |row| {
-                    Ok(MutationRecord {
-                        mutation_id: row.get(0)?,
-                        payload_hash: row.get(1)?,
-                        state: row.get(2)?,
-                        kind: row.get(3)?,
-                        note_id: row.get(4)?,
-                        path: row.get(5)?,
-                        old_path: row.get(6)?,
-                        expected_disk_hash: row.get(7)?,
-                        source_hash: row.get(8)?,
-                        disk_hash: row.get(9)?,
-                        result_json: row.get(10)?,
-                    })
-                },
+                mutation_from_sql,
             )
             .optional()
             .map_err(Into::into)
@@ -639,21 +722,16 @@ impl Catalog {
         let mut stmt = self.conn.prepare(
             "SELECT mutation_id, payload_hash, state, kind, note_id, path, old_path, expected_disk_hash, source_hash, disk_hash, result_json FROM mutation_operations WHERE state='pending_materialization' ORDER BY created_at_ms, mutation_id",
         )?;
-        let rows = stmt.query_map([], |row| {
-            Ok(MutationRecord {
-                mutation_id: row.get(0)?,
-                payload_hash: row.get(1)?,
-                state: row.get(2)?,
-                kind: row.get(3)?,
-                note_id: row.get(4)?,
-                path: row.get(5)?,
-                old_path: row.get(6)?,
-                expected_disk_hash: row.get(7)?,
-                source_hash: row.get(8)?,
-                disk_hash: row.get(9)?,
-                result_json: row.get(10)?,
-            })
-        })?;
+        let rows = stmt.query_map([], mutation_from_sql)?;
+        rows.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(Into::into)
+    }
+
+    pub fn pending_mutations_for_note(&self, note_id: &str) -> Result<Vec<MutationRecord>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT mutation_id, payload_hash, state, kind, note_id, path, old_path, expected_disk_hash, source_hash, disk_hash, result_json FROM mutation_operations WHERE state='pending_materialization' AND note_id=?1 ORDER BY created_at_ms, mutation_id",
+        )?;
+        let rows = stmt.query_map(params![note_id], mutation_from_sql)?;
         rows.collect::<std::result::Result<Vec<_>, _>>()
             .map_err(Into::into)
     }
@@ -1009,6 +1087,38 @@ fn insert_note_tx(tx: &Transaction<'_>, note_id: &str, note: InsertNote<'_>) -> 
         ],
     )?;
     Ok(())
+}
+
+fn mutation_from_sql(row: &rusqlite::Row<'_>) -> rusqlite::Result<MutationRecord> {
+    Ok(MutationRecord {
+        mutation_id: row.get(0)?,
+        payload_hash: row.get(1)?,
+        state: row.get(2)?,
+        kind: row.get(3)?,
+        note_id: row.get(4)?,
+        path: row.get(5)?,
+        old_path: row.get(6)?,
+        expected_disk_hash: row.get(7)?,
+        source_hash: row.get(8)?,
+        disk_hash: row.get(9)?,
+        result_json: row.get(10)?,
+    })
+}
+
+fn delete_pending_mutation_tx(
+    tx: &Transaction<'_>,
+    mutation_id: &str,
+    event_update_json: &str,
+    retain_events: usize,
+) -> Result<u64> {
+    let changed = tx.execute(
+        "DELETE FROM mutation_operations WHERE mutation_id=?1 AND state='pending_materialization'",
+        params![mutation_id],
+    )?;
+    if changed != 1 {
+        return Err(Error::Internal(format!("mutation {mutation_id} is not pending")));
+    }
+    Ok(append_vault_event_tx(tx, event_update_json, retain_events)? as u64)
 }
 
 fn note_by_id_tx(tx: &Transaction<'_>, note_id: &str) -> Result<Option<NoteRow>> {

@@ -1,39 +1,57 @@
 # TNS-085: Pending materialization reads and startup
 
-Status: draft
+Status: accepted
 
 ## Summary
 
-A save can commit the new source hash before the visible file matches it. Readers then see the old bytes under the new hash. If those bytes change before restart, opening that vault fails and the process does not start.
+A note mutation commits its catalog row before its visible file step finishes. If that step fails, the mutation stays `pending_materialization`. The note's per-note reads and writes did not account for that state. Startup aborted the vault when the visible bytes matched neither the pre-image nor the candidate.
 
 ## Motivation
 
-`accept_note_content_mutation` updates `content_hash` and marks the mutation `pending_materialization` before `write_visible_note_bytes_atomic`. A failed write returns `pendingMaterialization` without restoring the previous catalog row. `v2_open_note` reads the visible file and labels it with the catalog hash.
+`accept_note_content_mutation` stores the candidate `content_hash` and keeps `visible_hash` at the pre-image. Create and rename commit the new path before the file exists there.
 
-Restart finishes the write when the file is still the pre-image. `materialize_pending_file` returns `Error::Internal` when the bytes are neither the pre-image nor the candidate. `App::from_config` stops on the first vault that fails to open.
+Two reconcilers then disagreed about the same pending row. `reconcile_vault`, which runs on watcher events and at startup, rewrote the visible file from the accepted snapshot. `reconcile_note_before_write`, which runs before every per-note read and write, saw old bytes under the new hash and marked the note `file_catalog_mismatch`. It also tombstoned a pending create or rename because the visible path was missing. Opening a note during the pending window therefore destroyed it. A later replay materialized the file but left the note unresolved. An unresolved row also frees its path, so the next reconcile imported the file as a new note.
 
-The accepted snapshot is still on disk. The failure mode throws away serving every vault, and the in-process read lies about which bytes that hash names.
+At startup, `materialize_pending_file` and `move_pending_file` returned `Error::Internal` for unexpected bytes, and `VaultRuntime::open` failed.
 
 ## Design
 
-Content reads for a note with `pending_materialization` return the snapshot for the mutation's source hash. They do not return the visible file unless its disk hash is the candidate hash.
+The pending repair is the only code that touches a note with a pending mutation, and it always ends the mutation.
 
-Startup still materializes a pending write when the visible bytes are missing or equal the recorded pre-image. When the bytes are anything else, the note becomes unresolved, the snapshot stays, and the other vaults open. Unexpected bytes are not replaced.
+Before any per-note reconcile, the server repairs that note's pending mutations, using the same repair as mutation replay. The repair publishes its event and updates search. A read during the pending window then returns the materialized document with a matching `diskHash`. If the visible write still fails with an I/O error, the request fails with `409 pending_materialization` and carries `noteId` and `operationId`. The catalog row is unchanged and the client keeps its pending state. Watcher reconciliation repairs every pending mutation before `reconcile_vault` runs.
+
+Repair resolves each kind against the visible bytes:
+
+| Kind | Visible state | Result |
+| --- | --- | --- |
+| any | accepted snapshot missing or corrupt | note unresolved (`missing_snapshot` or `corrupt_snapshot`) |
+| save, save delta, restore | candidate, pre-image, or missing | candidate written; `accepted` |
+| save, save delta, restore | other valid UTF-8 | external edit recorded; candidate kept as a conflict draft; `conflict` |
+| save, save delta, restore | invalid UTF-8 | note unresolved (`invalid_utf8`) |
+| create | candidate or missing | candidate written; `accepted` |
+| create | other bytes | note unresolved (`file_catalog_mismatch`); reconcile imports the file as a separate note |
+| rename | destination free or candidate | move finished; an externally edited source file is left in place; `accepted` |
+| rename | destination occupied and source intact, or source edited and destination free | catalog path reverted to the source |
+| rename | destination occupied and source not intact | note unresolved (`file_catalog_mismatch`) |
+| delete | expected bytes or missing | file removed; `accepted` |
+| delete | other bytes | file kept; `accepted`; reconcile imports it as a new note |
+
+The conflict outcome is written in one catalog transaction: the external-edit revision, the conflict draft, the mutation state, and the vault event. The draft's base is the content revision before the accepted save. A replay of the mutation returns the same `conflict` response.
+
+The unresolved and reverted-rename outcomes delete the mutation record in the same transaction that changes the note. A replay then runs as a new request. It fails with `unresolved_note` for an unresolved note and `path_collision` for a reverted rename.
+
+A visible file that is missing during repair is written from the snapshot. This matches `reconcile_vault`, which restores a missing file whose last event came from the user.
 
 ## Alternatives considered
 
-Leave the catalog unchanged until the visible write finishes. A crash after the write and before the catalog commit can leave a new file with the old catalog row. Reconciliation already treats that as an external edit, which can drop the accepted identity. The snapshot-first order exists to avoid that.
+Leave the catalog unchanged until the visible write finishes. A crash after the write and before the catalog commit leaves a new file under the old catalog row, which reconciliation treats as an external edit. The snapshot-first order exists to avoid that.
 
-Fail the process, as today. That preserves unexpected bytes, and it also takes down every vault with no documented repair short of editing `vault.db` or restoring a backup.
+Return the accepted snapshot as a normal document during the pending window. The document then carries a `diskHash` that names neither its bytes nor the visible file, which poisons the next save's `baseDiskHash`.
 
-Return the stale file and the old hash until materialization finishes. That matches the file, and it hides an accepted revision from clients that key off `sourceHash`.
-
-## Open questions
-
-Should unexpected bytes at startup be an unresolved note, or a conflict draft beside the accepted snapshot?
-
-Should a read during pending return the snapshot document, or a dedicated pending error with no body?
+Mark the note unresolved on unexpected startup bytes. That hides the note from `v2_notes`, frees its path for import as a new note, and leaves the accepted revision reachable only by note ID. A conflict draft keeps identity and lets the user merge.
 
 ## Decision
 
-Not accepted. Recommendation: return the snapshot on read, and mark only that note unresolved when startup finds unexpected bytes.
+Accepted as designed above.
+
+Out of scope: an I/O failure while materializing at startup still fails that vault's open, and `App::from_config` still stops on the first vault that fails. Isolating vaults from each other needs a degraded-vault representation and is a separate design.
