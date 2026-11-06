@@ -266,6 +266,31 @@ describe("DocumentControllers close", () => {
     expect(start).toHaveBeenCalledTimes(1);
   });
 
+  it("keeps a controller reattached before a flushing close settles", async () => {
+    const controllers = new DocumentControllers();
+    let finish = (): void => {};
+    let started = (): void => {};
+    const saveStarted = new Promise<void>((resolve) => { started = resolve; });
+    const closing = controllers.close(noteId("a"), {
+      save: () => {
+        started();
+        return new Promise<void>((resolve) => { finish = resolve; });
+      },
+      close: () => {},
+    }, "flush");
+    const reopened = fakeSource();
+    controllers.for(noteId("a")).attachSession(reopened.source, () => {});
+
+    await saveStarted;
+    finish();
+    await closing;
+    for (let turn = 0; turn < 8; turn += 1) await Promise.resolve();
+
+    const request = controllers.for(noteId("a")).beginTask(reopened.source);
+    expect(request.signal.aborted).toBeFalsy();
+    request.finish();
+  });
+
   it("closes the session when the flush fails and still releases the controller", async () => {
     const controllers = new DocumentControllers();
     const close = vi.fn();

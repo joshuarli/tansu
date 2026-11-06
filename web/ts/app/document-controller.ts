@@ -154,6 +154,10 @@ export class DocumentController {
     this.autoSaveTimer = undefined;
   }
 
+  hasAttachedSession(): boolean {
+    return this.session !== null;
+  }
+
   private cancelTasks(): void {
     for (const task of this.tasks) task.cancel();
   }
@@ -186,13 +190,14 @@ export class DocumentControllers {
   }
 
   private forgetWhenSettled(id: NoteId, controller: DocumentController): void {
-    if (!controller.hasPendingMutations()) {
-      if (this.controllers.get(id) === controller) this.controllers.delete(id);
-      return;
-    }
-    void controller.settled().then(() => {
-      if (this.controllers.get(id) === controller && !controller.hasPendingMutations()) this.controllers.delete(id);
-    });
+    const forget = () => {
+      if (this.controllers.get(id) === controller && !controller.hasPendingMutations() &&
+        !controller.hasAttachedSession()) {
+        this.controllers.delete(id);
+      }
+    };
+    if (!controller.hasPendingMutations()) forget();
+    else void controller.settled().then(forget);
   }
 
   cancelAutoSaves(): void {

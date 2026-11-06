@@ -13,15 +13,6 @@ Next: 108
 - **Effort:** M
 - **Design:** [docs/rfc/TNS-085-pending-materialization.md](docs/rfc/TNS-085-pending-materialization.md)
 
-### TNS-089 · P2 · Reopening a note during its close flush orphans the live session's controller
-
-- **Area:** Concurrency
-- **Where:** `web/ts/app/document-controller.ts:181-196`, `web/ts/app.ts:1117`, `web/ts/app.ts:1577`
-- **Problem:** Closing a dirty tab with `"flush"` calls `DocumentControllers.close`, which retires the controller and calls `forgetWhenSettled`. If the user reopens the note before the save resolves, `documents.for(noteId)` returns that same controller and `attachSession` attaches the new session to it. When the flush settles, `forgetWhenSettled` deletes the controller from the map even though it now holds the live session. The next `documents.for(noteId)` builds a fresh controller with `session === null`, so `beginTask` throws `"Cannot issue a task for a detached document session"` for the reopened tab. Unproven: traced from code, not reproduced. Priority assumed.
-- **Recommendation:** In `forgetWhenSettled`, delete the controller only when it has no attached session. Add a test that closes with flush, reattaches before the save resolves, and then issues a task.
-- **Fix with:** lifecycle-concurrency
-- **Effort:** S
-
 ### TNS-086 · P3 · Help and settings overlays open on top of other overlays
 
 - **Area:** Types
