@@ -161,8 +161,8 @@ considers overlays in request order and includes a prefix of whole notes. If
 the limits exclude overlays, it reports
 `overlayCoverage: { "status": "partial", "skippedNoteCount": n }`; canonical
 search still runs. Overlay source is request-scoped and is never written to an
-index, log, or URL. When a saved-note overlay matches, the stale canonical hit
-for that note is suppressed.
+index, log, or URL. A saved-note overlay that the limits include suppresses the
+canonical hit for that note even when the overlay itself does not match.
 
 All unquoted whitespace-separated terms are required. Quoted multiword phrases
 match ordered adjacency and keep repeated words. Exact and prefix matches rank
