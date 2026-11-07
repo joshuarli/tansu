@@ -5,6 +5,10 @@ description="Tansu note server"
 
 : "${TANSU_PORT:=3001}"
 : "${TANSU_HOME:=/var/lib/tansu}"
+if [ -z "${TANSU_RELEASE:-}" ]; then
+  TANSU_RELEASE=$(basename "$(readlink /opt/tansu/current 2>/dev/null || true)")
+fi
+export TANSU_RELEASE
 
 export HOME="$TANSU_HOME"
 export XDG_CONFIG_HOME="$TANSU_HOME/config"

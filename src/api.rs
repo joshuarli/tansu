@@ -9,6 +9,15 @@ use crate::http::{HttpRequest, HttpResponse};
 use crate::vault::V2VaultError;
 use crate::{Error, Result};
 
+#[derive(deser::Serialize)]
+struct HealthResponse {
+    ok: bool,
+    #[deser(rename = "apiVersion")]
+    api_version: u8,
+    initialized: bool,
+    release: Option<String>,
+    version: String,
+}
 
 pub fn handle_v2_api(app: &App, request: &HttpRequest, request_id: &str) -> HttpResponse {
     match dispatch_v2_api(app, request) {
@@ -97,7 +106,15 @@ pub(crate) fn validate_v2_server_instance(
 fn dispatch_v2_api(app: &App, request: &HttpRequest) -> std::result::Result<HttpResponse, V2VaultError> {
     let path = request.path.split_once('?').map_or(request.path.as_str(), |(path, _)| path);
     if path == "/api/v2/health" {
-        return v2_json(200, &deser_value::value!({ "ok": true, "apiVersion": 2 }), "health");
+        let initialized = !app.setup_mode();
+        let health = HealthResponse {
+            ok: initialized,
+            api_version: 2,
+            initialized,
+            release: app.release().map(str::to_owned),
+            version: env!("CARGO_PKG_VERSION").to_string(),
+        };
+        return v2_json(if initialized { 200 } else { 503 }, &health, "health");
     }
     if path == "/api/v2/bootstrap" {
         return v2_json(200, &app.v2_bootstrap(), "bootstrap");
@@ -300,9 +317,33 @@ fn percent_decode_bytes(value: &str, plus_as_space: bool) -> std::result::Result
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{Config, VaultConfig};
+    use crate::config::{Config, ConfigStore, VaultConfig};
     use std::fs;
     use tempfile::TempDir;
+
+    #[test]
+    fn health_reports_the_running_release_and_setup_is_not_ready() {
+        let fixture = app_fixture(&[("One", &[("one.md", "# One\n")])]);
+        let app = fixture.app().with_release(Some("9df651c1a2b3".to_owned()));
+        let ready = handle_v2_api(&app, &v2_request("GET", "/api/v2/health", None, &[], &[]), "health");
+        assert_eq!(ready.status(), 200);
+        let body = String::from_utf8_lossy(ready.body());
+        assert!(body.contains(r#""ok":true"#), "{body}");
+        assert!(body.contains(r#""initialized":true"#), "{body}");
+        assert!(body.contains(r#""release":"9df651c1a2b3""#), "{body}");
+        assert!(body.contains(r#""apiVersion":2"#), "{body}");
+        assert!(body.contains(r#""version":"#), "{body}");
+
+        let root = tempfile::tempdir().unwrap();
+        let store = ConfigStore::open(&root.path().join("settings.sqlite3")).unwrap();
+        let setup = App::setup_only(store).with_release(Some("setup-release".to_owned()));
+        let not_ready = handle_v2_api(&setup, &v2_request("GET", "/api/v2/health", None, &[], &[]), "health");
+        assert_eq!(not_ready.status(), 503);
+        let body = String::from_utf8_lossy(not_ready.body());
+        assert!(body.contains(r#""ok":false"#), "{body}");
+        assert!(body.contains(r#""initialized":false"#), "{body}");
+        assert!(body.contains(r#""release":"setup-release""#), "{body}");
+    }
 
     #[test]
     fn query_params_decode_plus_and_reject_bad_hex() {

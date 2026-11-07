@@ -11,6 +11,7 @@ use crate::{Error, Result};
 pub struct App {
     vaults: Arc<Vec<Arc<VaultRuntime>>>,
     server_instance_id: Arc<String>,
+    release: Option<Arc<str>>,
     logs: LogHub,
     config_store: Option<ConfigStore>,
 }
@@ -28,6 +29,7 @@ impl App {
         Self {
             vaults: Arc::new(Vec::new()),
             server_instance_id: Arc::new("setup".to_string()),
+            release: release_from_env(),
             logs: LogHub::from_env(),
             config_store: Some(config_store),
         }
@@ -42,6 +44,7 @@ impl App {
         let app = Self {
             vaults: Arc::new(runtimes),
             server_instance_id: Arc::new(server_instance_id),
+            release: release_from_env(),
             logs,
             config_store,
         };
@@ -76,6 +79,15 @@ impl App {
 
     pub fn server_instance_id(&self) -> &str {
         self.server_instance_id.as_str()
+    }
+
+    pub fn release(&self) -> Option<&str> {
+        self.release.as_deref()
+    }
+
+    pub fn with_release(mut self, release: Option<String>) -> Self {
+        self.release = release.map(Arc::from);
+        self
     }
 
     pub fn setup_mode(&self) -> bool {
@@ -122,6 +134,14 @@ impl App {
     pub fn logs(&self) -> &LogHub {
         &self.logs
     }
+}
+
+fn release_from_env() -> Option<Arc<str>> {
+    std::env::var("TANSU_RELEASE")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .map(Arc::from)
 }
 
 #[cfg(test)]
