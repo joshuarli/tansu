@@ -1,0 +1,11 @@
+format: 2
+
+world:
+  name: tansu-check-amd64
+
+network:
+  egress: true
+
+machines:
+  runner:
+    smolfile: ./.niceforge/runner.Smolfile

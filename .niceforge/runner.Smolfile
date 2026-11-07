@@ -1,0 +1,7 @@
+image = "docker.io/library/node@sha256:791be9feee2e7a00dc90c6f7c87fc028c9ed026eda753d158340eedf6e3ef9b4"
+platform = "linux/amd64"
+cpus = 6
+memory = 8192
+storage = 40
+overlay = 8
+workdir = "/workspace"

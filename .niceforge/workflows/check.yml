@@ -1,0 +1,66 @@
+version: 1
+
+workflow:
+  name: check
+  timeout: 1h
+
+on:
+  manual: {}
+
+runner:
+  platform: linux/amd64
+
+runtime:
+  world: .niceforge/.smolworld
+  runner-machine: runner
+  workspace: /workspace
+
+jobs:
+  check:
+    target:
+      platform: linux/amd64
+    timeout: 55m
+    steps:
+      - id: checkout
+        name: Check out the sealed commit
+        uses: niceforge/checkout
+      - id: toolchain
+        name: Install pnpm, the pinned Rust nightly and static SQLite
+        shell: bash
+        timeout: 15m
+        run: |
+          set -euo pipefail
+          test "$(node --version)" = "v$(cat .node-version)"
+          npm install --global --no-fund --no-audit "pnpm@$(node -p "require('./package.json').packageManager.split('@')[1]")"
+          curl -fsSL -o /tmp/rustup-init https://static.rust-lang.org/rustup/archive/1.29.1/x86_64-unknown-linux-gnu/rustup-init
+          echo "dda7234360b7f578ca8b0ddcb80145646fa61a67c1720a5abc7051b35c9fcb71  /tmp/rustup-init" | sha256sum -c -
+          chmod +x /tmp/rustup-init
+          /tmp/rustup-init -y --no-modify-path --profile minimal --default-toolchain none
+          "$HOME/.cargo/bin/rustup" show active-toolchain
+          mkdir -p .work/tmp
+          CC=cc AR=ar TMPDIR="$PWD/.work/tmp" sh scripts/build-sqlite-static.sh /opt/tansu-sqlite
+      - id: install
+        name: Install the locked packages
+        shell: bash
+        timeout: 10m
+        run: TMPDIR="$PWD/.work/tmp" pnpm install --frozen-lockfile
+      - id: test-web
+        name: Lint and test the web code
+        shell: bash
+        timeout: 10m
+        run: |
+          set -euo pipefail
+          export TMPDIR="$PWD/.work/tmp"
+          pnpm run lint
+          pnpm run test
+      - id: test-rust
+        name: Run the Rust workspace tests
+        shell: bash
+        timeout: 30m
+        run: |
+          set -euo pipefail
+          export PATH="$HOME/.cargo/bin:$PATH" TMPDIR="$PWD/.work/tmp"
+          export SQLITE3_STATIC=1 SQLITE3_LIB_DIR=/opt/tansu-sqlite/lib SQLITE3_INCLUDE_DIR=/opt/tansu-sqlite/include LIBSQLITE3_SYS_USE_PKG_CONFIG=0
+          export CARGO_PROFILE_DEV_DEBUG=0 CARGO_INCREMENTAL=0
+          pnpm run build:dev
+          cargo test --locked --workspace
