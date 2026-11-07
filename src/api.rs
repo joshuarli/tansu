@@ -6,8 +6,10 @@ use crate::api_types::{
 };
 use crate::app::App;
 use crate::http::{HttpRequest, HttpResponse};
+use crate::telemetry;
 use crate::vault::V2VaultError;
 use crate::{Error, Result};
+use std::time::Instant;
 
 #[derive(deser::Serialize)]
 struct HealthResponse {
@@ -20,10 +22,59 @@ struct HealthResponse {
 }
 
 pub fn handle_v2_api(app: &App, request: &HttpRequest, request_id: &str) -> HttpResponse {
-    match dispatch_v2_api(app, request) {
+    let started = Instant::now();
+    let response = match dispatch_v2_api(app, request) {
         Ok(response) => response,
         Err(error) => v2_vault_error_response(error, request_id),
+    };
+    telemetry::record(
+        http_operation(request),
+        if response.status() < 400 { "ok" } else { "failed" },
+        started.elapsed().as_millis() as u64,
+        [("request_bytes", request.body.len() as u64), ("response_bytes", response.body().len() as u64)],
+    );
+    response
+}
+
+fn http_operation(request: &HttpRequest) -> &'static str {
+    let path = request.path.split_once('?').map_or(request.path.as_str(), |(path, _)| path);
+    let method = request.method.as_str();
+    if path == "/api/v2/health" {
+        return "http.health";
     }
+    if path == "/api/v2/bootstrap" {
+        return "http.bootstrap";
+    }
+    if path.starts_with("/api/v2/vaults/") {
+        if method == "POST" && path.ends_with("/search") {
+            return "http.vaults.search";
+        }
+        if method == "POST" && path.ends_with("/notes") {
+            return "http.vaults.notes.create";
+        }
+        if (method == "PUT" || method == "PATCH") && path.contains("/notes/") {
+            return "http.vaults.notes.save";
+        }
+        if method == "GET" && path.contains("/notes/") {
+            return "http.vaults.notes.open";
+        }
+        if method == "GET" && path.ends_with("/notes") {
+            return "http.vaults.notes.list";
+        }
+        if method == "POST" && path.ends_with("/images") {
+            return "http.vaults.images.upload";
+        }
+        if method == "GET" && path.ends_with("/assets") {
+            return "http.vaults.assets";
+        }
+        if method == "GET" && path.ends_with("/settings") {
+            return "http.vaults.settings.read";
+        }
+        if method == "PUT" && path.ends_with("/settings") {
+            return "http.vaults.settings.save";
+        }
+    }
+    "http.request"
 }
 
 pub(crate) fn v2_api_error_response(error: V2ApiErrorKind, request_id: &str) -> HttpResponse {
@@ -146,11 +197,17 @@ fn dispatch_v2_api(app: &App, request: &HttpRequest) -> std::result::Result<Http
         }
         ("PUT", ["notes", note_id]) => {
             let body = parse_v2_body::<V2SaveNoteRequest>(&request.body)?;
-            v2_json(200, &vault.v2_save_note(note_id, body)?, "saved note")
+            let content_bytes = body.content.len() as u64;
+            let started = Instant::now();
+            let saved = record_operation("note.save", started, |_| vec![("content_bytes", content_bytes)], vault.v2_save_note(note_id, body))?;
+            v2_json(200, &saved, "saved note")
         }
         ("PATCH", ["notes", note_id]) => {
             let body = parse_v2_body::<V2SaveNoteDeltaRequest>(&request.body)?;
-            v2_json(200, &vault.v2_save_note_delta(note_id, body)?, "saved note delta")
+            let edits = body.edits.len() as u64;
+            let started = Instant::now();
+            let saved = record_operation("note.save", started, |_| vec![("edits", edits)], vault.v2_save_note_delta(note_id, body))?;
+            v2_json(200, &saved, "saved note delta")
         }
         ("POST", ["notes", note_id, "rename"]) => {
             let body = parse_v2_body::<V2RenameNoteRequest>(&request.body)?;
@@ -187,7 +244,9 @@ fn dispatch_v2_api(app: &App, request: &HttpRequest) -> std::result::Result<Http
         }
         ("POST", ["search"]) => {
             let body = parse_v2_body::<V2SearchRequest>(&request.body)?;
-            v2_json(200, &vault.v2_search(body)?, "search results")
+            let started = Instant::now();
+            let results = record_operation("note.search", started, |results: &crate::api_types::V2SearchResponse| vec![("results", results.hits.len() as u64)], vault.v2_search(body))?;
+            v2_json(200, &results, "search results")
         }
         ("POST", ["images"]) => {
             if request_header(request, "content-type")?.as_deref() != Some("image/webp") {
@@ -221,6 +280,20 @@ fn map_v2_vault_lookup_error(error: Error, vault_id: &str) -> V2VaultError {
         }),
         error => V2VaultError::Internal(error),
     }
+}
+
+fn record_operation<T>(
+    operation: &'static str,
+    started: Instant,
+    work: impl FnOnce(&T) -> Vec<(&'static str, u64)>,
+    result: std::result::Result<T, V2VaultError>,
+) -> std::result::Result<T, V2VaultError> {
+    let (outcome, work) = match &result {
+        Ok(value) => ("ok", work(value)),
+        Err(_) => ("failed", Vec::new()),
+    };
+    telemetry::record(operation, outcome, started.elapsed().as_millis() as u64, work);
+    result
 }
 
 fn v2_json<T: deser::Serialize>(status: u16, value: &T, operation: &str) -> std::result::Result<HttpResponse, V2VaultError> {

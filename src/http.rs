@@ -141,8 +141,7 @@ impl HttpResponse {
         builder.body(Full::new(Bytes::from(self.body)).boxed_unsync()).expect("valid fixed response")
     }
 
-    #[cfg(test)]
-    pub(crate) fn status(&self) -> u16 {
+    pub fn status(&self) -> u16 {
         self.status
     }
 
@@ -157,8 +156,7 @@ impl HttpResponse {
             .map(|(_, value)| value.as_str())
     }
 
-    #[cfg(test)]
-    pub(crate) fn body(&self) -> &[u8] {
+    pub fn body(&self) -> &[u8] {
         &self.body
     }
 }

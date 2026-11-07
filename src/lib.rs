@@ -29,6 +29,7 @@ pub mod paths;
 pub mod reconcile;
 pub mod search;
 pub mod tags;
+pub mod telemetry;
 pub mod vault;
 
 use crate::api_types::ApiErrorKind;

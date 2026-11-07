@@ -53,10 +53,14 @@ fn run() -> tansu::Result<()> {
 }
 
 fn run_setup_server(store: ConfigStore, port: u16) -> tansu::Result<()> {
-    serve_setup(App::setup_only(store), port)
+    tansu::telemetry::init();
+    let result = serve_setup(App::setup_only(store), port);
+    tansu::telemetry::shutdown();
+    result
 }
 
 fn run_server(config: Config, store: ConfigStore, port: u16) -> tansu::Result<()> {
+    tansu::telemetry::init();
     let auth_config = config.auth.clone();
     let app = App::from_settings(config, store)?;
     let auth = auth_config
@@ -73,14 +77,16 @@ fn run_server(config: Config, store: ConfigStore, port: u16) -> tansu::Result<()
         })
         .transpose()?;
     let events: Arc<dyn EventSource> = Arc::new(AppEventSource(app.clone()));
-    serve_with_services(
+    let result = serve_with_services(
         app,
         port,
         ServerServices {
             auth,
             events: Some(events),
         },
-    )
+    );
+    tansu::telemetry::shutdown();
+    result
 }
 
 #[derive(Debug, PartialEq, Eq)]
