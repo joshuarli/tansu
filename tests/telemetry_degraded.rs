@@ -53,7 +53,7 @@ fn a_save_succeeds_when_stats_is_unreachable_and_drops_stay_bounded() {
     );
     assert_eq!(saved.status(), 200, "{}", String::from_utf8_lossy(saved.body()));
 
-    let _ = telemetry::flush();
+    telemetry::flush();
     let dropped = telemetry::dropped();
     assert!(dropped > 0, "the unreachable endpoint should drop at least one event");
     assert!(dropped <= 1024, "drops must stay within the bounded queue, got {dropped}");
