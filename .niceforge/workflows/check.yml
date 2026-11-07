@@ -41,13 +41,12 @@ jobs:
           apt-get -o Acquire::Retries=5 update -qq
           apt-get -o Acquire::Retries=5 install -y -qq --no-install-recommends musl musl-dev
           llvm=clang+llvm-23.1.5-x86_64-linux-musl
-          curl -fsSL -o "/tmp/$llvm.tar.xz" "https://github.com/laputa-systems/llvm-prebuilt-musl/releases/download/llvm-musl-23.1.5-2f0b039/$llvm.tar.xz"
-          echo "baba8cf90dd957cf64fdca219f659ec6817b699037a15dfa97bb847a01a64219  /tmp/$llvm.tar.xz" | sha256sum -c -
+          curl -fsSL -o "/tmp/$llvm.tar.xz" "https://github.com/laputa-systems/llvm-prebuilt-musl/releases/download/llvm-musl-23.1.5-c4f9b08/$llvm.tar.xz"
+          echo "8039dfa9e5b2ee53b04c1dcf94d65bd76c27842b0d4128c5a7bc6ba21d345fec  /tmp/$llvm.tar.xz" | sha256sum -c -
           tar -xf "/tmp/$llvm.tar.xz" -C /opt
           rm "/tmp/$llvm.tar.xz"
-          mkdir -p /opt/musl/x86_64/usr/lib
+          mkdir -p /opt/musl/x86_64/usr
           ln -s /usr/include/x86_64-linux-musl /opt/musl/x86_64/usr/include
-          for stub in dl pthread m rt crypt resolv util xnet; do "/opt/$llvm/bin/llvm-ar" rc "/opt/musl/x86_64/usr/lib/lib$stub.a"; done
           printf '#!/bin/sh\nexec /opt/%s/bin/clang --target=x86_64-linux-musl --sysroot=/opt/musl/x86_64 "$@"\n' "$llvm" > /usr/local/bin/tansu-clang
           chmod 0755 /usr/local/bin/tansu-clang
           mkdir -p .work/tmp
@@ -79,6 +78,6 @@ jobs:
           export CC_x86_64_unknown_linux_musl="$llvm/bin/clang" AR_x86_64_unknown_linux_musl="$llvm/bin/llvm-ar"
           export CFLAGS_x86_64_unknown_linux_musl="--target=x86_64-linux-musl --sysroot=/opt/musl/x86_64"
           export CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER="$llvm/bin/clang"
-          export CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_RUSTFLAGS="-Clink-arg=--target=x86_64-linux-musl -Clink-arg=--sysroot=/opt/musl/x86_64 -Clink-arg=-L/opt/musl/x86_64/usr/lib"
+          export CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_RUSTFLAGS="-Clink-arg=--target=x86_64-linux-musl -Clink-arg=--sysroot=/opt/musl/x86_64"
           pnpm run build:dev
           cargo test --locked --workspace --target x86_64-unknown-linux-musl
