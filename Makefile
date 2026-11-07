@@ -187,17 +187,6 @@ bench-full: setup
 .PHONY: auth-recovery-drill bench bench-full build-linux-musl-aarch64 build-linux-musl-docker build-linux-musl-x86_64 deploy deploy-check deploy-status deploy-smoke deploy-sync rollback dev dev-config dev-serve check lint loupe notes setup test-loupe-browser types types-check types-generated ts test test-e2e-chromium test-e2e-webkit update-e2e-baselines-linux test-e2e-loupe test-rs test-sqlite-static test-acceptance web-build publish-mynpm
 
 # Publish the TS dependency closure to our private npm registry as well.
-# TARGETS adds non-host targets (the default pass already covers the host);
-# the mirror only needs entries per platform for platform-specific packages.
-WORK_DIR ?= .work/registry-pub
-TARGETS ?= linux-x64-gnu
-PUBLIC_URL ?= https://npm.17166969.xyz
-BUCKET ?= stuff-mynpm
-STUFF_DIR ?= ../stuff
+STUFF ?= stuff
 publish-mynpm:
-	@test -x "$(STUFF_DIR)/deploy/publish-mynpm.sh" || { echo "STUFF_DIR does not point at a stuff checkout: $(STUFF_DIR)" >&2; exit 2; }
-	STUFF_DIR="$(STUFF_DIR)" \
-	LOCKFILE=pnpm-lock.yaml PROJECT=tansu \
-	WORK_DIR="$(WORK_DIR)" TARGETS="$(TARGETS)" \
-	PUBLIC_URL="$(PUBLIC_URL)" BUCKET="$(BUCKET)" \
-	"$(STUFF_DIR)/deploy/publish-mynpm.sh"
+	$(STUFF) publish npm --lockfile pnpm-lock.yaml --project tansu
