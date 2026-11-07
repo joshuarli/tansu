@@ -46,6 +46,11 @@ The remote host must run Alpine with OpenRC (`/sbin/openrc`, `rc-service`,
 `rc-update`), Tailscale, Python 3, and passwordless `doas` for the SSH user.
 The deployment uses OpenRC only; it does not write systemd units.
 
+The Stats agent is a host prerequisite, not part of a Tansu release. Install it
+once per host as described in the Stats README, and keep its token out of the
+Tansu release. The agent reports host metrics; Tansu reports its own application
+events with the ingest token from its service credential file.
+
 The layout is:
 
 - `/opt/tansu/releases/<commit>/tansu` and `http-redirect.py` are immutable.
@@ -78,6 +83,33 @@ for you.
 `alpine:3.22` container. It proves a fresh install, a no-op repeat, an upgrade
 that retains the previous release, a rollback, and a preflight rejection that
 writes nothing.
+
+A deploy replaces only the release directory and the generated OpenRC/conf
+files. It never replaces `/var/lib/tansu` (settings, data, vault, auth state),
+the host's Tailscale identity, or the Stats agent installation. A rollback
+reuses the retained release and the existing data; it does not downgrade the
+data schema, so restore a backup if an older binary cannot open newer state.
+
+### First and subsequent deploys
+
+The first deploy needs `DEPLOY_HOST` (or the default `josh@lisa`), a public key
+the host accepts, and an empty or initialized `/var/lib/tansu`. Subsequent
+deploys of the same commit are no-ops; a new commit builds and activates a new
+release, keeps the previous release, and writes a marker only for a genuine
+activation. A rollback is a new activation and gets its own marker.
+
+```sh
+make deploy-check
+make deploy DEPLOY_HOST=user@host
+make deploy-status DEPLOY_HOST=user@host
+make deploy-smoke DEPLOY_HOST=user@host
+make rollback REV=<commit> DEPLOY_HOST=user@host
+```
+
+The server's readiness URL is `GET /api/v2/health`; it reports the active
+release. `make deploy-smoke` checks both the Tansu and redirect services. Use
+`make deploy-status` after a failed readiness wait; a failed preflight leaves
+the previous release and data untouched.
 
 ### Report deployments to Stats
 
@@ -115,6 +147,13 @@ reported recorded only after Stats accepts it. `make rollback REV=...` records
 the rollback as a new activation. The receipt is
 `/var/lib/tansu/deploy/deploy-state.json`; `make deploy-status` prints it.
 
+The credential file from `statsctl service create` is JSON with `deployToken`,
+`ingestToken`, and `hostIds`. Keep it mode 0600. `make deploy` uses
+`deployToken` only for the marker; the OpenRC unit receives `ingestToken` from
+`/etc/tansu/stats.env` and never reads the credential file. Rotating the deploy
+token does not change telemetry, and rotating the ingest token requires
+reinstalling or rewriting `stats.env`.
+
 Tansu reports application telemetry when `TANSU_STATS_ENDPOINT` and
 `TANSU_STATS_TOKEN` are present. The endpoint is the Stats origin, the token is
 the service's `ingestToken` from the credential file, and
@@ -124,6 +163,16 @@ bounded and asynchronous: a save never waits for Stats, and an unreachable
 endpoint drops events within the queue limit. The installer owns
 `/etc/conf.d/tansu`, so keep the ingest token in a root-owned, `tansu`-readable
 file and source it from the unit rather than putting it in that file.
+
+### When Stats is unavailable
+
+A note save, search, or health check still succeeds when Stats is down. The
+producer drops events once its bounded queue is full; the drop count is exposed
+through the Tansu telemetry state and is not an application failure. A deploy
+whose marker POST fails exits nonzero with the marker still pending:
+`make deploy-status` shows it, and `make deploy-sync` retries the same marker id
+after Stats returns. Do not invent a new marker id for a retry. If telemetry is
+not configured, the producer is a no-op and no network request is made.
 
 The deployment initializes SQLite settings for an empty `Personal` vault. Enroll
 the first passkey before editing notes. Stop the service, issue a one-time

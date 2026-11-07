@@ -24,7 +24,9 @@ tansu
 
 Add `$HOME/Documents/Notes` in the setup page. The server listens on loopback;
 use
-[Deployment](docs/deployment.md) for remote access.
+[Deployment](docs/deployment.md) for remote access. The same guide covers the
+OpenRC deploy and rollback lifecycle, Stats deployment markers, application
+telemetry, and the credential files each uses.
 
 Read [Migration](docs/migration.md) before opening an existing vault.
 
