@@ -15,7 +15,6 @@ RUN apk add --no-cache \
   ca-certificates=20261020-r0 \
   curl=8.23.0-r0 \
   file=5.48-r0 \
-  libgcc=15.2.0-r9 \
   musl-dev=1.2.6-r6 \
   openssl=3.5.9-r0 \
   pax-utils=1.3.11-r0 \
@@ -33,6 +32,7 @@ RUN case "$TARGETARCH" in \
     && tar -xf /tmp/llvm.tar.xz -C /opt \
     && ln -s "/opt/${name}" /opt/llvm \
     && rm /tmp/llvm.tar.xz \
+    && /opt/llvm/bin/clang -shared -nostdlib -Wl,-soname,libgcc_s.so.1 -Wl,--whole-archive /opt/llvm/lib/libunwind.a -Wl,--no-whole-archive -L/usr/lib -o /usr/lib/libgcc_s.so.1 \
     && ln -s libgcc_s.so.1 /usr/lib/libgcc_s.so
 
 RUN case "$TARGETARCH" in \

@@ -14,7 +14,6 @@ RUN apk add --no-cache \
   ca-certificates=20261020-r0 \
   curl=8.23.0-r0 \
   git=2.56.0-r0 \
-  libgcc=15.2.0-r9 \
   musl-dev=1.2.6-r6 \
   openssl=3.5.9-r0 \
   tar=1.35-r5 \
@@ -31,6 +30,7 @@ RUN case "$TARGETARCH" in \
     && tar -xf /tmp/llvm.tar.xz -C /opt \
     && ln -s "/opt/${name}" /opt/llvm \
     && rm /tmp/llvm.tar.xz \
+    && /opt/llvm/bin/clang -shared -nostdlib -Wl,-soname,libgcc_s.so.1 -Wl,--whole-archive /opt/llvm/lib/libunwind.a -Wl,--no-whole-archive -L/usr/lib -o /usr/lib/libgcc_s.so.1 \
     && ln -s libgcc_s.so.1 /usr/lib/libgcc_s.so
 
 RUN case "$TARGETARCH" in \
@@ -59,6 +59,7 @@ RUN printf '#!/bin/sh\nexec clang --target=%s -fuse-ld=lld -static "$@"\n' "${TA
 
 COPY rust-toolchain.toml /tmp/toolchain/rust-toolchain.toml
 RUN cd /tmp/toolchain && rustup show active-toolchain && rustup target add "${TARGET}"
+RUN cd /tmp/toolchain && cargo install --locked --target "${TARGET}" --version 3.1.2 --root /usr/local jaq
 
 COPY scripts/build-sqlite-static.sh /tmp/build-sqlite-static.sh
 RUN CC=/usr/local/bin/tansu-clang sh /tmp/build-sqlite-static.sh /opt/tansu-sqlite

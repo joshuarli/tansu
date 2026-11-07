@@ -95,20 +95,7 @@ write_state() {
 }
 
 state_field() {
-  printf '%s' "$1" | python3 -c '
-import json, sys
-state = json.load(sys.stdin)
-marker = state.get("marker") or {}
-field = sys.argv[1]
-values = {
-    "revision": state.get("revision", ""),
-    "marker_id": marker.get("id", ""),
-    "marker_version": marker.get("version", ""),
-    "marker_status": marker.get("status", ""),
-    "attemptedAtMs": marker.get("attemptedAtMs", 0),
-}
-print(values[field])
-' "$2"
+  printf '%s' "$1" | jaq -r --arg field "$2" '(.marker // {}) as $m | {revision: (.revision // ""), marker_id: ($m.id // ""), marker_version: ($m.version // ""), marker_status: ($m.status // ""), attemptedAtMs: ($m.attemptedAtMs // 0)}[$field]'
 }
 
 set_marker() {
@@ -117,16 +104,8 @@ set_marker() {
   marker_version=$3
   attempted=$4
   recorded=$5
-  state_json=$(printf '%s' "$state_json" | python3 -c '
-import json, sys
-state = json.load(sys.stdin)
-status, marker_id, version, attempted, recorded = sys.argv[1:6]
-marker = {"id": marker_id, "version": version, "status": status, "attemptedAtMs": int(attempted)}
-if recorded:
-    marker["recordedAtMs"] = int(recorded)
-state["marker"] = marker
-print(json.dumps(state, separators=(",", ":")))
-' "$status" "$id" "$marker_version" "$attempted" "$recorded")
+  state_json=$(printf '%s' "$state_json" | jaq -c --arg status "$status" --arg id "$id" --arg version "$marker_version" --argjson attempted "$attempted" --arg recorded "$recorded" \
+    '.marker = ({id: $id, version: $version, status: $status, attemptedAtMs: $attempted} + (if $recorded == "" then {} else {recordedAtMs: ($recorded | tonumber)} end))')
   write_state "$state_json"
 }
 
