@@ -4,12 +4,42 @@ set -euo pipefail
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 : "${DEPLOY_HOST:?DEPLOY_HOST must name the SSH target, for example user@host}"
 deploy_host=$DEPLOY_HOST
+ssh_opts=${SSH_OPTS:--o BatchMode=yes -o ConnectTimeout=10}
+
+services_file="$repo_root/deploy/tansu-services"
+if [[ -f "$services_file" ]]; then
+  # shellcheck disable=SC1090
+  . "$services_file"
+fi
+stats_service=${STATS_SERVICE:-${TANSU_STATS_SERVICE:-tansu}}
+stats_origin=${STATS_ORIGIN:-}
+stats_token_file=${STATS_DEPLOY_TOKEN_FILE:-}
+statsctl=${STATSCTL:-statsctl}
+stats_enabled=0
+if [[ -n "$stats_origin" && -n "$stats_token_file" ]]; then
+  stats_enabled=1
+fi
+
+deploy_state() {
+  SSH_OPTS="$ssh_opts" "$repo_root/deploy/deploy-state.sh" "$1" \
+    --host "$deploy_host" \
+    --statsctl "$statsctl" \
+    --token-file "$stats_token_file" \
+    --origin "$stats_origin" \
+    --service "$stats_service"
+}
+
+deploy_state_exists() {
+  # shellcheck disable=SC2086
+  ssh $ssh_opts -- "$deploy_host" 'doas -n test -f /var/lib/tansu/deploy/deploy-state.json' >/dev/null 2>&1
+}
 
 mode=deploy
 rollback_revision=
 case "${1:-}" in
   --status) mode=status ;;
   --smoke) mode=smoke ;;
+  --marker-sync) mode=marker-sync ;;
   --rollback)
     mode=rollback
     rollback_revision=${2:-}
@@ -42,6 +72,16 @@ case "$tailnet_dns_name" in
   *.ts.net) ;;
   *) printf 'unexpected Tailscale DNS name: %s\n' "$tailnet_dns_name" >&2; exit 1 ;;
 esac
+
+if [[ "$mode" == "marker-sync" ]]; then
+  [[ "$stats_enabled" -eq 1 ]] || { printf 'STATS_ORIGIN and STATS_DEPLOY_TOKEN_FILE are required\n' >&2; exit 2; }
+  if deploy_state_exists; then
+    deploy_state sync
+  else
+    printf 'no deploy receipt on %s\n' "$deploy_host"
+  fi
+  exit 0
+fi
 
 if [[ "$mode" == "status" ]]; then
   ssh -o BatchMode=yes "$deploy_host" 'doas -n sh -s' <<'STATUS'
@@ -91,7 +131,13 @@ if [[ "$mode" == "rollback" ]]; then
   case "$rollback_revision" in
     *[!A-Za-z0-9._-]*|"") printf 'invalid revision: %s\n' "$rollback_revision" >&2; exit 2 ;;
   esac
+  if [[ "$stats_enabled" -eq 1 ]] && deploy_state_exists; then
+    deploy_state sync
+  fi
   ssh -o BatchMode=yes "$deploy_host" "doas -n sh -s -- --tailnet '$tailnet_dns_name' --rollback '$rollback_revision'" < "$repo_root/deploy/install.sh"
+  if [[ "$stats_enabled" -eq 1 ]] && ! deploy_state mark; then
+    printf '%s: deployment marker pending; retry with make deploy-sync\n' "$deploy_host" >&2
+  fi
   exit 0
 fi
 
@@ -133,4 +179,10 @@ scp -q "$artifact" "$deploy_host:$remote_stage/tansu"
 scp -q "$repo_root/deploy/http-redirect.py" "$deploy_host:$remote_stage/http-redirect.py"
 scp -q "$repo_root/deploy/openrc/tansu" "$deploy_host:$remote_stage/openrc/tansu"
 scp -q "$repo_root/deploy/openrc/tansu-http-redirect" "$deploy_host:$remote_stage/openrc/tansu-http-redirect"
+if [[ "$stats_enabled" -eq 1 ]] && deploy_state_exists; then
+  deploy_state sync
+fi
 ssh -o BatchMode=yes "$deploy_host" "doas -n sh -s -- --tailnet '$tailnet_dns_name' --revision '$revision' --stage '$remote_stage'" < "$repo_root/deploy/install.sh"
+if [[ "$stats_enabled" -eq 1 ]] && ! deploy_state mark; then
+  printf '%s: deployment marker pending; retry with make deploy-sync\n' "$deploy_host" >&2
+fi

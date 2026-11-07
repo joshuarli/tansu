@@ -79,6 +79,52 @@ for you.
 that retains the previous release, a rollback, and a preflight rejection that
 writes nothing.
 
+### Report deployments to Stats
+
+Tansu follows the
+[Stats integration contract](https://github.com/joshuarli/stats/blob/master/docs/integration.md).
+The Stats agent is installed once per host, separately from a Tansu release;
+`make deploy` only changes Tansu itself.
+
+Register the host and `tansu` service once from a Stats checkout. `HOST_ID` is
+the host that runs Tansu and the agent, and the credential file is mode 0600:
+
+```sh
+pnpm --dir cloudflare -s statsctl service create \
+  --name tansu \
+  --host HOST_ID \
+  --unit tansu \
+  --health-url "https://tansu.$TAILNET.ts.net/api/v2/health" \
+  --credential-file .work/credentials/tansu.json
+```
+
+Then pass the marker settings to `make deploy` or `make rollback`:
+
+```sh
+export STATS_ORIGIN=https://stats.17166969.xyz
+export STATS_DEPLOY_TOKEN_FILE=../stats/.work/credentials/tansu.json
+export STATSCTL=../stats/dist/statsctl-0.1.0.mjs
+make deploy
+```
+
+`make deploy` syncs a pending marker before installing and records a marker
+after a genuine activation. Repeating an already recorded release publishes
+nothing. If the marker POST fails, the receipt keeps the marker pending and
+`make deploy-sync` (or the next deploy) retries it with the same id; a marker is
+reported recorded only after Stats accepts it. `make rollback REV=...` records
+the rollback as a new activation. The receipt is
+`/var/lib/tansu/deploy/deploy-state.json`; `make deploy-status` prints it.
+
+Tansu reports application telemetry when `TANSU_STATS_ENDPOINT` and
+`TANSU_STATS_TOKEN` are present. The endpoint is the Stats origin, the token is
+the service's `ingestToken` from the credential file, and
+`TANSU_STATS_SERVICE` defaults to `tansu`. The OpenRC unit sets `TANSU_RELEASE`
+from the active release, which matches the marker version. The producer is
+bounded and asynchronous: a save never waits for Stats, and an unreachable
+endpoint drops events within the queue limit. The installer owns
+`/etc/conf.d/tansu`, so keep the ingest token in a root-owned, `tansu`-readable
+file and source it from the unit rather than putting it in that file.
+
 The deployment initializes SQLite settings for an empty `Personal` vault. Enroll
 the first passkey before editing notes. Stop the service, issue a one-time
 capability, then start the service again:

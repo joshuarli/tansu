@@ -7,6 +7,10 @@ NOTES_DEV_DIR := $(DEV_DIR)/notes
 NOTES_CONFIG_HOME := $(NOTES_DEV_DIR)/config
 NOTES_DATA_HOME := $(NOTES_DEV_DIR)/data
 DEPLOY_HOST ?= josh@lisa
+STATS_ORIGIN ?=
+STATS_DEPLOY_TOKEN_FILE ?=
+STATSCTL ?=
+STATS_ENV = STATS_ORIGIN="$(STATS_ORIGIN)" STATS_DEPLOY_TOKEN_FILE="$(STATS_DEPLOY_TOKEN_FILE)" STATSCTL="$(STATSCTL)"
 SQLITE_STATIC_DIR ?= $(CURDIR)/.work/sqlite-static
 AUTH_DRILL_BIN ?= $(CURDIR)/.work/dist/x86_64-unknown-linux-musl/tansu
 
@@ -143,7 +147,7 @@ build-linux-musl-aarch64:
 	$(MAKE) build-linux-musl-docker TARGET=aarch64-unknown-linux-musl PLATFORM=linux/amd64
 
 deploy:
-	DEPLOY_HOST="$(DEPLOY_HOST)" TMPDIR="$(CURDIR)/.work/tmp" deploy/deploy.sh
+	DEPLOY_HOST="$(DEPLOY_HOST)" $(STATS_ENV) TMPDIR="$(CURDIR)/.work/tmp" deploy/deploy.sh
 
 deploy-check:
 	docker run --rm -v "$(CURDIR):/src:ro" alpine:3.22 sh /src/deploy/lifecycle-check.sh
@@ -154,9 +158,12 @@ deploy-status:
 deploy-smoke:
 	DEPLOY_HOST="$(DEPLOY_HOST)" deploy/deploy.sh --smoke
 
+deploy-sync:
+	DEPLOY_HOST="$(DEPLOY_HOST)" $(STATS_ENV) deploy/deploy.sh --marker-sync
+
 rollback:
 	@test -n "$(REV)" || { echo 'REV is required: make rollback REV=<release>' >&2; exit 2; }
-	DEPLOY_HOST="$(DEPLOY_HOST)" deploy/deploy.sh --rollback "$(REV)"
+	DEPLOY_HOST="$(DEPLOY_HOST)" $(STATS_ENV) deploy/deploy.sh --rollback "$(REV)"
 
 PERF_GATE_BEFORE := scripts/perf-gate.sh before
 PERF_GATE_AFTER := scripts/perf-gate.sh after
@@ -173,7 +180,7 @@ bench-full: setup
 	TMPDIR="$(CURDIR)/.work/tmp" node bench/integrated-bench.mjs --browser=chromium,webkit --warmups=5 --runs=20
 	$(PERF_GATE_AFTER)
 
-.PHONY: auth-recovery-drill bench bench-full build-linux-musl-aarch64 build-linux-musl-docker build-linux-musl-x86_64 deploy deploy-check deploy-status deploy-smoke rollback dev dev-config dev-serve check lint loupe notes setup test-loupe-browser types types-check types-generated ts test test-e2e-chromium test-e2e-webkit update-e2e-baselines-linux test-e2e-loupe test-rs test-sqlite-static test-acceptance web-build publish-mynpm
+.PHONY: auth-recovery-drill bench bench-full build-linux-musl-aarch64 build-linux-musl-docker build-linux-musl-x86_64 deploy deploy-check deploy-status deploy-smoke deploy-sync rollback dev dev-config dev-serve check lint loupe notes setup test-loupe-browser types types-check types-generated ts test test-e2e-chromium test-e2e-webkit update-e2e-baselines-linux test-e2e-loupe test-rs test-sqlite-static test-acceptance web-build publish-mynpm
 
 # Publish the TS dependency closure to our private npm registry as well.
 # TARGETS adds non-host targets (the default pass already covers the host);

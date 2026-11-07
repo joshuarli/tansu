@@ -1,0 +1,14 @@
+# Tansu's Stats service definition. Register the Stats host and this service
+# once from a Stats checkout:
+#
+#   pnpm --dir cloudflare -s statsctl service create \
+#     --name tansu --host HOST_ID --unit tansu \
+#     --health-url https://tansu.<tailnet>.ts.net/api/v2/health \
+#     --credential-file .work/credentials/tansu.json
+#
+# The credential file holds the deploy token used by `statsctl deploy mark` and
+# the ingest token used by Tansu's producer. Keep it mode 0600. The deploy
+# script reads the defaults below; STATS_SERVICE overrides the name.
+TANSU_STATS_SERVICE=tansu
+TANSU_STATS_UNIT=tansu
+TANSU_STATS_HEALTH_PATH=/api/v2/health
