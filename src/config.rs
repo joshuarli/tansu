@@ -203,7 +203,7 @@ pub fn initialize_state_layout(data_root: &Path, vaults: &[VaultConfig]) -> Resu
     Ok((server_instance_id, resolved))
 }
 
-fn read_root_mappings(path: &Path) -> Result<std::collections::BTreeMap<String, String>> {
+fn read_root_mappings(path: &Path) -> Result<rustc_hash::FxHashMap<String, String>> {
     if let Ok(metadata) = fs::symlink_metadata(path)
         && (metadata.file_type().is_symlink() || !metadata.is_file())
     {
@@ -213,7 +213,7 @@ fn read_root_mappings(path: &Path) -> Result<std::collections::BTreeMap<String, 
     }
     match fs::read(path) {
         Ok(bytes) => deser_json::from_slice(&bytes).map_err(Into::into),
-        Err(error) if error.kind() == ErrorKind::NotFound => Ok(std::collections::BTreeMap::new()),
+        Err(error) if error.kind() == ErrorKind::NotFound => Ok(rustc_hash::FxHashMap::default()),
         Err(error) => Err(Error::Io(error)),
     }
 }

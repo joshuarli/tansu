@@ -1,7 +1,8 @@
-use std::collections::BTreeSet;
 use std::env;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
+
+use rustc_hash::FxHashSet;
 
 fn main() {
     let dist = Path::new("web/dist");
@@ -12,8 +13,8 @@ fn main() {
     ).expect("web asset manifest must be valid JSON");
     let files = manifest["files"].as_seq().expect("web asset manifest requires a files array");
     let mut entries = Vec::with_capacity(files.len());
-    let mut listed_paths = BTreeSet::new();
-    let mut listed_urls = BTreeSet::new();
+    let mut listed_paths = FxHashSet::default();
+    let mut listed_urls = FxHashSet::default();
 
     for file in files {
         let url = file["url"].as_str().expect("asset url must be a string");
@@ -45,7 +46,7 @@ fn main() {
 
     assert!(listed_urls.contains("/"), "manifest must include the HTML shell");
     let emitted_paths = files_below(dist);
-    let expected_paths = listed_paths.into_iter().chain(["manifest.json".to_string()]).collect::<BTreeSet<_>>();
+    let expected_paths = listed_paths.into_iter().chain(["manifest.json".to_string()]).collect::<FxHashSet<_>>();
     assert_eq!(emitted_paths, expected_paths, "web/dist contains files outside the manifest");
 
     let out_dir = PathBuf::from(env::var_os("OUT_DIR").expect("OUT_DIR is set by Cargo"));
@@ -76,8 +77,8 @@ fn has_content_hash(url: &str) -> bool {
     })
 }
 
-fn files_below(root: &Path) -> BTreeSet<String> {
-    let mut files = BTreeSet::new();
+fn files_below(root: &Path) -> FxHashSet<String> {
+    let mut files = FxHashSet::default();
     let mut pending = vec![root.to_path_buf()];
     while let Some(directory) = pending.pop() {
         for entry in fs::read_dir(directory).expect("read web/dist") {
