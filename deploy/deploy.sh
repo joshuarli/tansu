@@ -75,16 +75,18 @@ readiness() {
   attempt=0
   while [ "$attempt" -lt 30 ]; do
     # shellcheck disable=SC2086
-    if ssh $ssh_opts -- "$deploy_host" "doas -n sh -s -- '$expected'" <<'HEALTH'
+    if ssh $ssh_opts -- "$deploy_host" "doas -n sh -s -- '$expected' '$tailnet_dns_name'" <<'HEALTH'
 set -eu
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
 expected=$1
-python3 - "$expected" <<'PY'
+tailnet=$2
+python3 - "$expected" "$tailnet" <<'PY'
 import json, sys, urllib.request
-expected = sys.argv[1]
+expected, tailnet = sys.argv[1], sys.argv[2]
+request = urllib.request.Request("http://127.0.0.1:3001/api/v2/health", headers={"Host": tailnet})
 try:
-    with urllib.request.urlopen("http://127.0.0.1:3001/api/v2/health", timeout=3) as response:
+    with urllib.request.urlopen(request, timeout=3) as response:
         body = json.load(response)
 except Exception:
     raise SystemExit(1)
