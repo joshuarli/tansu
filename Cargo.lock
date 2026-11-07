@@ -1788,6 +1788,7 @@ dependencies = [
  "psl",
  "pulldown-cmark",
  "rusqlite",
+ "rustc-hash",
  "rustix",
  "tansu-api-types",
  "tansu-note-core",
