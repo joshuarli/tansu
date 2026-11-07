@@ -1,0 +1,32 @@
+#!/sbin/openrc-run
+
+name="tansu"
+description="Tansu note server"
+
+: "${TANSU_PORT:=3001}"
+: "${TANSU_HOME:=/var/lib/tansu}"
+
+export HOME="$TANSU_HOME"
+export XDG_CONFIG_HOME="$TANSU_HOME/config"
+export XDG_DATA_HOME="$TANSU_HOME/data"
+
+command="/opt/tansu/current/tansu"
+command_args="--port $TANSU_PORT"
+command_user="tansu:tansu"
+directory="$TANSU_HOME"
+supervisor="supervise-daemon"
+respawn_delay=3
+respawn_max=0
+output_log="/var/log/tansu/tansu.log"
+error_log="/var/log/tansu/tansu.err"
+
+depend() {
+  need net
+  after tailscaled
+}
+
+start_pre() {
+  checkpath --directory --owner root:tansu --mode 0750 "$TANSU_HOME"
+  checkpath --directory --owner tansu:tansu --mode 0750 "$TANSU_HOME/config" "$TANSU_HOME/data" "/var/log/tansu"
+  test -x /opt/tansu/current/tansu
+}

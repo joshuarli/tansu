@@ -36,30 +36,57 @@ do not replace Tansu passkey authentication.
 
 ## Deploy to a remote host
 
-Run `make deploy` from the repository root. It connects to `DEPLOY_HOST` over
-SSH, builds a static Linux binary for the remote architecture, installs it as a
-systemd service, and keeps the config, vault, and app data under
-`/var/lib/tansu/`. `DEPLOY_HOST` defaults to `josh@lisa`; override it with
-`make deploy DEPLOY_HOST=user@host`.
+Run `make deploy` from the repository root. `DEPLOY_HOST` defaults to
+`josh@lisa`; override it with `make deploy DEPLOY_HOST=user@host`. The script
+connects over SSH, builds the static Linux binary for the remote architecture
+in Docker, uploads the binary, redirect script, and OpenRC templates, and runs
+`deploy/install.sh` through passwordless `doas`.
 
-The remote host must run systemd with Tailscale, and the SSH user must have
-passwordless sudo because the deployment runs `sudo bash` without a terminal.
+The remote host must run Alpine with OpenRC (`/sbin/openrc`, `rc-service`,
+`rc-update`), Tailscale, Python 3, and passwordless `doas` for the SSH user.
+The deployment uses OpenRC only; it does not write systemd units.
 
-Tailscale Serve exposes the app to your tailnet over HTTPS. The URL
-`http://<host>:3000` redirects to `https://<host>.<tailnet>.ts.net`, where the
-server uses authenticated mode. The HTTP endpoint only redirects. Tailscale
-HTTPS must be enabled for your tailnet. See the
+The layout is:
+
+- `/opt/tansu/releases/<commit>/tansu` and `http-redirect.py` are immutable.
+- `/opt/tansu/current` is a symlink to the active release.
+- `/etc/init.d/tansu`, `/etc/init.d/tansu-http-redirect`, `/etc/conf.d/tansu`,
+  and `/etc/conf.d/tansu-http-redirect` are the OpenRC service files from
+  `deploy/openrc/`. Both run under `supervise-daemon` as `tansu:tansu`.
+- `/var/lib/tansu` keeps the config, data, and vault.
+- `/var/lib/tansu/deploy/deploy-state.json` is the owner-only receipt with the
+  active and previous revisions.
+
+The app listens on 3001 and the redirect on 3002. Tailscale Serve maps HTTPS
+443 to 3001 and HTTP 3000 to 3002. The URL `http://<host>:3000` redirects to
+`https://<host>.<tailnet>.ts.net`, where the server uses authenticated mode.
+Tailscale HTTPS must be enabled for your tailnet. See the
 [Tailscale Serve documentation](https://tailscale.com/docs/reference/tailscale-cli/serve).
 
-The deployment initializes SQLite settings for an empty `Personal` vault. Enroll the first
-passkey before editing notes. Stop the service, issue a one-time capability,
-then start the service again, replacing `user@host` with the `DEPLOY_HOST`
-target:
+Preflight runs entirely before the first write. A second deploy of the same
+commit with the same binary and service files writes nothing and restarts
+neither service. A different binary for an existing revision is refused;
+commit the change instead. The five newest releases are retained and older ones
+are pruned after an upgrade.
+
+`make deploy-status` prints the current link, receipt, OpenRC status, and
+Tailscale Serve status. `make deploy-smoke` verifies both services are running
+and that ports 3001 and 3002 answer. `make deploy` does not run the smoke check
+for you.
+
+`make deploy-check` runs `deploy/lifecycle-check.sh` in a disposable
+`alpine:3.22` container. It proves a fresh install, a no-op repeat, an upgrade
+that retains the previous release, a rollback, and a preflight rejection that
+writes nothing.
+
+The deployment initializes SQLite settings for an empty `Personal` vault. Enroll
+the first passkey before editing notes. Stop the service, issue a one-time
+capability, then start the service again:
 
 ```sh
-ssh user@host 'sudo systemctl stop tansu'
-ssh user@host 'sudo -u tansu env HOME=/var/lib/tansu XDG_CONFIG_HOME=/var/lib/tansu/config XDG_DATA_HOME=/var/lib/tansu/data /opt/tansu/tansu auth enroll'
-ssh user@host 'sudo systemctl start tansu'
+ssh user@host 'doas -n rc-service tansu stop'
+ssh user@host 'doas -n -u tansu env HOME=/var/lib/tansu XDG_CONFIG_HOME=/var/lib/tansu/config XDG_DATA_HOME=/var/lib/tansu/data /opt/tansu/current/tansu auth enroll'
+ssh user@host 'doas -n rc-service tansu start'
 ```
 
 Enter the printed capability at the authenticated HTTPS URL and complete
@@ -148,6 +175,28 @@ delete the catalog or revision data to rebuild search. Those files hold durable
 identity and recovery state.
 
 ## Roll back
+
+### Roll back a release
+
+List the retained releases on the host, then activate one:
+
+```sh
+ssh user@host 'doas -n sh -c "ls -1 /opt/tansu/releases"'
+make rollback REV=<commit> DEPLOY_HOST=user@host
+```
+
+`make rollback` does not build or upload. It verifies
+`/opt/tansu/releases/<commit>/tansu` exists, points `/opt/tansu/current` at it,
+restarts both OpenRC services, and updates the receipt. The release that was
+active is retained, so a second rollback can return to it.
+
+A rollback runs the older binary against the current data. Tansu may update its
+SQLite schema when a newer release opens app data, and it does not guarantee
+that a newer catalog can be opened by an older binary. Back up and restore the
+data if the schema needs to move backwards; the release rollback alone does not
+downgrade persistent state.
+
+### Restore from a backup
 
 Stop the server before restoring a backup. Restore the settings database, all vaults, and
 the full app data directory from the same point in time before starting an older

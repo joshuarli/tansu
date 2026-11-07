@@ -145,6 +145,19 @@ build-linux-musl-aarch64:
 deploy:
 	DEPLOY_HOST="$(DEPLOY_HOST)" TMPDIR="$(CURDIR)/.work/tmp" deploy/deploy.sh
 
+deploy-check:
+	docker run --rm -v "$(CURDIR):/src:ro" alpine:3.22 sh /src/deploy/lifecycle-check.sh
+
+deploy-status:
+	DEPLOY_HOST="$(DEPLOY_HOST)" deploy/deploy.sh --status
+
+deploy-smoke:
+	DEPLOY_HOST="$(DEPLOY_HOST)" deploy/deploy.sh --smoke
+
+rollback:
+	@test -n "$(REV)" || { echo 'REV is required: make rollback REV=<release>' >&2; exit 2; }
+	DEPLOY_HOST="$(DEPLOY_HOST)" deploy/deploy.sh --rollback "$(REV)"
+
 PERF_GATE_BEFORE := scripts/perf-gate.sh before
 PERF_GATE_AFTER := scripts/perf-gate.sh after
 
@@ -160,7 +173,7 @@ bench-full: setup
 	TMPDIR="$(CURDIR)/.work/tmp" node bench/integrated-bench.mjs --browser=chromium,webkit --warmups=5 --runs=20
 	$(PERF_GATE_AFTER)
 
-.PHONY: auth-recovery-drill bench bench-full build-linux-musl-aarch64 build-linux-musl-docker build-linux-musl-x86_64 deploy dev dev-config dev-serve check lint loupe notes setup test-loupe-browser types types-check types-generated ts test test-e2e-chromium test-e2e-webkit update-e2e-baselines-linux test-e2e-loupe test-rs test-sqlite-static test-acceptance web-build publish-mynpm
+.PHONY: auth-recovery-drill bench bench-full build-linux-musl-aarch64 build-linux-musl-docker build-linux-musl-x86_64 deploy deploy-check deploy-status deploy-smoke rollback dev dev-config dev-serve check lint loupe notes setup test-loupe-browser types types-check types-generated ts test test-e2e-chromium test-e2e-webkit update-e2e-baselines-linux test-e2e-loupe test-rs test-sqlite-static test-acceptance web-build publish-mynpm
 
 # Publish the TS dependency closure to our private npm registry as well.
 # TARGETS adds non-host targets (the default pass already covers the host);

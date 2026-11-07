@@ -1,0 +1,32 @@
+#!/sbin/openrc-run
+
+name="tansu-http-redirect"
+description="Tansu HTTP to HTTPS redirect"
+
+: "${TANSU_HOME:=/var/lib/tansu}"
+: "${TANSU_REDIRECT_ORIGIN:?TANSU_REDIRECT_ORIGIN must be set in /etc/conf.d/tansu-http-redirect}"
+
+export PYTHONDONTWRITEBYTECODE=1
+export TANSU_REDIRECT_ORIGIN
+
+command="/usr/bin/python3"
+command_args="/opt/tansu/current/http-redirect.py"
+command_user="tansu:tansu"
+directory="$TANSU_HOME"
+supervisor="supervise-daemon"
+respawn_delay=3
+respawn_max=0
+output_log="/var/log/tansu/http-redirect.log"
+error_log="/var/log/tansu/http-redirect.err"
+
+depend() {
+  need net
+  after tailscaled
+}
+
+start_pre() {
+  checkpath --directory --owner root:tansu --mode 0750 "$TANSU_HOME"
+  checkpath --directory --owner tansu:tansu --mode 0750 "/var/log/tansu"
+  test -r /opt/tansu/current/http-redirect.py
+  test -x /usr/bin/python3
+}
