@@ -37,8 +37,21 @@ jobs:
           chmod +x /tmp/rustup-init
           /tmp/rustup-init -y --no-modify-path --profile minimal --default-toolchain none
           "$HOME/.cargo/bin/rustup" show active-toolchain
+          "$HOME/.cargo/bin/rustup" target add x86_64-unknown-linux-musl
+          apt-get -o Acquire::Retries=5 update -qq
+          apt-get -o Acquire::Retries=5 install -y -qq --no-install-recommends musl musl-dev
+          llvm=clang+llvm-23.1.5-x86_64-linux-musl
+          curl -fsSL -o "/tmp/$llvm.tar.xz" "https://github.com/laputa-systems/llvm-prebuilt-musl/releases/download/llvm-musl-23.1.5-2f0b039/$llvm.tar.xz"
+          echo "baba8cf90dd957cf64fdca219f659ec6817b699037a15dfa97bb847a01a64219  /tmp/$llvm.tar.xz" | sha256sum -c -
+          tar -xf "/tmp/$llvm.tar.xz" -C /opt
+          rm "/tmp/$llvm.tar.xz"
+          mkdir -p /opt/musl/x86_64/usr/lib
+          ln -s /usr/include/x86_64-linux-musl /opt/musl/x86_64/usr/include
+          for stub in dl pthread m rt crypt resolv util xnet; do "/opt/$llvm/bin/llvm-ar" rc "/opt/musl/x86_64/usr/lib/lib$stub.a"; done
+          printf '#!/bin/sh\nexec /opt/%s/bin/clang --target=x86_64-linux-musl --sysroot=/opt/musl/x86_64 "$@"\n' "$llvm" > /usr/local/bin/tansu-clang
+          chmod 0755 /usr/local/bin/tansu-clang
           mkdir -p .work/tmp
-          CC=cc AR=ar TMPDIR="$PWD/.work/tmp" sh scripts/build-sqlite-static.sh /opt/tansu-sqlite
+          CC=tansu-clang AR="/opt/$llvm/bin/llvm-ar" TMPDIR="$PWD/.work/tmp" sh scripts/build-sqlite-static.sh /opt/tansu-sqlite
       - id: install
         name: Install the locked packages
         shell: bash
@@ -62,5 +75,10 @@ jobs:
           export PATH="$HOME/.cargo/bin:$PATH" TMPDIR="$PWD/.work/tmp"
           export SQLITE3_STATIC=1 SQLITE3_LIB_DIR=/opt/tansu-sqlite/lib SQLITE3_INCLUDE_DIR=/opt/tansu-sqlite/include LIBSQLITE3_SYS_USE_PKG_CONFIG=0
           export CARGO_PROFILE_DEV_DEBUG=0 CARGO_INCREMENTAL=0
+          llvm=/opt/clang+llvm-23.1.5-x86_64-linux-musl
+          export CC_x86_64_unknown_linux_musl="$llvm/bin/clang" AR_x86_64_unknown_linux_musl="$llvm/bin/llvm-ar"
+          export CFLAGS_x86_64_unknown_linux_musl="--target=x86_64-linux-musl --sysroot=/opt/musl/x86_64"
+          export CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER="$llvm/bin/clang"
+          export CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_RUSTFLAGS="-Clink-arg=--target=x86_64-linux-musl -Clink-arg=--sysroot=/opt/musl/x86_64 -Clink-arg=-L/opt/musl/x86_64/usr/lib"
           pnpm run build:dev
-          cargo test --locked --workspace
+          cargo test --locked --workspace --target x86_64-unknown-linux-musl
