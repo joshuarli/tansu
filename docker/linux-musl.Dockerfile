@@ -53,7 +53,6 @@ COPY src ./src
 COPY crates ./crates
 COPY scripts ./scripts
 COPY web/dist ./web/dist
-COPY stats/packages/stats-producer /stats/packages/stats-producer
 
 RUN rustup target add "${TARGET}"
 RUN CC=/usr/local/bin/tansu-clang scripts/build-sqlite-static.sh /opt/tansu-sqlite

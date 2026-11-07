@@ -18,9 +18,3 @@
 !web/
 !web/dist/
 !web/dist/**
-!stats/
-!stats/packages/
-!stats/packages/stats-producer/
-!stats/packages/stats-producer/Cargo.toml
-!stats/packages/stats-producer/src/
-!stats/packages/stats-producer/src/**

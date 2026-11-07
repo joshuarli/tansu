@@ -29,7 +29,7 @@ psl = "2.1.241"
 rusqlite = { version = "0.41", features = ["backup", "modern_sqlite"] }
 rustix = { version = "1.1", default-features = false, features = ["fs", "std"] }
 rustc-hash = "2"
-stats-producer = { version = "0.1.0", registry = "mycrates" }
+stats-producer = { version = "0.1.1", registry = "mycrates" }
 deser = { version = "0.10.2", features = ["derive"] }
 deser-json = "0.10.2"
 deser-value = "0.10.2"
@@ -54,9 +54,6 @@ notify = { version = "8.2", default-features = false, features = ["macos_fsevent
 
 [target.'cfg(all(target_os = "linux", target_env = "musl"))'.dependencies]
 notify = { version = "8.2", default-features = false }
-
-[patch.mycrates]
-stats-producer = { path = "../stats/packages/stats-producer" }
 
 [profile.dev]
 debug = "line-tables-only"
