@@ -13,6 +13,7 @@ if [ -z "${TANSU_RELEASE:-}" ]; then
   TANSU_RELEASE=$(basename "$(readlink /opt/tansu/current 2>/dev/null || true)")
 fi
 export TANSU_RELEASE
+export TANSU_STATS_ENDPOINT TANSU_STATS_TOKEN TANSU_STATS_SERVICE TANSU_STATS_RELEASE TANSU_STATS_INSTANCE TANSU_STATS_HOST
 
 export HOME="$TANSU_HOME"
 export XDG_CONFIG_HOME="$TANSU_HOME/config"
