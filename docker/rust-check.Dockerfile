@@ -5,18 +5,33 @@ ARG TARGETARCH
 ARG RUSTUP_VERSION=1.29.1
 ARG RUSTUP_X86_64_SHA256=331228566cc931f32cd684f9bebc5956a5e5d7394c8d5de595f196a658ab98e6
 ARG RUSTUP_AARCH64_SHA256=1ddf36182ac5d1782dbeefcb9bea7f5f9412d88f4a0d5047b1564a223624e8c6
+ARG LLVM_RELEASE=llvm-musl-23.1.5-2f0b039
+ARG LLVM_VERSION=23.1.5
+ARG LLVM_X86_64_SHA256=baba8cf90dd957cf64fdca219f659ec6817b699037a15dfa97bb847a01a64219
+ARG LLVM_AARCH64_SHA256=48d1801c1ccc0197182231b7b465879cf7366336f282287bdd30aa7573725dda
 
 RUN apk add --no-cache \
   ca-certificates=20261020-r0 \
-  clang22=22.1.8-r1 \
   curl=8.23.0-r0 \
-  gcc=15.2.0-r9 \
   git=2.56.0-r0 \
-  lld22=22.1.8-r1 \
-  llvm22=22.1.8-r1 \
+  libgcc=15.2.0-r9 \
   musl-dev=1.2.6-r6 \
   openssl=3.5.9-r0 \
-  tar=1.35-r5
+  tar=1.35-r5 \
+  xz=5.8.4-r0
+
+RUN case "$TARGETARCH" in \
+        amd64) arch=x86_64; sum="$LLVM_X86_64_SHA256" ;; \
+        arm64) arch=aarch64; sum="$LLVM_AARCH64_SHA256" ;; \
+        *) echo "unsupported TARGETARCH: $TARGETARCH" >&2; exit 1 ;; \
+    esac \
+    && name="clang+llvm-${LLVM_VERSION}-${arch}-linux-musl" \
+    && curl -fsSL -o /tmp/llvm.tar.xz "https://github.com/laputa-systems/llvm-prebuilt-musl/releases/download/${LLVM_RELEASE}/${name}.tar.xz" \
+    && echo "$sum  /tmp/llvm.tar.xz" | sha256sum -c - \
+    && tar -xf /tmp/llvm.tar.xz -C /opt \
+    && ln -s "/opt/${name}" /opt/llvm \
+    && rm /tmp/llvm.tar.xz \
+    && ln -s libgcc_s.so.1 /usr/lib/libgcc_s.so
 
 RUN case "$TARGETARCH" in \
         amd64) arch=x86_64; sum="$RUSTUP_X86_64_SHA256" ;; \
@@ -29,7 +44,7 @@ RUN case "$TARGETARCH" in \
     && /tmp/rustup-init -y --default-toolchain none \
     && rm /tmp/rustup-init
 
-ENV PATH="/root/.cargo/bin:/usr/lib/llvm22/bin:${PATH}" \
+ENV PATH="/root/.cargo/bin:/opt/llvm/bin:${PATH}" \
   CC=clang \
   AR=llvm-ar \
   SQLITE3_STATIC=1 \
