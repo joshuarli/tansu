@@ -70,6 +70,47 @@ PREFLIGHT
 remote_metadata=$(remote_preflight)
 read -r remote_arch tailnet_dns_name <<< "$remote_metadata"
 
+readiness() {
+  expected=$1
+  attempt=0
+  while [ "$attempt" -lt 30 ]; do
+    # shellcheck disable=SC2086
+    if ssh $ssh_opts -- "$deploy_host" "doas -n sh -s -- '$expected'" <<'HEALTH'
+set -eu
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+expected=$1
+python3 - "$expected" <<'PY'
+import json, sys, urllib.request
+expected = sys.argv[1]
+try:
+    with urllib.request.urlopen("http://127.0.0.1:3001/api/v2/health", timeout=3) as response:
+        body = json.load(response)
+except Exception:
+    raise SystemExit(1)
+if response.status != 200 or body.get("ok") is not True or body.get("release") != expected:
+    raise SystemExit(1)
+PY
+HEALTH
+    then return 0; fi
+    attempt=$((attempt + 1))
+    sleep 2
+  done
+  return 1
+}
+
+previous_revision=
+if deploy_state_exists; then
+  # shellcheck disable=SC2086
+  previous_revision=$(ssh $ssh_opts -- "$deploy_host" 'doas -n sh -s' <<'PREVIOUS'
+set -eu
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+sed -n 's/.*"revision":"\([A-Za-z0-9._-]*\)".*/\1/p' /var/lib/tansu/deploy/deploy-state.json | head -n 1
+PREVIOUS
+  )
+fi
+
 case "$tailnet_dns_name" in
   *.ts.net) ;;
   *) printf 'unexpected Tailscale DNS name: %s\n' "$tailnet_dns_name" >&2; exit 1 ;;
@@ -141,6 +182,10 @@ if [[ "$mode" == "rollback" ]]; then
     deploy_state sync
   fi
   ssh -o BatchMode=yes "$deploy_host" "doas -n sh -s -- --tailnet '$tailnet_dns_name' --rollback '$rollback_revision'" < "$repo_root/deploy/install.sh"
+  if ! readiness "$rollback_revision"; then
+    printf '%s: rolled-back release %s is not ready\n' "$deploy_host" "$rollback_revision" >&2
+    exit 1
+  fi
   if [[ "$stats_enabled" -eq 1 ]] && ! deploy_state mark; then
     printf '%s: deployment marker pending; retry with make deploy-sync\n' "$deploy_host" >&2
   fi
@@ -188,7 +233,28 @@ scp -q "$repo_root/deploy/openrc/tansu-http-redirect" "$deploy_host:$remote_stag
 if [[ "$stats_enabled" -eq 1 ]] && deploy_state_exists; then
   deploy_state sync
 fi
-ssh -o BatchMode=yes "$deploy_host" "doas -n sh -s -- --tailnet '$tailnet_dns_name' --revision '$revision' --stage '$remote_stage'" < "$repo_root/deploy/install.sh"
+stats_install_args=()
+if [[ "$stats_enabled" -eq 1 ]]; then
+  ingest_token=$(jaq -er '.ingestToken' "$stats_token_file")
+  stats_env="$repo_root/.work/tmp/tansu-stats.env"
+  umask 077
+  printf 'TANSU_STATS_TOKEN=%s\n' "$ingest_token" > "$stats_env"
+  scp -q "$stats_env" "$deploy_host:$remote_stage/stats.env"
+  rm -f "$stats_env"
+  stats_install_args=(--stats-origin "$stats_origin" --stats-service "$stats_service")
+fi
+ssh -o BatchMode=yes "$deploy_host" "doas -n sh -s -- --tailnet '$tailnet_dns_name' --revision '$revision' --stage '$remote_stage' ${stats_install_args[*]:-}" < "$repo_root/deploy/install.sh"
+if ! readiness "$revision"; then
+  printf '%s: release %s did not become ready\n' "$deploy_host" "$revision" >&2
+  if [ -n "$previous_revision" ]; then
+    printf '%s: rolling back to %s\n' "$deploy_host" "$previous_revision" >&2
+    ssh -o BatchMode=yes "$deploy_host" "doas -n sh -s -- --tailnet '$tailnet_dns_name' --rollback '$previous_revision'" < "$repo_root/deploy/install.sh"
+    if ! readiness "$previous_revision"; then
+      printf '%s: rollback release %s is not ready\n' "$deploy_host" "$previous_revision" >&2
+    fi
+  fi
+  exit 1
+fi
 if [[ "$stats_enabled" -eq 1 ]] && ! deploy_state mark; then
   printf '%s: deployment marker pending; retry with make deploy-sync\n' "$deploy_host" >&2
 fi

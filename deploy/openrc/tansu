@@ -3,6 +3,10 @@
 name="tansu"
 description="Tansu note server"
 
+if [ -r /etc/tansu/stats.env ]; then
+  . /etc/tansu/stats.env
+fi
+
 : "${TANSU_PORT:=3001}"
 : "${TANSU_HOME:=/var/lib/tansu}"
 if [ -z "${TANSU_RELEASE:-}" ]; then

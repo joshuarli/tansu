@@ -9,10 +9,12 @@ rollback=0
 revision=
 stage=
 tailnet=
+stats_origin=
+stats_service=tansu
 keep=${TANSU_KEEP_RELEASES:-5}
 
 usage() {
-  printf '%s\n' "usage: install.sh --tailnet DNS --revision REV --stage DIR [--root DIR] [--check]" "       install.sh --tailnet DNS --rollback REV [--root DIR] [--check]" >&2
+  printf '%s\n' "usage: install.sh --tailnet DNS --revision REV --stage DIR [--stats-origin URL] [--stats-service NAME] [--root DIR] [--check]" "       install.sh --tailnet DNS --rollback REV [--root DIR] [--check]" >&2
   exit 2
 }
 
@@ -29,6 +31,8 @@ while [ $# -gt 0 ]; do
     --revision) revision=${2:?--revision needs a revision}; shift 2 ;;
     --stage) stage=${2:?--stage needs a path}; shift 2 ;;
     --tailnet) tailnet=${2:?--tailnet needs a DNS name}; shift 2 ;;
+    --stats-origin) stats_origin=${2:?--stats-origin needs a URL}; shift 2 ;;
+    --stats-service) stats_service=${2:?--stats-service needs a name}; shift 2 ;;
     -h|--help) usage ;;
     *) die "unknown argument: $1" ;;
   esac
@@ -149,8 +153,20 @@ service_changed=0
 conf_changed=0
 conf_tansu="TANSU_PORT=3001
 TANSU_HOME=/var/lib/tansu"
+if [ -n "$stats_origin" ]; then
+  conf_tansu="$conf_tansu
+TANSU_STATS_ENDPOINT=$stats_origin
+TANSU_STATS_SERVICE=$stats_service"
+fi
 conf_redirect="TANSU_REDIRECT_ORIGIN=$origin
 TANSU_HOME=/var/lib/tansu"
+stats_env="$stage/stats.env"
+stats_env_changed=0
+if [ "$rollback" -eq 0 ] && [ -f "$stats_env" ]; then
+  if [ ! -f "$(path /etc/tansu/stats.env)" ] || ! cmp -s "$stats_env" "$(path /etc/tansu/stats.env)"; then
+    stats_env_changed=1
+  fi
+fi
 if [ "$rollback" -eq 0 ]; then
   installed_tansu=$(path /etc/init.d/tansu)
   installed_redirect=$(path /etc/init.d/tansu-http-redirect)
@@ -179,7 +195,7 @@ if rc-service tansu status >/dev/null 2>&1; then tansu_active=1; fi
 if rc-service tansu-http-redirect status >/dev/null 2>&1; then redirect_active=1; fi
 
 restart_required=0
-if [ "$release_changed" -eq 1 ] || [ "$current_changed" -eq 1 ] || [ "$service_changed" -eq 1 ] || [ "$conf_changed" -eq 1 ] || [ "$config_missing" -eq 1 ]; then
+if [ "$release_changed" -eq 1 ] || [ "$current_changed" -eq 1 ] || [ "$service_changed" -eq 1 ] || [ "$conf_changed" -eq 1 ] || [ "$stats_env_changed" -eq 1 ] || [ "$config_missing" -eq 1 ]; then
   restart_required=1
 fi
 
@@ -198,6 +214,10 @@ install -d -o root -g tansu -m 0750 "$(path /var/lib/tansu)"
 install -d -o tansu -g tansu -m 0750 "$(path /var/lib/tansu/config)" "$(path /var/lib/tansu/config/tansu)" "$(path /var/lib/tansu/data)" "$(path /var/lib/tansu/vault)" "$(path /var/log/tansu)"
 install -d -o tansu -g tansu -m 0700 "$(path /var/lib/tansu/deploy)"
 install -d -o root -g root -m 0755 "$(path /etc/init.d)" "$(path /etc/conf.d)" "$(path /etc/runlevels/default)"
+install -d -o root -g tansu -m 0750 "$(path /etc/tansu)"
+if [ "$stats_env_changed" -eq 1 ]; then
+  install -o root -g tansu -m 0640 "$stats_env" "$(path /etc/tansu/stats.env)"
+fi
 
 if [ "$release_changed" -eq 1 ]; then
   install -d -o root -g root -m 0755 "$new_release"
