@@ -52,6 +52,8 @@ esac
 remote_preflight() {
   ssh -o BatchMode=yes -o ConnectTimeout=10 "$deploy_host" sh -s <<'PREFLIGHT'
 set -eu
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
 command -v tailscale >/dev/null
 command -v doas >/dev/null
 command -v rc-service >/dev/null
@@ -86,6 +88,8 @@ fi
 if [[ "$mode" == "status" ]]; then
   ssh -o BatchMode=yes "$deploy_host" 'doas -n sh -s' <<'STATUS'
 set -eu
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
 printf 'host: %s\n' "$(uname -n)"
 printf 'current: %s\n' "$(readlink /opt/tansu/current 2>/dev/null || printf 'missing')"
 if [ -f /var/lib/tansu/deploy/deploy-state.json ]; then
@@ -104,6 +108,8 @@ fi
 if [[ "$mode" == "smoke" ]]; then
   ssh -o BatchMode=yes "$deploy_host" 'doas -n sh -s' <<'SMOKE'
 set -eu
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
 rc-service tansu status
 rc-service tansu-http-redirect status
 python3 - <<'PY'

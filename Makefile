@@ -138,7 +138,11 @@ test-acceptance: setup
 build-linux-musl-docker: setup
 	mkdir -p "$(CURDIR)/.work/tmp" "$(CURDIR)/.work/dist/$${TARGET:-x86_64-unknown-linux-musl}"
 	TMPDIR="$(CURDIR)/.work/tmp" pnpm run build
-	TMPDIR="$(CURDIR)/.work/tmp" docker build --platform $${PLATFORM:-linux/amd64} -f docker/linux-musl.Dockerfile --build-arg TARGET=$${TARGET:-x86_64-unknown-linux-musl} --build-arg CARGO_PROFILE=$${CARGO_PROFILE:-release} --output type=local,dest="$(CURDIR)/.work/dist/$${TARGET:-x86_64-unknown-linux-musl}" .
+	rm -rf "$(CURDIR)/stats"
+	mkdir -p "$(CURDIR)/stats/packages"
+	cp -a "$(CURDIR)/../stats/packages/stats-producer" "$(CURDIR)/stats/packages/stats-producer"
+	@set -eu; trap 'rm -rf "$(CURDIR)/stats"' EXIT; \
+		TMPDIR="$(CURDIR)/.work/tmp" docker build --platform $${PLATFORM:-linux/amd64} -f docker/linux-musl.Dockerfile --build-arg TARGET=$${TARGET:-x86_64-unknown-linux-musl} --build-arg CARGO_PROFILE=$${CARGO_PROFILE:-release} --output type=local,dest="$(CURDIR)/.work/dist/$${TARGET:-x86_64-unknown-linux-musl}" .
 
 build-linux-musl-x86_64:
 	$(MAKE) build-linux-musl-docker TARGET=x86_64-unknown-linux-musl PLATFORM=linux/amd64
