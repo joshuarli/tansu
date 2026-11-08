@@ -212,7 +212,6 @@ mod reader;
 mod compat_tests;
 
 pub use self::reader::{IndexReader, IndexReaderBuilder, ReloadPolicy, Warmer};
-pub mod snippet;
 
 use std::fmt;
 

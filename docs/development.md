@@ -135,6 +135,6 @@ generated bindings under `extension-loupe/.generated/`.
 Tansu uses the source of Tantivy 0.27.0 in `vendor/tantivy`, licensed under
 MIT. `tansu-search` owns the dependency. Changes to the vendored engine must
 preserve Tansu's search behavior and derived-index recovery.
-The vendored build omits upstream aggregation support and query parsing;
-Tansu constructs its own search queries.
+The vendored build omits upstream aggregation support, query parsing, and
+snippet generation; Tansu constructs queries and excerpts itself.
 
