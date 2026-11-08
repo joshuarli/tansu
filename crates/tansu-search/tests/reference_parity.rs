@@ -94,6 +94,24 @@ fn port_matches_the_pinned_reference_candidate_golden() {
     )
     .unwrap();
 
+    for (query, expected) in [
+        ("apple", vec![("apple", 46.10177), ("desserts", 3.750022)]),
+        ("tart", vec![("apple", 28.807467), ("desserts", 2.9707336)]),
+        ("quick", vec![("guide", 14.090438), ("typo", 2.9707336)]),
+        ("\"quick brown\"", vec![("guide", 3.1414669), ("typo", 3.1414669)]),
+        ("powd", vec![("powder", 8.8)]),
+        ("pwoder", vec![("typo", 3.750022), ("powder", 0.6)]),
+        ("café", vec![("guide", 3.750022)]),
+        ("dessert", vec![("desserts", 8.661395), ("apple", 3.0613954)]),
+    ] {
+        let hits = service.search(query.into(), options, identities.clone()).unwrap();
+        assert_eq!(hits.len(), expected.len(), "query: {query:?}");
+        for (hit, (id, score)) in hits.iter().zip(expected) {
+            assert_eq!(hit.note_id, id, "query: {query:?}");
+            assert!((hit.score - score).abs() < 0.0001, "query: {query:?}, score: {}", hit.score);
+        }
+    }
+
     for line in include_str!("goldens/reference-parity.tsv").lines().skip(1) {
         let fields = line.split('\t').collect::<Vec<_>>();
         assert_eq!(fields.len(), 3);
