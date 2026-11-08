@@ -137,4 +137,7 @@ MIT. `tansu-search` owns the dependency. Changes to the vendored engine must
 preserve Tansu's search behavior and derived-index recovery.
 The vendored build omits upstream aggregation support, query parsing, and
 snippet generation; Tansu constructs queries and excerpts itself.
+The vendored crate's upstream unit tests and doctests are disabled because
+they depend on removed APIs and development dependencies. Run
+`cargo test -p tansu-search` to check the retained search behavior.
 
