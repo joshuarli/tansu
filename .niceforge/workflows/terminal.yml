@@ -1,0 +1,30 @@
+version: 1
+
+workflow:
+  name: terminal
+  timeout: 15m
+
+on:
+  manual: {}
+
+runner:
+  platform: linux/amd64
+
+runtime:
+  world: .niceforge/offline/.smolworld
+  runner-machine: runner
+  workspace: /workspace
+
+jobs:
+  checkout:
+    target:
+      platform: linux/amd64
+    timeout: 10m
+    steps:
+      - id: checkout
+        name: Check out the sealed commit
+        uses: niceforge/checkout
+      - id: node
+        name: Confirm the pinned Node without network access
+        shell: bash
+        run: test "$(node --version)" = "v$(cat .node-version)"

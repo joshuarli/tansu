@@ -1,0 +1,11 @@
+format: 2
+
+world:
+  name: tansu-terminal-amd64
+
+network:
+  egress: false
+
+machines:
+  runner:
+    smolfile: ./.niceforge/runner.Smolfile
