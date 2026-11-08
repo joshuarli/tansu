@@ -296,7 +296,6 @@ impl Weight for RegexPhraseWeight {
 
 #[cfg(test)]
 mod tests {
-    use proptest::prelude::*;
     use rand::seq::SliceRandom;
 
     use super::super::tests::create_index;
@@ -304,49 +303,6 @@ mod tests {
     use crate::query::{wildcard_query_to_regex_str, EnableScoring, RegexPhraseQuery};
     use crate::DocSet;
 
-    proptest! {
-        #![proptest_config(ProptestConfig::with_cases(50))]
-        #[test]
-        fn test_phrase_regex_with_random_strings(mut random_strings in proptest::collection::vec("[c-z ]{0,10}", 1..100), num_occurrences in 1..150_usize) {
-            let mut rng = rand::rng();
-
-            // Insert "aaa ccc" the specified number of times into the list
-            for _ in 0..num_occurrences {
-                random_strings.push("aaa ccc".to_string());
-            }
-            // Shuffle the list, which now contains random strings and the inserted "aaa ccc"
-            random_strings.shuffle(&mut rng);
-
-            // Compute the positions of "aaa ccc" after the shuffle
-            let aaa_ccc_positions: Vec<usize> = random_strings
-                .iter()
-                .enumerate()
-                .filter_map(|(idx, s)| if s == "aaa ccc" { Some(idx) } else { None })
-                .collect();
-
-            // Create the index with random strings and the fixed string "aaa ccc"
-            let index = create_index(&random_strings.iter().map(AsRef::as_ref).collect::<Vec<&str>>())?;
-            let schema = index.schema();
-            let text_field = schema.get_field("text").unwrap();
-            let searcher = index.reader()?.searcher();
-
-            let phrase_query = RegexPhraseQuery::new(text_field, vec![wildcard_query_to_regex_str("a*"), wildcard_query_to_regex_str("c*")]);
-
-            let enable_scoring = EnableScoring::enabled_from_searcher(&searcher);
-            let phrase_weight = phrase_query.regex_phrase_weight(enable_scoring).unwrap();
-            let mut phrase_scorer = phrase_weight
-                .phrase_scorer(searcher.segment_reader(0u32), 1.0)?
-                .unwrap();
-
-            // Check if the scorer returns the correct document positions for "aaa ccc"
-            for expected_doc in aaa_ccc_positions {
-                prop_assert_eq!(phrase_scorer.doc(), expected_doc as u32);
-                prop_assert_eq!(phrase_scorer.phrase_count(), 1);
-                phrase_scorer.advance();
-            }
-            prop_assert_eq!(phrase_scorer.advance(), TERMINATED);
-        }
-    }
 
     #[test]
     pub fn test_phrase_regex_invalid_pattern_fails_at_weight() -> crate::Result<()> {

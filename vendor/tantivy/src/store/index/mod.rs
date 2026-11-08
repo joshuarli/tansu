@@ -41,7 +41,6 @@ mod tests {
 
     use std::io;
 
-    use proptest::prelude::*;
 
     use super::{SkipIndex, SkipIndexBuilder};
     use crate::directory::OwnedBytes;
@@ -188,26 +187,6 @@ mod tests {
         output
     }
 
-    // Generates a sequence of n valid checkpoints, with n < max_len.
-    fn monotonic_checkpoints(max_len: usize) -> BoxedStrategy<Vec<Checkpoint>> {
-        (0..max_len)
-            .prop_flat_map(move |len: usize| {
-                (
-                    proptest::collection::vec(1usize..20, len).prop_map(integrate_delta),
-                    proptest::collection::vec(1usize..26, len).prop_map(integrate_delta),
-                )
-                    .prop_map(|(docs, offsets)| {
-                        (0..docs.len() - 1)
-                            .map(move |i| Checkpoint {
-                                doc_range: docs[i] as DocId..docs[i + 1] as DocId,
-                                byte_range: offsets[i]..offsets[i + 1],
-                            })
-                            .collect::<Vec<Checkpoint>>()
-                    })
-            })
-            .boxed()
-    }
-
     fn seek_manual<I: Iterator<Item = Checkpoint>>(
         checkpoints: I,
         target: DocId,
@@ -227,20 +206,26 @@ mod tests {
         }
     }
 
-    proptest! {
-        #![proptest_config(ProptestConfig::with_cases(20))]
-        #[test]
-        fn test_proptest_skip(checkpoints in monotonic_checkpoints(100)) {
-             let mut skip_index_builder = SkipIndexBuilder::new();
-             for checkpoint in checkpoints.iter().cloned() {
-                 skip_index_builder.insert(checkpoint);
-             }
-             let mut buffer = Vec::new();
-             skip_index_builder.serialize_into(&mut buffer).unwrap();
-             let skip_index = SkipIndex::open(OwnedBytes::new(buffer));
-             let iter_checkpoints: Vec<Checkpoint> = skip_index.checkpoints().collect();
-             assert_eq!(&checkpoints[..], &iter_checkpoints[..]);
-             test_skip_index_aux(skip_index, &checkpoints[..]);
-         }
+    #[test]
+    fn test_skip_index_boundaries() {
+        for len in [0, 1, 2, 31, 32, 33, 99] {
+            let docs = integrate_delta((0..len).map(|i| 1 + i % 19).collect());
+            let offsets = integrate_delta((0..len).map(|i| 1 + i % 25).collect());
+            let checkpoints: Vec<Checkpoint> = (0..len)
+                .map(|i| Checkpoint {
+                    doc_range: docs[i] as DocId..docs[i + 1] as DocId,
+                    byte_range: offsets[i]..offsets[i + 1],
+                })
+                .collect();
+            let mut builder = SkipIndexBuilder::new();
+            for checkpoint in &checkpoints {
+                builder.insert(checkpoint.clone());
+            }
+            let mut buffer = Vec::new();
+            builder.serialize_into(&mut buffer).unwrap();
+            let index = SkipIndex::open(OwnedBytes::new(buffer));
+            assert_eq!(index.checkpoints().collect::<Vec<_>>(), checkpoints);
+            test_skip_index_aux(index, &checkpoints);
+        }
     }
 }

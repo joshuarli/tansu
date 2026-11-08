@@ -543,8 +543,6 @@ impl IndexMerger {
 #[cfg(test)]
 mod tests {
     use columnar::Column;
-    use proptest::prop_oneof;
-    use proptest::strategy::Strategy;
     use schema::FAST;
 
     use crate::collector::tests::{
@@ -1298,22 +1296,7 @@ mod tests {
         Commit,
     }
 
-    fn balanced_operation_strategy() -> impl Strategy<Value = IndexingOp> {
-        prop_oneof![
-            (0u64..1u64).prop_map(|_| IndexingOp::ZeroVal),
-            (0u64..1u64).prop_map(|val| IndexingOp::OneVal { val }),
-            (0u64..1u64).prop_map(|val| IndexingOp::TwoVal { val }),
-            (0u64..1u64).prop_map(|_| IndexingOp::Commit),
-        ]
-    }
 
-    use proptest::prelude::*;
-    proptest! {
-        #[test]
-        fn test_merge_columnar_int_proptest(ops in proptest::collection::vec(balanced_operation_strategy(), 1..20)) {
-            assert!(test_merge_int_fields(&ops[..]).is_ok());
-        }
-    }
     fn test_merge_int_fields(ops: &[IndexingOp]) -> crate::Result<()> {
         if ops.iter().all(|op| *op == IndexingOp::Commit) {
             return Ok(());

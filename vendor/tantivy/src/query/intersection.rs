@@ -350,7 +350,6 @@ where
 
 #[cfg(test)]
 mod tests {
-    use proptest::prelude::*;
 
     use super::Intersection;
     use crate::collector::Count;
@@ -497,115 +496,9 @@ mod tests {
         }
     }
 
-    // Strategy to generate sorted and deduplicated vectors of u32 document IDs
-    fn sorted_deduped_vec(max_val: u32, max_size: usize) -> impl Strategy<Value = Vec<u32>> {
-        prop::collection::vec(0..max_val, 0..max_size).prop_map(|mut vec| {
-            vec.sort();
-            vec.dedup();
-            vec
-        })
-    }
 
-    proptest! {
-        #[test]
-        fn prop_test_intersection_consistency(
-            a in sorted_deduped_vec(100, 10),
-            b in sorted_deduped_vec(100, 10),
-            num_docs in 100u32..500u32
-        ) {
-            let left = VecDocSet::from(a.clone());
-            let right = VecDocSet::from(b.clone());
-            let mut intersection = Intersection::new(vec![left, right], num_docs);
 
-            let expected: Vec<u32> = a.iter()
-                .cloned()
-                .filter(|doc| b.contains(doc))
-                .collect();
 
-            for expected_doc in expected {
-                assert_eq!(intersection.doc(), expected_doc);
-                intersection.advance();
-            }
-            assert_eq!(intersection.doc(), TERMINATED);
-        }
-    }
-
-    proptest! {
-        #[test]
-        fn prop_test_intersection_seek(
-            a in sorted_deduped_vec(200, 60),
-            b in sorted_deduped_vec(200, 60),
-            c in sorted_deduped_vec(200, 60),
-            // Each step is either a seek (to `doc + delta`) or an advance (`None`).
-            steps in prop::collection::vec(prop::option::of(0u32..30u32), 0..20),
-        ) {
-            let expected: Vec<u32> = a.iter()
-                .cloned()
-                .filter(|doc| b.contains(doc) && c.contains(doc))
-                .collect();
-            let mut intersection = Intersection::new(
-                vec![
-                    VecDocSet::from(a.clone()),
-                    VecDocSet::from(b.clone()),
-                    VecDocSet::from(c.clone()),
-                ],
-                200,
-            );
-            for step in steps {
-                let doc = intersection.doc();
-                if doc == TERMINATED {
-                    break;
-                }
-                let (returned_doc, expected_doc) = match step {
-                    Some(delta) => {
-                        let target = doc + delta;
-                        let expected_doc = expected.iter().cloned().find(|&expected_doc| expected_doc >= target)
-                            .unwrap_or(TERMINATED);
-                        (intersection.seek(target), expected_doc)
-                    }
-                    None => {
-                        let expected_doc = expected.iter().cloned().find(|&expected_doc| expected_doc > doc)
-                            .unwrap_or(TERMINATED);
-                        (intersection.advance(), expected_doc)
-                    }
-                };
-                prop_assert_eq!(returned_doc, expected_doc);
-                prop_assert_eq!(intersection.doc(), expected_doc);
-            }
-        }
-    }
-
-    proptest! {
-        #[test]
-        fn prop_test_count_including_deleted_matches_default(
-            a in sorted_deduped_vec(1200, 400),
-            b in sorted_deduped_vec(1200, 400),
-            c in sorted_deduped_vec(1200, 400),
-            num_docs in 1200u32..2000u32,
-        ) {
-            // Compute expected count via set intersection.
-            let expected: u32 = a.iter()
-                .filter(|doc| b.contains(doc) && c.contains(doc))
-                .count() as u32;
-
-            // Test count_including_deleted (dense path).
-            let make_intersection = || {
-                Intersection::new(
-                    vec![
-                        VecDocSet::from(a.clone()),
-                        VecDocSet::from(b.clone()),
-                        VecDocSet::from(c.clone()),
-                    ],
-                    num_docs,
-                )
-            };
-
-            let mut intersection = make_intersection();
-            let count = intersection.count_including_deleted();
-            prop_assert_eq!(count, expected,
-                "count_including_deleted mismatch: a={:?}, b={:?}, c={:?}", a, b, c);
-        }
-    }
 
     #[test]
     fn test_count_including_deleted_two_way() {

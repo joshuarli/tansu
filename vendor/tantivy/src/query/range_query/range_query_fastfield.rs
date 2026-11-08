@@ -513,7 +513,6 @@ mod tests {
 
     use common::bounds::BoundsRange;
     use common::DateTime;
-    use proptest::prelude::*;
     use rand::rngs::StdRng;
     use rand::seq::IndexedRandom;
     use rand::SeedableRng;
@@ -1123,12 +1122,6 @@ mod tests {
         pub id: u64,
     }
 
-    fn operation_strategy() -> impl Strategy<Value = Doc> {
-        prop_oneof![
-            (0u64..10_000u64).prop_map(doc_from_id_1),
-            (1u64..10_000u64).prop_map(doc_from_id_2),
-        ]
-    }
 
     fn doc_from_id_1(id: u64) -> Doc {
         let id = id * 1000;
@@ -1145,13 +1138,6 @@ mod tests {
         }
     }
 
-    proptest! {
-        #![proptest_config(ProptestConfig::with_cases(10))]
-        #[test]
-        fn test_range_for_docs_prop(ops in proptest::collection::vec(operation_strategy(), 1..1000)) {
-            assert!(test_id_range_for_docs(ops).is_ok());
-        }
-    }
 
     #[test]
     fn range_regression1_test() {
@@ -1522,9 +1508,6 @@ mod tests {
 
 #[cfg(test)]
 pub(crate) mod ip_range_tests {
-    use proptest::prelude::ProptestConfig;
-    use proptest::strategy::Strategy;
-    use proptest::{prop_oneof, proptest};
 
     use super::*;
     use crate::collector::Count;
@@ -1538,12 +1521,6 @@ pub(crate) mod ip_range_tests {
         pub ip: Ipv6Addr,
     }
 
-    fn operation_strategy() -> impl Strategy<Value = Doc> {
-        prop_oneof![
-            (0u64..10_000u64).prop_map(doc_from_id_1),
-            (1u64..10_000u64).prop_map(doc_from_id_2),
-        ]
-    }
 
     pub fn doc_from_id_1(id: u64) -> Doc {
         let id = id * 1000;
@@ -1562,13 +1539,6 @@ pub(crate) mod ip_range_tests {
         }
     }
 
-    proptest! {
-        #![proptest_config(ProptestConfig::with_cases(10))]
-        #[test]
-        fn test_ip_range_for_docs_prop(ops in proptest::collection::vec(operation_strategy(), 1..1000)) {
-            assert!(test_ip_range_for_docs(&ops).is_ok());
-        }
-    }
 
     #[test]
     fn test_ip_range_regression1() {

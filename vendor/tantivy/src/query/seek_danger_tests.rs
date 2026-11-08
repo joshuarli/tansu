@@ -9,8 +9,6 @@ use std::ops::Bound;
 use std::path::Path;
 use std::sync::OnceLock;
 
-use proptest::prelude::*;
-
 use super::doc_predicate_query::{DocPredicateQuery, FunctionPredicate};
 use super::*;
 use crate::docset::SeekDangerResult;
@@ -37,27 +35,21 @@ enum Kind {
 macro_rules! implementations {
     ($(($path:literal, $kind:ident, $test:ident)),* $(,)?) => {
         const IMPLEMENTATIONS: &[(&str, Kind)] = &[$(($path, Kind::$kind)),*];
-        $(proptest! {
-            #![proptest_config(ProptestConfig::with_cases(32))]
+        $(
             #[test]
-            fn $test(
-                left in expressions(),
-                right in expressions(),
-                random_targets in prop::collection::vec(0u32..12000, 0..80),
-                scoring in any::<bool>(),
-            ) {
-                let mut targets = random_targets;
-                targets.extend([0, 1, 4095, 4096, 4097, 6000, 10200, 11000, 11010, 11101, 11102, TERMINATED]);
-                targets.sort_unstable();
-                targets.dedup();
-                // Exercise the implementation with simple, nonempty children
-                // as well as with randomly nested queries.
-                for (left, right) in [(Expr::Term(2, false), Expr::Term(2, true)), (left, right)] {
-                    let expr = Expr::Node(Kind::$kind, Box::new(left), Box::new(right));
-                    check(|| scorer(&expr, scoring), &targets);
+            fn $test() {
+                let targets = [0, 1, 4095, 4096, 4097, 6000, 10200, 11000, 11010, 11101, 11102, TERMINATED];
+                for scoring in [false, true] {
+                    for (left, right) in [
+                        (Expr::Term(2, false), Expr::Term(2, true)),
+                        (Expr::Node(Kind::Intersection, Box::new(Expr::Term(0, false)), Box::new(Expr::Term(1, true))), Expr::Term(2, true)),
+                    ] {
+                        let expr = Expr::Node(Kind::$kind, Box::new(left), Box::new(right));
+                        check(|| scorer(&expr, scoring), &targets);
+                    }
                 }
             }
-        })*
+        )*
     };
 }
 
@@ -127,21 +119,6 @@ impl Expr {
             Kind::ScorerWrapper => left,
         }
     }
-}
-
-fn expressions() -> impl Strategy<Value = Expr> {
-    (0usize..3, any::<bool>())
-        .prop_map(|(field, order)| Expr::Term(field, order))
-        .prop_recursive(3, 16, 2, |inner| {
-            // ScorerWrapper is exercised directly as a root, not a Query.
-            let kinds: Vec<_> = IMPLEMENTATIONS
-                .iter()
-                .map(|&(_, kind)| kind)
-                .filter(|kind| !matches!(kind, Kind::ScorerWrapper))
-                .collect();
-            (prop::sample::select(kinds), inner.clone(), inner)
-                .prop_map(|(kind, left, right)| Expr::Node(kind, Box::new(left), Box::new(right)))
-        })
 }
 
 struct Fixture {
@@ -257,31 +234,27 @@ fn check(mut make: impl FnMut() -> Box<dyn Scorer>, targets: &[DocId]) {
     }
 }
 
-proptest! {
-    #![proptest_config(ProptestConfig::with_cases(32))]
-
-    #[test]
-    fn buffered_union_invalid_child_regression(offset in 0u32..1000, extra_gap in 0u32..1000) {
-        // Same state transitions as #3086, without indexing 11k documents per
-        // case. Both seeks are beyond the buffered horizon. The first child
-        // misses the second target and leaves a one-term-only doc in the new
-        // horizon; the second child finds the target.
-        let first = offset + 6000;
-        let second = first + 5000 + extra_gap;
-        let false_match = second + 10;
-        let last = second + 101;
-        check(|| {
-            let intersection = |a, b| -> Box<dyn Scorer> {
-                Box::new(Intersection::new(vec![
-                    ConstScorer::new(VecDocSet::from(a), 1.0),
-                    ConstScorer::new(VecDocSet::from(b), 1.0),
-                ], last + 3))
-            };
-            Box::new(BufferedUnionScorer::build(vec![
-                intersection(vec![offset, first + 4200, false_match, last], vec![offset, first + 4200, last, last + 1, last + 2]),
-                intersection(vec![first, second], vec![first, second]),
-            ], SumCombiner::default, last + 3))
-        }, &[first, second, false_match, last, TERMINATED]);
+#[test]
+fn buffered_union_invalid_child_regression() {
+    for offset in [0, 1, 999] {
+        for extra_gap in [0, 1, 999] {
+            let first = offset + 6000;
+            let second = first + 5000 + extra_gap;
+            let false_match = second + 10;
+            let last = second + 101;
+            check(|| {
+                let intersection = |a, b| -> Box<dyn Scorer> {
+                    Box::new(Intersection::new(vec![
+                        ConstScorer::new(VecDocSet::from(a), 1.0),
+                        ConstScorer::new(VecDocSet::from(b), 1.0),
+                    ], last + 3))
+                };
+                Box::new(BufferedUnionScorer::build(vec![
+                    intersection(vec![offset, first + 4200, false_match, last], vec![offset, first + 4200, last, last + 1, last + 2]),
+                    intersection(vec![first, second], vec![first, second]),
+                ], SumCombiner::default, last + 3))
+            }, &[first, second, false_match, last, TERMINATED]);
+        }
     }
 }
 

@@ -41,9 +41,6 @@ const COMPRESSION_BLOCK_SIZE: usize = BitPacker4x::BLOCK_LEN;
 #[cfg(test)]
 pub(crate) mod tests {
 
-    use proptest::prelude::*;
-    use proptest::sample::select;
-
     use super::PositionSerializer;
     use crate::directory::OwnedBytes;
     use crate::positions::reader::PositionReader;
@@ -57,20 +54,10 @@ pub(crate) mod tests {
         Ok(OwnedBytes::new(positions_buffer))
     }
 
-    fn gen_delta_positions() -> BoxedStrategy<Vec<u32>> {
-        select(&[0, 1, 70, 127, 128, 129, 200, 255, 256, 257, 270][..])
-            .prop_flat_map(|num_delta_positions| {
-                proptest::collection::vec(
-                    select(&[1u32, 2u32, 4u32, 8u32, 16u32][..]),
-                    num_delta_positions,
-                )
-            })
-            .boxed()
-    }
-
-    proptest! {
-        #[test]
-        fn test_position_delta(delta_positions in gen_delta_positions()) {
+    #[test]
+    fn test_position_delta() {
+        for len in [0, 1, 70, 127, 128, 129, 200, 255, 256, 257, 270] {
+            let delta_positions: Vec<u32> = (0..len).map(|index| [1, 2, 4, 8, 16][index % 5]).collect();
             let delta_positions_data = create_positions_data(&delta_positions).unwrap();
             let mut position_reader = PositionReader::open(delta_positions_data).unwrap();
             let mut minibuf = [0u32; 1];

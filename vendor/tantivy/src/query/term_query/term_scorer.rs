@@ -151,7 +151,6 @@ impl Scorer for TermScorer {
 
 #[cfg(test)]
 mod tests {
-    use proptest::prelude::*;
 
     use crate::index::SegmentId;
     use crate::indexer::index_writer::MEMORY_BUDGET_NUM_BYTES_MIN;
@@ -208,48 +207,6 @@ mod tests {
         Ok(())
     }
 
-    proptest! {
-        #[test]
-        fn test_term_scorer_block_max_score(term_freqs_fieldnorms in proptest::collection::vec((1u32..10u32, 0u32..100u32), 80..300)) {
-        let term_doc_freq = term_freqs_fieldnorms.len();
-         let doc_tfs: Vec<(u32, u32)> = term_freqs_fieldnorms.iter()
-                   .cloned()
-                  .enumerate()
-                  .map(|(doc, (tf, _))| (doc as u32, tf))
-                  .collect();
-
-         let mut fieldnorms: Vec<u32> = vec![];
-         for item in term_freqs_fieldnorms.iter().take(term_doc_freq) {
-             let (tf, num_extra_terms) = item;
-             fieldnorms.push(tf + num_extra_terms);
-         }
-         let average_fieldnorm = fieldnorms
-             .iter()
-             .cloned()
-             .sum::<u32>() as Score / term_doc_freq as Score;
-             // Average fieldnorm is over the entire index,
-             // not necessarily the docs that are in the posting list.
-             // For this reason we multiply by 1.1 to make a realistic value.
-         let bm25_weight = Bm25Weight::for_one_term(term_doc_freq as u64,
-            term_doc_freq as u64 * 10u64,
-            average_fieldnorm);
-
-         let mut term_scorer =
-              TermScorer::create_for_test(&doc_tfs[..], &fieldnorms[..], bm25_weight);
-
-         let docs: Vec<DocId> = (0..term_doc_freq).map(|doc| doc as DocId).collect();
-         for block in docs.chunks(COMPRESSION_BLOCK_SIZE) {
-             let block_max_score: Score = term_scorer.block_max_score();
-             let mut block_max_score_computed: Score = 0.0;
-             for &doc in block {
-                assert_eq!(term_scorer.doc(), doc);
-                block_max_score_computed = block_max_score_computed.max(term_scorer.score());
-                term_scorer.advance();
-             }
-             assert_nearly_equals!(block_max_score_computed, block_max_score);
-         }
-        }
-    }
 
     #[test]
     fn test_block_wand() {

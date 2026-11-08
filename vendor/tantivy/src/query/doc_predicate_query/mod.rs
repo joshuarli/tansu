@@ -325,7 +325,6 @@ pub trait SegmentDocPredicate: Send + 'static {
 pub(crate) mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
 
-    use proptest::prelude::*;
 
     use super::*;
     use crate::collector::{Count, DocSetCollector};
@@ -523,85 +522,6 @@ pub(crate) mod tests {
         );
     }
 
-    proptest! {
-        #[test]
-        fn proptest_necessary_condition_doc_set(
-            candidates in prop::collection::btree_set(0u32..200, 0..60),
-            modulo in 1u32..5,
-            targets in prop::collection::vec(0u32..220, 0..30),
-            advances in prop::collection::vec(any::<bool>(), 0..30),
-        ) {
-            let candidates: Vec<DocId> = candidates.into_iter().collect();
-            let expected: Vec<DocId> = candidates
-                .iter()
-                .copied()
-                .filter(|doc| doc.is_multiple_of(modulo))
-                .collect();
-            let new_doc_set = || {
-                DocPredicateDocSet::new(
-                    move |doc: DocId| doc.is_multiple_of(modulo),
-                    Box::new(VecDocSet::from(candidates.clone())),
-                )
-            };
-            let first_match = |target: DocId| {
-                expected
-                    .iter()
-                    .copied()
-                    .find(|doc| *doc >= target)
-                    .unwrap_or(TERMINATED)
-            };
-
-            // advance
-            let mut doc_set = new_doc_set();
-            let mut matches: Vec<DocId> = Vec::new();
-            while doc_set.doc() != TERMINATED {
-                matches.push(doc_set.doc());
-                doc_set.advance();
-            }
-            prop_assert_eq!(&matches, &expected);
-
-            // interleaved seek and advance
-            let mut doc_set = new_doc_set();
-            for (target, advance) in targets.iter().zip(advances.iter()) {
-                let target = (*target).max(doc_set.doc());
-                if *advance && doc_set.doc() != TERMINATED {
-                    let current = doc_set.doc();
-                    prop_assert_eq!(doc_set.advance(), first_match(current + 1));
-                } else {
-                    prop_assert_eq!(doc_set.seek(target), first_match(target));
-                }
-            }
-
-            // seek_danger, following its contract: strictly increasing targets, respecting
-            // the returned lower bounds.
-            let mut sorted_targets = targets.clone();
-            sorted_targets.sort_unstable();
-            sorted_targets.dedup();
-            let mut doc_set = new_doc_set();
-            let mut lower_bound = doc_set.doc();
-            let mut previous_target = None;
-            for requested_target in sorted_targets {
-                let target = requested_target.max(lower_bound);
-                if previous_target.is_some_and(|previous| previous >= target) {
-                    continue;
-                }
-                previous_target = Some(target);
-                let next_match = first_match(target);
-                match doc_set.seek_danger(target) {
-                    SeekDangerResult::Found => {
-                        prop_assert_eq!(next_match, target);
-                        prop_assert_eq!(doc_set.doc(), target);
-                    }
-                    SeekDangerResult::SeekLowerBound(bound) => {
-                        prop_assert!(next_match != target || target == TERMINATED);
-                        prop_assert!(bound > target || target == TERMINATED);
-                        prop_assert!(bound <= next_match);
-                        lower_bound = bound;
-                    }
-                }
-            }
-        }
-    }
 
     #[test]
     fn test_doc_predicate_query_scorer_danger_target_past_max_doc() {

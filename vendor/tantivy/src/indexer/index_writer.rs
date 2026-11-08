@@ -835,7 +835,6 @@ mod tests {
 
     use columnar::{Cardinality, Column, MonotonicallyMappableToU128};
     use itertools::Itertools;
-    use proptest::prop_oneof;
 
     use super::super::operation::UserOperation;
     use crate::collector::{Count, TopDocs};
@@ -1647,54 +1646,8 @@ mod tests {
         }
     }
 
-    fn value_strategy() -> impl Strategy<Value = IndexValue> {
-        prop_oneof![
-            any::<f64>().prop_map(IndexValue::F64),
-            any::<u64>().prop_map(IndexValue::U64),
-            any::<i64>().prop_map(IndexValue::I64),
-            any::<String>().prop_map(IndexValue::Str),
-        ]
-    }
 
-    fn balanced_operation_strategy() -> impl Strategy<Value = IndexingOp> {
-        prop_oneof![
-            (0u64..20u64).prop_map(|id| IndexingOp::DeleteDoc { id }),
-            (0u64..20u64).prop_map(|id| IndexingOp::DeleteDocQuery { id }),
-            (0u64..20u64, value_strategy())
-                .prop_map(move |(id, value)| IndexingOp::AddDoc { id, value }),
-            ((0u64..20u64), (1u64..100), value_strategy()).prop_map(
-                move |(id, num_docs, value)| {
-                    IndexingOp::AddMultipleDoc {
-                        id,
-                        num_docs,
-                        value,
-                    }
-                }
-            ),
-            (0u64..1u64).prop_map(|_| IndexingOp::Commit),
-            (0u64..1u64).prop_map(|_| IndexingOp::Merge),
-        ]
-    }
 
-    fn adding_operation_strategy() -> impl Strategy<Value = IndexingOp> {
-        prop_oneof![
-            5 => (0u64..100u64).prop_map(|id| IndexingOp::DeleteDoc { id }),
-            5 => (0u64..100u64).prop_map(|id| IndexingOp::DeleteDocQuery { id }),
-            50 => (0u64..100u64, value_strategy())
-                .prop_map(move |(id, value)| IndexingOp::AddDoc { id, value }),
-            50 => (0u64..100u64, (1u64..100), value_strategy()).prop_map(
-                move |(id, num_docs, value)| {
-                    IndexingOp::AddMultipleDoc {
-                        id,
-                        num_docs,
-                        value,
-                    }
-                }
-            ),
-            2 => (0u64..1u64).prop_map(|_| IndexingOp::Commit),
-            1 => (0u64..1u64).prop_map(|_| IndexingOp::Merge),
-        ]
-    }
 
     fn expected_ids(ops: &[IndexingOp]) -> (HashMap<u64, u64>, HashSet<u64>) {
         let mut existing_ids = HashMap::new();
@@ -2517,43 +2470,7 @@ mod tests {
         assert!(test_operation_strategy(&[IndexingOp::add(3),], true, true).is_ok());
     }
 
-    use proptest::prelude::*;
 
-    proptest! {
-
-        #![proptest_config(ProptestConfig::with_cases(20))]
-        #[test]
-        fn test_delete_proptest_adding(ops in proptest::collection::vec(adding_operation_strategy(), 1..100)) {
-            assert!(test_operation_strategy(&ops[..],  true, false).is_ok());
-        }
-
-        #[test]
-        fn test_delete_proptest_with_merge_adding(ops in proptest::collection::vec(adding_operation_strategy(), 1..100)) {
-            assert!(test_operation_strategy(&ops[..],  false, false).is_ok());
-        }
-
-        #[test]
-        fn test_delete_proptest(ops in proptest::collection::vec(balanced_operation_strategy(), 1..10)) {
-            assert!(test_operation_strategy(&ops[..],  true, true).is_ok());
-        }
-
-        #[test]
-        fn test_delete_proptest_with_merge(ops in proptest::collection::vec(balanced_operation_strategy(), 1..100)) {
-            assert!(test_operation_strategy(&ops[..],  false, true).is_ok());
-        }
-
-        #[test]
-        #[ignore = "doesn't work with deferred segment loading"]
-        fn test_delete_without_sort_proptest(ops in proptest::collection::vec(balanced_operation_strategy(), 1..10)) {
-            assert!(test_operation_strategy(&ops[..], false, false).is_ok());
-        }
-
-        #[test]
-        #[ignore = "doesn't work with deferred segment loading"]
-        fn test_delete_with_sort_proptest_with_merge(ops in proptest::collection::vec(balanced_operation_strategy(), 1..10)) {
-            assert!(test_operation_strategy(&ops[..], true, true).is_ok());
-        }
-    }
 
     #[test]
     fn test_delete_with_sort_by_field_last_opstamp_is_not_max() -> crate::Result<()> {

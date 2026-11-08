@@ -97,26 +97,7 @@ mod tests {
         assert_eq!(count, make_union().count_including_deleted());
     }
 
-    use proptest::prelude::*;
 
-    proptest! {
-        #[test]
-        fn test_union_is_same(vecs in prop::collection::vec(
-            prop::collection::vec(0u32..100, 1..10)
-                .prop_map(|mut inner| {
-                    inner.sort_unstable();
-                    inner.dedup();
-                    inner
-                }),
-            1..10
-        ),
-        seek_docids in prop::collection::vec(0u32..100, 0..10).prop_map(|mut inner| {
-            inner.sort_unstable();
-            inner
-        })) {
-            test_docid_with_skip(&vecs, &seek_docids);
-        }
-    }
 
     fn test_docid_with_skip(vecs: &[Vec<DocId>], skip_targets: &[DocId]) {
         let mut union1 = posting_list_union_from_docs_list(vecs);

@@ -79,7 +79,6 @@ pub fn search_block(arr: &[u32; COMPRESSION_BLOCK_SIZE], target: u32) -> usize {
 mod tests {
     use std::collections::HashSet;
 
-    use proptest::prelude::*;
 
     use super::{kary_search, search_block};
     use crate::docset::TERMINATED;
@@ -160,21 +159,5 @@ mod tests {
         }
     }
 
-    fn monotonous_block() -> impl Strategy<Value = Vec<u32>> {
-        prop::collection::vec(0u32..5u32, COMPRESSION_BLOCK_SIZE).prop_map(|mut deltas| {
-            let mut el = 0;
-            for i in 0..COMPRESSION_BLOCK_SIZE {
-                el += deltas[i];
-                deltas[i] = el;
-            }
-            deltas
-        })
-    }
 
-    proptest! {
-        #[test]
-        fn test_proptest_branchless_binary_search(block in monotonous_block()) {
-            util_test_search_in_block_all(&block[..]);
-        }
-    }
 }

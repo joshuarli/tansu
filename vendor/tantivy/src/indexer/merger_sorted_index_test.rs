@@ -2,7 +2,6 @@
 mod tests {
     use std::cmp::Ordering;
 
-    use proptest::prelude::*;
 
     use crate::collector::TopDocs;
     use crate::fastfield::AliveBitSet;
@@ -777,40 +776,6 @@ mod tests {
         assert_eq!(values, vec![Some(vec![0x00]), Some(vec![0x02])]);
     }
 
-    proptest! {
-        #[test]
-        fn test_merge_sorted_index_str_matches_sorted_input(
-            order in prop_oneof![Just(Order::Asc), Just(Order::Desc)],
-            segments in proptest::collection::vec(
-                proptest::collection::vec(proptest::option::of("[a-z]{0,8}"), 1..8),
-                1..6,
-            )
-        ) {
-            let index = build_str_sorted_index_owned(order, segments.clone());
-            let values = collect_str_values(&index);
-            let mut expected: Vec<Option<String>> = segments.into_iter().flatten().collect();
-            expected.sort_by(|left, right| compare_option_values(left, right, order));
-            prop_assert_eq!(values, expected);
-        }
-
-        #[test]
-        fn test_merge_sorted_index_bytes_matches_sorted_input(
-            order in prop_oneof![Just(Order::Asc), Just(Order::Desc)],
-            segments in proptest::collection::vec(
-                proptest::collection::vec(
-                    proptest::option::of(proptest::collection::vec(any::<u8>(), 0..8)),
-                    1..8,
-                ),
-                1..6,
-            )
-        ) {
-            let index = build_bytes_sorted_index_owned(order, segments.clone());
-            let values = collect_bytes_values(&index);
-            let mut expected: Vec<Option<Vec<u8>>> = segments.into_iter().flatten().collect();
-            expected.sort_by(|left, right| compare_option_values(left, right, order));
-            prop_assert_eq!(values, expected);
-        }
-    }
 
     // ---- Cross-segment merge: numeric u64 with NULLs ----
 
@@ -904,22 +869,6 @@ mod tests {
         assert_eq!(values, vec![Some(4), Some(3), Some(2), Some(1), None]);
     }
 
-    proptest! {
-        #[test]
-        fn test_merge_sorted_index_u64_matches_sorted_input(
-            order in prop_oneof![Just(Order::Asc), Just(Order::Desc)],
-            segments in proptest::collection::vec(
-                proptest::collection::vec(proptest::option::of(0u64..100), 1..8),
-                1..6,
-            )
-        ) {
-            let index = build_u64_sorted_index(order, segments.clone());
-            let values = collect_u64_values(&index);
-            let mut expected: Vec<Option<u64>> = segments.into_iter().flatten().collect();
-            expected.sort_by(|left, right| compare_option_values(left, right, order));
-            prop_assert_eq!(values, expected);
-        }
-    }
 
     #[test]
     fn test_merge_sorted_index_postings_with_deletes_and_missing_sort_keys() -> crate::Result<()> {

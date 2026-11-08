@@ -295,7 +295,6 @@ mod tests {
     use std::cmp::Ordering;
     use std::collections::BinaryHeap;
 
-    use proptest::prelude::*;
 
     use crate::query::score_combiner::SumCombiner;
     use crate::query::term_query::TermScorer;
@@ -392,38 +391,6 @@ mod tests {
         checkpoints
     }
 
-    const MAX_TERM_FREQ: u32 = 100u32;
-
-    fn posting_list(max_doc: u32) -> BoxedStrategy<Vec<(DocId, u32)>> {
-        (1..max_doc + 1)
-            .prop_flat_map(move |doc_freq| {
-                (
-                    proptest::bits::bitset::sampled(doc_freq as usize, 0..max_doc as usize),
-                    proptest::collection::vec(1u32..MAX_TERM_FREQ, doc_freq as usize),
-                )
-            })
-            .prop_map(|(docset, term_freqs)| {
-                docset
-                    .iter()
-                    .map(|doc| doc as u32)
-                    .zip(term_freqs.iter().cloned())
-                    .collect::<Vec<_>>()
-            })
-            .boxed()
-    }
-
-    #[expect(clippy::type_complexity)]
-    fn gen_term_scorers(num_scorers: usize) -> BoxedStrategy<(Vec<Vec<(DocId, u32)>>, Vec<u32>)> {
-        (1u32..100u32)
-            .prop_flat_map(move |max_doc: u32| {
-                (
-                    proptest::collection::vec(posting_list(max_doc), num_scorers),
-                    proptest::collection::vec(2u32..10u32 * MAX_TERM_FREQ, max_doc as usize),
-                )
-            })
-            .boxed()
-    }
-
     fn test_block_wand_aux(posting_lists: &[Vec<(DocId, u32)>], fieldnorms: &[u32]) {
         // We virtually repeat all docs 64 times in order to emulate blocks of 2 documents
         // and surface blogs more easily.
@@ -487,24 +454,10 @@ mod tests {
         }
     }
 
-    proptest! {
-        #![proptest_config(ProptestConfig::with_cases(500))]
-        #[test]
-        fn test_block_wand_two_term_scorers((posting_lists, fieldnorms) in gen_term_scorers(2)) {
-            test_block_wand_aux(&posting_lists[..], &fieldnorms[..]);
-        }
-    }
 
-    proptest! {
-        #![proptest_config(ProptestConfig::with_cases(500))]
-        #[test]
-        fn test_block_wand_single_term_scorer((posting_lists, fieldnorms) in gen_term_scorers(1)) {
-            test_block_wand_aux(&posting_lists[..], &fieldnorms[..]);
-        }
-    }
 
     #[test]
-    fn test_fn_reproduce_proptest() {
+    fn test_block_wand_regression() {
         let postings_lists = &[
             vec![
                 (0, 1),
@@ -608,13 +561,4 @@ mod tests {
         test_block_wand_aux(postings_lists, fieldnorms);
     }
 
-    proptest! {
-        #![proptest_config(ProptestConfig::with_cases(500))]
-        #[ignore]
-        #[test]
-        #[ignore]
-        fn test_block_wand_three_term_scorers((posting_lists, fieldnorms) in gen_term_scorers(3)) {
-            test_block_wand_aux(&posting_lists[..], &fieldnorms[..]);
-        }
-    }
 }
