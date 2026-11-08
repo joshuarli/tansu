@@ -479,4 +479,32 @@ mod tests {
         manager.upsert(&make_doc("b.md", "two", 1)).unwrap();
         assert_eq!(manager.document_count(), 2);
     }
+
+    #[test]
+    fn merged_segments_preserve_updates_deletes_and_phrase_matches_after_reopen() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("search");
+        let mut manager = IndexManager::open(&path).unwrap();
+        manager.upsert(&make_doc("a.md", "quick brown fox", 1)).unwrap();
+        manager.upsert(&make_doc("b.md", "quick brown hare", 1)).unwrap();
+        manager.upsert(&make_doc("c.md", "quick brown bear", 1)).unwrap();
+        manager.upsert(&make_doc("a.md", "quick brown cat", 2)).unwrap();
+        manager.remove("c", 2).unwrap();
+        let segments = manager.index.searchable_segment_ids().unwrap();
+        assert!(segments.len() > 1);
+        manager.writer().unwrap().merge(&segments).wait().unwrap();
+        manager.reader.reload().unwrap();
+        assert_eq!(manager.index.searchable_segment_ids().unwrap().len(), 1);
+        drop(manager);
+
+        let manager = IndexManager::open(&path).unwrap();
+        let mut hits = crate::search::execute(&manager, "\"quick brown\"", crate::types::SearchOptions::default())
+            .unwrap()
+            .into_iter()
+            .map(|hit| (hit.note_id, hit.revision, hit.excerpt))
+            .collect::<Vec<_>>();
+        hits.sort_by(|a, b| a.0.cmp(&b.0));
+        assert_eq!(hits, [("a".into(), 2, "quick brown cat".into()), ("b".into(), 1, "quick brown hare".into())]);
+        assert!(!manager.has_document("c").unwrap());
+    }
 }
