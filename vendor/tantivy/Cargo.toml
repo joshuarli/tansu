@@ -139,9 +139,6 @@ version = "1.10.0"
 [dependencies.oneshot]
 version = "0.1.13"
 
-[dependencies.query-grammar]
-version = "0.27"
-package = "tantivy-query-grammar"
 
 [dependencies.rayon]
 version = "1.5.2"

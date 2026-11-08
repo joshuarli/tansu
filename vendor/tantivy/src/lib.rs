@@ -171,7 +171,6 @@ mod future_result;
 // Re-exports
 pub use columnar;
 pub use common::{BitSet, ByteCount, DateTime};
-pub use query_grammar;
 pub use time;
 
 pub use crate::error::TantivyError;

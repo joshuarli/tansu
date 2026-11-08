@@ -1,6 +1,4 @@
-use query_grammar::Occur;
-
-use crate::query::Weight;
+use crate::query::{Occur, Weight};
 
 /// A replacement for `HashMap<Occur, Vec<Box<dyn Weight>>>`.
 ///

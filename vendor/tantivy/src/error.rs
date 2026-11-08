@@ -11,7 +11,7 @@ use crate::directory::error::{
 };
 use crate::fastfield::FastFieldNotAvailableError;
 use crate::schema::document::DeserializeError;
-use crate::{query, schema};
+use crate::schema;
 
 /// Represents a `DataCorruption` error.
 ///
@@ -146,12 +146,6 @@ impl From<FastFieldNotAvailableError> for TantivyError {
 impl From<LockError> for TantivyError {
     fn from(lock_error: LockError) -> TantivyError {
         TantivyError::LockFailure(lock_error, None)
-    }
-}
-
-impl From<query::QueryParserError> for TantivyError {
-    fn from(parsing_error: query::QueryParserError) -> TantivyError {
-        TantivyError::InvalidArgument(format!("Query is invalid. {parsing_error:?}"))
     }
 }
 

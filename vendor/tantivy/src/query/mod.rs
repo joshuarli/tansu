@@ -20,7 +20,6 @@ mod more_like_this;
 mod phrase_prefix_query;
 mod phrase_query;
 mod query;
-mod query_parser;
 mod range_query;
 mod regex_query;
 mod reqopt_scorer;
@@ -37,7 +36,16 @@ mod seek_danger_tests;
 mod vec_docset;
 
 pub(crate) mod score_combiner;
-pub use query_grammar::Occur;
+/// Specifies whether a Boolean clause is required, optional, or excluded.
+#[derive(Debug, Clone, Copy, Hash, Eq, PartialEq)]
+pub enum Occur {
+    /// At least one optional clause must match when no clause is required.
+    Should,
+    /// The clause must match.
+    Must,
+    /// The clause must not match.
+    MustNot,
+}
 
 pub use self::all_query::{AllQuery, AllScorer, AllWeight};
 pub use self::automaton_weight::AutomatonWeight;
@@ -58,7 +66,6 @@ pub use self::phrase_prefix_query::PhrasePrefixQuery;
 pub use self::phrase_query::regex_phrase_query::{wildcard_query_to_regex_str, RegexPhraseQuery};
 pub use self::phrase_query::PhraseQuery;
 pub use self::query::{EnableScoring, Query, QueryClone};
-pub use self::query_parser::{QueryParser, QueryParserError};
 pub use self::range_query::*;
 pub use self::regex_query::RegexQuery;
 pub use self::reqopt_scorer::RequiredOptionalScorer;
