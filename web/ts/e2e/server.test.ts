@@ -1,6 +1,5 @@
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { once } from "node:events";
 import { createReadStream } from "node:fs";
 import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import net from "node:net";
@@ -20,6 +19,7 @@ import { expect, afterAll, beforeEach, describe, beforeAll, it } from "vitest";
 import { canonicalSourceHash } from "../source-hash.ts";
 import encodeWebp from "../editor/vendor/jsquash-webp/encode.js";
 import type { V2ServerEvent } from "../types.generated.ts";
+import { stopChildProcess } from "./child-process.ts";
 
 let server: ChildProcess | undefined;
 let browser: Browser | undefined;
@@ -1606,28 +1606,8 @@ async function artifactHash(path: string): Promise<string> {
 
 async function stopFixtureServer(): Promise<void> {
   const current = server;
-  if (current === undefined) return;
   server = undefined;
-  let didExit = false;
-  const exited = once(current, "exit").then(() => {
-    didExit = true;
-  }).catch(() => undefined);
-  if (current.pid !== undefined) {
-    try {
-      current.kill("SIGTERM");
-    } catch (error) {
-      if (!(error instanceof Error) || !("code" in error) || error.code !== "ESRCH") throw error;
-    }
-  }
-  await Promise.race([exited, new Promise((resolve) => setTimeout(resolve, 5_000))]);
-  if (!didExit && current.exitCode === null && current.signalCode === null && current.pid !== undefined) {
-    try {
-      current.kill("SIGKILL");
-    } catch (error) {
-      if (!(error instanceof Error) || !("code" in error) || error.code !== "ESRCH") throw error;
-    }
-    await exited;
-  }
+  await stopChildProcess(current);
 }
 
 async function v2Request(vaultId: string, path: string, init: RequestInit = {}): Promise<Response> {

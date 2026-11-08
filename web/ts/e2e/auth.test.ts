@@ -1,5 +1,4 @@
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
-import { once } from "node:events";
 import { mkdtemp, mkdir, readFile, rm } from "node:fs/promises";
 import { request as httpRequest } from "node:http";
 import { createServer as createHttpsServer, request as httpsRequest } from "node:https";
@@ -8,6 +7,8 @@ import { join, resolve } from "node:path";
 
 import { chromium, type Browser, type BrowserContext } from "playwright";
 import { expect, describe, it } from "vitest";
+
+import { stopChildProcess } from "./child-process.ts";
 
 type Fixture = {
   configHome: string;
@@ -339,7 +340,7 @@ describe("authenticated Chromium server", () => {
           proxy!.close((error) => error === undefined ? resolve() : reject(error));
         });
       }
-      await stopServer(server);
+      await stopChildProcess(server);
       await rm(root, { recursive: true, force: true });
     }
   }, 120_000);
@@ -429,18 +430,4 @@ async function secureRequest(
     request.on("error", reject);
     request.end();
   });
-}
-
-async function stopServer(server: ChildProcess | undefined): Promise<void> {
-  if (server === undefined) return;
-  let didExit = false;
-  const exited = once(server, "exit").then(() => {
-    didExit = true;
-  });
-  if (server.exitCode === null && server.signalCode === null) server.kill("SIGTERM");
-  await Promise.race([exited, new Promise((resolve) => setTimeout(resolve, 5_000))]);
-  if (!didExit && server.exitCode === null && server.signalCode === null) {
-    server.kill("SIGKILL");
-    await exited;
-  }
 }

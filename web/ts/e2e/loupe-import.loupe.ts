@@ -9,6 +9,8 @@ import { join, resolve } from "node:path";
 import { chromium, type BrowserContext, type Page, type Worker } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import { stopChildProcess } from "./child-process.ts";
+
 type ChromeApi = {
   storage: {
     local: {
@@ -227,15 +229,8 @@ async function startTansu(fixture: { configHome: string; dataHome: string; vault
 
 async function stopTansu(): Promise<void> {
   const current = tansuServer;
-  if (current === undefined) return;
   tansuServer = undefined;
-  const exited = once(current, "exit");
-  current.kill("SIGTERM");
-  await Promise.race([exited, new Promise((done) => setTimeout(done, 5_000))]);
-  if (current.exitCode === null && current.signalCode === null) {
-    current.kill("SIGKILL");
-    await exited;
-  }
+  await stopChildProcess(current);
 }
 
 async function freePort(): Promise<number> {
