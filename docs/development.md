@@ -140,4 +140,6 @@ snippet generation; Tansu constructs queries and excerpts itself.
 The vendored crate's upstream unit tests and doctests are disabled because
 they depend on removed APIs and development dependencies. Run
 `cargo test -p tansu-search` to check the retained search behavior.
+The workspace excludes the vendored crate, so workspace-wide lint checks it
+as a dependency and checks Tansu's own test targets separately.
 
