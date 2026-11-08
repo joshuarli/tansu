@@ -9,6 +9,8 @@ The vault calls the search service directly while holding its search mutex.
 Rebuild clears and recreates only the derived index from canonical note
 documents. On startup, the host compares the index with the catalog and
 rebuilds it when needed, including after an interrupted rebuild.
+Search schema version 3 removes the revision fast field. Existing search
+indexes are rebuilt from canonical notes when opened.
 
 Run the focused benchmarks with `make bench`. Run the wider browser and sample
 set with `make bench-full`. Both targets are defined in the root `Makefile` and run `perf-gate-ready` before measuring and

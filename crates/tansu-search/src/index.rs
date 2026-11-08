@@ -15,7 +15,7 @@ use crate::schema::{FieldHandles, build_schema, doc_text};
 use crate::tokenizer::{DiacriticFilter, FerrisearchTokenizer};
 use crate::types::{DocumentInput, NoteIdentity};
 
-const SCHEMA_VERSION: u32 = 2;
+const SCHEMA_VERSION: u32 = 3;
 const ANALYZER_VERSION: u32 = 2;
 const MAX_SHARED_WRITER_MEMORY_BUDGET: usize = 64 * 1024 * 1024;
 const WRITER_MEMORY_BUDGET: usize = 15_000_000;
@@ -375,7 +375,7 @@ fn read_watermark(index: &Index, allow_missing: bool) -> Result<(i64, bool), Sea
         };
     };
     let Some(value) = payload
-        .strip_prefix("tansu-search;schema=2;analyzer=2;watermark=")
+        .strip_prefix(&format!("tansu-search;schema={SCHEMA_VERSION};analyzer={ANALYZER_VERSION};watermark="))
     else {
         return Err(SearchError::SchemaMismatch);
     };

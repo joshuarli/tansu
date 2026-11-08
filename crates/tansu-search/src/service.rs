@@ -528,6 +528,42 @@ mod tests {
     }
 
     #[test]
+    fn legacy_revision_fast_field_requests_canonical_rebuild() {
+        use tantivy::schema::{FAST, STORED, Schema};
+
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("search");
+        fs::create_dir(&path).unwrap();
+        let (current, _) = crate::schema::build_schema();
+        let mut builder = Schema::builder();
+        for (_, entry) in current.fields() {
+            if entry.name() == "revision" {
+                builder.add_u64_field("revision", STORED | FAST);
+            } else {
+                builder.add_field(entry.clone());
+            }
+        }
+        let index = tantivy::Index::create_in_dir(&path, builder.build()).unwrap();
+        let mut writer = index.writer_with_num_threads::<tantivy::TantivyDocument>(1, 15_000_000).unwrap();
+        let mut commit = writer.prepare_commit().unwrap();
+        commit.set_payload("tansu-search;schema=2;analyzer=2;watermark=0");
+        commit.commit().unwrap();
+        drop(writer);
+        drop(index);
+
+        let mut service = SearchService::open(&path).unwrap();
+        assert!(service.needs_reconciliation());
+        assert_eq!(service.status(), SearchStatus { dirty: true, degraded: true });
+        let canonical = document("a", 1, "canonical needle");
+        service.rebuild(vec![canonical.clone()]).unwrap();
+        assert!(!service.needs_reconciliation());
+        drop(service);
+        let mut reopened = SearchService::open(&path).unwrap();
+        assert!(!reopened.needs_reconciliation());
+        assert_eq!(reopened.search("needle".into(), options(), vec![canonical.identity().clone()]).unwrap().len(), 1);
+    }
+
+    #[test]
     fn new_empty_index_persists_schema_and_analyzer_metadata() {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("search");

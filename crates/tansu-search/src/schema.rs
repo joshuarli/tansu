@@ -33,7 +33,7 @@ pub(crate) fn build_schema() -> (Schema, FieldHandles) {
     let headings = builder.add_text_field("headings", searchable_stored());
     let tags = builder.add_text_field("tags", searchable_stored());
     let content = builder.add_text_field("content", searchable_stored());
-    let revision = builder.add_u64_field("revision", STORED | FAST);
+    let revision = builder.add_u64_field("revision", STORED);
     let source_hash = builder.add_text_field("sourceHash", STRING | STORED);
     (
         builder.build(),
