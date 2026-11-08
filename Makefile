@@ -96,7 +96,7 @@ update-e2e-baselines-linux: setup build-linux-musl-x86_64
 		--env TANSU_E2E_SERVER_BINARY=/work/.work/dist/x86_64-unknown-linux-musl/tansu \
 		--env TMPDIR=/work/.work/tmp \
 		tansu-linux-e2e-baselines \
-		sh -c 'set -eu; pnpm install --frozen-lockfile; for browser in chromium webkit; do TANSU_UPDATE_BASELINES=1 TANSU_E2E_BROWSER=$$browser pnpm run test:browser -- -t baselines; TANSU_E2E_BROWSER=$$browser pnpm run test:browser -- -t baselines; done'
+		sh -c 'set -eu; pnpm install --frozen-lockfile; for browser in chromium webkit; do TANSU_UPDATE_BASELINES=1 TANSU_E2E_BROWSER=$$browser pnpm run test:browser -t baselines; TANSU_E2E_BROWSER=$$browser pnpm run test:browser -t baselines; done'
 
 loupe: setup
 	mkdir -p "$(CURDIR)/.work/tmp"

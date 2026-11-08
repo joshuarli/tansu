@@ -20,7 +20,7 @@
     "types:check": "pnpm run build && cargo run --quiet -p gen-api-types -- --check",
     "test:rs": "pnpm run build && cargo test -q --workspace",
     "test:app-interleavings": "vitest run web/ts/app.test.ts -t interleavings",
-    "test:acceptance": "pnpm run test:app-interleavings && pnpm run test:browser -- -t acceptance:",
+    "test:acceptance": "pnpm run test:app-interleavings && pnpm run test:browser -t acceptance:",
     "test:e2e:chromium": "TANSU_E2E_BROWSER=chromium pnpm run test:browser",
     "test:e2e:webkit": "TANSU_E2E_BROWSER=webkit pnpm run test:browser",
     "test:e2e:loupe": "pnpm run loupe:build && pnpm run build:dev && PLAYWRIGHT_BROWSERS_PATH=${PLAYWRIGHT_BROWSERS_PATH:-.work/tmp/playwright-browsers} vitest run --config vitest.loupe.config.ts",

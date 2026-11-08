@@ -47,7 +47,7 @@ platform without a baseline fails the baseline test. After an intentional UI
 change, generate Chromium baselines with:
 
 ```sh
-TANSU_UPDATE_BASELINES=1 TANSU_E2E_BROWSER=chromium pnpm run test:browser -- -t baselines
+TANSU_UPDATE_BASELINES=1 TANSU_E2E_BROWSER=chromium pnpm run test:browser -t baselines
 ```
 
 Review the generated images in the diff. A failing run writes the actual image
