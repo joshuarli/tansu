@@ -115,12 +115,6 @@ impl From<notify::Error> for Error {
     }
 }
 
-impl From<tantivy::TantivyError> for Error {
-    fn from(value: tantivy::TantivyError) -> Self {
-        Self::Internal(value.to_string())
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -137,7 +131,6 @@ mod tests {
             Error::NotFound("missing".to_string()),
             Error::Internal("internal".to_string()),
             notify::Error::generic("watcher").into(),
-            tantivy::TantivyError::InvalidArgument("query".to_string()).into(),
         ];
 
         let messages = errors.into_iter().map(|error| error.to_string()).collect::<Vec<_>>();
@@ -150,6 +143,5 @@ mod tests {
         assert_eq!(messages[5], "missing");
         assert_eq!(messages[6], "internal");
         assert!(messages[7].contains("watcher"));
-        assert!(messages[8].contains("query"));
     }
 }

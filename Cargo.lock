@@ -2083,7 +2083,6 @@ dependencies = [
  "tansu-note-core",
  "tansu-search",
  "tansu-webauthn",
- "tantivy",
  "tempfile",
  "ts-rs",
 ]

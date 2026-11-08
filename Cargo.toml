@@ -33,7 +33,6 @@ stats-producer = { version = "0.1.1", registry = "mycrates" }
 deser = { version = "0.10.2", features = ["derive"] }
 deser-json = "0.10.2"
 deser-value = "0.10.2"
-tantivy = { version = "0.27", default-features = false, features = ["mmap", "lz4-compression"] }
 tansu-search = { path = "crates/tansu-search" }
 tansu-api-types = { path = "crates/tansu-api-types" }
 tansu-note-core = { path = "crates/tansu-note-core" }
