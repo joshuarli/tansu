@@ -129,3 +129,10 @@ Homebrew if missing. Set `WASM_BINDGEN` or `WASM_OPT` to select executable
 paths. The build uses
 `.work/target-defuddle-wasm` unless `CARGO_TARGET_DIR` is set and writes
 generated bindings under `extension-loupe/.generated/`.
+
+## Vendored search engine
+
+Tansu uses the source of Tantivy 0.27.0 in `vendor/tantivy`, licensed under
+MIT. `tansu-search` owns the dependency. Changes to the vendored engine must
+preserve Tansu's search behavior and derived-index recovery.
+

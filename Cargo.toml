@@ -5,6 +5,7 @@ edition = "2024"
 
 [workspace]
 members = [".", "crates/*"]
+exclude = ["vendor/tantivy"]
 
 [dependencies]
 async-channel = { package = "laputa-async-channel", version = "0.3" }
