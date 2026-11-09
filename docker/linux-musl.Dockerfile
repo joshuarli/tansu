@@ -66,6 +66,7 @@ COPY rust-toolchain.toml Cargo.toml Cargo.lock ./
 COPY build.rs ./build.rs
 COPY src ./src
 COPY crates ./crates
+COPY vendor ./vendor
 COPY scripts ./scripts
 COPY web/dist ./web/dist
 

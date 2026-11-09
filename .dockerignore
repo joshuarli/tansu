@@ -13,6 +13,8 @@
 !crates/**
 !scripts/
 !scripts/**
+!vendor/
+!vendor/**
 !.cargo/
 !.cargo/config.toml
 !web/
