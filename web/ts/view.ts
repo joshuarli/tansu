@@ -54,7 +54,8 @@ export function renderAuthGate(state: State, actions: ViewActions): HTMLElement 
   capability.dataset["key"] = "enrollment-capability";
   capability.type = "password";
   capability.autocomplete = "one-time-code";
-  capability.placeholder = "Enrollment capability";
+  capability.placeholder = "One-time code";
+  capability.setAttribute("aria-label", "Enrollment capability");
   capability.value = state.authCapability;
   capability.addEventListener("input", () => actions.dispatch({ type: "auth.capability", value: capability.value }));
   const available = typeof navigator !== "undefined" && navigator.credentials !== undefined &&
@@ -63,25 +64,24 @@ export function renderAuthGate(state: State, actions: ViewActions): HTMLElement 
     "main",
     "auth-gate",
     el("div", "auth-card",
-      el("p", "eyebrow", "Tansu vault"),
       el("h1", "auth-title", "Unlock your notes"),
-      el("p", "auth-copy", "Use a passkey registered for this server."),
-      state.authError === null ? el("span", "") : el("p", "auth-error", state.authError),
+      ...(state.authError === null ? [] : [el("p", "auth-error", state.authError)]),
       button(
-        state.authBusy === "login" ? "Waiting for passkey…" : "Sign in with passkey",
+        state.authBusy === "login" ? "Waiting…" : "Sign in with passkey",
         "Sign in with passkey",
         () => actions.dispatch({ type: "auth.login" }),
         "primary-button",
       ),
-      el("div", "auth-divider", "First credential"),
-      el("label", "field-label", span("Enrollment capability"), capability),
-      button(
-        state.authBusy === "enroll" ? "Waiting for passkey…" : "Register first passkey",
-        "Register first passkey",
-        () => actions.dispatch({ type: "auth.enroll" }),
-        "text-button",
+      el("div", "auth-enroll",
+        capability,
+        button(
+          state.authBusy === "enroll" ? "Waiting…" : "Register first passkey",
+          "Register first passkey",
+          () => actions.dispatch({ type: "auth.enroll" }),
+          "auth-enroll-button",
+        ),
       ),
-      available ? span("") : el("p", "auth-error", "Passkeys require a supported browser in a secure context."),
+      available ? el("span", "") : el("p", "auth-note", "Passkeys need a secure context."),
     ),
   );
   panel.dataset["viewRegion"] = "auth";
