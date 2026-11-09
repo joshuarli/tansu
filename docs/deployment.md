@@ -62,11 +62,16 @@ The layout is:
 - `/var/lib/tansu/deploy/deploy-state.json` is the owner-only receipt with the
   active and previous revisions.
 
-The app listens on 3001 and the redirect on 3002. Tailscale Serve maps HTTPS
-443 to 3001 and HTTP 3000 to 3002. The URL `http://<host>:3000` redirects to
-`https://<host>.<tailnet>.ts.net`, where the server uses authenticated mode.
-Tailscale HTTPS must be enabled for your tailnet. See the
-[Tailscale Serve documentation](https://tailscale.com/docs/reference/tailscale-cli/serve).
+The app listens on 3001 and the redirect on 3002. By default Tailscale Serve
+maps HTTPS 443 to 3001 and HTTP 3000 to 3002, and `http://<host>:3000`
+redirects to the tailnet HTTPS origin. To serve a public hostname through
+Cloudflare Tunnel instead, set `TANSU_PUBLIC_ORIGIN=https://<host>` (for
+example `https://tansu.17166969.xyz`) for `make deploy`: the installer then
+validates the existing auth origin against that public origin and RP ID,
+writes it as `TANSU_REDIRECT_ORIGIN`, and skips re-creating the Tailscale
+Serve mappings (the tunnel, not Serve, provides the public HTTPS endpoint).
+The RP ID must be exactly the public hostname, so changing it clears existing
+passkeys; back up the auth database first.
 
 Preflight runs entirely before the first write. A second deploy of the same
 commit with the same binary and service files writes nothing and restarts
@@ -101,6 +106,8 @@ activation. A rollback is a new activation and gets its own marker.
 ```sh
 make deploy-check
 make deploy DEPLOY_HOST=user@host
+# Public Cloudflare hostname instead of the tailnet origin:
+TANSU_PUBLIC_ORIGIN=https://tansu.17166969.xyz make deploy
 make deploy-status DEPLOY_HOST=user@host
 make deploy-smoke DEPLOY_HOST=user@host
 make rollback REV=<commit> DEPLOY_HOST=user@host
@@ -126,7 +133,7 @@ pnpm --dir cloudflare -s statsctl service create \
   --name tansu \
   --host HOST_ID \
   --unit tansu \
-  --health-url "https://tansu.$TAILNET.ts.net/api/v2/health" \
+  --health-url "https://tansu.17166969.xyz/api/v2/health" \
   --credential-file .work/credentials/tansu.json
 ```
 

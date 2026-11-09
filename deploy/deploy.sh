@@ -4,6 +4,20 @@ set -euo pipefail
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 : "${DEPLOY_HOST:?DEPLOY_HOST must name the SSH target, for example user@host}"
 deploy_host=$DEPLOY_HOST
+public_origin=${TANSU_PUBLIC_ORIGIN:-${DEPLOY_PUBLIC_ORIGIN:-}}
+if [ -n "$public_origin" ]; then
+  case "$public_origin" in
+    https://*) ;;
+    *) printf 'TANSU_PUBLIC_ORIGIN must be an HTTPS origin, got: %s\n' "$public_origin" >&2; exit 2 ;;
+  esac
+  case "$public_origin" in
+    https://*/*) printf 'TANSU_PUBLIC_ORIGIN must be an HTTPS origin with nothing after the host, got: %s\n' "$public_origin" >&2; exit 2 ;;
+  esac
+  public_host=${public_origin#https://}
+  if [ -z "$public_host" ]; then printf 'TANSU_PUBLIC_ORIGIN must be an HTTPS origin, got: %s\n' "$public_origin" >&2; exit 2; fi
+else
+  public_host=
+fi
 ssh_opts=${SSH_OPTS:--o BatchMode=yes -o ConnectTimeout=10}
 
 services_file="$repo_root/deploy/tansu-services"
@@ -72,10 +86,12 @@ read -r remote_arch tailnet_dns_name <<< "$remote_metadata"
 
 readiness() {
   expected=$1
+  # shellcheck disable=SC2086
+  readiness_host=${public_host:-$tailnet_dns_name}
   attempt=0
   while [ "$attempt" -lt 30 ]; do
     # shellcheck disable=SC2086
-    if ssh $ssh_opts -- "$deploy_host" "doas -n sh -s -- '$expected' '$tailnet_dns_name'" <<'HEALTH'
+    if ssh $ssh_opts -- "$deploy_host" "doas -n sh -s -- '$expected' '$readiness_host'" <<'HEALTH'
 set -eu
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
@@ -183,7 +199,11 @@ if [[ "$mode" == "rollback" ]]; then
   if [[ "$stats_enabled" -eq 1 ]] && deploy_state_exists; then
     deploy_state sync
   fi
-  ssh -o BatchMode=yes "$deploy_host" "doas -n sh -s -- --tailnet '$tailnet_dns_name' --rollback '$rollback_revision'" < "$repo_root/deploy/install.sh"
+  if [ -n "$public_origin" ]; then
+    ssh -o BatchMode=yes "$deploy_host" "doas -n sh -s -- --tailnet '$tailnet_dns_name' --origin '$public_origin' --rp-id '$public_host' --rollback '$rollback_revision'" < "$repo_root/deploy/install.sh"
+  else
+    ssh -o BatchMode=yes "$deploy_host" "doas -n sh -s -- --tailnet '$tailnet_dns_name' --rollback '$rollback_revision'" < "$repo_root/deploy/install.sh"
+  fi
   if ! readiness "$rollback_revision"; then
     printf '%s: rolled-back release %s is not ready\n' "$deploy_host" "$rollback_revision" >&2
     exit 1
@@ -245,12 +265,20 @@ if [[ "$stats_enabled" -eq 1 ]]; then
   rm -f "$stats_env"
   stats_install_args=(--stats-origin "$stats_origin" --stats-service "$stats_service")
 fi
-ssh -o BatchMode=yes "$deploy_host" "doas -n sh -s -- --tailnet '$tailnet_dns_name' --revision '$revision' --stage '$remote_stage' ${stats_install_args[*]:-}" < "$repo_root/deploy/install.sh"
+if [ -n "$public_origin" ]; then
+  ssh -o BatchMode=yes "$deploy_host" "doas -n sh -s -- --tailnet '$tailnet_dns_name' --origin '$public_origin' --rp-id '$public_host' --revision '$revision' --stage '$remote_stage' ${stats_install_args[*]:-}" < "$repo_root/deploy/install.sh"
+else
+  ssh -o BatchMode=yes "$deploy_host" "doas -n sh -s -- --tailnet '$tailnet_dns_name' --revision '$revision' --stage '$remote_stage' ${stats_install_args[*]:-}" < "$repo_root/deploy/install.sh"
+fi
 if ! readiness "$revision"; then
   printf '%s: release %s did not become ready\n' "$deploy_host" "$revision" >&2
   if [ -n "$previous_revision" ]; then
     printf '%s: rolling back to %s\n' "$deploy_host" "$previous_revision" >&2
-    ssh -o BatchMode=yes "$deploy_host" "doas -n sh -s -- --tailnet '$tailnet_dns_name' --rollback '$previous_revision'" < "$repo_root/deploy/install.sh"
+    if [ -n "$public_origin" ]; then
+      ssh -o BatchMode=yes "$deploy_host" "doas -n sh -s -- --tailnet '$tailnet_dns_name' --origin '$public_origin' --rp-id '$public_host' --rollback '$previous_revision'" < "$repo_root/deploy/install.sh"
+    else
+      ssh -o BatchMode=yes "$deploy_host" "doas -n sh -s -- --tailnet '$tailnet_dns_name' --rollback '$previous_revision'" < "$repo_root/deploy/install.sh"
+    fi
     if ! readiness "$previous_revision"; then
       printf '%s: rollback release %s is not ready\n' "$deploy_host" "$previous_revision" >&2
     fi

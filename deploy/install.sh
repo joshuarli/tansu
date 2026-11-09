@@ -9,12 +9,14 @@ rollback=0
 revision=
 stage=
 tailnet=
+origin=
+rp_id=
 stats_origin=
 stats_service=tansu
 keep=${TANSU_KEEP_RELEASES:-5}
 
 usage() {
-  printf '%s\n' "usage: install.sh --tailnet DNS --revision REV --stage DIR [--stats-origin URL] [--stats-service NAME] [--root DIR] [--check]" "       install.sh --tailnet DNS --rollback REV [--root DIR] [--check]" >&2
+  printf '%s\n' "usage: install.sh --tailnet DNS --revision REV --stage DIR [--origin URL] [--rp-id ID] [--stats-origin URL] [--stats-service NAME] [--root DIR] [--check]" "       install.sh --tailnet DNS --rollback REV [--origin URL] [--rp-id ID] [--root DIR] [--check]" >&2
   exit 2
 }
 
@@ -31,6 +33,8 @@ while [ $# -gt 0 ]; do
     --revision) revision=${2:?--revision needs a revision}; shift 2 ;;
     --stage) stage=${2:?--stage needs a path}; shift 2 ;;
     --tailnet) tailnet=${2:?--tailnet needs a DNS name}; shift 2 ;;
+    --origin) origin=${2:?--origin needs a URL}; shift 2 ;;
+    --rp-id) rp_id=${2:?--rp-id needs an ID}; shift 2 ;;
     --stats-origin) stats_origin=${2:?--stats-origin needs a URL}; shift 2 ;;
     --stats-service) stats_service=${2:?--stats-service needs a name}; shift 2 ;;
     -h|--help) usage ;;
@@ -58,7 +62,25 @@ case "$tailnet" in
   *.ts.net) ;;
   *) die "tailnet must end in .ts.net, got: $tailnet" ;;
 esac
-origin="https://$tailnet"
+if [ -n "$origin" ]; then
+  public_mode=1
+  case "$origin" in
+    https://*) ;;
+    *) die "--origin must be an HTTPS origin, got: $origin" ;;
+  esac
+  case "$origin" in
+    https://*/*) die "--origin must be an HTTPS origin with nothing after the host, got: $origin" ;;
+  esac
+  if [ -z "$rp_id" ]; then die "--rp-id is required with --origin" ; fi
+  case "$rp_id" in
+    ''|*[!A-Za-z0-9.-]*|*..*) die "--rp-id must be a DNS name, got: $rp_id" ;;
+  esac
+  if [ "$origin" != "https://$rp_id" ]; then die "--origin must be exactly https://$rp_id" ; fi
+else
+  public_mode=0
+  origin="https://$tailnet"
+  rp_id="$tailnet"
+fi
 
 if [ "$rollback" -eq 0 ]; then
   [ -n "$stage" ] || die "--stage is required"
@@ -78,8 +100,10 @@ if [ "$rollback" -eq 0 ]; then
   done
 fi
 
-current_dns_name=$(tailscale status --json | python3 -c 'import json,sys; print(json.load(sys.stdin)["Self"]["DNSName"].rstrip("."))' 2>/dev/null) || die "cannot read the Tailscale DNS name"
-[ "$current_dns_name" = "$tailnet" ] || die "Tailscale DNS name is $current_dns_name, not $tailnet"
+if [ -z "$public_mode" ]; then
+  current_dns_name=$(tailscale status --json | python3 -c 'import json,sys; print(json.load(sys.stdin)["Self"]["DNSName"].rstrip("."))' 2>/dev/null) || die "cannot read the Tailscale DNS name"
+  [ "$current_dns_name" = "$tailnet" ] || die "Tailscale DNS name is $current_dns_name, not $tailnet"
+fi
 
 for directory in /opt/tansu /opt/tansu/releases /var/lib/tansu /var/lib/tansu/config /var/lib/tansu/config/tansu /var/lib/tansu/data /var/lib/tansu/vault /var/lib/tansu/deploy /var/log/tansu /etc/init.d /etc/conf.d /etc/runlevels/default; do
   target=$(path "$directory")
@@ -111,7 +135,7 @@ if [ ! -e "$settings" ]; then
   [ "$rollback" -eq 0 ] || die "cannot roll back without an initialized settings database"
 fi
 if [ "$config_missing" -eq 0 ]; then
-  python3 - "$settings" "$tailnet" <<'CONFIG_CHECK' || die "Tansu settings database is not initialized for $origin"
+  python3 - "$settings" "$origin" "$rp_id" <<'CONFIG_CHECK' || die "Tansu settings database is not initialized for $origin"
 import json
 import sqlite3
 import sys
@@ -123,8 +147,9 @@ if row is None:
 config = json.loads(row[0])
 
 auth = config.get("auth", {})
-expected_origin = f"https://{sys.argv[2]}"
-if auth.get("externalOrigin") != expected_origin or auth.get("rpId") != sys.argv[2]:
+expected_origin = sys.argv[2]
+expected_rp_id = sys.argv[3]
+if auth.get("externalOrigin") != expected_origin or auth.get("rpId") != expected_rp_id:
     raise SystemExit("Tansu config must use authenticated mode with the current HTTPS origin and RP ID")
 CONFIG_CHECK
 fi
@@ -255,7 +280,7 @@ if [ "$config_missing" -eq 1 ]; then
     XDG_DATA_HOME="$(path /var/lib/tansu/data)" \
     "$(path /opt/tansu/current/tansu)" config init \
     --vault Personal "$(path /var/lib/tansu/vault)" \
-    --auth "$origin" "$tailnet" Tansu
+    --auth "$origin" "$rp_id" Tansu
   chown tansu:tansu "$settings"
   chmod 0640 "$settings"
 fi
@@ -279,9 +304,11 @@ for service in tansu tansu-http-redirect; do
 done
 
 if [ "$restart_required" -eq 1 ] || [ "$runlevel_changed" -eq 1 ]; then
-  tailscale serve --yes --bg --https=443 3001
-  tailscale serve --yes --bg --http=3000 3002
-  tailscale serve status
+  if [ "$public_mode" -eq 0 ]; then
+    tailscale serve --yes --bg --https=443 3001
+    tailscale serve --yes --bg --http=3000 3002
+    tailscale serve status
+  fi
 fi
 
 state=$(path /var/lib/tansu/deploy/deploy-state.json)
