@@ -1,8 +1,10 @@
 ARG NODE_VERSION
-FROM node:${NODE_VERSION}-bookworm AS node
+FROM node:${NODE_VERSION}-bookworm@sha256:a546d3f8acd2af4382668a7e6acd3bc4418e6a27478373e3246f8162f5181509 AS node
 FROM mcr.microsoft.com/playwright:v1.64.0-noble@sha256:06a9939e57531807f8d5fd76ce44b53165ffb7d7501d87ab10e285c20b1e971f
 
 COPY --from=node /usr/local/bin/node /usr/local/bin/node
+ARG NODE_VERSION
+RUN test "$(node --version)" = "v${NODE_VERSION}"
 
 ARG PNPM_VERSION
 
