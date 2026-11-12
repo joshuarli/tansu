@@ -680,6 +680,7 @@ function decodeV2VaultMeta(value: unknown): V2VaultMeta {
   return {
     vaultId: nonEmptyString(field(body, "vaultId"), "vaultId"),
     name: string(field(body, "name"), "name"),
+    error: nullableString(field(body, "error"), "error"),
   };
 }
 
@@ -1096,6 +1097,10 @@ function string(value: unknown, name: string): string {
     throw new V2ProtocolError(`${name} must be a string`);
   }
   return value;
+}
+
+function nullableString(value: unknown, name: string): string | null {
+  return value === undefined || value === null ? null : string(value, name);
 }
 
 function nonEmptyString(value: unknown, name: string): string {

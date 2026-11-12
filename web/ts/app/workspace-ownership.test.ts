@@ -35,7 +35,7 @@ describe("workspace write ownership", () => {
     if (first === null) throw new Error("Expected the first window to own the workspace");
     const abort = new AbortController();
     const waiting = acquireWorkspaceLock(locks, "workspace", { ifAvailable: false, signal: abort.signal });
-    const outcome = waiting.then(() => "granted", () => "aborted");
+    const outcome = waiting.then(() => "granted").catch(() => "aborted");
     abort.abort();
     await expect(outcome).resolves.toBe("aborted");
     first.release();

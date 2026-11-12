@@ -107,10 +107,10 @@ export class ClientStorageFailureError extends Error {
   }
 }
 
-class StoredCheckpointRejected extends ClientStorageFailureError {
+class StoredCheckpointRejectedError extends ClientStorageFailureError {
   constructor() {
     super("transaction", "A newer draft checkpoint is already stored");
-    this.name = "StoredCheckpointRejected";
+    this.name = "StoredCheckpointRejectedError";
   }
 }
 
@@ -328,13 +328,13 @@ export class DraftJournal {
       .then(async () => {
         const written = "kind" in record ? await this.writeLocal(record) : await this.write(record);
         if (!written) {
-          throw new StoredCheckpointRejected();
+          throw new StoredCheckpointRejectedError();
         }
         this.failures.delete(key);
         return true;
       })
       .catch((error: unknown) => {
-        if (!(error instanceof StoredCheckpointRejected) && !this.pending.has(key)) {
+        if (!(error instanceof StoredCheckpointRejectedError) && !this.pending.has(key)) {
           this.pending.set(key, record);
           this.failures.set(key, error);
         }
