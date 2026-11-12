@@ -77,8 +77,13 @@ are pruned after an upgrade.
 `make deploy-status` prints the current link, receipt, OpenRC status, and
 Tailscale Serve status. `make deploy-smoke` checks both services and ports.
 Deployment waits for the new release's health response after installation.
-A failed health check triggers an attempted rollback. An installer error exits
-before that recovery path, even if activation already changed the current link.
+An installer failure and a failed health check share one recovery path. When
+a prior release is known, recovery restores it if activation changed the
+current link, or if the new release never became ready, and then checks the
+restored release. The original installer or readiness status is preserved. A
+rollback failure is reported on its own and does not replace that status. An
+installer error that leaves the prior release selected does not roll back.
+`bash deploy/recovery-check.sh` covers these cases with mocked SSH.
 
 `make deploy-check` runs `deploy/lifecycle-check.sh` in a disposable
 `alpine:3.22` container. It proves a fresh install, a no-op repeat, an upgrade

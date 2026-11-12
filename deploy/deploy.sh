@@ -117,6 +117,52 @@ HEALTH
   return 1
 }
 
+active_release() {
+  local target
+  if ! target=$(
+    # shellcheck disable=SC2086
+    ssh $ssh_opts -- "$deploy_host" 'doas -n readlink /opt/tansu/current 2>/dev/null || printf missing'
+  ); then
+    printf 'unknown'
+    return 0
+  fi
+  printf '%s' "$target"
+}
+
+rollback_to() {
+  local status=0
+  if [ -n "$public_origin" ]; then
+    ssh -o BatchMode=yes "$deploy_host" "doas -n sh -s -- --tailnet '$tailnet_dns_name' --origin '$public_origin' --rp-id '$public_host' --rollback '$1'" < "$repo_root/deploy/install.sh" || status=$?
+  else
+    ssh -o BatchMode=yes "$deploy_host" "doas -n sh -s -- --tailnet '$tailnet_dns_name' --rollback '$1'" < "$repo_root/deploy/install.sh" || status=$?
+  fi
+  return "$status"
+}
+
+restore_prior_release() {
+  local cause=$1
+  local reason=$2
+  local active rollback_status=0
+  if [ -z "$previous_revision" ]; then
+    printf '%s: no prior release to restore\n' "$deploy_host" >&2
+    exit "$cause"
+  fi
+  active=$(active_release)
+  if [ "$reason" = "installer" ] && [ "$active" = "releases/$previous_revision" ]; then
+    exit "$cause"
+  fi
+  printf '%s: rolling back to %s\n' "$deploy_host" "$previous_revision" >&2
+  rollback_to "$previous_revision" || rollback_status=$?
+  if [ "$rollback_status" -ne 0 ]; then
+    printf '%s: rollback to %s failed (status %s)\n' "$deploy_host" "$previous_revision" "$rollback_status" >&2
+    exit "$cause"
+  fi
+  if ! readiness "$previous_revision"; then
+    printf '%s: rollback release %s is not ready\n' "$deploy_host" "$previous_revision" >&2
+  fi
+  exit "$cause"
+}
+
 previous_revision=
 if deploy_state_exists; then
   # shellcheck disable=SC2086
@@ -265,25 +311,19 @@ if [[ "$stats_enabled" -eq 1 ]]; then
   rm -f "$stats_env"
   stats_install_args=(--stats-origin "$stats_origin" --stats-service "$stats_service")
 fi
+install_status=0
 if [ -n "$public_origin" ]; then
-  ssh -o BatchMode=yes "$deploy_host" "doas -n sh -s -- --tailnet '$tailnet_dns_name' --origin '$public_origin' --rp-id '$public_host' --revision '$revision' --stage '$remote_stage' ${stats_install_args[*]:-}" < "$repo_root/deploy/install.sh"
+  ssh -o BatchMode=yes "$deploy_host" "doas -n sh -s -- --tailnet '$tailnet_dns_name' --origin '$public_origin' --rp-id '$public_host' --revision '$revision' --stage '$remote_stage' ${stats_install_args[*]:-}" < "$repo_root/deploy/install.sh" || install_status=$?
 else
-  ssh -o BatchMode=yes "$deploy_host" "doas -n sh -s -- --tailnet '$tailnet_dns_name' --revision '$revision' --stage '$remote_stage' ${stats_install_args[*]:-}" < "$repo_root/deploy/install.sh"
+  ssh -o BatchMode=yes "$deploy_host" "doas -n sh -s -- --tailnet '$tailnet_dns_name' --revision '$revision' --stage '$remote_stage' ${stats_install_args[*]:-}" < "$repo_root/deploy/install.sh" || install_status=$?
+fi
+if [ "$install_status" -ne 0 ]; then
+  printf '%s: installer failed for release %s (status %s)\n' "$deploy_host" "$revision" "$install_status" >&2
+  restore_prior_release "$install_status" installer
 fi
 if ! readiness "$revision"; then
   printf '%s: release %s did not become ready\n' "$deploy_host" "$revision" >&2
-  if [ -n "$previous_revision" ]; then
-    printf '%s: rolling back to %s\n' "$deploy_host" "$previous_revision" >&2
-    if [ -n "$public_origin" ]; then
-      ssh -o BatchMode=yes "$deploy_host" "doas -n sh -s -- --tailnet '$tailnet_dns_name' --origin '$public_origin' --rp-id '$public_host' --rollback '$previous_revision'" < "$repo_root/deploy/install.sh"
-    else
-      ssh -o BatchMode=yes "$deploy_host" "doas -n sh -s -- --tailnet '$tailnet_dns_name' --rollback '$previous_revision'" < "$repo_root/deploy/install.sh"
-    fi
-    if ! readiness "$previous_revision"; then
-      printf '%s: rollback release %s is not ready\n' "$deploy_host" "$previous_revision" >&2
-    fi
-  fi
-  exit 1
+  restore_prior_release 1 readiness
 fi
 if [[ "$stats_enabled" -eq 1 ]] && ! deploy_state mark; then
   printf '%s: deployment marker pending; retry with make deploy-sync\n' "$deploy_host" >&2

@@ -22,15 +22,6 @@ Next: 119
 - **Fix with:** durable-state
 - **Effort:** M
 
-### TNS-111 · P1 · Installer failures bypass rollback after switching releases
-
-- **Area:** Build
-- **Where:** `deploy/deploy.sh:2`, `deploy/deploy.sh:269`, `deploy/deploy.sh:271`, `deploy/deploy.sh:273`, `deploy/install.sh:255`, `deploy/install.sh:297`
-- **Problem:** The installer switches `/opt/tansu/current` before restarting services. A failed OpenRC restart exits the installer under `set -e`; its unguarded SSH invocation then exits `deploy.sh` before the readiness/rollback block. A candidate that cannot start can leave the current link on that candidate and the service down despite a retained working release. A byte-identical deploy script run with mocked external commands returned installer status 71 after a simulated switch: zero readiness calls, zero rollback calls, and the new release still selected. The control, with a successful installer followed by failed readiness, did roll back. The outer failure path was executed; inner switch-before-restart ordering was traced in source, not exercised on a live OpenRC host.
-- **Recommendation:** Route installer failure and readiness failure through one recovery path while preserving the original exit status. Determine whether activation changed the current release, restore the known prior release when needed, and verify its readiness. Report rollback failure separately. Retain the successful-install/failed-readiness control and add failure after release switching.
-- **Fix with:** lifecycle-concurrency
-- **Effort:** S
-
 ### TNS-112 · P2 · Local and setup requests bypass Host and Origin validation
 
 - **Area:** Security
