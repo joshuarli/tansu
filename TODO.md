@@ -22,15 +22,6 @@ Next: 119
 - **Fix with:** durable-state
 - **Effort:** M
 
-### TNS-114 · P2 · Reconciliation resurrects completed writes and rejects their exclusion
-
-- **Area:** Data
-- **Where:** `src/reconcile.rs:120`, `src/reconcile.rs:129`, `src/reconcile.rs:294`, `src/reconcile.rs:391`, `src/vault.rs:1351`, `src/vault.rs:1363`
-- **Problem:** Missing-file recovery treats the latest user create/save/rename/import event as evidence of an unfinished write even when its mutation is already accepted. Deleting such a file externally recreates it. Excluding its folder omits the still-existing file from discovery, then attempts a no-clobber recreation and fails with `AlreadyExists`; settings were already committed, so later reconciliation keeps failing. An unchanged-module SQLite/filesystem probe completed a real save mutation, verified zero pending mutations, and reproduced both restoration after unlink and `File exists (os error 17)` after exclusion. A baseline-only deletion control correctly became a tombstone.
-- **Recommendation:** Use explicit unfinished mutation state as the authority for materialization recovery. Distinguish excluded files from physically missing files; a completed user event or absence from the scan must not independently trigger creation. Preserve snapshots when tombstoning. Cover accepted save followed by external deletion and exclusion, alongside pending-save recovery.
-- **Fix with:** durable-state
-- **Effort:** M
-
 ### TNS-116 · P2 · Loupe enforces image byte limits after buffering the data
 
 - **Area:** Security

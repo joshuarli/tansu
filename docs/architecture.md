@@ -95,19 +95,17 @@ to the remaining notes:
 - An exact-hash move preserves identity only when the match is unambiguous.
 - A path whose case changes, while its path key stays the same, is an external
   rename of that note. Content reconciliation then uses the observed path.
-- A missing file with a valid snapshot is recreated when its last event is a
-  user create, save, rename, or import, even after that mutation completed.
-  Other missing files become tombstones.
+- A file that is physically missing, or omitted because its folder is excluded,
+  becomes a tombstone when its snapshot is valid. The snapshot stays. A
+  completed create, save, rename, or import does not recreate the file.
+  Unfinished materialization is recovered from pending mutation state before
+  reconciliation.
 - A moved-and-edited file becomes a delete plus a new note.
 - Invalid UTF-8, case collisions, corrupt or missing snapshots, and catalog/file
   mismatches become unresolved state.
 
 Title, mtime, filename similarity, and fuzzy content matching do not preserve
 identity.
-
-The current missing-file heuristic also handles files omitted by exclusions.
-Excluding a user-created or saved note can therefore fail by trying to recreate
-the still-existing file. The exclusion setting remains committed.
 
 ## Frontend state
 

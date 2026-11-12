@@ -9,7 +9,7 @@ use crate::history;
 use tansu_note_core::{NoteUnavailable, SourceDocument};
 use crate::paths::{
     has_markdown_extension, normalize_note_path, path_key, read_visible_bytes,
-    write_visible_note_bytes_atomic, write_visible_note_bytes_new,
+    write_visible_note_bytes_atomic,
 };
 use crate::tags::parse_markdown;
 use crate::{Error, Result};
@@ -142,10 +142,6 @@ pub fn reconcile_vault(
             &row.meta.note_id,
             &row.meta.content_hash,
         ) {
-            Ok(bytes) if should_repair_missing_visible(catalog, &row.meta.note_id)? => {
-                write_visible_note_bytes_new(root, &row.meta.path, &bytes)?;
-                catalog.record_visible_hash(&row.meta.note_id, &tansu_note_core::disk_hash(&bytes))?;
-            }
             Ok(_) => {
                 catalog.tombstone_note(
                     &row.meta.note_id,
@@ -404,13 +400,6 @@ fn unambiguous_move_pairs(rows: &[NoteRow], files: &[&FileRecord]) -> Vec<(usize
     pairs
 }
 
-fn should_repair_missing_visible(catalog: &Catalog, note_id: &str) -> Result<bool> {
-    let Some((kind, source)) = catalog.latest_event(note_id)? else {
-        return Ok(false);
-    };
-    Ok(source == "user" && matches!(kind.as_str(), "create" | "save" | "rename" | "import"))
-}
-
 fn insert_unresolved(
     state_root: &Path,
     catalog: &mut Catalog,
@@ -537,6 +526,7 @@ fn mark_snapshot_unresolved(
 #[cfg(test)]
 mod tests {
     use std::fs;
+    use std::path::Path;
 
     use crate::api_types::{NoteEventKind, NoteEventSource};
     use tansu_note_core::NoteState;
@@ -856,6 +846,79 @@ mod tests {
         let row = catalog.note_row_by_id(&note.note_id).unwrap().unwrap();
         assert_eq!(row.meta.content_hash, accepted_source_hash);
         assert_eq!(row.visible_hash, tansu_note_core::disk_hash(accepted.as_bytes()));
+    }
+
+    fn accept_visible_save(catalog: &mut Catalog, state_root: &Path, note_id: &str, path: &str, accepted: &str) -> String {
+        let accepted_source_hash = history::write_snapshot(state_root, note_id, accepted).unwrap();
+        let parsed = parse_markdown(path, accepted);
+        catalog
+            .update_note_content(
+                note_id,
+                &parsed.title,
+                &parsed.tags,
+                &accepted_source_hash,
+                &tansu_note_core::disk_hash(accepted.as_bytes()),
+                NoteEventKind::Save,
+                NoteEventSource::User,
+            )
+            .unwrap();
+        accepted_source_hash
+    }
+
+    #[test]
+    fn accepted_save_deleted_externally_becomes_a_tombstone() {
+        let dir = tempfile::tempdir().unwrap();
+        let visible = dir.path().join("A.md");
+        fs::write(&visible, "# A\n\nold\n").unwrap();
+        let state_root = dir.path().join("state");
+        let mut catalog = Catalog::open(&state_root.join("vault.db")).unwrap();
+        reconcile_vault(dir.path(), &state_root, &mut catalog, &[]).unwrap();
+        let note = catalog.live_notes().unwrap().remove(0);
+        let accepted = "# A\n\nnew\n";
+        fs::write(&visible, accepted).unwrap();
+        let accepted_source_hash = accept_visible_save(&mut catalog, &state_root, &note.note_id, &note.path, accepted);
+        fs::remove_file(&visible).unwrap();
+
+        reconcile_vault(dir.path(), &state_root, &mut catalog, &[]).unwrap();
+
+        assert!(!visible.exists());
+        let row = catalog.note_row_by_id(&note.note_id).unwrap().unwrap();
+        assert_eq!(row.state, NoteState::Tombstoned);
+        assert_eq!(
+            history::read_snapshot_bytes(&state_root, &note.note_id, &accepted_source_hash).unwrap(),
+            accepted.as_bytes()
+        );
+        reconcile_vault(dir.path(), &state_root, &mut catalog, &[]).unwrap();
+        assert!(!visible.exists());
+        assert!(catalog.live_notes().unwrap().is_empty());
+    }
+
+    #[test]
+    fn excluding_an_accepted_note_does_not_recreate_its_file() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir(dir.path().join("Archive")).unwrap();
+        let visible = dir.path().join("Archive/A.md");
+        fs::write(&visible, "# A\n\nold\n").unwrap();
+        let state_root = dir.path().join("state");
+        let mut catalog = Catalog::open(&state_root.join("vault.db")).unwrap();
+        reconcile_vault(dir.path(), &state_root, &mut catalog, &[]).unwrap();
+        let note = catalog.live_notes().unwrap().remove(0);
+        let accepted = "# A\n\nnew\n";
+        fs::write(&visible, accepted).unwrap();
+        let accepted_source_hash = accept_visible_save(&mut catalog, &state_root, &note.note_id, &note.path, accepted);
+
+        reconcile_vault(dir.path(), &state_root, &mut catalog, &["Archive".to_string()]).unwrap();
+
+        assert_eq!(fs::read(&visible).unwrap(), accepted.as_bytes());
+        let row = catalog.note_row_by_id(&note.note_id).unwrap().unwrap();
+        assert_eq!(row.state, NoteState::Tombstoned);
+        assert_eq!(
+            history::read_snapshot_bytes(&state_root, &note.note_id, &accepted_source_hash).unwrap(),
+            accepted.as_bytes()
+        );
+        reconcile_vault(dir.path(), &state_root, &mut catalog, &["Archive".to_string()]).unwrap();
+        assert_eq!(fs::read(&visible).unwrap(), accepted.as_bytes());
+        assert!(catalog.live_notes().unwrap().is_empty());
     }
 
     #[test]

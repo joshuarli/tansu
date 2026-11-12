@@ -4127,6 +4127,56 @@ mod tests {
     }
 
     #[test]
+    fn completed_save_is_not_restored_after_external_delete_or_exclusion() {
+        let (config, vault) = reopenable_vault(&[]);
+        let created = v2_create(&vault, "Archive/A.md", "# A\nold\n");
+        let saved = v2_save(&vault, &created, "save-archive", "# A\nnew\n").unwrap();
+        let V2MutationOutcome::Accepted { result: Some(saved) } = saved.outcome else {
+            panic!("expected accepted save");
+        };
+        assert!(vault.lock_catalog().pending_mutations().unwrap().is_empty());
+        fs::remove_file(config.path.join("Archive/A.md")).unwrap();
+
+        vault.reconcile_from_watcher().unwrap();
+
+        assert!(!config.path.join("Archive/A.md").exists());
+        assert!(vault.v2_notes().unwrap().iter().all(|note| note.note_id != created.note_id));
+        assert_eq!(
+            history::read_snapshot_bytes(&vault.state_root, &created.note_id, &saved.source_hash).unwrap(),
+            b"# A\nnew\n"
+        );
+
+        let kept = v2_create(&vault, "Archive/B.md", "# B\nkept\n");
+        let mut settings = vault.settings().unwrap();
+        settings.excluded_folders = vec!["Archive".to_string()];
+        vault
+            .v2_save_settings(V2SettingsRequest {
+                mutation_id: "exclude-archive".to_string(),
+                settings,
+            })
+            .unwrap();
+        assert_eq!(fs::read(config.path.join("Archive/B.md")).unwrap(), b"# B\nkept\n");
+        assert!(vault.v2_notes().unwrap().iter().all(|note| note.note_id != kept.note_id));
+        assert!(vault.lock_catalog().pending_mutations().unwrap().is_empty());
+        vault.reconcile_from_watcher().unwrap();
+        assert_eq!(fs::read(config.path.join("Archive/B.md")).unwrap(), b"# B\nkept\n");
+    }
+
+    #[test]
+    fn watcher_reconcile_restores_a_missing_file_for_a_pending_save() {
+        let (_, vault) = reopenable_vault(&[("A.md", b"# A\nold\n")]);
+        let note_id = vault.v2_notes().unwrap().remove(0).note_id;
+        pending_save(&vault, &note_id, "save-pending", "# A\nnew\n");
+        fs::remove_file(vault.root.join("A.md")).unwrap();
+
+        vault.reconcile_from_watcher().unwrap();
+
+        assert_eq!(mutation_state(&vault, "save-pending").as_deref(), Some("accepted"));
+        assert_eq!(fs::read(vault.root.join("A.md")).unwrap(), b"# A\nnew\n");
+        assert!(vault.v2_notes().unwrap().iter().any(|note| note.note_id == note_id));
+    }
+
+    #[test]
     fn watcher_reconcile_completes_a_pending_save_and_publishes_it() {
         let (_, vault) = reopenable_vault(&[("A.md", b"# A\nold\n")]);
         let note_id = vault.v2_notes().unwrap().remove(0).note_id;
