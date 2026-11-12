@@ -581,6 +581,101 @@ describe("private workspace storage", () => {
     expect(journalFailure).toHaveBeenCalledWith(failure);
   });
 
+  it("keeps a settled checkpoint failure until a later flush stores it", async () => {
+    const failure = new Error("quota exceeded");
+    let fail = true;
+    const writes: string[] = [];
+    let attempts = 0;
+    const journal = new DraftJournal(() => {}, 200, async (record) => {
+      attempts += 1;
+      if (fail) throw failure;
+      writes.push(record.source);
+      return true;
+    });
+
+    await expect(journal.checkpoint(draftRecord(1, "# Newest\n"))).rejects.toBe(failure);
+    const settled = attempts;
+    await expect(journal.flushAll()).rejects.toBe(failure);
+    expect(attempts - settled).toBeGreaterThan(0);
+    expect(attempts - settled).toBeLessThanOrEqual(3);
+    await expect(journal.flushAll()).rejects.toBe(failure);
+    expect(writes).toStrictEqual([]);
+
+    fail = false;
+    await journal.flushAll();
+    expect(writes).toStrictEqual(["# Newest\n"]);
+    await journal.flushAll();
+    expect(writes).toStrictEqual(["# Newest\n"]);
+  });
+
+  it("keeps a settled local draft failure until a later flush stores it", async () => {
+    const failure = new Error("quota exceeded");
+    let fail = true;
+    const writes: string[] = [];
+    const journal = new DraftJournal(() => {}, 200, undefined, undefined, async (record) => {
+      if (fail) throw failure;
+      writes.push(record.source);
+      return true;
+    });
+
+    await expect(journal.checkpointLocal(localDraftRecord(1, "# Local newest\n"))).rejects.toBe(failure);
+    await expect(journal.flushAll()).rejects.toBe(failure);
+    fail = false;
+    await journal.flushAll();
+    expect(writes).toStrictEqual(["# Local newest\n"]);
+  });
+
+  it("drops a retained checkpoint when its accepted revision is discarded", async () => {
+    const writes: string[] = [];
+    const cleared: string[] = [];
+    const journal = new DraftJournal(
+      () => {},
+      200,
+      async (record) => {
+        writes.push(record.source);
+        throw new Error("quota exceeded");
+      },
+      async (_identity, _workspace, noteId) => {
+        cleared.push(noteId);
+        return true;
+      },
+    );
+
+    await expect(journal.checkpoint(draftRecord(1, "# Newest\n"))).rejects.toThrow("quota exceeded");
+    await expect(journal.clearCheckpoint(
+      { serverInstanceId: serverInstanceId("server-1"), vaultId: vaultId("vault-1") },
+      workspaceId("workspace-1"),
+      "note-1",
+      9,
+      "other",
+    )).resolves.toBeFalsy();
+    await expect(journal.flushAll()).rejects.toThrow("quota exceeded");
+    const failedWrites = writes.length;
+    await expect(journal.clearCheckpoint(
+      { serverInstanceId: serverInstanceId("server-1"), vaultId: vaultId("vault-1") },
+      workspaceId("workspace-1"),
+      "note-1",
+      1,
+      "mutation-1",
+    )).resolves.toBeTruthy();
+    await journal.flushAll();
+
+    expect(cleared).toStrictEqual(["note-1"]);
+    expect(writes).toHaveLength(failedWrites);
+  });
+
+  it("does not retain a checkpoint superseded by a newer stored revision", async () => {
+    let attempts = 0;
+    const journal = new DraftJournal(() => {}, 200, async () => {
+      attempts += 1;
+      return false;
+    });
+
+    await expect(journal.checkpoint(draftRecord(1, "# Older\n"))).rejects.toThrow("already stored");
+    await journal.flushAll();
+    expect(attempts).toBe(1);
+  });
+
   it("flushes scheduled checkpoints when the page becomes hidden and detaches listeners", async () => {
     const writes: DraftJournalRecord[] = [];
     let finishWrite: (() => void) | undefined;

@@ -840,6 +840,45 @@ describe("v2 desktop shell", () => {
     expect(root.textContent).not.toContain("First");
   });
 
+  it("keeps a settled checkpoint failure from closing the tab or switching vaults", async () => {
+    useFakeTimers();
+    const note = noteMeta("note-1", "one.md", "One");
+    const client = configureVault([note], workspaceSeed([
+      { noteId: note.noteId, title: note.title, path: note.path, cursorOffset: null, sourceMode: false },
+    ], note.noteId));
+    client.openNote.mockResolvedValue(documentFor(note, "# One\n"));
+    const next = configureVault([noteMeta("second", "second.md", "Second")], null, "vault-2");
+    let fail = true;
+    const writes: string[] = [];
+    const journal = new DraftJournal(() => {}, 200, async (record) => {
+      if (fail) throw new Error("quota exceeded");
+      writes.push(record.source);
+      return true;
+    });
+    const services = createServices();
+    vi.spyOn(services.workspace, "createJournal").mockReturnValue(journal);
+    const { app, root } = mountApp(services);
+    await app.boot();
+    editorMock.instances[0]!.simulateEdit("# Newest\n");
+    await vi.advanceTimersByTimeAsync(200);
+    await flushAsync();
+
+    root.querySelector<HTMLButtonElement>(".tab.active .tab-close")?.click();
+    await flushAsync();
+    expect(root.querySelector(".tab")).not.toBeNull();
+    expect(root.textContent).toContain("Local recovery storage failed");
+
+    await app.boot("vault-2");
+    expect(root.textContent).toContain("One");
+    expect(root.textContent).not.toContain("Second");
+    expect(next.connectEvents).not.toHaveBeenCalled();
+
+    fail = false;
+    root.querySelector<HTMLButtonElement>(".tab.active .tab-close")?.click();
+    await until(() => root.querySelector(".tab") === null);
+    expect(writes).toContain("# Newest\n");
+  });
+
   it("keeps the old vault event stream live when an outgoing flush fails", async () => {
     const oldNote = noteMeta("first", "first.md", "First");
     const updatedNote = noteMeta(oldNote.noteId, "updated.md", "Updated", [], 2, HASH_B);

@@ -98,8 +98,17 @@ export class ClientStorageFailureError extends Error {
   }
 }
 
+class StoredCheckpointRejected extends ClientStorageFailureError {
+  constructor() {
+    super("transaction", "A newer draft checkpoint is already stored");
+    this.name = "StoredCheckpointRejected";
+  }
+}
+
 export class DraftJournal {
+  private static readonly flushAttemptLimit = 3;
   private readonly pending = new Map<string, DraftJournalRecord | LocalDraftJournalRecord>();
+  private readonly failures = new Map<string, unknown>();
   private readonly timers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly writes = new Map<string, Promise<boolean>>();
   private readonly failureHandlers = new Map<string, (error: unknown) => void>();
@@ -169,7 +178,15 @@ export class DraftJournal {
   }
 
   async flushAll(): Promise<void> {
+    let attempts = 0;
     while (this.pending.size > 0 || this.timers.size > 0 || this.writes.size > 0) {
+      const retryingStoredFailure = this.timers.size === 0 && this.writes.size === 0 && this.pending.size > 0;
+      if (retryingStoredFailure) {
+        if (attempts >= DraftJournal.flushAttemptLimit) {
+          throw this.retainedFailure();
+        }
+        attempts += 1;
+      }
       const keys = new Set([...this.pending.keys(), ...this.timers.keys(), ...this.writes.keys()]);
       const tasks = [...keys].map((key) => {
         const timer = this.timers.get(key);
@@ -181,7 +198,7 @@ export class DraftJournal {
       });
       const results = await Promise.allSettled(tasks);
       const failed = results.find((result): result is PromiseRejectedResult => result.status === "rejected");
-      if (failed !== undefined) {
+      if (failed !== undefined && this.pending.size === 0 && this.timers.size === 0 && this.writes.size === 0) {
         throw failed.reason;
       }
     }
@@ -244,6 +261,7 @@ export class DraftJournal {
         this.timers.delete(key);
       }
       this.pending.delete(key);
+      this.failures.delete(key);
     }
     return this.clearAfterWrites(key, clear);
   }
@@ -301,11 +319,16 @@ export class DraftJournal {
       .then(async () => {
         const written = "kind" in record ? await this.writeLocal(record) : await this.write(record);
         if (!written) {
-          throw new ClientStorageFailureError("transaction", "A newer draft checkpoint is already stored");
+          throw new StoredCheckpointRejected();
         }
+        this.failures.delete(key);
         return true;
       })
       .catch((error: unknown) => {
+        if (!(error instanceof StoredCheckpointRejected) && !this.pending.has(key)) {
+          this.pending.set(key, record);
+          this.failures.set(key, error);
+        }
         const failureHandler = this.failureHandlers.get(key);
         if (failureHandler !== undefined) {
           failureHandler(error);
@@ -325,6 +348,12 @@ export class DraftJournal {
       }
     }).catch(() => undefined);
     return next;
+  }
+
+  private retainedFailure(): unknown {
+    const failure = this.failures.values().next().value;
+    if (failure !== undefined) return failure;
+    return new ClientStorageFailureError("transaction", "A draft checkpoint could not be stored");
   }
 }
 
