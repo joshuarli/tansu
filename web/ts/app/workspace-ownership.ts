@@ -101,6 +101,7 @@ export function acquireWorkspaceLock(
             if (options.signal?.aborted) reject(aborted(options.signal));
             else resolve(null);
           }
+          // oxlint-disable-next-line promise/no-return-wrap -- locks.request needs a Promise, and an async callback would release one tick later.
           return Promise.resolve();
         }
         return new Promise<void>((release) => {
@@ -163,12 +164,14 @@ export class SharedLockManager implements WorkspaceLockManager {
           this.queues.get(name)?.shift()?.();
           return;
         }
-        this.start(name, callback).then((value) => {
-          if (!settled) {
-            settled = true;
-            resolve(value);
-          }
-        }, fail);
+        void this.start(name, callback)
+          .then((value) => {
+            if (!settled) {
+              settled = true;
+              resolve(value);
+            }
+          })
+          .catch(fail);
       };
       const onAbort = () => {
         if (signal === undefined) return;
@@ -198,6 +201,7 @@ export function requestWorkspaceTransfer(name: string): void {
   transferListeners.get(name)?.forEach((listener) => listener());
   if (typeof BroadcastChannel !== "function") return;
   const channel = new BroadcastChannel(name);
+  // oxlint-disable-next-line unicorn/require-post-message-target-origin -- BroadcastChannel.postMessage takes no target origin.
   channel.postMessage("transfer");
   channel.close();
 }

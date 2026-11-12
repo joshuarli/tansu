@@ -93,8 +93,8 @@ describe("view rendering", () => {
   it("opens a custom animated vault menu", () => {
     const state = baseState();
     state.boot!.vaults = [
-      { vaultId: "vault-1", name: "Main" },
-      { vaultId: "vault-2", name: "Work" },
+      { vaultId: "vault-1", name: "Main", error: null },
+      { vaultId: "vault-2", name: "Work", error: null },
     ];
     const actions = actionSpies();
     const root = render(state, actions);
@@ -565,7 +565,7 @@ function baseState(): State {
   const notes: V2NoteMeta[] = [];
   state.boot = {
     serverInstanceId: serverInstanceId("server-1"),
-    vaults: [{ vaultId: VAULT_ID, name: "Main" }, { vaultId: vaultId("vault-2"), name: "Work" }],
+    vaults: [{ vaultId: VAULT_ID, name: "Main", error: null }, { vaultId: vaultId("vault-2"), name: "Work", error: null }],
     vault: { vaultId: VAULT_ID, name: "Main", error: null },
     notes,
     settings: settings(),

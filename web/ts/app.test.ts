@@ -64,7 +64,7 @@ const api = {
   bootstrap: vi.fn(async (): Promise<V2BootstrapResponse> => ({
     apiVersion: 2,
     serverInstanceId: "server-1",
-    vaults: [{ vaultId: DEFAULT_VAULT, name: "Notes" }, { vaultId: "vault-2", name: "Other notes" }],
+    vaults: [{ vaultId: DEFAULT_VAULT, name: "Notes", error: null }, { vaultId: "vault-2", name: "Other notes", error: null }],
   })),
   forVault: vi.fn((_server: string, id: string): TestClient => testClient(id)),
 };
@@ -87,7 +87,7 @@ describe("v2 desktop shell", () => {
     api.bootstrap.mockReset().mockResolvedValue({
       apiVersion: 2,
       serverInstanceId: "server-1",
-      vaults: [{ vaultId: DEFAULT_VAULT, name: "Notes" }, { vaultId: "vault-2", name: "Other notes" }],
+      vaults: [{ vaultId: DEFAULT_VAULT, name: "Notes", error: null }, { vaultId: "vault-2", name: "Other notes", error: null }],
     });
     api.forVault.mockClear();
     let sequence = 0;
@@ -3610,7 +3610,7 @@ function useShellFixtures(): void {
     api.bootstrap.mockReset().mockResolvedValue({
       apiVersion: 2,
       serverInstanceId: "server-1",
-      vaults: [{ vaultId: DEFAULT_VAULT, name: "Notes" }, { vaultId: "vault-2", name: "Other notes" }],
+      vaults: [{ vaultId: DEFAULT_VAULT, name: "Notes", error: null }, { vaultId: "vault-2", name: "Other notes", error: null }],
     });
     api.forVault.mockClear();
     let sequence = 0;

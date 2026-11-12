@@ -251,7 +251,7 @@ export async function downloadTansuImages(
   retryOptions: ExponentialBackoffOptions,
   limits: { maxImageBytes: number; maxTotalBytes: number },
 ): Promise<ImageFetchOutcome[]> {
-  const outcomes: ImageFetchOutcome[] = new Array(urls.length);
+  const outcomes = Array.from<ImageFetchOutcome>({ length: urls.length });
   const pending = new Map<number, ImageFetchOutcome>();
   let settled = 0;
   let retained = 0;
