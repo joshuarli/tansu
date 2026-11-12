@@ -13,15 +13,6 @@ Next: 119
 - **Effort:** M
 - **Design:** [Workspace write ownership](docs/rfc/TNS-109-workspace-write-ownership.md)
 
-### TNS-110 · P1 · A settled checkpoint failure lets closing discard the newest draft
-
-- **Area:** Data
-- **Where:** `web/ts/app/workspace-store.ts:171`, `web/ts/app/workspace-store.ts:292`, `web/ts/app/workspace-store.ts:298`, `web/ts/app/workspace-store.ts:319`, `web/ts/app.ts:1099`, `web/ts/app.ts:1112`, `web/ts/state.ts:277`
-- **Problem:** `DraftJournal.flushKey` removes a record from `pending` before writing and removes its rejected promise from `writes` after settlement. It retains neither the failed record nor a failure for the next `flushAll`. After a quota or transaction error has settled, `closeTab` sees an empty journal and closes a local draft despite its failed storage state. Closed-tab metadata contains no source, so reopening recovers only an older checkpoint. A probe persisted old text, injected a quota error for new text, waited for the rejection to settle, and invoked the actual close method. Closing succeeded and the new text had no persisted recovery copy. Existing tests cover an actively failing flush, not this later false success.
-- **Recommendation:** Retain the newest failed checkpoint and keep its durability failure visible until it is written, superseded by a durably accepted revision, or explicitly discarded. Bound retries and never interpret a settled rejection as a successful flush. Check close and vault switching after the original rejection settles, then confirm navigation resumes after a successful write.
-- **Fix with:** durable-state
-- **Effort:** M
-
 ### TNS-112 · P2 · Local and setup requests bypass Host and Origin validation
 
 - **Area:** Security
