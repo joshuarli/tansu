@@ -30,10 +30,12 @@ ignoredOptionalDependencies:
   - "*wasm32*"
   - "*win32*"
 minimumReleaseAgeExclude:
-  - "@oxlint-tsgolint/darwin-arm64@7.0.2005"
-  - "@oxlint-tsgolint/darwin-x64@7.0.2005"
-  - "@oxlint-tsgolint/linux-arm64@7.0.2005"
-  - "@oxlint-tsgolint/linux-x64@7.0.2005"
   - effect@4.0.6
-  - oxlint-tsgolint@7.0.2005
+  - "@tsrs/darwin-arm64@0.25.0-ts7.1.0-beta"
+  - "@tsrs/darwin-x64@0.25.0-ts7.1.0-beta"
+  - "@tsrs/linux-arm64-gnu@0.25.0-ts7.1.0-beta"
+  - "@tsrs/linux-arm64-musl@0.25.0-ts7.1.0-beta"
+  - "@tsrs/linux-x64-gnu@0.25.0-ts7.1.0-beta"
+  - "@tsrs/linux-x64-musl@0.25.0-ts7.1.0-beta"
+  - tsrs@0.25.0-ts7.1.0-beta
 ...
