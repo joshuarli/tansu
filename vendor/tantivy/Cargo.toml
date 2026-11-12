@@ -99,7 +99,7 @@ version = "1.0.7"
 
 
 [dependencies.fs4]
-version = "0.13.1"
+version = "1.1.0"
 optional = true
 
 
@@ -107,7 +107,7 @@ optional = true
 
 
 [dependencies.itertools]
-version = "0.14.0"
+version = "0.15.0"
 
 
 [dependencies.levenshtein_automata]
@@ -117,7 +117,7 @@ version = "0.2.1"
 version = "0.4.16"
 
 [dependencies.lru]
-version = "0.18.2"
+version = "0.19.0"
 
 [dependencies.lz4_flex]
 version = "0.14"
@@ -135,7 +135,8 @@ optional = true
 version = "1.10.0"
 
 [dependencies.oneshot]
-version = "0.1.13"
+version = "0.2.1"
+features = ["std", "async"]
 
 
 [dependencies.rayon]
