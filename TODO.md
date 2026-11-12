@@ -58,12 +58,4 @@ Next: 119
 - **Fix with:** none
 - **Effort:** M
 
-### TNS-118 · P2 · Accepted uppercase Markdown extensions break reconciliation
-
-- **Area:** Data
-- **Where:** `src/paths.rs:44`, `src/reconcile.rs:305`, `src/reconcile.rs:129`, `src/vault.rs:1807`, `src/vault.rs:1904`
-- **Problem:** Creation and rename accept `.MD` and `.Md` through `normalize_note_path`, while discovery includes only exactly lowercase `.md`. A valid uppercase-extension note is omitted from the next scan; the missing-file heuristic then attempts to recreate its existing path and fails with `AlreadyExists`. An unchanged-module probe validated `UPPER.MD`, wrote its real snapshot and file, inserted the live user-create row, and reproduced `File exists (os error 17)` during reconciliation. Fixing the missing-file heuristic alone would instead let these accepted notes disappear from the live catalog.
-- **Recommendation:** Use one extension predicate for create, rename, and discovery, preserving already accepted spellings. Cover `.md`, `.Md`, and `.MD` through creation/rename, reconciliation, and reopen.
-- **Fix with:** single-source-of-truth
-- **Effort:** S
 

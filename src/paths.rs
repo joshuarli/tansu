@@ -41,10 +41,14 @@ pub fn normalize_note_path(input: &str) -> std::result::Result<String, PathValid
         return Err(PathValidationReason::Empty);
     }
     let normalized = parts.join("/");
-    if !normalized.to_ascii_lowercase().ends_with(".md") {
+    if !has_markdown_extension(&normalized) {
         return Err(PathValidationReason::NotMarkdown);
     }
     Ok(normalized)
+}
+
+pub fn has_markdown_extension(path: &str) -> bool {
+    path.to_ascii_lowercase().ends_with(".md")
 }
 
 pub fn path_key(path: &str) -> String {
@@ -580,6 +584,20 @@ mod tests {
         assert_eq!(path_key("Notes/One.md"), "notes/one.md");
         assert_eq!(path_key("Ä.md"), path_key("ä.md"));
         assert_ne!(path_key("É.md"), path_key("E\u{301}.md"));
+    }
+
+    #[test]
+    fn markdown_extension_acceptance_preserves_case() {
+        for path in ["Note.md", "Note.Md", "Note.MD", "Dir/Note.MD"] {
+            assert!(has_markdown_extension(path), "{path}");
+            assert_eq!(normalize_note_path(path).unwrap(), path);
+        }
+        assert!(!has_markdown_extension("Note.txt"));
+        assert!(!has_markdown_extension("Note.markdown"));
+        assert_eq!(
+            normalize_note_path("Note.txt").unwrap_err(),
+            PathValidationReason::NotMarkdown
+        );
     }
 
     #[test]

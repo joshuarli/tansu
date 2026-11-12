@@ -13,7 +13,7 @@ first run.
 5. Keep existing `z-images/` assets in place.
 6. Let startup reconciliation finish before editing.
 
-For each valid UTF-8 `.md` file, Tansu creates a generated `noteId`, metadata
+For each valid UTF-8 file with a `.md`, `.Md`, or `.MD` extension, Tansu creates a generated `noteId`, metadata
 for its path, title, and tags, and a baseline history snapshot. It also creates
 a search document when indexing succeeds. Titles come from the first H1 or
 filename stem. The parser reads tags from tags-only frontmatter and leaves

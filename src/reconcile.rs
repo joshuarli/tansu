@@ -8,8 +8,8 @@ use crate::catalog::{Catalog, InsertNote, NoteRow, generate_note_id};
 use crate::history;
 use tansu_note_core::{NoteUnavailable, SourceDocument};
 use crate::paths::{
-    normalize_note_path, path_key, read_visible_bytes, write_visible_note_bytes_atomic,
-    write_visible_note_bytes_new,
+    has_markdown_extension, normalize_note_path, path_key, read_visible_bytes,
+    write_visible_note_bytes_atomic, write_visible_note_bytes_new,
 };
 use crate::tags::parse_markdown;
 use crate::{Error, Result};
@@ -302,7 +302,7 @@ fn walk_dir(
             walk_dir(root, state_root, &path, excluded_folders, out)?;
             continue;
         }
-        if !file_type.is_file() || path.extension().and_then(|value| value.to_str()) != Some("md") {
+        if !file_type.is_file() || !has_markdown_extension(&file_name) {
             continue;
         }
         let rel = path
@@ -644,6 +644,35 @@ mod tests {
             if !remove_visible {
                 assert_eq!(fs::read(&visible).unwrap(), bytes);
             }
+        }
+    }
+
+    #[test]
+    fn accepted_markdown_extension_case_stays_live_across_reconciliation() {
+        for file_name in ["Note.md", "Note.Md", "Note.MD"] {
+            let dir = tempfile::tempdir().unwrap();
+            let bytes = b"# Note\n\nbody\n";
+            fs::write(dir.path().join(file_name), bytes).unwrap();
+            let state_root = dir.path().join("state");
+            let mut catalog = Catalog::open(&state_root.join("vault.db")).unwrap();
+
+            reconcile_vault(dir.path(), &state_root, &mut catalog, &[]).unwrap();
+            let first = catalog.live_notes().unwrap();
+            assert_eq!(first.len(), 1, "{file_name}");
+            assert_eq!(first[0].path, file_name);
+            let note_id = first[0].note_id.clone();
+            let content_hash = first[0].content_hash.clone();
+
+            reconcile_vault(dir.path(), &state_root, &mut catalog, &[]).unwrap();
+            drop(catalog);
+            let mut reopened = Catalog::open(&state_root.join("vault.db")).unwrap();
+            reconcile_vault(dir.path(), &state_root, &mut reopened, &[]).unwrap();
+            let live = reopened.live_notes().unwrap();
+            assert_eq!(live.len(), 1, "{file_name}");
+            assert_eq!(live[0].note_id, note_id);
+            assert_eq!(live[0].path, file_name);
+            assert_eq!(live[0].content_hash, content_hash);
+            assert_eq!(fs::read(dir.path().join(file_name)).unwrap(), bytes);
         }
     }
 

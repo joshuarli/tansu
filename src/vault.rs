@@ -3570,6 +3570,43 @@ mod tests {
     }
 
     #[test]
+    fn uppercase_markdown_extensions_survive_create_rename_and_reopen() {
+        for (created_path, renamed_path) in [
+            ("Plain.md", "Renamed.md"),
+            ("Mixed.Md", "Renamed.Md"),
+            ("Upper.MD", "Renamed.MD"),
+        ] {
+            let (config, vault) = reopenable_vault(&[]);
+            let content = "# Title\nbody\n";
+            let created = v2_create(&vault, created_path, content);
+            let opened = vault.v2_open_note(&created.note_id).unwrap();
+            let renamed = vault
+                .v2_rename_note(
+                    &created.note_id,
+                    V2RenameNoteRequest {
+                        mutation_id: format!("rename-{created_path}"),
+                        precondition: v2_precondition(&opened.meta),
+                        path: renamed_path.to_string(),
+                    },
+                )
+                .unwrap();
+            assert!(
+                matches!(renamed.outcome, V2MutationOutcome::Accepted { .. }),
+                "{created_path}"
+            );
+            drop(vault);
+
+            let reopened = reopen(&config);
+            reopened.reconcile_from_watcher().unwrap();
+            let notes = reopened.v2_notes().unwrap();
+            assert_eq!(notes.len(), 1, "{created_path}");
+            assert_eq!(notes[0].note_id, created.note_id);
+            assert_eq!(notes[0].path, renamed_path);
+            assert_eq!(fs::read(config.path.join(renamed_path)).unwrap(), content.as_bytes());
+        }
+    }
+
+    #[test]
     fn v2_rename_delete_retry_and_materialize_paths() {
         let vault = test_vault();
         let content = "# A\ncontent\n";
