@@ -84,4 +84,5 @@ export type ViewEvent =
   | { type: "conflict.restore" }
   | { type: "draft.export" }
   | { type: "draft.recreate" }
-  | { type: "render.request" };
+  | { type: "render.request" }
+  | { type: "workspace.requestOwnership" };

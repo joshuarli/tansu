@@ -132,6 +132,8 @@ export type State = {
   notice: string | null;
   imageUploads: Set<number>;
   readingMode: boolean;
+  workspaceOwned: boolean;
+  workspaceLockUnavailable: boolean;
   focusMode: boolean;
   tagSuggestions: TagSuggestionsState | null;
 };
@@ -173,6 +175,8 @@ export function createState(vault: VaultId): State {
     notice: null,
     imageUploads: new Set(),
     readingMode: false,
+    workspaceOwned: true,
+    workspaceLockUnavailable: false,
     focusMode: false,
     tagSuggestions: null,
   };

@@ -632,6 +632,21 @@ function activeDraftStorageFailed(tab: Tab): boolean {
 
 function renderOverlays(state: State, actions: ViewActions): HTMLElement {
   const host = el("div", "overlay-host");
+  if (state.boot !== null && !state.workspaceOwned) {
+    const message = state.workspaceLockUnavailable
+      ? "This browser cannot keep one editing window for this workspace."
+      : "Another window is editing this workspace.";
+    const controls: HTMLElement[] = [span(message, "workspace-ownership-message")];
+    if (!state.workspaceLockUnavailable) {
+      controls.push(button(
+        "Edit in this window",
+        "Edit in this window",
+        () => actions.dispatch({ type: "workspace.requestOwnership" }),
+        "primary-button",
+      ));
+    }
+    host.append(el("div", "workspace-ownership", ...controls));
+  }
   if (state.activeOverlay === "command") host.append(backdrop(actions), renderCommandPalette(state, actions));
   if (state.activeOverlay === "search") {
     const input = document.createElement("input");

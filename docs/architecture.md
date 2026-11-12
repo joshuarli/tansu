@@ -114,7 +114,12 @@ tabs, and draft checkpoints live in browser IndexedDB, which is not encrypted
 and may be cleared or evicted. Recovery covers the latest journaled checkpoint,
 not every keystroke. A pending local create replays the path, content, and
 source hash stored with its mutation id. A pending checkpoint written before
-that request was stored keeps its source and is not resubmitted.
+that request was stored keeps its source and is not resubmitted. Each persisted
+workspace has one writable window, the holder of an exclusive Web Lock named
+for that server, vault, and workspace. Other windows of the same workspace stay
+read-only until that holder flushes its recovery records and releases the lock.
+A failed flush keeps the lock. A window that no longer holds it does not write
+or clear recovery records. The server protocol is unchanged.
 
 `web/ts/editor/` owns Markdown editing behavior. The app owns tabs, each tab's
 editor session and view, settings, and the shared asset URL cache. A per-note

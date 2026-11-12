@@ -1,4 +1,5 @@
 import type { AppServices } from "./services.ts";
+import type { WorkspaceWriteGate } from "./workspace-ownership.ts";
 
 type Workspace = Pick<AppServices["workspace"], "createJournal" | "attachVisibilityFlush">;
 type Journal = ReturnType<Workspace["createJournal"]>;
@@ -11,12 +12,13 @@ export class JournalHandle {
   constructor(
     private readonly workspace: Workspace,
     private readonly onFailure: (error: unknown) => void,
+    private readonly gate?: WorkspaceWriteGate,
   ) {}
 
   get(): Journal {
     if (this.disposed) throw new Error("The draft journal was disposed");
     if (this.journal !== null) return this.journal;
-    this.journal = this.workspace.createJournal(this.onFailure);
+    this.journal = this.workspace.createJournal(this.onFailure, this.gate);
     this.detachVisibilityFlush = this.workspace.attachVisibilityFlush(this.journal);
     return this.journal;
   }

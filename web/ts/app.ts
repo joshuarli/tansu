@@ -6,6 +6,14 @@ import { applySettingsForm } from "./app/settings-policy.ts";
 import { DocumentSession, defaultDocumentSessionServices, type DocumentSessionServices, type DocumentSessionState } from "./app/document-session.ts";
 import { dirtySnapshot, DocumentControllers, type ControllerTask } from "./app/document-controller.ts";
 import { JournalHandle } from "./app/journal-handle.ts";
+import {
+  acquireWorkspaceLock,
+  listenForWorkspaceTransfer,
+  OwnershipGate,
+  requestWorkspaceTransfer,
+  workspaceLockName,
+  workspaceLocks,
+} from "./app/workspace-ownership.ts";
 import { LocalDraftSession } from "./app/local-draft-session.ts";
 import { defaultServices, type AppServices } from "./app/services.ts";
 import { localDraftId, noteId, serverInstanceId, vaultId, type DocumentIdentity, type LocalDraftId, type NoteId, type ServerIdentity, type WorkspaceId } from "./app/identity.ts";
@@ -146,6 +154,15 @@ export class TansuApp {
     return (await this.vaultClient.notePreview(id)).preview;
   });
   private bootGeneration = 0;
+  private readonly gate = new OwnershipGate();
+  private hold: { release(): void } | null = null;
+  private pendingHold: { release(): void } | null = null;
+  private lockName: string | null = null;
+  private pendingLockName: string | null = null;
+  private pendingLockUnavailable = false;
+  private transferring = false;
+  private stopOwnershipSignal: (() => void) | null = null;
+  private ownershipAbort = new AbortController();
   private sessionGeneration = 0;
   private transitioningVault = false;
   private noVaultConfigured = false;
@@ -165,7 +182,11 @@ export class TansuApp {
     this.state.theme = savedTheme();
     document.documentElement.dataset["theme"] = this.state.theme;
     this.workspaceId = this.services.workspace.createWorkspaceId();
-    this.journal = new JournalHandle(this.services.workspace, (error) => this.notifyStorageFailure(error));
+    this.journal = new JournalHandle(
+      this.services.workspace,
+      (error) => this.notifyStorageFailure(error),
+      this.gate,
+    );
     this.editorMount.className = "editor-mount";
     this.editorMount.id = "editor-mount";
   }
@@ -224,31 +245,44 @@ export class TansuApp {
     try {
       vaultBootstrap = await nextClient.bootstrap();
       if (generation !== this.bootGeneration || this.disposed) return;
-      workspace = await this.services.workspace.getOrCreateWorkspace(
-        nextIdentity,
-        this.workspaceId,
-      );
+      await this.drainInFlightActions();
+      if (generation !== this.bootGeneration || this.disposed) return;
+      if (this.identity !== null) {
+        try {
+          await this.flushOutgoingWorkspace(this.identity);
+        } catch (error) {
+          this.restoreCurrentVault(generation);
+          this.notifyStorageFailure(error);
+          return;
+        }
+        if (generation !== this.bootGeneration || this.disposed) return;
+      }
+      const owned = await this.prepareWorkspaceOwnership(nextIdentity, generation);
+      if (generation !== this.bootGeneration || this.disposed) {
+        this.abandonPendingOwnership();
+        return;
+      }
+      const current = this.identity;
+      const sameVault = current !== null &&
+        current.serverInstanceId === nextIdentity.serverInstanceId &&
+        current.vaultId === nextIdentity.vaultId;
+      if (sameVault && this.gate.accepts && owned) workspace = this.workspaceSnapshot(current);
+      else if (owned) workspace = await this.services.workspace.getOrCreateWorkspace(nextIdentity, this.workspaceId);
+      else {
+        workspace = await this.services.workspace.getWorkspaceState(nextIdentity, this.workspaceId) ??
+          blankWorkspace(nextIdentity, this.workspaceId);
+      }
     } catch (error) {
+      this.abandonPendingOwnership();
       this.restoreCurrentVault(generation);
       throw error;
     }
-    if (generation !== this.bootGeneration || this.disposed) return;
-    await this.drainInFlightActions();
-    if (generation !== this.bootGeneration || this.disposed) return;
-    if (this.identity !== null) {
-      try {
-        await this.flushOutgoingWorkspace(this.identity);
-      } catch (error) {
-        this.restoreCurrentVault(generation);
-        this.notifyStorageFailure(error);
-        return;
-      }
-      if (generation !== this.bootGeneration || this.disposed) return;
-      if (this.identity.serverInstanceId === nextIdentity.serverInstanceId &&
-        this.identity.vaultId === nextIdentity.vaultId) {
-        workspace = this.workspaceSnapshot(this.identity);
-      }
+    if (generation !== this.bootGeneration || this.disposed) {
+      this.abandonPendingOwnership();
+      return;
     }
+    await this.commitWorkspaceOwnership(generation);
+    if (generation !== this.bootGeneration || this.disposed) return;
     this.clearAssetScope();
     for (const tab of this.state.tabs) if (tab.kind === "saved") tab.session?.close();
     this.documents.disposeAll();
@@ -261,6 +295,173 @@ export class TansuApp {
     this.state.boot = { ...vaultBootstrap, serverInstanceId: global.serverInstanceId, vaults: global.vaults };
     this.state.authRequired = false;
     this.state.notes = new Map(vaultBootstrap.notes.map((meta) => [meta.noteId, meta]));
+    this.adoptWorkspace(workspace);
+    this.transitioningVault = false;
+    this.scheduleWorkspaceSave();
+    this.connectEvents(generation);
+    this.render();
+    this.extensionImport?.announceReady();
+    const active = activeTab(this.state);
+    if (active !== undefined) await this.ensureTabLoaded(active);
+  }
+
+  private async flushOutgoingWorkspace(identity: ServerIdentity): Promise<void> {
+    if (!this.gate.accepts) return;
+    for (;;) {
+      this.captureActiveEditor();
+      if (this.workspaceTimer !== undefined) window.clearTimeout(this.workspaceTimer);
+      this.workspaceTimer = undefined;
+      await Promise.all([
+        this.trackAction(this.writeWorkspaceState(this.workspaceSnapshot(identity))),
+        this.journal.flushAll(),
+      ]);
+      if (this.workspaceTimer === undefined) return;
+    }
+  }
+
+  private async prepareWorkspaceOwnership(identity: ServerIdentity, generation: number): Promise<boolean> {
+    const name = workspaceLockName(identity, this.workspaceId);
+    if (this.lockName === name && this.hold !== null && this.gate.accepts) return true;
+    if (this.lockName === name && this.hold === null && !this.state.workspaceLockUnavailable) return false;
+    const locks = workspaceLocks();
+    this.abandonPendingOwnership();
+    this.pendingLockName = name;
+    if (locks === null) {
+      this.pendingLockUnavailable = true;
+      return false;
+    }
+    try {
+      const acquired = await acquireWorkspaceLock(locks, name, { ifAvailable: true });
+      if (this.disposed || generation !== this.bootGeneration) {
+        acquired?.release();
+        this.pendingLockName = null;
+        return false;
+      }
+      this.pendingHold = acquired;
+      this.pendingLockUnavailable = false;
+      return acquired !== null;
+    } catch (error) {
+      if (this.disposed || generation !== this.bootGeneration) {
+        this.pendingLockName = null;
+        return false;
+      }
+      this.pendingHold = null;
+      this.pendingLockUnavailable = true;
+      logClientEvent("warn", "client.storage", { error: errorSummary(error) });
+      return false;
+    }
+  }
+
+  private abandonPendingOwnership(): void {
+    this.pendingHold?.release();
+    this.pendingHold = null;
+    this.pendingLockName = null;
+    this.pendingLockUnavailable = false;
+  }
+
+  private async commitWorkspaceOwnership(generation: number): Promise<void> {
+    if (this.pendingLockName === null) return;
+    const name = this.pendingLockName;
+    const acquired = this.pendingHold;
+    const unavailable = this.pendingLockUnavailable;
+    this.pendingLockName = null;
+    this.pendingHold = null;
+    this.pendingLockUnavailable = false;
+    if (this.disposed || generation !== this.bootGeneration) {
+      acquired?.release();
+      return;
+    }
+    if (this.lockName !== null && this.lockName !== name) {
+      this.gate.close();
+      await this.gate.drain();
+      this.hold?.release();
+      this.hold = null;
+      this.stopOwnershipSignal?.();
+      this.stopOwnershipSignal = null;
+      this.stopWaitingForOwnership();
+    }
+    if (this.disposed || generation !== this.bootGeneration) {
+      acquired?.release();
+      return;
+    }
+    this.lockName = name;
+    this.hold = acquired;
+    if (acquired !== null) {
+      this.gate.allow();
+      this.state.workspaceOwned = true;
+      this.state.workspaceLockUnavailable = false;
+      this.watchTransfer(name);
+      return;
+    }
+    this.gate.close();
+    this.state.workspaceOwned = false;
+    this.state.workspaceLockUnavailable = unavailable;
+    if (!unavailable) {
+      this.watchTransfer(name);
+      void this.waitForOwnership(name, generation);
+    }
+  }
+
+  private stopWaitingForOwnership(): void {
+    this.ownershipAbort.abort();
+    this.ownershipAbort = new AbortController();
+  }
+
+  private watchTransfer(name: string): void {
+    this.stopOwnershipSignal?.();
+    let requested = false;
+    this.stopOwnershipSignal = listenForWorkspaceTransfer(name, () => {
+      if (requested) return;
+      requested = true;
+      queueMicrotask(() => {
+        requested = false;
+        void this.transferWorkspace();
+      });
+    });
+  }
+
+  private async waitForOwnership(name: string, generation: number): Promise<void> {
+    const locks = workspaceLocks();
+    const signal = this.ownershipAbort.signal;
+    if (locks === null) return;
+    try {
+      const acquired = await acquireWorkspaceLock(locks, name, { ifAvailable: false, signal });
+      if (acquired === null || this.disposed || signal.aborted || generation !== this.bootGeneration ||
+        this.lockName !== name || this.hold !== null) {
+        acquired?.release();
+        return;
+      }
+      this.hold = acquired;
+      this.gate.allow();
+      this.state.workspaceOwned = true;
+      this.state.workspaceLockUnavailable = false;
+      this.watchTransfer(name);
+      await this.reloadOwnedWorkspace(generation);
+    } catch (error) {
+      if (this.disposed || signal.aborted) return;
+      this.notifyStorageFailure(error);
+    }
+  }
+
+  private async reloadOwnedWorkspace(generation: number): Promise<void> {
+    if (this.identity === null || !this.gate.accepts) return;
+    const workspace = await this.services.workspace.getOrCreateWorkspace(this.identity, this.workspaceId);
+    if (this.disposed || generation !== this.bootGeneration || !this.gate.accepts) return;
+    this.cancelAutoSaves();
+    for (const tab of this.state.tabs) if (tab.kind === "saved") tab.session?.close();
+    this.documents.disposeAll();
+    this.editor?.detachSession();
+    this.attachedEditor = null;
+    this.activeEditorKey = null;
+    this.adoptWorkspace(workspace);
+    this.render();
+    const active = activeTab(this.state);
+    if (active !== undefined) await this.ensureTabLoaded(active);
+    if (this.disposed || generation !== this.bootGeneration) return;
+    this.render();
+  }
+
+  private adoptWorkspace(workspace: WorkspaceState): void {
     this.state.pinned = new Set(workspace.pinnedNoteIds.filter((id) => this.state.notes.has(id)));
     this.state.recent = workspace.recentNoteIds.filter((id) => this.state.notes.has(id));
     this.state.searchHistory = workspace.searchHistory.slice(0, 100);
@@ -280,26 +481,44 @@ export class TansuApp {
         this.state.activeTab = tabIdentity(tab);
       }
     }
-    this.transitioningVault = false;
-    this.scheduleWorkspaceSave();
-    this.connectEvents(generation);
-    this.render();
-    this.extensionImport?.announceReady();
-    const active = activeTab(this.state);
-    if (active !== undefined) await this.ensureTabLoaded(active);
   }
 
-  private async flushOutgoingWorkspace(identity: ServerIdentity): Promise<void> {
-    for (;;) {
-      this.captureActiveEditor();
-      if (this.workspaceTimer !== undefined) window.clearTimeout(this.workspaceTimer);
-      this.workspaceTimer = undefined;
-      await Promise.all([
-        this.services.workspace.saveWorkspaceState(this.workspaceSnapshot(identity)),
-        this.journal.flushAll(),
-      ]);
-      if (this.workspaceTimer === undefined) return;
+  private async transferWorkspace(): Promise<void> {
+    if (!this.gate.accepts || this.transferring || this.identity === null || this.hold === null || this.lockName === null) return;
+    this.transferring = true;
+    const name = this.lockName;
+    const generation = this.bootGeneration;
+    try {
+      await this.flushOutgoingWorkspace(this.identity);
+    } catch (error) {
+      this.transferring = false;
+      this.notifyStorageFailure(error);
+      this.notify("Could not hand off editing because recovery storage failed. Export the draft before trying again.");
+      return;
     }
+    if (this.disposed || generation !== this.bootGeneration || !this.gate.accepts || this.hold === null || this.lockName !== name) {
+      this.transferring = false;
+      return;
+    }
+    for (const timer of this.draftPromotionTimers.values()) window.clearTimeout(timer);
+    this.draftPromotionTimers.clear();
+    this.gate.close();
+    await this.gate.drain();
+    const released = this.hold;
+    this.hold = null;
+    this.state.workspaceOwned = false;
+    this.transferring = false;
+    released.release();
+    this.render();
+    void this.waitForOwnership(name, generation);
+  }
+
+  private acceptsWorkspaceEdits(): boolean {
+    if (this.state.workspaceOwned) return true;
+    this.notify(this.state.workspaceLockUnavailable
+      ? "This browser cannot keep one editing window for this workspace."
+      : "Another window is editing this workspace");
+    return false;
   }
 
   private async drainInFlightActions(): Promise<void> {
@@ -447,7 +666,6 @@ export class TansuApp {
     ++this.bootGeneration;
     for (const cleanup of this.globalEventCleanups.splice(0)) cleanup();
     this.captureActiveEditor();
-    const pendingJournalFlush = this.journal.dispose();
     this.eventSubscription?.close();
     this.eventSubscription = null;
     this.clearAssetScope();
@@ -463,8 +681,23 @@ export class TansuApp {
     this.noticeTimer = undefined;
     disposeAppView(this.root);
     this.root.replaceChildren();
-    this.disposeTask = pendingJournalFlush;
+    this.disposeTask = this.finishDispose();
     return this.disposeTask;
+  }
+
+  private async finishDispose(): Promise<void> {
+    try {
+      await this.journal.dispose();
+    } finally {
+      this.gate.close();
+      await this.gate.drain();
+      this.stopWaitingForOwnership();
+      this.hold?.release();
+      this.hold = null;
+      this.abandonPendingOwnership();
+      this.stopOwnershipSignal?.();
+      this.stopOwnershipSignal = null;
+    }
   }
 
   private connectEvents(generation: number): void {
@@ -521,7 +754,7 @@ export class TansuApp {
       this.state.notes.delete(deletedNoteId);
       this.state.recent = this.state.recent.filter((item) => item !== deletedNoteId);
       this.evictNonRecentPreviews();
-      await this.services.workspace.deleteCachedNoteBodies({ ...this.identity!, noteId: noteId(deletedNoteId) });
+      await this.deleteCachedBodies({ ...this.identity!, noteId: noteId(deletedNoteId) });
       await this.closeTab({ kind: "saved", noteId: toNoteId(deletedNoteId) }, "deleted");
     } else if (event.update.kind === "searchChanged" && this.state.boot !== null) {
       this.state.boot.searchStatus = { dirty: event.update.dirty, degraded: event.update.degraded };
@@ -661,7 +894,7 @@ export class TansuApp {
         this.updateActiveOutlineHeading(heading);
       },
       uploadPastedImage: async ({ image, signal }) => {
-        if (generation !== this.bootGeneration || this.transitioningVault || client === null ||
+        if (generation !== this.bootGeneration || this.transitioningVault || !this.state.workspaceOwned || client === null ||
           serverIdentity === null || !this.isCurrentVault(serverIdentity, client)) {
           throw new DOMException("Image upload was canceled because the vault changed", "AbortError");
         }
@@ -690,7 +923,7 @@ export class TansuApp {
         }
       },
       onChange: (change) => {
-        if (generation !== this.bootGeneration || this.transitioningVault || !currentVault()) return;
+        if (generation !== this.bootGeneration || this.transitioningVault || !this.state.workspaceOwned || !currentVault()) return;
         const tab = this.state.tabs.find((candidate) => candidate.key === change.noteId);
         if (tab === undefined || tab.editorSession === null) return;
         if (this.attachedEditor?.tab !== tab) {
@@ -705,7 +938,7 @@ export class TansuApp {
         if (this.editorCaptureTimer !== undefined) window.clearTimeout(this.editorCaptureTimer);
         this.editorCaptureTimer = window.setTimeout(() => {
           this.editorCaptureTimer = undefined;
-          if (generation !== this.bootGeneration || this.transitioningVault ||
+          if (generation !== this.bootGeneration || this.transitioningVault || !this.state.workspaceOwned ||
             !currentVault() || !this.state.tabs.includes(tab) || this.attachedEditor?.tab !== tab) return;
           const previousTags = this.tagFeature?.readNoteTags(loadedDraft(tab) ?? "") ?? [];
           this.captureActiveEditor();
@@ -759,7 +992,7 @@ export class TansuApp {
         const source = loadedDraft(tab) ?? "";
         tab.editorSession = this.editor.createSession(tab.key, source, {
           mode: tab.sourceMode ? "source" : "live",
-          readOnly: this.state.readingMode || (tab.kind === "local-draft" && tab.session?.state.promotionPending === true),
+          readOnly: this.editorIsReadOnly(tab),
         });
       }
       this.editor.attachSession(tab.editorSession);
@@ -767,12 +1000,12 @@ export class TansuApp {
       this.attachedEditor = { tab, session: tab.editorSession };
       this.setEditorMountVisible(true);
       if (tab.selection !== null) this.editor.revealSelection(tab.selection);
-      this.editor.updateConfiguration({ ...this.editorConfig(), mode: tab.sourceMode ? "source" : "live", readOnly: this.transitioningVault || this.state.readingMode || (tab.kind === "local-draft" && tab.session?.state.promotionPending === true) });
+      this.editor.updateConfiguration({ ...this.editorConfig(), mode: tab.sourceMode ? "source" : "live", readOnly: this.transitioningVault || this.editorIsReadOnly(tab) });
       void this.prefetchAssets(tab, loadedDraft(tab) ?? "");
       this.setEditorMountVisible(true);
       return true;
     } else {
-      this.editor.updateConfiguration({ ...this.editorConfig(), mode: tab.sourceMode ? "source" : "live", readOnly: this.transitioningVault || this.state.readingMode || (tab.kind === "local-draft" && tab.session?.state.promotionPending === true) });
+      this.editor.updateConfiguration({ ...this.editorConfig(), mode: tab.sourceMode ? "source" : "live", readOnly: this.transitioningVault || this.editorIsReadOnly(tab) });
     }
     this.setEditorMountVisible(true);
     return false;
@@ -791,7 +1024,7 @@ export class TansuApp {
     this.editor.updateConfiguration({
       ...this.editorConfig(),
       mode: tab.sourceMode ? "source" : "live",
-      readOnly: readOnly || this.state.readingMode || (tab.kind === "local-draft" && tab.session?.state.promotionPending === true),
+      readOnly: this.editorIsReadOnly(tab, readOnly),
     });
   }
 
@@ -818,7 +1051,13 @@ export class TansuApp {
     this.scheduleWorkspaceSave();
   }
 
+  private editorIsReadOnly(tab: Tab, forced = false): boolean {
+    return forced || !this.state.workspaceOwned || this.state.readingMode ||
+      (tab.kind === "local-draft" && tab.session?.state.promotionPending === true);
+  }
+
   private applyEditorSnapshot(tab: Tab, snapshot: EditorSnapshot): void {
+    if (!this.state.workspaceOwned) return;
     tab.selection = snapshot.selection;
     tab.scrollTop = snapshot.scroll.top;
     tab.sourceMode = snapshot.mode === "source";
@@ -1137,7 +1376,7 @@ export class TansuApp {
     if (closed.kind === "saved" && this.identity !== null && this.vaultClient !== null) {
       const identity = this.identity;
       const client = this.vaultClient;
-      const deletion = this.services.workspace.deleteCachedNoteBodies({ ...identity, noteId: closed.noteId }).catch((error) => {
+      const deletion = this.deleteCachedBodies({ ...identity, noteId: closed.noteId }).catch((error) => {
         if (this.isCurrentVault(identity, client)) logClientEvent("warn", "client.storage", { error: errorSummary(error) });
       });
       this.trackAction(deletion);
@@ -1148,6 +1387,7 @@ export class TansuApp {
   }
 
   private async manualSave(): Promise<void> {
+    if (!this.acceptsWorkspaceEdits()) return;
     this.captureActiveEditor();
     const tab = activeTab(this.state);
     if (tab?.kind === "saved" && tab.session !== null) await tab.session.save();
@@ -1155,6 +1395,7 @@ export class TansuApp {
   }
 
   private scheduleAutoSave(tab: SavedTab): void {
+    if (!this.state.workspaceOwned) return;
     const delay = this.state.boot?.settings.autosaveDelayMs ?? 900;
     const session = tab.session;
     if (session === null) return;
@@ -1179,14 +1420,19 @@ export class TansuApp {
     };
   }
 
+  private writeWorkspaceState(snapshot: WorkspaceState): Promise<void> {
+    return this.gate.run(() => this.services.workspace.saveWorkspaceState(snapshot), undefined).then(() => undefined);
+  }
+
   private async saveWorkspaceState(snapshot: WorkspaceState): Promise<void> {
-    await this.trackAction(this.services.workspace.saveWorkspaceState(snapshot).catch((error) => {
+    await this.trackAction(this.writeWorkspaceState(snapshot).catch((error) => {
       this.notifyStorageFailure(error);
       throw error;
     }));
   }
 
   private persistWorkspace(): void {
+    if (!this.gate.accepts) return;
     this.captureActiveEditor();
     if (this.workspaceTimer !== undefined) window.clearTimeout(this.workspaceTimer);
     this.workspaceTimer = undefined;
@@ -1196,7 +1442,7 @@ export class TansuApp {
   }
 
   private scheduleWorkspaceSave(): void {
-    if (this.identity === null || this.disposed) return;
+    if (!this.gate.accepts || this.identity === null || this.disposed) return;
     const snapshot = this.workspaceSnapshot(this.identity);
     if (this.workspaceTimer !== undefined) window.clearTimeout(this.workspaceTimer);
     this.workspaceTimer = window.setTimeout(() => {
@@ -1487,6 +1733,7 @@ export class TansuApp {
   }
 
   private async commandCreate(): Promise<void> {
+    if (!this.acceptsWorkspaceEdits()) return;
     const tab = this.localDraftTab(localDraftId(mutationId()), "", "");
     this.state.tabs.push(tab);
     this.state.activeTab = { kind: "local-draft", localDraftId: tab.localDraftId };
@@ -1499,6 +1746,7 @@ export class TansuApp {
   private scheduleDraftPromotion(tab: Extract<Tab, { kind: "local-draft" }>): void {
     window.clearTimeout(this.draftPromotionTimers.get(tab.localDraftId));
     this.draftPromotionTimers.delete(tab.localDraftId);
+    if (!this.state.workspaceOwned) return;
     const session = tab.session;
     if (session === null || session.state.promotionPending || session.state.source.trim() === "") return;
     const delay = this.state.boot?.settings.autosaveDelayMs ?? 900;
@@ -1509,6 +1757,7 @@ export class TansuApp {
   }
 
   private async promoteDraftFromSource(tab: Extract<Tab, { kind: "local-draft" }>): Promise<void> {
+    if (!this.state.workspaceOwned) return;
     window.clearTimeout(this.draftPromotionTimers.get(tab.localDraftId));
     this.draftPromotionTimers.delete(tab.localDraftId);
     const session = tab.session;
@@ -1582,7 +1831,10 @@ export class TansuApp {
     const noteMeta = response.outcome.result;
     const document = await client.openNote(noteMeta.noteId);
     const documentIdentity: DocumentIdentity = { ...serverIdentity, noteId: noteId(noteMeta.noteId) };
-    const promoted = await this.services.workspace.promoteLocalDraftCheckpoint(documentIdentity, this.workspaceId, tab.localDraftId, document);
+    const promoted = await this.gate.run(
+      () => this.services.workspace.promoteLocalDraftCheckpoint(documentIdentity, this.workspaceId, tab.localDraftId, document),
+      null,
+    );
     if (promoted === null) throw new Error("Local draft checkpoint changed before promotion completed");
     if (!this.isCurrentVault(serverIdentity, client)) return null;
     this.state.notes.set(document.meta.noteId, document.meta);
@@ -1631,6 +1883,7 @@ export class TansuApp {
   }
 
   private async commitActiveNoteTitle(request: { title: string; intent: "rename" | "submit" }): Promise<boolean> {
+    if (!this.acceptsWorkspaceEdits()) return false;
     const tab = activeTab(this.state);
     const title = request.title.trim();
     const submit = request.intent === "submit";
@@ -1765,6 +2018,7 @@ export class TansuApp {
   }
 
   private async deleteNote(id: ReturnType<typeof toNoteId>): Promise<void> {
+    if (!this.acceptsWorkspaceEdits()) return;
     const tab = tabById(this.state, id);
     const status = tab?.session?.state;
     if (tab === undefined || status === undefined || !("base" in status)) return;
@@ -1779,11 +2033,12 @@ export class TansuApp {
     this.evictNonRecentPreviews();
     this.state.noteDialog = null;
     this.render();
-    await this.services.workspace.deleteCachedNoteBodies({ ...this.identity!, noteId: id });
+    await this.deleteCachedBodies({ ...this.identity!, noteId: id });
     await this.closeTab({ kind: "saved", noteId: id }, "deleted");
   }
 
   private async togglePin(id: ReturnType<typeof toNoteId>): Promise<void> {
+    if (!this.acceptsWorkspaceEdits()) return;
     if (this.state.pinned.has(id)) this.state.pinned.delete(id);
     else this.state.pinned.add(id);
     this.persistWorkspace();
@@ -2220,13 +2475,19 @@ export class TansuApp {
         this.runAsync(this.openLocalDraft(event.localDraftId), "Open failed");
         return;
       }
+      case "workspace.requestOwnership": {
+        if (this.lockName !== null && !this.state.workspaceLockUnavailable) requestWorkspaceTransfer(this.lockName);
+        return;
+      }
       case "note.delete": {
+        if (!this.acceptsWorkspaceEdits()) return;
         const current = activeTab(this.state);
         const id = event.noteId ?? (current?.kind === "saved" ? current.noteId : undefined);
         if (id !== undefined) { this.state.noteDialog = { kind: "delete", noteId: id }; this.render(); }
         return;
       }
       case "note.pin": {
+        if (!this.acceptsWorkspaceEdits()) return;
         const current = activeTab(this.state);
         const id = event.noteId ?? (current?.kind === "saved" ? current.noteId : undefined);
         if (id !== undefined) this.runAsync(this.togglePin(id), "Pin failed");
@@ -2316,14 +2577,17 @@ export class TansuApp {
     if (["save", "pin", "reopen", "reading", "focus", "source"].includes(id)) this.restoreOverlayReturn();
     switch (id) {
       case "create": {
+        if (!this.acceptsWorkspaceEdits()) break;
         this.runAsync(this.commandCreate(), "Create failed");
         break;
       }
       case "save": {
+        if (!this.acceptsWorkspaceEdits()) break;
         this.runAsync(this.manualSave(), "Save failed");
         break;
       }
       case "rename": {
+        if (!this.acceptsWorkspaceEdits()) break;
         const tab = activeTab(this.state);
         if (tab?.kind === "saved") this.editorMount.querySelector<HTMLElement>(".document-title")?.click();
         break;
@@ -2334,11 +2598,13 @@ export class TansuApp {
         break;
       }
       case "delete": {
+        if (!this.acceptsWorkspaceEdits()) break;
         const tab = activeTab(this.state);
         if (tab?.kind === "saved") this.dispatch({ type: "note.delete", noteId: tab.noteId });
         break;
       }
       case "pin": {
+        if (!this.acceptsWorkspaceEdits()) break;
         const tab = activeTab(this.state);
         if (tab?.kind === "saved") this.runAsync(this.togglePin(tab.noteId), "Pin failed");
         break;
@@ -2509,7 +2775,7 @@ export class TansuApp {
       this.recentPreviews.set(document.meta.noteId, markdownPreview(document.content));
     }
     this.evictNonRecentPreviews();
-    const write = this.services.workspace.cacheNoteBody(identity, document).catch((error) => {
+    const write = this.gate.run(() => this.services.workspace.cacheNoteBody(identity, document), undefined).catch((error) => {
       if (this.isCurrentVault(serverIdentity, client)) this.notifyStorageFailure(error);
     });
     this.trackAction(write);
@@ -2598,7 +2864,12 @@ export class TansuApp {
     window.setTimeout(() => URL.revokeObjectURL(url), 0);
   }
 
+  private deleteCachedBodies(identity: DocumentIdentity): Promise<void> {
+    return this.gate.run(() => this.services.workspace.deleteCachedNoteBodies(identity), undefined).then(() => undefined);
+  }
+
   private async recreateUnavailableDraft(): Promise<void> {
+    if (!this.acceptsWorkspaceEdits()) return;
     const original = activeTab(this.state);
     if (original?.kind !== "saved" || original.session?.state.status !== "unavailable" ||
       original.session.state.reason.kind !== "unresolved" || original.session.state.draft === null ||
@@ -2779,6 +3050,22 @@ export class TansuApp {
     this.render();
   }
 
+}
+
+function blankWorkspace(identity: ServerIdentity, workspace: WorkspaceId): WorkspaceState {
+  return {
+    formatVersion: 1,
+    serverInstanceId: identity.serverInstanceId,
+    vaultId: identity.vaultId,
+    workspaceId: workspace,
+    tabs: [],
+    activeTab: null,
+    closedTabs: [],
+    pinnedNoteIds: [],
+    recentNoteIds: [],
+    searchHistory: [],
+    savedAtMs: 0,
+  };
 }
 
 function uniqueNotePath(title: string, notes: Iterable<{ path: string }>): string {

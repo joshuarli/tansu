@@ -24,6 +24,7 @@ import {
 import { canonicalSourceHash } from "./source-hash.ts";
 import { V2ApiError, type V2VaultBootstrap, type V2VaultClient, type V2VaultSnapshot } from "./app/v2-api.ts";
 import { localDraftId, noteId, serverInstanceId, vaultId, workspaceId } from "./app/identity.ts";
+import { SharedLockManager } from "./app/workspace-ownership.ts";
 import type { EditorConfig } from "./editor/tansu-extensions.ts";
 import { createCodeMirrorEditor, type EditorHandle, type EditorSession, type EditorSnapshot } from "./editor/codemirror-adapter.ts";
 import type {
@@ -56,6 +57,7 @@ const clients = new Map<string, TestClient>();
 let workspaceSeeds = Promise.resolve();
 const memory = {
   workspaceWrites: [] as WorkspaceState[],
+  failWorkspaceWrite: false,
 };
 const apps: TansuApp[] = [];
 const api = {
@@ -78,7 +80,9 @@ describe("v2 desktop shell", () => {
     localStorage.clear();
     localStorage.setItem("tansu.workspace.v1", "workspace-1");
     memory.workspaceWrites.length = 0;
+    memory.failWorkspaceWrite = false;
     editorMock.instances.length = 0;
+    installWorkspaceLocks();
     fakeVisibleAssetNames = [];
     api.bootstrap.mockReset().mockResolvedValue({
       apiVersion: 2,
@@ -3193,7 +3197,87 @@ describe("v2 desktop shell", () => {
       }));
     });
   });
+
+  describe("workspace write ownership", () => {
+    async function bootPair(source = "# One\n") {
+      const note = noteMeta("note-1", "one.md", "One");
+      const client = configureVault([note], workspaceSeed([
+        { noteId: note.noteId, title: note.title, path: note.path, cursorOffset: null, sourceMode: false },
+      ], note.noteId));
+      client.openNote.mockResolvedValue(documentFor(note, source));
+      const owner = mountApp();
+      await owner.app.boot();
+      await until(() => editorMock.instances[0]?.getSnapshot()?.source === source);
+      return { note, client, owner };
+    }
+
+    it("keeps a second window from replacing the owner's recovery draft", async () => {
+      useFakeTimers();
+      const { note, owner } = await bootPair();
+      editorMock.instances[0]!.simulateEdit("# From the owner\n");
+      await flushEditorCapture();
+      await vi.advanceTimersByTimeAsync(200);
+      await flushAsync();
+      await until(async () => (await savedCheckpoint(note.noteId))?.source === "# From the owner\n");
+
+      const other = mountApp();
+      await other.app.boot();
+      await until(() => other.root.querySelector(".workspace-ownership") !== null);
+      expect(editorMock.instances[1]?.getSnapshot()?.source).toBe("# From the owner\n");
+      editorMock.instances[1]!.simulateEdit("# From the other window\n");
+      await flushEditorCapture();
+      expect((await savedCheckpoint(note.noteId))?.source).toBe("# From the owner\n");
+
+      await owner.app.dispose();
+      await until(() => other.root.querySelector(".workspace-ownership") === null);
+      expect((await savedCheckpoint(note.noteId))?.source).toBe("# From the owner\n");
+      const editor = editorMock.instances[1]!;
+      await until(() => editor.getSnapshot()?.source === "# From the owner\n");
+      editor.simulateEdit("# After taking ownership\n");
+      await flushEditorCapture();
+      await vi.advanceTimersByTimeAsync(200);
+      await flushAsync();
+      await until(async () => (await savedCheckpoint(note.noteId))?.source === "# After taking ownership\n");
+    });
+
+    it("keeps ownership when the handoff cannot flush recovery storage", async () => {
+      useFakeTimers();
+      const { note, owner } = await bootPair();
+      editorMock.instances[0]!.simulateEdit("# From the owner\n");
+      await flushEditorCapture();
+      await vi.advanceTimersByTimeAsync(200);
+      await flushAsync();
+      await until(async () => (await savedCheckpoint(note.noteId))?.source === "# From the owner\n");
+      const other = mountApp();
+      await other.app.boot();
+      const takeOver = () => other.root.querySelector<HTMLButtonElement>('[title="Edit in this window"]');
+      await until(() => takeOver() !== null);
+
+      memory.failWorkspaceWrite = true;
+      takeOver()?.click();
+      await until(() => owner.root.textContent?.includes("Could not hand off editing") === true);
+      expect(other.root.querySelector(".workspace-ownership")).not.toBeNull();
+      expect((await savedCheckpoint(note.noteId))?.source).toBe("# From the owner\n");
+
+      memory.failWorkspaceWrite = false;
+      takeOver()?.click();
+      await until(() => other.root.querySelector(".workspace-ownership") === null &&
+        editorMock.instances[1]?.getSnapshot()?.source === "# From the owner\n");
+      editorMock.instances[1]!.simulateEdit("# After the handoff\n");
+      await flushEditorCapture();
+      await vi.advanceTimersByTimeAsync(200);
+      await flushAsync();
+      await until(async () => (await savedCheckpoint(note.noteId))?.source === "# After the handoff\n");
+      editorMock.instances[0]!.simulateEdit("# Stale owner\n");
+      await flushEditorCapture();
+      expect((await savedCheckpoint(note.noteId))?.source).toBe("# After the handoff\n");
+    });
+  });
 });
+
+function installWorkspaceLocks(): void {
+  Object.defineProperty(navigator, "locks", { configurable: true, value: new SharedLockManager() });
+}
 
 function createTestClient() {
   const client = {
@@ -3318,6 +3402,7 @@ function createServices(): AppServices {
   const workspace = {
     ...defaultServices.workspace,
     saveWorkspaceState: async (state: WorkspaceState) => {
+      if (memory.failWorkspaceWrite) throw new Error("quota");
       await defaultServices.workspace.saveWorkspaceState(state);
       memory.workspaceWrites.push(state);
     },
@@ -3519,7 +3604,9 @@ function useShellFixtures(): void {
     localStorage.clear();
     localStorage.setItem("tansu.workspace.v1", "workspace-1");
     memory.workspaceWrites.length = 0;
+    memory.failWorkspaceWrite = false;
     editorMock.instances.length = 0;
+    installWorkspaceLocks();
     api.bootstrap.mockReset().mockResolvedValue({
       apiVersion: 2,
       serverInstanceId: "server-1",
