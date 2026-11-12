@@ -1,4 +1,4 @@
-FROM alpine:edge@sha256:020dfcbaaf4cc1078bf2d9c7ba31a8466e334061dcd2f248001d68f79e52c000 AS build
+FROM alpine:3.24.2@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6 AS build
 
 ARG TARGET=x86_64-unknown-linux-musl
 ARG TARGETARCH
@@ -14,10 +14,10 @@ ARG LLVM_AARCH64_SHA256=7055513530fc60361e29d01d5c849d356b25e9e38124811a42097094
 RUN apk add --no-cache \
   ca-certificates=20261020-r0 \
   curl=8.23.0-r0 \
-  file=5.48-r0 \
-  musl-dev=1.2.6-r6 \
+  file=5.47-r2 \
+  musl-dev=1.2.6-r3 \
   openssl=3.5.9-r0 \
-  pax-utils=1.3.11-r0 \
+  pax-utils=1.3.9-r1 \
   tar=1.35-r5 \
   xz=5.8.4-r0
 
