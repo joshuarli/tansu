@@ -304,7 +304,7 @@ mod tests {
         let degraded = &bootstrap.vaults[1];
         assert_eq!(degraded.vault_id, resolved_vaults[1].vault_id);
         assert_eq!(degraded.name, "Second");
-        assert!(degraded.error.as_deref().unwrap_or("").len() > 0);
+        assert!(degraded.error.as_deref().is_some_and(|error| !error.is_empty()));
 
         assert!(app.vault_by_id(&resolved_vaults[0].vault_id).is_ok());
         assert!(matches!(
