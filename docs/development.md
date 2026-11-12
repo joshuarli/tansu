@@ -117,18 +117,18 @@ macOS, it opens Helium's extension page when Helium is installed. Choose
 **Load unpacked** and select that folder. See [Loupe](loupe.md) for extension
 behavior and permissions.
 
-The build reads `../defuddle-rs` by default; set `DEFUDDLE_RS_DIR` to use
-another checkout. It installs the matching `wasm-bindgen` CLI and
-`wasm32-unknown-unknown` target when needed. On macOS arm64 and x86_64, and
-Linux arm64 and x86_64, the build downloads a checksum-verified CLI release
-when one is available. It caches the executable under
-`$CARGO_HOME/wasm-bindgen-cli/<version>/<target>`. Other platforms and CLI
-versions use `cargo install` into the same versioned cache. Binaryen's
-`wasm-opt` is also required. On macOS, the build installs Binaryen with
-Homebrew if missing. Set `WASM_BINDGEN` or `WASM_OPT` to select executable
-paths. The build uses
-`.work/target-defuddle-wasm` unless `CARGO_TARGET_DIR` is set and writes
-generated bindings under `extension-loupe/.generated/`.
+The build reads `../defuddle-rs` by default when present; set `DEFUDDLE_RS_DIR`
+to use another checkout. When neither is set and no sibling checkout exists, it
+clones and checks out a pinned defuddle-rs revision into `.work/defuddle-rs`.
+It installs the matching `wasm-bindgen` CLI and `wasm32-unknown-unknown` target
+when needed. On macOS arm64 and x86_64, and Linux arm64 and x86_64, the build
+downloads a checksum-verified CLI release when one is available. It caches the
+executable under `$CARGO_HOME/wasm-bindgen-cli/<version>/<target>`. Other
+platforms and CLI versions use `cargo install` into the same versioned cache.
+Binaryen's `wasm-opt` is also required. On macOS, the build installs Binaryen
+with Homebrew if missing. Set `WASM_BINDGEN` or `WASM_OPT` to select executable
+paths. The build uses `.work/target-defuddle-wasm` unless `CARGO_TARGET_DIR` is
+set and writes generated bindings under `extension-loupe/.generated/`.
 
 ## Vendored search engine
 

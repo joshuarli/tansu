@@ -14,8 +14,15 @@ import { homedir } from "node:os";
 import { resolve } from "node:path";
 
 const repositoryRoot = resolve(import.meta.dirname, ".."),
+  defuddleRepositoryUrl = "https://github.com/joshuarli/defuddle-rs.git",
+  defuddleRepositoryCommit = "d13d3e40f1598fc880f09a31e1a7d821dcd9a0d4",
+  defaultDefuddleRepositoryRoot = resolve(repositoryRoot, "../defuddle-rs"),
+  managedDefuddleRepositoryRoot = resolve(repositoryRoot, ".work/defuddle-rs"),
   defuddleRepositoryRoot = resolve(
-    process.env.DEFUDDLE_RS_DIR || resolve(repositoryRoot, "../defuddle-rs"),
+    process.env.DEFUDDLE_RS_DIR ||
+      (existsSync(defaultDefuddleRepositoryRoot)
+        ? defaultDefuddleRepositoryRoot
+        : managedDefuddleRepositoryRoot),
   ),
   cargoTargetDirectory = resolve(
     process.env.CARGO_TARGET_DIR || resolve(repositoryRoot, ".work/target-defuddle-wasm"),
@@ -83,11 +90,70 @@ function cachedCargoInstallWasmBindgen(version, target) {
   return resolve(cargoInstallWasmBindgenRoot(version, target), "bin", "wasm-bindgen");
 }
 
-if (!existsSync(defuddleRepositoryRoot)) {
-  throw new Error(
-    `Could not find defuddle-rs at ${defuddleRepositoryRoot}. Set DEFUDDLE_RS_DIR to its path.`,
+function ensureDefuddleRepository() {
+  const managed = defuddleRepositoryRoot === managedDefuddleRepositoryRoot && !process.env.DEFUDDLE_RS_DIR;
+  if (existsSync(defuddleRepositoryRoot)) {
+    if (!managed) return;
+    try {
+      const head = execFileSync("git", ["rev-parse", "HEAD"], {
+        cwd: managedDefuddleRepositoryRoot,
+        encoding: "utf8",
+      }).trim();
+      if (head === defuddleRepositoryCommit) return;
+    } catch {}
+    console.log(
+      `Updating managed defuddle-rs in ${managedDefuddleRepositoryRoot} to ${defuddleRepositoryCommit}.`,
+    );
+    try {
+      execFileSync("git", ["fetch", "--depth", "1", "origin", defuddleRepositoryCommit], {
+        cwd: managedDefuddleRepositoryRoot,
+        stdio: "inherit",
+      });
+    } catch {
+      execFileSync("git", ["fetch", "origin"], {
+        cwd: managedDefuddleRepositoryRoot,
+        stdio: "inherit",
+      });
+    }
+    execFileSync("git", ["checkout", "--detach", defuddleRepositoryCommit], {
+      cwd: managedDefuddleRepositoryRoot,
+      stdio: "inherit",
+    });
+    return;
+  }
+  if (!managed) {
+    throw new Error(
+      `Could not find defuddle-rs at ${defuddleRepositoryRoot}. Set DEFUDDLE_RS_DIR to its path, or clone it next to this repository.`,
+    );
+  }
+  mkdirSync(resolve(repositoryRoot, ".work"), { recursive: true });
+  console.log(
+    `defuddle-rs not found. Cloning ${defuddleRepositoryUrl} into ${managedDefuddleRepositoryRoot} at ${defuddleRepositoryCommit}.`,
   );
+  execFileSync(
+    "git",
+    ["clone", "--no-checkout", "--filter=blob:none", defuddleRepositoryUrl, managedDefuddleRepositoryRoot],
+    { cwd: repositoryRoot, stdio: "inherit",
+    },
+  );
+  try {
+    execFileSync("git", ["fetch", "--depth", "1", "origin", defuddleRepositoryCommit], {
+      cwd: managedDefuddleRepositoryRoot,
+      stdio: "inherit",
+    });
+  } catch {
+    execFileSync("git", ["fetch", "origin"], {
+      cwd: managedDefuddleRepositoryRoot,
+      stdio: "inherit",
+    });
+  }
+  execFileSync("git", ["checkout", "--detach", defuddleRepositoryCommit], {
+    cwd: managedDefuddleRepositoryRoot,
+    stdio: "inherit",
+  });
 }
+
+ensureDefuddleRepository();
 
 function readWasmBindgenCrateVersion() {
   try {
