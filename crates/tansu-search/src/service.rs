@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -122,18 +122,40 @@ impl SearchService {
         options: SearchOptions,
         current: Vec<NoteIdentity>,
     ) -> Result<Vec<SearchResult>, SearchError> {
-        let result = search::execute(&self.index, &query, options).map(|mut hits| {
-            let canonical = current
-                .iter()
-                .map(|identity| (identity.note_id(), identity))
-                .collect::<HashMap<_, _>>();
+        let result = self.canonical_hits(&query, options, &current, &HashSet::new());
+        if let Err(error) = &result {
+            mark_search_failure(&mut self.status, &mut self.needs_reconciliation, error);
+        }
+        result
+    }
+
+    fn canonical_hits(
+        &mut self,
+        query: &str,
+        options: SearchOptions,
+        current: &[NoteIdentity],
+        suppressed: &HashSet<String>,
+    ) -> Result<Vec<SearchResult>, SearchError> {
+        let wanted = options.limit.get();
+        if wanted == 0 {
+            return Ok(Vec::new());
+        }
+        let canonical = current
+            .iter()
+            .map(|identity| (identity.note_id(), identity))
+            .collect::<HashMap<_, _>>();
+        let mut fetch = wanted;
+        loop {
+            let mut hits = search::execute_at_most(&self.index, query, options, fetch)?;
+            let returned = hits.len();
             hits.retain(|hit| {
-                canonical.get(hit.note_id.as_str()).is_some_and(|identity| {
-                    hit.revision == identity.revision()
-                        && hit.source_hash == identity.source_hash()
-                        && hit.path == identity.path()
-                        && hit.title == identity.title()
-                })
+                !suppressed.contains(&hit.note_id)
+                    && canonical.get(hit.note_id.as_str()).is_some_and(|identity| {
+                        hit.revision == identity.revision()
+                            && hit.source_hash == identity.source_hash()
+                            && hit.path == identity.path()
+                            && hit.title == identity.title()
+                    })
             });
             search::rank_hits(
                 &mut hits,
@@ -144,12 +166,17 @@ impl SearchService {
                 },
                 &options,
             );
-            hits
-        });
-        if let Err(error) = &result {
-            mark_search_failure(&mut self.status, &mut self.needs_reconciliation, error);
+            if hits.len() >= wanted || returned < fetch || fetch >= MAX_REBUILD_NOTES {
+                hits.truncate(wanted);
+                return Ok(hits);
+            }
+            let next = fetch.saturating_mul(2).min(MAX_REBUILD_NOTES);
+            if next == fetch {
+                hits.truncate(wanted);
+                return Ok(hits);
+            }
+            fetch = next;
         }
-        result
     }
 
     pub fn search_with_overlay(
@@ -159,9 +186,12 @@ impl SearchService {
         current: Vec<NoteIdentity>,
         snapshots: &[DirtyNoteSnapshot],
     ) -> Result<OverlaySearchResult, SearchError> {
-        let mut canonical = self.search(query.clone(), options, current)?;
         let overlay_result = overlay::search(&query, options, snapshots)?;
-        canonical.retain(|hit| !overlay_result.covered_note_ids.contains(&hit.note_id));
+        let mut canonical = self
+            .canonical_hits(&query, options, &current, &overlay_result.covered_note_ids)
+            .inspect_err(|error| {
+                mark_search_failure(&mut self.status, &mut self.needs_reconciliation, error);
+            })?;
         canonical.extend(overlay_result.result.hits);
         canonical.sort_by(|left, right| {
             right
@@ -316,7 +346,7 @@ fn ensure_real_directory(path: &Path) -> Result<(), SearchError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{DirtyNoteSnapshot, Fuzziness, NoteIdentity, SearchMode};
+    use crate::types::{DirtyNoteSnapshot, Fuzziness, NoteIdentity, SearchLimit, SearchMode};
     use std::sync::mpsc;
     use std::time::Duration;
 
@@ -632,6 +662,92 @@ mod tests {
         service.upsert(document("a", 1, "needle")).unwrap();
         let stale = document("a", 2, "new source").identity().clone();
         assert!(service.search("needle".into(), options(), vec![stale]).unwrap().is_empty());
+    }
+
+    fn titled(note_id: &str, title: &str, content: &str) -> DocumentInput {
+        let identity = NoteIdentity::new(
+            note_id.into(),
+            format!("{note_id}.md"),
+            title.into(),
+            vec![],
+            1,
+            format!("blake3-v3:{note_id}"),
+        )
+        .unwrap();
+        DocumentInput::new(identity, content.into(), String::new()).unwrap()
+    }
+
+    fn limit_of(limit: usize) -> SearchOptions {
+        SearchOptions {
+            limit: SearchLimit::try_from(limit).unwrap(),
+            ..options()
+        }
+    }
+
+    #[test]
+    fn ineligible_top_hit_leaves_the_next_matching_note() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut service = SearchService::open(&temp.path().join("search")).unwrap();
+        let top = titled("top", "needle", "other");
+        let lower = titled("lower", "lower", "needle");
+        service.upsert(top.clone()).unwrap();
+        service.upsert(lower.clone()).unwrap();
+        let limited = limit_of(1);
+        let ranked = service
+            .search(
+                "needle".into(),
+                limited,
+                vec![top.identity().clone(), lower.identity().clone()],
+            )
+            .unwrap();
+        assert_eq!(ranked.len(), 1);
+        assert_eq!(ranked[0].note_id, "top");
+
+        let stale = service
+            .search("needle".into(), limited, vec![lower.identity().clone()])
+            .unwrap();
+        assert_eq!(stale.into_iter().map(|hit| hit.note_id).collect::<Vec<_>>(), ["lower"]);
+
+        let draft = NoteIdentity::new(
+            "top".into(),
+            "top.md".into(),
+            "draft".into(),
+            vec![],
+            1,
+            "blake3-v3:top".into(),
+        )
+        .unwrap();
+        let overlaid = service
+            .search_with_overlay(
+                "needle".into(),
+                limited,
+                vec![top.identity().clone(), lower.identity().clone()],
+                &[snapshot(draft, "unrelated draft", 4)],
+            )
+            .unwrap();
+        assert_eq!(
+            overlaid.hits.into_iter().map(|hit| hit.note_id).collect::<Vec<_>>(),
+            ["lower"]
+        );
+    }
+
+    #[test]
+    fn many_stale_higher_hits_still_surface_a_later_match() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut service = SearchService::open(&temp.path().join("search")).unwrap();
+        for index in 0..6 {
+            service
+                .upsert(titled(&format!("stale-{index}"), "needle", "body"))
+                .unwrap();
+        }
+        let kept = titled("kept", "kept", "needle");
+        service.upsert(kept.clone()).unwrap();
+
+        let hits = service
+            .search("needle".into(), limit_of(1), vec![kept.identity().clone()])
+            .unwrap();
+
+        assert_eq!(hits.into_iter().map(|hit| hit.note_id).collect::<Vec<_>>(), ["kept"]);
     }
 
     #[test]

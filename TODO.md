@@ -31,13 +31,4 @@ Next: 119
 - **Fix with:** lifecycle-concurrency
 - **Effort:** M
 
-### TNS-117 · P2 · Search truncates candidates before filtering stale and overlaid notes
-
-- **Area:** Data
-- **Where:** `crates/tansu-search/src/search.rs:80`, `crates/tansu-search/src/search.rs:116`, `crates/tansu-search/src/service.rs:125`, `crates/tansu-search/src/service.rs:130`, `crates/tansu-search/src/service.rs:164`
-- **Problem:** `search::execute` truncates to the requested limit before the service removes stale identities or canonical notes covered by dirty overlays. No later candidate is fetched to fill the vacated slots. Valid matching notes can therefore disappear, including a false empty result. A compiled probe against the actual search crate and vendored engine indexed two matching notes, requested one hit, and replaced the top note with a nonmatching overlay. The result was empty although the second note still matched. Excluding the top indexed identity from the current catalog produced the same empty result.
-- **Recommendation:** Apply canonical eligibility and overlay suppression before the final result cap, or continue collecting candidates until enough eligible results exist or candidates are exhausted. Keep query, result, and resource bounds. Add both stale-top-hit and nonmatching-overlay cases with a lower-ranked valid match.
-- **Fix with:** none
-- **Effort:** M
-
 

@@ -39,6 +39,15 @@ pub(crate) fn execute(
     query: &str,
     options: SearchOptions,
 ) -> Result<Vec<SearchResult>, SearchError> {
+    execute_at_most(index, query, options, options.limit.get())
+}
+
+pub(crate) fn execute_at_most(
+    index: &IndexManager,
+    query: &str,
+    options: SearchOptions,
+    output_limit: usize,
+) -> Result<Vec<SearchResult>, SearchError> {
     if query.len() > MAX_QUERY_BYTES {
         return Err(SearchError::QueryTooLong {
             bytes: query.len(),
@@ -46,7 +55,7 @@ pub(crate) fn execute(
         });
     }
     let query = query.trim();
-    if query.is_empty() || options.limit.get() == 0 {
+    if query.is_empty() || options.limit.get() == 0 || output_limit == 0 {
         return Ok(Vec::new());
     }
     let parsed = parse_query(query);
@@ -71,13 +80,13 @@ pub(crate) fn execute(
         (
             searcher.search(
                 &*query,
-                &TopDocs::with_limit(options.limit.get()).order_by_score(),
+                &TopDocs::with_limit(output_limit).order_by_score(),
             )?,
             options.fuzziness,
         )
     } else {
         let exact_query = build_search_query(index, &parsed, options, Fuzziness::Disabled, false);
-        let search_limit = options.limit.get().max(FUZZY_THRESHOLD);
+        let search_limit = output_limit.max(FUZZY_THRESHOLD);
         let mut results = searcher.search(
             &*exact_query,
             &TopDocs::with_limit(search_limit).order_by_score(),
@@ -113,7 +122,7 @@ pub(crate) fn execute(
             make_result(&result_context, address, score).transpose()
         })
         .collect::<Result<Vec<_>, SearchError>>()?;
-    results.truncate(options.limit.get());
+    results.truncate(output_limit);
     Ok(results)
 }
 
