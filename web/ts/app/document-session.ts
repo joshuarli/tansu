@@ -1041,17 +1041,19 @@ export class DocumentSession {
     try {
       const result = this.services.checkpointDraft(record, urgency, onFailure);
       if (result instanceof Promise) {
-        void result.then((written) => {
-          if (!written) {
-            onFailure(new SessionProtocolError("A newer draft checkpoint is already stored"));
-          } else if (!this.disposed && sequence === this.checkpointGeneration) {
-            this.clearStorageFailure();
-          }
-        }, (error) => {
-          if (!failureReported) {
-            onFailure(error);
-          }
-        });
+        void result
+          .then((written) => {
+            if (!written) {
+              onFailure(new SessionProtocolError("A newer draft checkpoint is already stored"));
+            } else if (!this.disposed && sequence === this.checkpointGeneration) {
+              this.clearStorageFailure();
+            }
+          })
+          .catch((error) => {
+            if (!failureReported) {
+              onFailure(error);
+            }
+          });
       }
     } catch (error) {
       onFailure(error);
@@ -1065,13 +1067,16 @@ export class DocumentSession {
       }
     };
     try {
-      void this.services.clearCheckpoint(this.identity, localRevision, mutationId).then((cleared) => {
-        if (cleared && !this.disposed && this.current.status !== "loading" &&
-          !(this.current.status === "unavailable" && this.current.draft === null) &&
-          this.current.draft.localRevision === localRevision) {
-          this.clearStorageFailure();
-        }
-      }, onFailure);
+      void this.services
+        .clearCheckpoint(this.identity, localRevision, mutationId)
+        .then((cleared) => {
+          if (cleared && !this.disposed && this.current.status !== "loading" &&
+            !(this.current.status === "unavailable" && this.current.draft === null) &&
+            this.current.draft.localRevision === localRevision) {
+            this.clearStorageFailure();
+          }
+        })
+        .catch(onFailure);
     } catch (error) {
       onFailure(error);
     }

@@ -99,12 +99,14 @@ function waitForTabComplete(tabId: number): Promise<void> {
       },
       timeout = setTimeout(() => finish(new Error("The Tansu tab did not finish loading.")), TAB_LOAD_TIMEOUT_MS);
     chrome.tabs.onUpdated.addListener(listener);
-    void chrome.tabs.get(tabId).then(
-      (tab) => {
+    void chrome.tabs
+      .get(tabId)
+      .then((tab) => {
         if (tab.status === "complete") finish();
-      },
-      (error: unknown) => finish(error instanceof Error ? error : new Error(String(error))),
-    );
+      })
+      .catch((error: unknown) =>
+        finish(error instanceof Error ? error : new Error(String(error))),
+      );
   });
 }
 

@@ -132,15 +132,17 @@ class NoteHeaderWidget extends WidgetType {
           return;
         }
         title.contentEditable = "false";
-        void onTitleCommit({ title: nextTitle, intent: submit ? "submit" : "rename" }).then((accepted) => {
-          if (!accepted && title.isConnected) title.textContent = this.title;
-          if (title.isConnected) title.contentEditable = "true";
-        }, () => {
-          if (title.isConnected) {
-            title.textContent = this.title;
-            title.contentEditable = "true";
-          }
-        });
+        void onTitleCommit({ title: nextTitle, intent: submit ? "submit" : "rename" })
+          .then((accepted) => {
+            if (!accepted && title.isConnected) title.textContent = this.title;
+            if (title.isConnected) title.contentEditable = "true";
+          })
+          .catch(() => {
+            if (title.isConnected) {
+              title.textContent = this.title;
+              title.contentEditable = "true";
+            }
+          });
       });
     }
     header.append(title);

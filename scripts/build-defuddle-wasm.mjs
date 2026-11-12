@@ -100,7 +100,9 @@ function ensureDefuddleRepository() {
         encoding: "utf8",
       }).trim();
       if (head === defuddleRepositoryCommit) return;
-    } catch {}
+    } catch {
+      void 0;
+    }
     console.log(
       `Updating managed defuddle-rs in ${managedDefuddleRepositoryRoot} to ${defuddleRepositoryCommit}.`,
     );

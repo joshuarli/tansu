@@ -168,17 +168,19 @@ export class LocalDraftSession {
     try {
       const result = this.services.checkpoint(record, urgency, fail);
       if (result instanceof Promise) {
-        return result.then((written) => {
-          if (!written) {
+        return result
+          .then((written) => {
+            if (!written) {
+              fail();
+            } else if (!failed && sequence === this.checkpointGeneration && this.current.storage === "failed") {
+              this.set({ ...this.current, storage: "available" });
+            }
+            return written;
+          })
+          .catch((error: unknown) => {
             fail();
-          } else if (!failed && sequence === this.checkpointGeneration && this.current.storage === "failed") {
-            this.set({ ...this.current, storage: "available" });
-          }
-          return written;
-        }, (error: unknown) => {
-          fail();
-          throw error;
-        });
+            throw error;
+          });
       }
       return result;
     } catch (error) {

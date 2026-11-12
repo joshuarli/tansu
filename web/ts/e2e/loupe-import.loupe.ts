@@ -221,7 +221,11 @@ async function startTansu(fixture: { configHome: string; dataHome: string; vault
   tansuServer.stdout?.on("data", (chunk: Buffer) => tansuOutput.push(chunk.toString("utf8")));
   tansuServer.stderr?.on("data", (chunk: Buffer) => tansuOutput.push(chunk.toString("utf8")));
   const deadline = Date.now() + 20_000;
-  while (!(await fetch(`${tansuUrl}/api/v2/health`).then((response) => response.ok, () => false))) {
+  while (
+    !(await fetch(`${tansuUrl}/api/v2/health`)
+      .then((response) => response.ok)
+      .catch(() => false))
+  ) {
     if (Date.now() > deadline) throw new Error(`tansu did not become ready\n${tansuOutput.join("")}`);
     await new Promise((done) => setTimeout(done, 100));
   }
