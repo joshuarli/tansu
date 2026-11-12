@@ -1,7 +1,7 @@
 # Deployment
 
-Run one Tansu server per vault root. A second server, or a second config
-naming the same directory, exits at startup with an "already owned" error.
+Run one Tansu server per vault root. A server that cannot acquire a vault's
+ownership lock lists that vault as degraded and continues serving other vaults.
 
 Tansu binds to `127.0.0.1` on port `3000` by default. Without authentication
 settings, the server uses loopback mode and passkey routes are disabled. Keep
@@ -46,11 +46,6 @@ The remote host must run Alpine with OpenRC (`/sbin/openrc`, `rc-service`,
 `rc-update`), Tailscale, Python 3, and passwordless `doas` for the SSH user.
 The deployment uses OpenRC only; it does not write systemd units.
 
-The Stats agent is a host prerequisite, not part of a Tansu release. Install it
-once per host as described in the Stats README, and keep its token out of the
-Tansu release. The agent reports host metrics; Tansu reports its own application
-events with the ingest token from its service credential file.
-
 The layout is:
 
 - `/opt/tansu/releases/<commit>/tansu` and `http-redirect.py` are immutable.
@@ -80,9 +75,10 @@ commit the change instead. The five newest releases are retained and older ones
 are pruned after an upgrade.
 
 `make deploy-status` prints the current link, receipt, OpenRC status, and
-Tailscale Serve status. `make deploy-smoke` verifies both services are running
-and that ports 3001 and 3002 answer. `make deploy` does not run the smoke check
-for you.
+Tailscale Serve status. `make deploy-smoke` checks both services and ports.
+Deployment waits for the new release's health response after installation.
+A failed health check triggers an attempted rollback. An installer error exits
+before that recovery path, even if activation already changed the current link.
 
 `make deploy-check` runs `deploy/lifecycle-check.sh` in a disposable
 `alpine:3.22` container. It proves a fresh install, a no-op repeat, an upgrade
@@ -98,10 +94,7 @@ data schema, so restore a backup if an older binary cannot open newer state.
 ### First and subsequent deploys
 
 The first deploy needs `DEPLOY_HOST` (or the default `josh@lisa`), a public key
-the host accepts, and an empty or initialized `/var/lib/tansu`. Subsequent
-deploys of the same commit are no-ops; a new commit builds and activates a new
-release, keeps the previous release, and writes a marker only for a genuine
-activation. A rollback is a new activation and gets its own marker.
+the host accepts, and an empty or initialized `/var/lib/tansu`.
 
 ```sh
 make deploy-check
@@ -122,8 +115,9 @@ the previous release and data untouched.
 
 Tansu follows the
 [Stats integration contract](https://github.com/joshuarli/stats/blob/master/docs/integration.md).
-The Stats agent is installed once per host, separately from a Tansu release;
-`make deploy` only changes Tansu itself.
+Install the Stats agent once per host for host metrics, separately from Tansu.
+Keep its token out of the Tansu release. Tansu reports application events with
+its own ingest token.
 
 Register the host and `tansu` service once from a Stats checkout. `HOST_ID` is
 the host that runs Tansu and the agent, and the credential file is mode 0600:
@@ -300,12 +294,7 @@ downgrade persistent state.
 
 ### Restore from a backup
 
-Stop the server before restoring a backup. Restore the settings database, all vaults, and
-the full app data directory from the same point in time before starting an older
-binary. Tansu may update its SQLite schema when it opens app data. The project
-does not guarantee that a newer catalog can be opened by an older binary.
-
-The Markdown files remain ordinary files, but restoring only the vault or only
-app data can pair different file contents and catalog state. A rollback cannot
-recover edits made after the backup unless those edits remain in another copy
-or in browser-local drafts.
+Stop the server and restore the matching settings, vaults, and app data as
+described in [Back up and restore Tansu state](#back-up-and-restore-tansu-state).
+A rollback cannot recover edits made after the backup unless another copy or
+browser-local draft still contains them.

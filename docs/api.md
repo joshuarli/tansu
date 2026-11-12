@@ -25,8 +25,8 @@ plus its workspace ID.
 
 All vault routes use `/api/v2/vaults/:vaultId`. There is no active-vault index
 header. Authenticated deployments require a session for bootstrap and vault
-routes. `GET /api/v2/health` is public, but still validates `Host` and rejects
-a supplied `Origin` that differs from the configured origin.
+routes. `GET /api/v2/health` is public. In authenticated mode it still validates
+`Host` and rejects a supplied `Origin` that differs from the configured origin.
 
 App settings use a separate SQLite database from each vault's catalog settings.
 The first-run server serves setup until app settings are saved.
@@ -42,20 +42,13 @@ metadata. Choosing a suggestion edits tags frontmatter in the browser; the
 normal note save carries that change. There is no tag-suggestion endpoint or
 separate metadata write.
 
-`/api/v2/bootstrap` returns only server identity and vault IDs. Workspace
-sessions, pins, and recents are stored in the browser's private workspace.
+Bootstrap includes each vault's name and nullable `error`. A vault that failed
+to open remains listed with its error; its routes return `503 vault_unavailable`.
+Other opened vaults remain usable. Workspace sessions, pins, and recents are
+stored in the browser's private workspace.
 
 Legacy `/api/` routes return `api_version_unsupported` before dispatch. They do
 not interpret `X-Tansu-Vault` or mutate a default vault.
-
-### Rust API compatibility
-
-The V1 Rust adapters `api::handle_api`, `api::api_error_response`,
-`App::vault_entries`, `App::handle_events`, index-based `App::vault`,
-`App::handle_log_stream`, `VaultRuntime::bootstrap`, `VaultRuntime::save_session`,
-`VaultRuntime::set_pin`, and their session/bootstrap DTOs were removed. These
-removals break downstream Rust callers. Other public `VaultRuntime` methods and
-DTOs have not been audited for external use.
 
 ### Source and hashes
 
@@ -143,11 +136,9 @@ name as the `name` query parameter and resolve only within the selected vault's
 `GET .../notes/:noteId/preview` returns `{ noteId, preview }`: the note body
 with frontmatter stripped and whitespace collapsed, truncated to 280 characters.
 
-Previews are read-only derived state computed from the catalog's live notes and
-their current files on each request; nothing is persisted. They hold the vault
-operation lock only while reading the note list, never while reading files, so
-they do not delay writes. An unknown, deleted, or unresolved `noteId` returns
-`note_not_found`.
+Previews are read-only derived state computed from live notes and their current
+files. They release the vault operation lock before reading files. An unknown,
+deleted, or unresolved `noteId` returns `note_not_found`.
 
 ### Search
 

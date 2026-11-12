@@ -31,8 +31,9 @@ settings are rejected before persistence by both HTTP and Rust callers.
 
 An `excludedFolders` entry is one exact, case-sensitive folder or file name
 matched at any depth. A path such as `projects/Archive` is not a valid entry.
-Saving a changed list reconciles the vault before returning: excluded notes
-leave the catalog and search, and removing an entry brings them back.
+Saving a changed list commits it before reconciling the vault; a reconciliation
+error does not roll the setting back. See [Reconciliation](architecture.md#reconciliation)
+for current exclusion behavior.
 
 Settings loaded from an earlier version are not revalidated on load. An
 out-of-range stored value is served unchanged; saving the settings form brings

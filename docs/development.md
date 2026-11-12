@@ -11,13 +11,13 @@ pnpm install --frozen-lockfile
 pnpm run playwright:install
 ```
 
-`make setup` installs the frozen lockfile. `make test`, `make dev`, and
-`make dev-config` run setup automatically. Run `pnpm install --frozen-lockfile`
-before direct pnpm tasks.
+`make setup`, `make test`, `make dev`, and `make dev-config` install the frozen
+lockfile. Install it yourself before direct pnpm tasks.
 
 `pnpm run check` checks generated API types, lint, TypeScript, unit tests, and
 Rust compilation. `make check` runs the same check after installing dependencies.
-Type checking is `tsc --noEmit` from the TypeScript 7 package.
+`pnpm run typecheck` builds Loupe's WASM bindings, then runs `tsrs --noEmit --fast`.
+Oxlint uses its `tsrs-lint` backend for type-aware rules.
 
 The supported Rust targets are `aarch64-apple-darwin`,
 `x86_64-unknown-linux-musl`, and `aarch64-unknown-linux-musl`. CI runs the web
@@ -39,10 +39,9 @@ docker run --rm --platform linux/amd64 \
 make dev
 ```
 
-The fixture app serves port `3000` with one demo note and its WebP images. It
-uses isolated settings, data, and a copied vault under `.dev/`. See
-[Fixtures](fixtures.md) for fixture setup and [Logging](logging.md) for the dev
-and e2e log stream.
+The fixture app serves port `3000` with copied `Demo` and `Field Notes` vaults
+and isolated settings and data under `.dev/`. See [Fixtures](fixtures.md) and
+[Logging](logging.md).
 
 To serve your own notes at `notes/` in place instead of the fixtures, run:
 

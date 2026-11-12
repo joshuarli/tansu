@@ -7,7 +7,8 @@ checks `Host` on every request and requires an exact `Origin` match when the
 header is present. State-changing requests require the configured origin, a
 valid session, and its CSRF token, except for ticket-bound login and initial
 enrollment. Health is public but still checks `Host` and any supplied
-`Origin`. The server does not enable cross-origin access.
+`Origin`. The server does not enable cross-origin access. Local and first-run
+setup modes currently skip these header checks when no auth store is configured.
 
 WebAuthn credentials bind to the configured origin and RP ID. Changing either
 clears credentials, sessions, enrollment capabilities, and pending ceremonies
@@ -30,7 +31,8 @@ existing authenticated writes. See [extension import](extension-import.md).
 ## Enrollment and sessions
 
 The first credential requires a random, expiring enrollment capability. The
-server stores only its hash and consumes it after successful registration.
+server stores only its hash. Finishing an enrollment attempt consumes the
+capability even when verification fails. Issue a new one before retrying.
 Later registrations require a recently verified owner session. Session tokens
 are random opaque values stored as hashes. The `__Host-tansu_session` cookie is
 HttpOnly, Secure, and SameSite=Strict. The session-bound CSRF cookie is Secure,

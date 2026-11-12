@@ -13,8 +13,9 @@ settings and data under `.dev/`. `make notes` skips these fixtures and serves
 make dev-config
 ```
 
-The generator replaces `.dev/config`, `.dev/data`, and `.dev/vault`. The demo
-vault covers editor, image, and tag behavior. Tag fixtures live under
+The generator replaces `.dev/config`, `.dev/data`, `.dev/vault`, and
+`.dev/vault-field-notes`. The demo vault covers editor, image, and tag behavior.
+Tag fixtures live under
 `tests/fixtures/demo-vault/tags/`; the tag end-to-end test copies them into its
 seeded vault. See `src/tags.rs` and `web/ts/e2e/server.test.ts` for the parser
 and test cases.

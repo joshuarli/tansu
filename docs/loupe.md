@@ -36,11 +36,10 @@ on-demand content script and Tansu page script as classic IIFEs. Keep Effect out
 of the page script and keep its message type aligned with
 [the Tansu import schema](../extension-loupe/src/tansu-schemas.ts).
 
-The [WASM build script](../scripts/build-defuddle-wasm.mjs) reads `../defuddle-rs`
-by default and writes generated bindings under `extension-loupe/.generated/`.
-Set `DEFUDDLE_RS_DIR` to choose another checkout. The [reader fixture
-builder](../scripts/build-reader-sample-fixture.mjs) regenerates the tracked
-fixture from its source HTML.
+WASM source selection, the pinned auto-fetch fallback, and tool prerequisites
+are in [Development](development.md#loupe). The [reader fixture
+builder](../scripts/build-reader-sample-fixture.mjs) regenerates its tracked
+fixture from source HTML.
 
 Build and test commands are in [Development](development.md#loupe) and
 [Testing](testing.md).

@@ -62,8 +62,8 @@ Wiki links resolve against notes in the active vault. `/` starts at the vault
 root; `./` and `../` resolve from the current note's directory. A bare basename
 resolves only when it matches one note. Ambiguous links remain unresolved.
 Renaming a note preserves its `noteId` and does not rewrite Markdown links that
-mention its old path. The [API link rules](api.md#links-and-previews) use the
-same resolution behavior.
+mention its old path. Server-side previews are described in
+[API previews](api.md#previews).
 
 When configured with `loadNotePreview`, hovering a resolved wiki link loads a
 preview. Leaving the link aborts a pending load. Unresolved links and failed

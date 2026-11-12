@@ -17,10 +17,10 @@ conflicts, reconciliation, and derived search state follow the contracts in
 [API](api.md). Markdown files contain no Tansu IDs, and V1 `z-images/` assets
 are vault-local opaque files.
 
-One server process owns a vault root at a time. Startup locks the root directory
-through reconciliation and runtime shutdown, so configs naming the same
-directory collide. Previews are derived from live notes and files in
-`src/links.rs`.
+One server process owns a vault root at a time. Startup locks each opened root
+through reconciliation and runtime shutdown. A vault that fails to open remains
+listed as degraded while other vaults stay available. Previews are derived from
+live notes and files in `src/links.rs`.
 
 ## Server runtime
 
@@ -74,8 +74,7 @@ state, and the vault event in one catalog transaction, and its draft is based on
 the content revision before the accepted save. The unresolved and
 reverted-rename outcomes delete the mutation record with the note change, so a
 replay runs as a new request and fails with `unresolved_note` or
-`path_collision`. A missing visible file is written from the snapshot, matching
-reconciliation's rule for files whose last event came from the user.
+`path_collision`. Pending recovery writes a missing visible file from its snapshot.
 
 Create, save, import, restore, delete, rename, and conflict recovery all keep
 history under `noteId`, not the current path.
@@ -88,18 +87,25 @@ Tansu. Use one writer per vault when that race matters.
 
 ## Reconciliation
 
-Reconciliation applies these rules:
+Reconciliation skips notes owned by pending mutations and applies these rules
+to the remaining notes:
 
 - A same-path hash change is an external edit unless the file still matches the
   last visible hash, in which case reconciliation restores the accepted snapshot.
 - An exact-hash move preserves identity only when the match is unambiguous.
-- A missing visible file with a valid snapshot becomes a tombstone.
+- A missing file with a valid snapshot is recreated when its last event is a
+  user create, save, rename, or import, even after that mutation completed.
+  Other missing files become tombstones.
 - A moved-and-edited file becomes a delete plus a new note.
 - Invalid UTF-8, case collisions, corrupt or missing snapshots, and catalog/file
   mismatches become unresolved state.
 
 Title, mtime, filename similarity, and fuzzy content matching do not preserve
 identity.
+
+The current missing-file heuristic also handles files omitted by exclusions.
+Excluding a user-created or saved note can therefore fail by trying to recreate
+the still-existing file. The exclusion setting remains committed.
 
 ## Frontend state
 

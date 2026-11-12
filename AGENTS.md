@@ -18,7 +18,7 @@ Commands: frontend build `pnpm run build`, fixture app `make dev`, check `pnpm r
 ## Tooling
 
 - Node runs project scripts. pnpm owns JavaScript packages and tasks. `package.json` and `pnpm-lock.yaml` are the only JavaScript manifest and lockfile.
-- TypeScript 7 owns type checking. Oxlint with `oxlint-tsgolint` owns linting. Vitest owns tests. Vite builds the web app.
+- `tsrs` owns type checking. Oxlint's `tsrs-lint` backend owns type-aware linting. Vitest owns tests. Vite builds the web app.
 - Do not reintroduce Deno, React, SolidStart, Vite+, Jest, ESLint, the npm CLI, Yarn, Bun, or another lockfile.
 
 ## Topics
