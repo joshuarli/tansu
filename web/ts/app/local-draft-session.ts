@@ -1,6 +1,7 @@
 import type { Selection } from "./document-session.ts";
 import type { LocalDraftId, ServerIdentity, WorkspaceId } from "./identity.ts";
-import type { LocalDraftJournalRecord } from "./workspace-store.ts";
+import { canonicalSourceHash } from "../source-hash.ts";
+import type { LocalCreateRequest, LocalDraftJournalRecord } from "./workspace-store.ts";
 
 export type LocalDraftSessionState = {
   serverInstanceId: string;
@@ -13,6 +14,7 @@ export type LocalDraftSessionState = {
   source: string;
   titleDraft: string;
   promotionPending: boolean;
+  createRequest: LocalCreateRequest | null;
   selection: Selection;
   storage: "available" | "failed";
 };
@@ -48,6 +50,7 @@ export class LocalDraftSession {
       source: "",
       titleDraft: "",
       promotionPending: false,
+      createRequest: null,
       selection: null,
       storage: "available",
     };
@@ -82,6 +85,7 @@ export class LocalDraftSession {
       source: record.source,
       titleDraft: record.titleDraft,
       promotionPending: record.promotionPending,
+      createRequest: record.createRequest ?? null,
       selection: record.selection,
       storage: "available",
     });
@@ -113,11 +117,25 @@ export class LocalDraftSession {
     this.checkpointInBackground("structural");
   }
 
-  async beginPromotion(): Promise<boolean> {
+  async beginPromotion(path: string): Promise<boolean> {
     if (this.current.titleDraft.trim() === "") return false;
-    if (!this.current.promotionPending) {
-      this.set({ ...this.current, promotionPending: true });
+    if (this.current.promotionPending) {
+      if (this.current.createRequest === null) return false;
+      const result = this.checkpoint("structural");
+      return result instanceof Promise ? await result : true;
     }
+    if (path.trim() === "") throw new TypeError("A local create request needs a path");
+    const content = this.current.source;
+    const mutationId = this.current.mutationId;
+    const sourceHash = await canonicalSourceHash(content);
+    if (this.current.promotionPending || this.current.source !== content || this.current.mutationId !== mutationId) {
+      throw new TypeError("Local draft changed before its create request was stored");
+    }
+    this.set({
+      ...this.current,
+      promotionPending: true,
+      createRequest: { version: 1, mutationId, path, content, sourceHash },
+    });
     const result = this.checkpoint("structural");
     return result instanceof Promise ? await result : true;
   }
@@ -155,6 +173,7 @@ export class LocalDraftSession {
       source: state.source,
       titleDraft: state.titleDraft,
       promotionPending: state.promotionPending,
+      createRequest: state.createRequest,
       selection: state.selection,
       checkpointedAtMs: Date.now(),
     };

@@ -1516,7 +1516,10 @@ export class TansuApp {
     const source = session.exportSource();
     if (source.trim() === "") return;
     const title = tab.title.trim() === "" ? titleFromSource(source) : tab.title.trim();
-    const path = uniqueNotePath(title, this.state.notes.values());
+    if (session.state.promotionPending && session.state.createRequest === null) {
+      throw new Error("This pending create has no stored request. Export its source before retrying.");
+    }
+    const path = session.state.createRequest?.path ?? uniqueNotePath(title, this.state.notes.values());
     tab.title = title;
     tab.path = path;
     await this.promoteLocalDraft(tab, title, path);
@@ -1550,17 +1553,23 @@ export class TansuApp {
     if (serverIdentity === null || client === null || tab.session === null) return null;
     if (!tab.session.state.promotionPending) tab.session.editTitle(title);
     else if (tab.session.state.titleDraft !== title) throw new Error("A pending local create cannot change its title");
-    const ready = await tab.session.beginPromotion();
+    if (tab.session.state.promotionPending && tab.session.state.createRequest === null) {
+      throw new Error("This pending create has no stored request. Export its source before retrying.");
+    }
+    const ready = await tab.session.beginPromotion(tab.session.state.createRequest?.path ?? path);
     if (!ready || tab.session.state.storage === "failed") {
       throw new Error("Local draft checkpoint failed; export its source before retrying");
     }
-    const source = tab.session.exportSource();
-    const state = tab.session.state;
+    const request = tab.session.state.createRequest;
+    if (request === null) {
+      throw new Error("This pending create has no stored request. Export its source before retrying.");
+    }
+    tab.path = request.path;
     const response = await client.createNote({
-      mutationId: state.mutationId,
-      path,
-      content: source,
-      sourceHash: await canonicalSourceHash(source),
+      mutationId: request.mutationId,
+      path: request.path,
+      content: request.content,
+      sourceHash: request.sourceHash,
     });
     if (response.outcome.state === "pendingMaterialization") {
       this.notify("Note creation is still being applied. Retry the same save to finish promotion.");

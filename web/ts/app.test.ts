@@ -1246,12 +1246,50 @@ describe("v2 desktop shell", () => {
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "s", ctrlKey: true, cancelable: true }));
     await flushAsync();
     expect(client.createNote).toHaveBeenCalledTimes(2);
-    expect(client.createNote.mock.calls[1]?.[0].mutationId).toBe(request.mutationId);
+    expect(client.createNote.mock.calls[1]?.[0]).toStrictEqual(request);
     const localId = localIdFrom(editorMock.instances[0]!);
     const checkpoint = await savedCheckpoint(created.noteId);
     expect(checkpoint?.noteId).toBe(created.noteId);
     expect(localId).not.toBe(created.noteId);
     await expect(localCheckpoint(localId)).resolves.toBeNull();
+  });
+
+  it("replays a lost local create after the note is bootstrapped and the window reloads", async () => {
+    const notes: V2NoteMeta[] = [];
+    const client = configureVault(notes);
+    const created = noteMeta("created", "meeting-notes.md", "Meeting Notes");
+    client.createNote.mockRejectedValueOnce(new Error("response lost")).mockImplementation(async (request) =>
+      accepted(request.mutationId, created)
+    );
+    client.openNote.mockResolvedValue(documentFor(created, "# Meeting Notes\n"));
+    const first = mountApp();
+    await first.app.boot();
+    first.root.querySelector<HTMLButtonElement>('[title="New note"]')?.click();
+    await until(() => editorMock.instances.length > 0);
+    editorMock.instances[0]!.simulateEdit("# Meeting Notes\n");
+    await flushEditorCapture();
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "s", ctrlKey: true, cancelable: true }));
+    await until(() => client.createNote.mock.calls.length === 1);
+    const request = client.createNote.mock.calls[0]![0];
+    await flushAsync();
+    notes.push(created);
+    client.eventHandlers?.onEvent({
+      eventVersion: 2,
+      resyncRequired: false,
+      update: { kind: "noteChanged", note: created },
+    });
+    window.dispatchEvent(new Event("beforeunload"));
+    await until(async () => (await storedWorkspace())?.tabs.some((tab) => tab.kind === "local-draft") === true);
+    await first.app.dispose();
+
+    const second = mountApp();
+    await second.app.boot();
+    await until(() => editorMock.instances.at(-1)?.getSnapshot()?.source === "# Meeting Notes\n");
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "s", ctrlKey: true, cancelable: true }));
+    await until(() => client.createNote.mock.calls.length === 2);
+
+    expect(client.createNote.mock.calls[1]?.[0]).toStrictEqual(request);
+    expect(request.path).toBe("meeting-notes.md");
   });
 
   it("does not schedule workspace persistence when a local checkpoint read finishes after dispose", async () => {

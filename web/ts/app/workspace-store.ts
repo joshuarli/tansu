@@ -70,6 +70,14 @@ export type DraftJournalRecord = {
   checkpointedAtMs: number;
 };
 
+export type LocalCreateRequest = {
+  version: 1;
+  mutationId: string;
+  path: string;
+  content: string;
+  sourceHash: string;
+};
+
 export type LocalDraftJournalRecord = {
   formatVersion: 2;
   kind: "local";
@@ -82,6 +90,7 @@ export type LocalDraftJournalRecord = {
   source: string;
   titleDraft: string;
   promotionPending: boolean;
+  createRequest: LocalCreateRequest | null;
   selection: { anchor: number; head: number } | null;
   checkpointedAtMs: number;
 };
@@ -630,10 +639,28 @@ export async function writeLocalDraftCheckpoint(record: LocalDraftJournalRecord)
       await done;
       return false;
     }
-    const promotionPending = existing?.mutationId === valid.mutationId && existing.promotionPending
-      ? true
-      : valid.promotionPending;
-    store.put({ ...valid, promotionPending, noteId: valid.localDraftId });
+    if (existing !== null && existing.mutationId === valid.mutationId && existing.createRequest !== null) {
+      if (!sameCreateRequest(valid.createRequest, existing.createRequest) || valid.source !== existing.source ||
+        valid.titleDraft !== existing.titleDraft) {
+        await done;
+        return false;
+      }
+      store.put({
+        ...valid,
+        promotionPending: true,
+        createRequest: existing.createRequest,
+        noteId: valid.localDraftId,
+      });
+      await done;
+      return true;
+    }
+    let promotionPending = valid.promotionPending;
+    let createRequest = valid.createRequest;
+    if (existing !== null && existing.mutationId === valid.mutationId && existing.promotionPending) {
+      promotionPending = true;
+      createRequest = existing.createRequest;
+    }
+    store.put({ ...valid, promotionPending, createRequest, noteId: valid.localDraftId });
     await done;
     return true;
   } catch (error) {
@@ -960,6 +987,10 @@ export function decodeLocalDraftJournalRecord(value: unknown): LocalDraftJournal
     throw corrupt("Local draft key identity does not match its record");
   }
   const source = text(body["source"], "source");
+  const mutationId = boundedMutationId(body["mutationId"]);
+  const promotionPending = body["promotionPending"] === undefined
+    ? false
+    : bool(body["promotionPending"], "promotionPending");
   return {
     formatVersion: 2,
     kind: "local",
@@ -968,13 +999,46 @@ export function decodeLocalDraftJournalRecord(value: unknown): LocalDraftJournal
     workspaceId: identityString(body["workspaceId"], "workspaceId"),
     localDraftId: id,
     localRevision: safeInteger(body["localRevision"], "localRevision"),
-    mutationId: boundedMutationId(body["mutationId"]),
+    mutationId,
     source,
     titleDraft: text(body["titleDraft"], "titleDraft"),
-    promotionPending: body["promotionPending"] === undefined ? false : bool(body["promotionPending"], "promotionPending"),
+    promotionPending,
+    createRequest: decodeLocalCreateRequest(body["createRequest"], mutationId, source, promotionPending),
     selection: body["selection"] === null ? null : selection(body["selection"], source.length),
     checkpointedAtMs: safeInteger(body["checkpointedAtMs"], "checkpointedAtMs"),
   };
+}
+
+function decodeLocalCreateRequest(
+  value: unknown,
+  mutationId: string,
+  source: string,
+  promotionPending: boolean,
+): LocalCreateRequest | null {
+  if (value === undefined || value === null) return null;
+  const body = object(value, "local create request");
+  version(body["version"], 1, "local create request");
+  if (!promotionPending) throw corrupt("A local create request requires a pending promotion");
+  const requestMutationId = boundedMutationId(body["mutationId"]);
+  if (requestMutationId !== mutationId) {
+    throw corrupt("Local create request mutation does not match its draft");
+  }
+  const content = text(body["content"], "content");
+  if (content !== source) throw corrupt("Local create request content does not match its draft");
+  const path = text(body["path"], "path");
+  if (path.trim() === "") throw corrupt("Local create request path is empty");
+  return {
+    version: 1,
+    mutationId: requestMutationId,
+    path,
+    content,
+    sourceHash: sourceHash(body["sourceHash"], "sourceHash", "source"),
+  };
+}
+
+function sameCreateRequest(left: LocalCreateRequest | null, right: LocalCreateRequest | null): boolean {
+  return left?.version === right?.version && left?.mutationId === right?.mutationId && left?.path === right?.path &&
+    left?.content === right?.content && left?.sourceHash === right?.sourceHash;
 }
 
 export function decodeCachedNoteBody(value: unknown): CachedNoteBody {

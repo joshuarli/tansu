@@ -13,11 +13,3 @@ Next: 119
 - **Effort:** M
 - **Design:** [Workspace write ownership](docs/rfc/TNS-109-workspace-write-ownership.md)
 
-### TNS-113 · P2 · Retrying a local create changes its payload under the same mutation ID
-
-- **Area:** Data
-- **Where:** `web/ts/app.ts:1511`, `web/ts/app.ts:1519`, `web/ts/app.ts:1547`, `web/ts/app.ts:1559`, `web/ts/app/local-draft-session.ts:146`, `src/vault.rs:1810`, `src/vault.rs:272`
-- **Problem:** A pending local create checkpoints its mutation ID, source, title, and pending flag, but not its chosen path. Every retry recomputes `uniqueNotePath` from the current note list. If creation succeeds but its response or follow-up read fails, an SSE/bootstrap update can add that note before retry; the same mutation ID then carries a suffixed path and is rejected as `mutation_id_reuse`. The local draft remains pending and read-only, including after recovery. A probe of the actual promotion and event methods produced `meeting-notes.md` followed by `meeting-notes-2.md` under the same mutation ID. The current retry test keeps the note list unchanged and does not assert the whole request.
-- **Recommendation:** Persist the complete immutable create request before first submission, including the selected path, and replay those fields through its terminal outcome. Version pending checkpoints explicitly and preserve source when an old checkpoint cannot reconstruct its request. Cover accepted creation with a lost response, then SSE/bootstrap, reload, and retry.
-- **Fix with:** durable-state
-- **Effort:** M

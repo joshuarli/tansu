@@ -112,7 +112,9 @@ identity.
 The frontend scopes API calls by server and vault identity. Workspace state,
 tabs, and draft checkpoints live in browser IndexedDB, which is not encrypted
 and may be cleared or evicted. Recovery covers the latest journaled checkpoint,
-not every keystroke.
+not every keystroke. A pending local create replays the path, content, and
+source hash stored with its mutation id. A pending checkpoint written before
+that request was stored keeps its source and is not resubmitted.
 
 `web/ts/editor/` owns Markdown editing behavior. The app owns tabs, each tab's
 editor session and view, settings, and the shared asset URL cache. A per-note

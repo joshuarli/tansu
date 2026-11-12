@@ -124,10 +124,63 @@ describe("private workspace storage", () => {
     const old = { ...valid } as Omit<LocalDraftJournalRecord, "promotionPending"> & { promotionPending?: boolean };
     delete old.promotionPending;
     expect(decodeLocalDraftJournalRecord(old).promotionPending).toBeFalsy();
+    const legacyPending: Record<string, unknown> = { ...valid, promotionPending: true };
+    delete legacyPending["createRequest"];
+    expect(decodeLocalDraftJournalRecord(legacyPending).createRequest).toBeNull();
+    const request = {
+      version: 1 as const,
+      mutationId: valid.mutationId,
+      path: "meeting-notes.md",
+      content: valid.source,
+      sourceHash: hash(valid.source),
+    };
+    expect(decodeLocalDraftJournalRecord({ ...valid, promotionPending: true, createRequest: request }).createRequest)
+      .toStrictEqual(request);
+    expect(() => decodeLocalDraftJournalRecord({
+      ...valid,
+      promotionPending: true,
+      createRequest: { ...request, path: "meeting-notes-2.md", mutationId: "other" },
+    })).toThrow(ClientStorageFailureError);
+    expect(() => decodeLocalDraftJournalRecord({
+      ...valid,
+      promotionPending: true,
+      createRequest: { ...request, version: 2 },
+    })).toThrow(ClientStorageFailureError);
     expect(() => decodeDraftJournalRecord(valid)).toThrow(ClientStorageFailureError);
     expect(() => decodeLocalDraftJournalRecord({ ...valid, kind: "saved" })).toThrow(ClientStorageFailureError);
     expect(() => decodeLocalDraftJournalRecord({ ...valid, noteId: "different-key" })).toThrow(ClientStorageFailureError);
     expect(() => decodeLocalDraftJournalRecord({ ...valid, selection: { anchor: 99, head: 99 } })).toThrow(ClientStorageFailureError);
+  });
+
+  it("keeps the first pending create request when a later checkpoint changes its path", async () => {
+    const identity = { serverInstanceId: serverInstanceId("server-1"), vaultId: vaultId("vault-1") };
+    const workspace = workspaceId("workspace-1");
+    const source = "# Meeting Notes\n";
+    const request = {
+      version: 1 as const,
+      mutationId: "mutation-1",
+      path: "meeting-notes.md",
+      content: source,
+      sourceHash: hash(source),
+    };
+    const pending = {
+      ...localDraftRecord(1, source),
+      promotionPending: true,
+      titleDraft: "Meeting Notes",
+      createRequest: request,
+    };
+    const rewritten = {
+      ...pending,
+      localRevision: 2,
+      createRequest: { ...request, path: "meeting-notes-2.md" },
+    };
+
+    await expect(writeLocalDraftCheckpoint(pending)).resolves.toBeTruthy();
+    await expect(writeLocalDraftCheckpoint(rewritten)).resolves.toBeFalsy();
+    await expect(getLocalDraftCheckpoint(identity, workspace, pending.localDraftId)).resolves.toMatchObject({
+      createRequest: request,
+      source,
+    });
   });
 
   it("keeps local draft IDs separate from saved note IDs", async () => {
@@ -795,6 +848,7 @@ function localDraftRecord(
     source,
     titleDraft: `Recovered ${localRevision}`,
     promotionPending: false,
+    createRequest: null,
     selection: { anchor: 2, head: 2 },
     checkpointedAtMs: 3,
   };
