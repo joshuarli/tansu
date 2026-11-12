@@ -566,7 +566,7 @@ function baseState(): State {
   state.boot = {
     serverInstanceId: serverInstanceId("server-1"),
     vaults: [{ vaultId: VAULT_ID, name: "Main" }, { vaultId: vaultId("vault-2"), name: "Work" }],
-    vault: { vaultId: VAULT_ID, name: "Main" },
+    vault: { vaultId: VAULT_ID, name: "Main", error: null },
     notes,
     settings: settings(),
     searchStatus: { dirty: false, degraded: false },

@@ -49,6 +49,13 @@ pub fn reconcile_vault(
         .filter_map(|mut records| records.drain(..).next())
         .collect::<Vec<_>>();
     let rows = catalog.all_rows()?;
+    let pending_note_ids = catalog
+        .pending_mutations()?
+        .into_iter()
+        .filter_map(|mutation| mutation.note_id)
+        .collect::<HashSet<_>>();
+    let mut consumed = HashSet::new();
+
     let live_rows = rows
         .iter()
         .filter(|row| row.state.is_live())
@@ -58,9 +65,18 @@ pub fn reconcile_vault(
         .iter()
         .map(|row| path_key(&row.meta.path))
         .collect::<HashSet<_>>();
-    let mut consumed = HashSet::new();
-
+    let reconcile_rows = live_rows
+        .iter()
+        .filter(|row| !pending_note_ids.contains(&row.meta.note_id))
+        .cloned()
+        .collect::<Vec<_>>();
     for row in &live_rows {
+        if pending_note_ids.contains(&row.meta.note_id) {
+            consumed.insert(path_key(&row.meta.path));
+        }
+    }
+
+    for row in &reconcile_rows {
         let key = path_key(&row.meta.path);
         let Some(file) = primary_files.iter().find(|file| file.path_key == key) else {
             continue;
@@ -69,7 +85,7 @@ pub fn reconcile_vault(
         apply_visible_version(root, state_root, catalog, row, file)?;
     }
 
-    let unmatched_rows = live_rows
+    let unmatched_rows = reconcile_rows
         .iter()
         .filter(|row| !primary_files.iter().any(|file| file.path_key == path_key(&row.meta.path)))
         .cloned()

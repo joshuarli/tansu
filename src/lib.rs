@@ -48,6 +48,7 @@ pub enum Error {
     Json(deser::Error),
     Sql(rusqlite::Error),
     NotFound(String),
+    VaultUnavailable { vault_id: String, message: String },
     Internal(String),
     VaultAlreadyOwned { root: std::path::PathBuf },
 }
@@ -64,6 +65,9 @@ impl std::fmt::Display for Error {
             Self::Api(error) => write!(f, "{error:?}"),
             Self::BadRequest(message) | Self::NotFound(message) | Self::Internal(message) => {
                 f.write_str(message)
+            }
+            Self::VaultUnavailable { vault_id, message } => {
+                write!(f, "vault {vault_id} is unavailable: {message}")
             }
             Self::VaultAlreadyOwned { root } => write!(
                 f,

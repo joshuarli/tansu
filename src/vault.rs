@@ -450,7 +450,11 @@ fn v2_document(meta: &NoteMeta, disk_hash: &str, content: String) -> Result<V2No
 
 fn repair_pending_mutations(root: &Path, state_root: &Path, catalog: &mut Catalog) -> Result<()> {
     for mutation in catalog.pending_mutations()? {
-        let _ = repair_pending_mutation(root, state_root, catalog, &mutation)?;
+        match repair_pending_mutation(root, state_root, catalog, &mutation) {
+            Ok(_) => {}
+            Err(Error::Io(_)) => continue,
+            Err(error) => return Err(error),
+        }
     }
     Ok(())
 }
@@ -1196,6 +1200,7 @@ impl VaultRuntime {
         V2VaultMeta {
             vault_id: self.vault_id.clone(),
             name: self.name.clone(),
+            error: None,
         }
     }
 

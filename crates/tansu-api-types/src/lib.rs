@@ -323,6 +323,8 @@ pub enum UnresolvedReason {
 pub struct V2VaultMeta {
     pub vault_id: String,
     pub name: String,
+    #[deser(default)]
+    pub error: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -739,6 +741,10 @@ pub enum V2ApiErrorKind {
     VaultNotFound {
         vault_id: String,
     },
+    VaultUnavailable {
+        vault_id: String,
+        message: String,
+    },
     ServerInstanceMismatch {
         expected: String,
         received: String,
@@ -821,6 +827,15 @@ mod v2_tests {
         assert_eq!(
             deser_value::to_value(&error).unwrap(),
             json!({"code": "mutation_id_reuse", "mutationId": "mutation-1"})
+        );
+
+        let unavailable = V2ApiErrorKind::VaultUnavailable {
+            vault_id: "vault-1".to_string(),
+            message: "broken".to_string(),
+        };
+        assert_eq!(
+            deser_value::to_value(&unavailable).unwrap(),
+            json!({"code": "vault_unavailable", "vaultId": "vault-1", "message": "broken"})
         );
     }
 

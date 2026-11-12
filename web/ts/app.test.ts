@@ -3226,7 +3226,7 @@ function localIdFrom(editor: FakeEditor): string {
 }
 
 function vaultBootstrap(notes: V2NoteMeta[], id = DEFAULT_VAULT): V2VaultBootstrapResponse {
-  return { vault: { vaultId: id, name: id }, notes, settings: settings(), searchStatus: { dirty: false, degraded: false } };
+  return { vault: { vaultId: id, name: id, error: null }, notes, settings: settings(), searchStatus: { dirty: false, degraded: false } };
 }
 
 function workspaceSeed(openTabs: TestSessionTab[], activeNoteId: string | null, closedTabs: TestSessionTab[] = []): WorkspaceSeed {

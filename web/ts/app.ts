@@ -197,8 +197,9 @@ export class TansuApp {
       throw error;
     }
     if (generation !== this.bootGeneration || this.disposed) return;
-    const selected = global.vaults.find((vault) => vault.vaultId === requestedVault) ??
-      global.vaults.find((vault) => vault.vaultId === this.state.vault) ?? global.vaults[0];
+    const selectableVaults = global.vaults.filter((vault) => vault.error == null);
+    const selected = selectableVaults.find((vault) => vault.vaultId === requestedVault) ??
+      selectableVaults.find((vault) => vault.vaultId === this.state.vault) ?? selectableVaults[0];
     if (selected === undefined) {
       if (this.identity === null) {
         this.state.boot = null;

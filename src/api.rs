@@ -119,6 +119,7 @@ fn v2_api_error_status(error: &V2ApiErrorKind) -> u16 {
         | V2ApiErrorKind::OriginRejected => 403,
         V2ApiErrorKind::RateLimited { .. } => 429,
         V2ApiErrorKind::NotImplemented => 501,
+        V2ApiErrorKind::VaultUnavailable { .. } => 503,
         V2ApiErrorKind::Internal { .. } => 500,
     }
 }
@@ -275,6 +276,10 @@ fn dispatch_v2_api(app: &App, request: &HttpRequest) -> std::result::Result<Http
 
 fn map_v2_vault_lookup_error(error: Error, vault_id: &str) -> V2VaultError {
     match error {
+        Error::VaultUnavailable { message, .. } => V2VaultError::Api(V2ApiErrorKind::VaultUnavailable {
+            vault_id: vault_id.to_string(),
+            message,
+        }),
         Error::NotFound(_) => V2VaultError::Api(V2ApiErrorKind::VaultNotFound {
             vault_id: vault_id.to_string(),
         }),
@@ -434,10 +439,21 @@ mod tests {
     }
 
     #[test]
-    fn vault_lookup_only_maps_not_found_to_vault_not_found() {
+    fn vault_lookup_maps_not_found_unavailable_and_internal() {
         assert!(matches!(
             map_v2_vault_lookup_error(Error::NotFound("lookup".to_string()), "vault-1"),
             V2VaultError::Api(V2ApiErrorKind::VaultNotFound { vault_id }) if vault_id == "vault-1"
+        ));
+        assert!(matches!(
+            map_v2_vault_lookup_error(
+                Error::VaultUnavailable {
+                    vault_id: "vault-1".to_string(),
+                    message: "disk".to_string(),
+                },
+                "vault-1",
+            ),
+            V2VaultError::Api(V2ApiErrorKind::VaultUnavailable { vault_id, message })
+                if vault_id == "vault-1" && message == "disk"
         ));
         assert!(matches!(
             map_v2_vault_lookup_error(Error::Internal("database unavailable".to_string()), "vault-1"),

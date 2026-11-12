@@ -186,6 +186,7 @@ pub trait EventSubscriptionStream: Send + 'static {
 #[derive(Debug)]
 pub enum EventSourceError {
     VaultNotFound,
+    VaultUnavailable(String),
     Internal(String),
 }
 
@@ -1155,6 +1156,12 @@ async fn event_response(
         Err(EventSourceError::VaultNotFound) => {
             return v2_api_error_response(
                 V2ApiErrorKind::VaultNotFound { vault_id },
+                &request_id,
+            ).with_no_store().into_hyper();
+        }
+        Err(EventSourceError::VaultUnavailable(message)) => {
+            return v2_api_error_response(
+                V2ApiErrorKind::VaultUnavailable { vault_id, message },
                 &request_id,
             ).with_no_store().into_hyper();
         }
@@ -2402,6 +2409,7 @@ mod tests {
         fn subscribe(&self, vault_id: &str, _: Option<u64>) -> std::result::Result<EventSubscription, EventSourceError> {
             match vault_id {
                 "missing" => Err(EventSourceError::VaultNotFound),
+                "unavailable" => Err(EventSourceError::VaultUnavailable("degraded".to_string())),
                 _ => Err(EventSourceError::Internal("event storage unavailable".to_string())),
             }
         }

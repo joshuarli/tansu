@@ -88,7 +88,7 @@ describe("v2 API client", () => {
 
   it("decodes a vault bootstrap without server-side workspace state", () => {
     const bootstrap = decodeV2VaultBootstrap({
-      vault: { vaultId: "vault-1", name: "Notes" },
+      vault: { vaultId: "vault-1", name: "Notes", error: null },
       notes: [],
       settings: settings(),
       searchStatus: { dirty: false, degraded: false },
@@ -189,7 +189,7 @@ describe("v2 API client", () => {
 
   it("requires only current fields in vault bootstrap responses", () => {
     const bootstrap = {
-      vault: { vaultId: "vault-1", name: "Notes" },
+      vault: { vaultId: "vault-1", name: "Notes", error: null },
       notes: [],
       settings: settings(),
       searchStatus: { dirty: false, degraded: false },
@@ -378,7 +378,7 @@ describe("v2 API client", () => {
 
   it("rejects response identities and mutation ids that do not match the request", async () => {
     await expect(vaultWithResponse({
-      vault: { vaultId: "vault-2", name: "Other" },
+      vault: { vaultId: "vault-2", name: "Other", error: null },
       notes: [],
       settings: settings(),
       searchStatus: { dirty: false, degraded: false },
@@ -474,7 +474,7 @@ describe("v2 API client", () => {
       }
       if (path.endsWith("/bootstrap")) {
         return jsonResponse({
-          vault: { vaultId: "vault-1", name: "Notes" },
+          vault: { vaultId: "vault-1", name: "Notes", error: null },
           notes: [],
           settings: settings(),
           searchStatus: { dirty: false, degraded: false },

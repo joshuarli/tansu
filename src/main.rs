@@ -230,6 +230,7 @@ impl EventSource for AppEventSource {
     ) -> std::result::Result<EventSubscription, EventSourceError> {
         let vault = self.0.vault_by_id(vault_id).map_err(|error| match error {
             tansu::Error::NotFound(_) => EventSourceError::VaultNotFound,
+            tansu::Error::VaultUnavailable { message, .. } => EventSourceError::VaultUnavailable(message),
             error => EventSourceError::Internal(error.to_string()),
         })?;
         let subscription = vault
