@@ -27,7 +27,7 @@ hyper = { package = "laputa-hyper-futures-lite", version = "=1.12.0-beta.1", def
 lz4_flex = "0.14"
 pulldown-cmark = { version = "0.13", default-features = false }
 psl = "2.1.241"
-rusqlite = { version = "0.41", features = ["backup", "modern_sqlite"] }
+rusqlite = { version = "0.42", features = ["backup", "modern_sqlite"] }
 rustix = { version = "1.1", default-features = false, features = ["fs", "std"] }
 rustc-hash = "2"
 stats-producer = { version = "0.2.0", registry = "mycrates" }
