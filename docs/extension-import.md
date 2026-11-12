@@ -53,9 +53,11 @@ result.
 
 ## Limits
 
-Tansu rejects malformed requests and enforces size, image-count, and URL bounds
-defined in [Loupe's schema](../extension-loupe/src/tansu-schemas.ts) and
-[Tansu's receiver](../web/ts/app/extension-import-receiver.ts).
+Loupe enforces the image-count cap before download and the per-image and total
+byte caps while streaming, cancelling a body that crosses a cap. Tansu rejects
+malformed requests and enforces the same size, image-count, and URL bounds.
+The caps live in [Loupe's importer](../extension-loupe/src/tansu-import.ts) and
+[Tansu's import check](../web/ts/app/extension-import.ts).
 
 ## Security model
 

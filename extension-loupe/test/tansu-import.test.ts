@@ -1,14 +1,17 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
+import { MAX_IMAGES as receiverImageLimit } from "../../web/ts/app/extension-import.ts";
 import {
   applyTotalImageCap,
   bytesToBase64,
+  downloadTansuImages,
   fetchTansuImage,
   IMAGE_ACCEPT_HEADER,
   IMAGE_USER_AGENT,
   isRetryableImageStatus,
   mapWithConcurrency,
   MAX_IMAGE_BYTES,
+  MAX_IMAGES,
   MAX_TOTAL_IMAGE_BYTES,
   planTansuImages,
   prepareTansuImport,
@@ -215,19 +218,33 @@ test("fetches an image with browser-like headers", async () => {
 
 test("retries 503 responses then succeeds", async () => {
   let calls = 0;
+  let cancelled = 0;
   const outcome = await fetchTansuImage(
     "https://example.com/a.png",
     async () => {
       calls++;
-      return calls < 3
-        ? new Response("busy", { status: 503 })
-        : imageResponse(new Uint8Array([9]));
+      if (calls < 3) {
+        return new Response(
+          new ReadableStream({
+            pull(controller) {
+              controller.enqueue(new Uint8Array([1]));
+              controller.close();
+            },
+            cancel() {
+              cancelled++;
+            },
+          }),
+          { status: 503 },
+        );
+      }
+      return imageResponse(new Uint8Array([9]));
     },
     noSleep,
   );
 
   assert.equal(outcome.status, "fetched");
   assert.equal(calls, 3);
+  assert.equal(cancelled, 2);
 });
 
 test("rejects non-image content types and HTTP errors without retrying 404", async () => {
@@ -275,6 +292,127 @@ test("a network failure after retries fails soft", async () => {
 
   assert.deepEqual(outcome, { status: "failed", reason: "network" });
   assert.equal(calls, 3);
+});
+
+test("the image count matches the receiver and extra urls are not downloaded", async () => {
+  assert.equal(MAX_IMAGES, receiverImageLimit);
+  const markdown = Array.from({ length: MAX_IMAGES + 1 }, (_, index) => `![a](/i${index}.png)`).join(" ");
+  let calls = 0;
+  const prepared = await prepareTansuImport(markdown, SOURCE, {
+    retryOptions: noSleep,
+    fetchImpl: async () => {
+      calls++;
+      return imageResponse(new Uint8Array([1]));
+    },
+  });
+
+  assert.equal(calls, MAX_IMAGES);
+  assert.equal(prepared.images.length, MAX_IMAGES);
+  assert.match(prepared.markdown, /\]\(\/i200\.png\)/);
+});
+
+test("an oversized stream is cancelled at the per-image cap", async () => {
+  const chunk = 1024 * 1024;
+  let pulled = 0;
+  let cancelled = false;
+  const outcome = await fetchTansuImage(
+    "https://example.com/big.png",
+    async () =>
+      new Response(
+        new ReadableStream({
+          pull(controller) {
+            if (pulled >= 20) {
+              controller.close();
+              return;
+            }
+            pulled++;
+            controller.enqueue(new Uint8Array(chunk));
+          },
+          cancel() {
+            cancelled = true;
+          },
+        }),
+        { headers: { "content-type": "image/png" } },
+      ),
+    noSleep,
+  );
+
+  assert.deepEqual(outcome, { status: "failed", reason: "too-large" });
+  assert.equal(cancelled, true);
+  assert.ok(pulled < 20, `stream was fully consumed after ${pulled} chunks`);
+  assert.ok(pulled <= MAX_IMAGE_BYTES / chunk + 2, `pulled ${pulled} chunks`);
+});
+
+test("a declared oversized image is cancelled before its body is read", async () => {
+  let cancelled = false;
+  let pulls = 0;
+  const outcome = await fetchTansuImage(
+    "https://example.com/big.png",
+    async () =>
+      new Response(
+        new ReadableStream({
+          pull(controller) {
+            pulls += 1;
+            controller.enqueue(new Uint8Array([1]));
+            controller.close();
+          },
+          cancel() {
+            cancelled = true;
+          },
+        }),
+        {
+          headers: {
+            "content-type": "image/png",
+            "content-length": String(MAX_IMAGE_BYTES + 1),
+          },
+        },
+      ),
+    noSleep,
+  );
+
+  assert.deepEqual(outcome, { status: "failed", reason: "too-large" });
+  assert.equal(cancelled, true);
+  assert.ok(pulls <= 1, `consumer read the body in ${pulls} pulls`);
+});
+
+test("downloads stop retaining bytes once the source-order total is full", async () => {
+  const pulls = new Map<string, number>();
+  const outcomes = await downloadTansuImages(
+    ["/0.png", "/1.png", "/2.png", "/3.png", "/4.png", "/5.png"].map(
+      (path) => `https://example.com${path}`,
+    ),
+    async (url) => {
+      const path = new URL(String(url)).pathname;
+      return new Response(
+        new ReadableStream({
+          pull(controller) {
+            const pulled = pulls.get(path) ?? 0;
+            if (pulled >= 8) {
+              controller.close();
+              return;
+            }
+            pulls.set(path, pulled + 1);
+            controller.enqueue(new Uint8Array([1]));
+          },
+        }),
+        { headers: { "content-type": "image/png" } },
+      );
+    },
+    noSleep,
+    { maxImageBytes: 8, maxTotalBytes: 16 },
+  );
+
+  const retained = outcomes.reduce(
+    (total, outcome) => total + (outcome.status === "fetched" ? outcome.bytes.byteLength : 0),
+    0,
+  );
+  const pulled = [...pulls.values()].reduce((total, count) => total + count, 0);
+  assert.ok(retained <= 16);
+  assert.ok(pulled < 6 * 8);
+  assert.equal(outcomes[0]?.status, "fetched");
+  assert.equal(outcomes[1]?.status, "fetched");
+  assert.equal(outcomes[5]?.status, "failed");
+  if (outcomes[5]?.status === "failed") assert.equal(outcomes[5].reason, "total-cap");
 });
 
 test("an image over the per-image cap stays remote", async () => {

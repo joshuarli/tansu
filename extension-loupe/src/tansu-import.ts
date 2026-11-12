@@ -3,6 +3,7 @@ import { TANSU_IMAGE_PLACEHOLDER_SCHEME, type TansuImportImage } from "./tansu-w
 
 export const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 export const MAX_TOTAL_IMAGE_BYTES = 40 * 1024 * 1024;
+export const MAX_IMAGES = 200;
 export const IMAGE_FETCH_CONCURRENCY = 4;
 export const IMAGE_REQUEST_TIMEOUT_MS = 30_000;
 export const IMAGE_ACCEPT_HEADER =
@@ -74,6 +75,7 @@ export function planTansuImages(markdown: string, sourceUrl: string): PlannedTan
       : occurrence;
     let id = idByUrl.get(resolvedUrl);
     if (id === undefined) {
+      if (urls.length >= MAX_IMAGES) continue;
       id = urls.length;
       urls.push(resolvedUrl);
       idByUrl.set(resolvedUrl, id);
@@ -145,49 +147,151 @@ export function readImageContentType(headers: Headers): string {
   return (headers.get("content-type") ?? "").split(";", 1)[0]?.trim().toLowerCase() ?? "";
 }
 
+async function cancelBody(response: Response): Promise<void> {
+  try {
+    await response.body?.cancel();
+  } catch {
+    return;
+  }
+}
+
+export interface FetchTansuImageOptions {
+  maxImageBytes?: number;
+  shouldStop?: () => boolean;
+}
+
+async function readCappedImage(
+  response: Response,
+  maxImageBytes: number,
+  shouldStop: () => boolean,
+): Promise<ImageFetchOutcome> {
+  if (shouldStop()) {
+    await cancelBody(response);
+    return { status: "failed", reason: "total-cap" };
+  }
+  if (!response.ok) {
+    await cancelBody(response);
+    return { status: "failed", reason: "http" };
+  }
+  const contentType = readImageContentType(response.headers);
+  if (!contentType.startsWith("image/")) {
+    await cancelBody(response);
+    return { status: "failed", reason: "not-image" };
+  }
+  if (Number(response.headers.get("content-length")) > maxImageBytes) {
+    await cancelBody(response);
+    return { status: "failed", reason: "too-large" };
+  }
+  const reader = response.body?.getReader();
+  if (reader === undefined) return { status: "failed", reason: "empty" };
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      if (shouldStop()) {
+        await reader.cancel();
+        return { status: "failed", reason: "total-cap" };
+      }
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (value === undefined || value.byteLength === 0) continue;
+      if (total + value.byteLength > maxImageBytes) {
+        await reader.cancel();
+        return { status: "failed", reason: "too-large" };
+      }
+      chunks.push(value);
+      total += value.byteLength;
+    }
+  } catch {
+    await reader.cancel().catch(() => undefined);
+    return { status: "failed", reason: shouldStop() ? "total-cap" : "network" };
+  }
+  if (total === 0) return { status: "failed", reason: "empty" };
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return { status: "fetched", contentType, bytes };
+}
+
 export async function fetchTansuImage(
   url: string,
   fetchImpl: typeof globalThis.fetch,
   retryOptions: ExponentialBackoffOptions = IMAGE_RETRY_OPTIONS,
+  fetchOptions: FetchTansuImageOptions = {},
 ): Promise<ImageFetchOutcome> {
+  const maxImageBytes = fetchOptions.maxImageBytes ?? MAX_IMAGE_BYTES;
+  const shouldStop = fetchOptions.shouldStop ?? (() => false);
   let response: Response;
   try {
     response = await retryWithExponentialBackoff(
-      () =>
-        fetchImpl(url, {
+      async () => {
+        const candidate = await fetchImpl(url, {
           method: "GET",
           headers: { Accept: IMAGE_ACCEPT_HEADER, "User-Agent": IMAGE_USER_AGENT },
           signal: AbortSignal.timeout(IMAGE_REQUEST_TIMEOUT_MS),
-        }),
+        });
+        if (isRetryableImageStatus(candidate.status)) await cancelBody(candidate);
+        return candidate;
+      },
       (candidate) => isRetryableImageStatus(candidate.status),
       retryOptions,
     );
   } catch {
     return { status: "failed", reason: "network" };
   }
-  if (!response.ok) {
-    return { status: "failed", reason: "http" };
-  }
-  const contentType = readImageContentType(response.headers);
-  if (!contentType.startsWith("image/")) {
-    return { status: "failed", reason: "not-image" };
-  }
-  if (Number(response.headers.get("content-length")) > MAX_IMAGE_BYTES) {
-    return { status: "failed", reason: "too-large" };
-  }
-  let bytes: Uint8Array;
-  try {
-    bytes = new Uint8Array(await response.arrayBuffer());
-  } catch {
-    return { status: "failed", reason: "network" };
-  }
-  if (bytes.byteLength === 0) {
-    return { status: "failed", reason: "empty" };
-  }
-  if (bytes.byteLength > MAX_IMAGE_BYTES) {
-    return { status: "failed", reason: "too-large" };
-  }
-  return { status: "fetched", contentType, bytes };
+  return readCappedImage(response, maxImageBytes, shouldStop);
+}
+
+export async function downloadTansuImages(
+  urls: readonly string[],
+  fetchImpl: typeof globalThis.fetch,
+  retryOptions: ExponentialBackoffOptions,
+  limits: { maxImageBytes: number; maxTotalBytes: number },
+): Promise<ImageFetchOutcome[]> {
+  const outcomes: ImageFetchOutcome[] = new Array(urls.length);
+  const pending = new Map<number, ImageFetchOutcome>();
+  let settled = 0;
+  let retained = 0;
+  let capReached = false;
+  const shouldStop = () => capReached;
+  const discard = (outcome: ImageFetchOutcome): ImageFetchOutcome =>
+    outcome.status === "fetched" ? { status: "failed", reason: "total-cap" } : outcome;
+  const absorb = (): void => {
+    while (settled < urls.length) {
+      const outcome = outcomes[settled] ?? pending.get(settled);
+      if (outcome === undefined) return;
+      pending.delete(settled);
+      if (
+        capReached ||
+        (outcome.status === "fetched" && retained + outcome.bytes.byteLength > limits.maxTotalBytes)
+      ) {
+        capReached = true;
+        outcomes[settled] = discard(outcome);
+      } else {
+        outcomes[settled] = outcome;
+        if (outcome.status === "fetched") retained += outcome.bytes.byteLength;
+        if (retained >= limits.maxTotalBytes) capReached = true;
+      }
+      settled += 1;
+    }
+  };
+  await mapWithConcurrency(urls, IMAGE_FETCH_CONCURRENCY, async (url, index) => {
+    if (capReached) {
+      outcomes[index] = { status: "failed", reason: "total-cap" };
+      absorb();
+      return;
+    }
+    const outcome = await fetchTansuImage(url, fetchImpl, retryOptions, {
+      maxImageBytes: limits.maxImageBytes,
+      shouldStop,
+    });
+    pending.set(index, capReached ? discard(outcome) : outcome);
+    absorb();
+  });
+  return outcomes;
 }
 
 export function applyTotalImageCap(outcomes: readonly ImageFetchOutcome[]): ImageFetchOutcome[] {
@@ -229,10 +333,11 @@ export async function prepareTansuImport(
   options: PrepareTansuImportOptions,
 ): Promise<PreparedTansuImport> {
   const planned = planTansuImages(markdown, sourceUrl),
-    outcomes = applyTotalImageCap(
-      await mapWithConcurrency(planned.urls, IMAGE_FETCH_CONCURRENCY, (url) =>
-        fetchTansuImage(url, options.fetchImpl, options.retryOptions),
-      ),
+    outcomes = await downloadTansuImages(
+      planned.urls,
+      options.fetchImpl,
+      options.retryOptions ?? IMAGE_RETRY_OPTIONS,
+      { maxImageBytes: MAX_IMAGE_BYTES, maxTotalBytes: MAX_TOTAL_IMAGE_BYTES },
     );
   return {
     markdown: planned.markdown,
