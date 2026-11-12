@@ -93,6 +93,8 @@ to the remaining notes:
 - A same-path hash change is an external edit unless the file still matches the
   last visible hash, in which case reconciliation restores the accepted snapshot.
 - An exact-hash move preserves identity only when the match is unambiguous.
+- A path whose case changes, while its path key stays the same, is an external
+  rename of that note. Content reconciliation then uses the observed path.
 - A missing file with a valid snapshot is recreated when its last event is a
   user create, save, rename, or import, even after that mutation completed.
   Other missing files become tombstones.

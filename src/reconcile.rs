@@ -82,7 +82,17 @@ pub fn reconcile_vault(
             continue;
         };
         consumed.insert(file.path_key.clone());
-        apply_visible_version(root, state_root, catalog, row, file)?;
+        let mut row = row.clone();
+        if file.path != row.meta.path {
+            row.meta = catalog.rename_note(
+                &row.meta.note_id,
+                &file.path,
+                &file.path_key,
+                NoteEventKind::ExternalRename,
+                NoteEventSource::External,
+            )?;
+        }
+        apply_visible_version(root, state_root, catalog, &row, file)?;
     }
 
     let unmatched_rows = reconcile_rows
@@ -106,7 +116,13 @@ pub fn reconcile_vault(
     for (row_index, file_index) in moved_pairs {
         let row = &unmatched_rows[row_index];
         let file = unmatched_files[file_index];
-        catalog.rename_note(&row.meta.note_id, &file.path, &file.path_key)?;
+        catalog.rename_note(
+            &row.meta.note_id,
+            &file.path,
+            &file.path_key,
+            NoteEventKind::Rename,
+            NoteEventSource::User,
+        )?;
         catalog.record_visible_hash(&row.meta.note_id, &file.disk_hash)?;
         history::write_snapshot_bytes(
             state_root,
@@ -674,6 +690,71 @@ mod tests {
             assert_eq!(live[0].content_hash, content_hash);
             assert_eq!(fs::read(dir.path().join(file_name)).unwrap(), bytes);
         }
+    }
+
+    #[test]
+    fn case_only_external_rename_keeps_the_note_id_and_observed_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let bytes = b"# Note\n\nsame\n";
+        fs::write(dir.path().join("old.md"), bytes).unwrap();
+        let state_root = dir.path().join("state");
+        let mut catalog = Catalog::open(&state_root.join("vault.db")).unwrap();
+        reconcile_vault(dir.path(), &state_root, &mut catalog, &[]).unwrap();
+        let before = catalog.live_notes().unwrap().remove(0);
+        let revision_hashes = catalog
+            .revisions(&before.note_id)
+            .unwrap()
+            .into_iter()
+            .map(|revision| revision.content_hash)
+            .collect::<Vec<_>>();
+
+        fs::rename(dir.path().join("old.md"), dir.path().join("Old.md")).unwrap();
+        let listed = fs::read_dir(dir.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+            .collect::<Vec<_>>();
+        assert!(
+            listed.iter().any(|name| name == "Old.md"),
+            "filesystem did not record the case-only rename: {listed:?}"
+        );
+
+        reconcile_vault(dir.path(), &state_root, &mut catalog, &[]).unwrap();
+        let after = catalog.live_notes().unwrap().remove(0);
+        assert_eq!(after.note_id, before.note_id);
+        assert_eq!(after.path, "Old.md");
+        assert_eq!(after.content_hash, before.content_hash);
+        assert_eq!(
+            catalog.latest_event(&after.note_id).unwrap(),
+            Some(("external_rename".to_string(), "external".to_string()))
+        );
+        assert_eq!(
+            catalog
+                .revisions(&after.note_id)
+                .unwrap()
+                .into_iter()
+                .map(|revision| revision.content_hash)
+                .collect::<Vec<_>>(),
+            revision_hashes
+        );
+        assert!(!reconcile_note_before_write(dir.path(), &state_root, &mut catalog, &before.note_id).unwrap());
+
+        reconcile_vault(dir.path(), &state_root, &mut catalog, &[]).unwrap();
+        drop(catalog);
+        let mut reopened = Catalog::open(&state_root.join("vault.db")).unwrap();
+        reconcile_vault(dir.path(), &state_root, &mut reopened, &[]).unwrap();
+        let live = reopened.live_notes().unwrap();
+        assert_eq!(live.len(), 1);
+        assert_eq!(live[0].note_id, before.note_id);
+        assert_eq!(live[0].path, "Old.md");
+        assert_eq!(
+            reopened
+                .revisions(&before.note_id)
+                .unwrap()
+                .into_iter()
+                .map(|revision| revision.content_hash)
+                .collect::<Vec<_>>(),
+            revision_hashes
+        );
     }
 
     #[test]

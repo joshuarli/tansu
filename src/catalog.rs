@@ -244,7 +244,14 @@ impl Catalog {
             .ok_or_else(|| Error::NotFound(note_id.to_string()))
     }
 
-    pub fn rename_note(&mut self, note_id: &str, path: &str, path_key: &str) -> Result<NoteMeta> {
+    pub fn rename_note(
+        &mut self,
+        note_id: &str,
+        path: &str,
+        path_key: &str,
+        kind: NoteEventKind,
+        source: NoteEventSource,
+    ) -> Result<NoteMeta> {
         let tx = self.conn.transaction()?;
         let current =
             note_by_id_tx(&tx, note_id)?.ok_or_else(|| Error::NotFound(note_id.to_string()))?;
@@ -255,8 +262,8 @@ impl Catalog {
             params![note_id, path, path_key, seq, now],
         )?;
         tx.execute(
-            "INSERT INTO note_events(note_id, seq, kind, source, path, content_hash, created_at_ms) VALUES(?1, ?2, 'rename', 'user', ?3, NULL, ?4)",
-            params![note_id, seq, path, now],
+            "INSERT INTO note_events(note_id, seq, kind, source, path, content_hash, created_at_ms) VALUES(?1, ?2, ?3, ?4, ?5, NULL, ?6)",
+            params![note_id, seq, event_kind(kind), event_source(source), path, now],
         )?;
         advance_sync_tx(&tx)?;
         tx.commit()?;

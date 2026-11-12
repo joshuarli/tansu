@@ -31,15 +31,6 @@ Next: 119
 - **Fix with:** durable-state
 - **Effort:** M
 
-### TNS-115 · P2 · Case-only external renames strand the original note identity
-
-- **Area:** Data
-- **Where:** `src/reconcile.rs:73`, `src/reconcile.rs:200`, `src/reconcile.rs:450`, `src/paths.rs:50`
-- **Problem:** On a case-sensitive filesystem, `old.md` renamed externally to `Old.md` matches the original row by lowercase path key. Reconciliation consumes the file without updating its stored path. A subsequent note read/write preflight looks for nonexistent `old.md` and tombstones the original ID; the next scan imports `Old.md` under a new ID. Content survives, but tabs and revision history remain attached to the old identity. The real SQLite/filesystem probe reproduced all three steps for a unique file, without a case-collision pair.
-- **Recommendation:** Separate the collision key from the observed path. Persist a unique case-only path change as an external rename before reconciling content. On a case-sensitive filesystem, verify repeated reconciliation and reopen preserve the original note ID and history.
-- **Fix with:** durable-state
-- **Effort:** S
-
 ### TNS-116 · P2 · Loupe enforces image byte limits after buffering the data
 
 - **Area:** Security
