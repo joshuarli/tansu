@@ -1007,6 +1007,21 @@ fn auth_error_kind(error: AuthError, request_id: &str) -> V2ApiErrorKind {
     }
 }
 
+fn authorize_loopback_without_session(
+    method: &Method,
+    headers: &HeaderMap,
+) -> std::result::Result<RequestAuthorization, V2ApiErrorKind> {
+    let host = single_header(headers, HOST.as_str())
+        .map_err(|()| V2ApiErrorKind::OriginRejected)?
+        .ok_or(V2ApiErrorKind::OriginRejected)?;
+    let origin = single_header(headers, ORIGIN.as_str()).map_err(|()| V2ApiErrorKind::OriginRejected)?;
+    let state_changing = !matches!(*method, Method::GET | Method::HEAD | Method::OPTIONS);
+    AuthPolicy::loopback_development()
+        .validate_origin_host(host, origin, state_changing)
+        .map_err(|error| auth_error_kind(error, &request_id_from_headers(headers)))?;
+    Ok(RequestAuthorization { stream: None, session_cookie: None, verified_session: None })
+}
+
 fn authorize_request(
     method: &Method,
     uri: &hyper::Uri,
@@ -1014,7 +1029,7 @@ fn authorize_request(
     services: &ServerServices,
 ) -> std::result::Result<RequestAuthorization, V2ApiErrorKind> {
     let Some(auth) = &services.auth else {
-        return Ok(RequestAuthorization { stream: None, session_cookie: None, verified_session: None });
+        return authorize_loopback_without_session(method, headers);
     };
     let host = single_header(headers, HOST.as_str())
         .map_err(|()| V2ApiErrorKind::OriginRejected)?
@@ -2135,6 +2150,43 @@ mod tests {
     }
 
     #[test]
+    fn local_and_setup_modes_reject_foreign_origins_and_accept_loopback() {
+        let uri = "/api/v2/app/settings".parse().unwrap();
+        let services = [
+            ServerServices::default(),
+            ServerServices {
+                auth: None,
+                events: Some(Arc::new(LookupErrorEventSource)),
+            },
+        ];
+        for services in services {
+            let mut foreign = HeaderMap::new();
+            foreign.insert(HOST, "attacker.example:3000".parse().unwrap());
+            foreign.insert(ORIGIN, "http://attacker.example:3000".parse().unwrap());
+            assert!(matches!(
+                authorize_request(&Method::PUT, &uri, &foreign, &services),
+                Err(V2ApiErrorKind::OriginRejected)
+            ));
+
+            let mut local = HeaderMap::new();
+            local.insert(HOST, "localhost:3000".parse().unwrap());
+            local.insert(ORIGIN, "http://localhost:3000".parse().unwrap());
+            assert!(authorize_request(&Method::PUT, &uri, &local, &services).is_ok());
+
+            let mut read = HeaderMap::new();
+            read.insert(HOST, "127.0.0.1".parse().unwrap());
+            assert!(authorize_request(&Method::GET, &"/api/v2/health".parse().unwrap(), &read, &services).is_ok());
+
+            let mut missing_origin = HeaderMap::new();
+            missing_origin.insert(HOST, "localhost".parse().unwrap());
+            assert!(matches!(
+                authorize_request(&Method::PUT, &uri, &missing_origin, &services),
+                Err(V2ApiErrorKind::OriginRejected)
+            ));
+        }
+    }
+
+    #[test]
     fn rejects_ambiguous_security_headers() {
         let mut headers = HeaderMap::new();
         headers.append(HOST, "notes.example.com".parse().unwrap());
@@ -2321,14 +2373,14 @@ mod tests {
 
         let mut oversized = TcpStream::connect(address).unwrap();
         oversized.set_read_timeout(Some(Duration::from_secs(1))).unwrap();
-        oversized.write_all(b"POST /api/v2/vaults/vault-1/notes HTTP/1.1\r\nHost: localhost\r\nContent-Length: 9\r\n\r\n").unwrap();
+        oversized.write_all(b"POST /api/v2/vaults/vault-1/notes HTTP/1.1\r\nHost: localhost\r\nOrigin: http://localhost\r\nContent-Length: 9\r\n\r\n").unwrap();
         let mut oversized_response = String::new();
         oversized.read_to_string(&mut oversized_response).unwrap();
         assert!(oversized_response.starts_with("HTTP/1.1 413"));
 
         let mut slow = TcpStream::connect(address).unwrap();
         slow.set_read_timeout(Some(Duration::from_secs(1))).unwrap();
-        slow.write_all(b"POST /api/v2/vaults/vault-1/notes HTTP/1.1\r\nHost: localhost\r\nContent-Length: 2\r\n\r\na").unwrap();
+        slow.write_all(b"POST /api/v2/vaults/vault-1/notes HTTP/1.1\r\nHost: localhost\r\nOrigin: http://localhost\r\nContent-Length: 2\r\n\r\na").unwrap();
         let mut slow_response = String::new();
         slow.read_to_string(&mut slow_response).unwrap();
         assert!(slow_response.starts_with("HTTP/1.1 408"));

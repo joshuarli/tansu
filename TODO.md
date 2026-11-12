@@ -13,15 +13,6 @@ Next: 119
 - **Effort:** M
 - **Design:** [Workspace write ownership](docs/rfc/TNS-109-workspace-write-ownership.md)
 
-### TNS-112 · P2 · Local and setup requests bypass Host and Origin validation
-
-- **Area:** Security
-- **Where:** `src/http.rs:303`, `src/http.rs:1016`, `src/main.rs:66`, `src/auth.rs:124`, `src/api.rs:171`
-- **Problem:** Normal local mode has no auth store, and setup uses default services. `authorize_request` immediately accepts either case without inspecting Host, Origin, or method. The existing `LoopbackDevelopment` policy has these checks but is not installed by those entry points. A compiled probe of the exact authorization function and real auth module accepted `PUT /api/v2/app/settings` with `Host: attacker.example:3000` and `Origin: http://attacker.example:3000`; applying the existing loopback policy rejected it and still accepted matching localhost headers. The missing gate is proven at the request boundary. Browser DNS-rebinding exploitation is unproven; its impact depends on a hostile hostname reaching loopback. Bootstrap supplies the identities needed for later vault requests, so identity headers are not an authorization substitute.
-- **Recommendation:** Enforce an explicit request-origin policy in setup and normal local mode independently of session persistence. Require a loopback authority and matching local origin for local mutations. Reuse the existing policy and add transport cases for both entry points that reject foreign headers and accept legitimate local requests.
-- **Fix with:** security
-- **Effort:** S
-
 ### TNS-113 · P2 · Retrying a local create changes its payload under the same mutation ID
 
 - **Area:** Data

@@ -111,7 +111,7 @@ impl AuthPolicy {
         }
     }
 
-    fn validate_origin_host(&self, host: &str, origin: Option<&str>, state_changing: bool) -> Result<(), AuthError> {
+    pub(crate) fn validate_origin_host(&self, host: &str, origin: Option<&str>, state_changing: bool) -> Result<(), AuthError> {
         match self {
             Self::Authenticated { external_origin, host: expected_host, .. } => {
                 if !host.eq_ignore_ascii_case(expected_host) || origin.is_some_and(|origin| origin != external_origin) {

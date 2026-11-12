@@ -7,8 +7,10 @@ checks `Host` on every request and requires an exact `Origin` match when the
 header is present. State-changing requests require the configured origin, a
 valid session, and its CSRF token, except for ticket-bound login and initial
 enrollment. Health is public but still checks `Host` and any supplied
-`Origin`. The server does not enable cross-origin access. Local and first-run
-setup modes currently skip these header checks when no auth store is configured.
+`Origin`. The server does not enable cross-origin access. Local mode and
+first-run setup have no auth store. They still require a loopback `Host`.
+State-changing requests also require a matching `http` loopback `Origin`.
+Reads may omit `Origin`.
 
 WebAuthn credentials bind to the configured origin and RP ID. Changing either
 clears credentials, sessions, enrollment capabilities, and pending ceremonies
