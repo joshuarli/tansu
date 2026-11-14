@@ -59,12 +59,16 @@ The layout is:
 
 The app listens on 3001 and the redirect on 3002. By default Tailscale Serve
 maps HTTPS 443 to 3001 and HTTP 3000 to 3002, and `http://<host>:3000`
-redirects to the tailnet HTTPS origin. To serve a public hostname through
-Cloudflare Tunnel instead, set `TANSU_PUBLIC_ORIGIN=https://<host>` (for
-example `https://tansu.17166969.xyz`) for `make deploy`: the installer then
-validates the existing auth origin against that public origin and RP ID,
-writes it as `TANSU_REDIRECT_ORIGIN`, and skips re-creating the Tailscale
-Serve mappings (the tunnel, not Serve, provides the public HTTPS endpoint).
+redirects to the tailnet HTTPS origin. To serve a custom hostname instead,
+set `TANSU_PUBLIC_ORIGIN=https://<host>` (for example
+`https://tansu.17166969.xyz`) for `make deploy`: the installer then validates
+the existing auth origin against that origin and RP ID, writes it as
+`TANSU_REDIRECT_ORIGIN`, and skips re-creating the Tailscale Serve mappings.
+On `lisa`, the shared tailnet ingress in `stuff/deploy/openorange` serves
+`tansu.17166969.xyz` from a DNS-only record to the Tailscale address, with
+ACME certificates, and proxies to `127.0.0.1:3001` with the Host unchanged;
+only tailnet devices reach it. The Cloudflare Tunnel that served it publicly
+was retired on 2026-11-14.
 The RP ID must be exactly the public hostname, so changing it clears existing
 passkeys; back up the auth database first.
 
@@ -104,7 +108,7 @@ the host accepts, and an empty or initialized `/var/lib/tansu`.
 ```sh
 make deploy-check
 make deploy DEPLOY_HOST=user@host
-# Public Cloudflare hostname instead of the tailnet origin:
+# Custom hostname served by the shared tailnet ingress:
 TANSU_PUBLIC_ORIGIN=https://tansu.17166969.xyz make deploy
 make deploy-status DEPLOY_HOST=user@host
 make deploy-smoke DEPLOY_HOST=user@host
