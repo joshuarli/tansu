@@ -1613,6 +1613,7 @@ async function stopFixtureServer(): Promise<void> {
 async function v2Request(vaultId: string, path: string, init: RequestInit = {}): Promise<Response> {
   const headers = new Headers(init.headers);
   headers.set("X-Tansu-Server-Instance", serverInstanceId);
+  headers.set("Origin", baseUrl);
   return fetch(`${baseUrl}/api/v2/vaults/${encodeURIComponent(vaultId)}${path}`, {
     ...init,
     headers,
