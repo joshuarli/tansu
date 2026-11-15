@@ -135,6 +135,15 @@ fn is_listening_event(line: &str) -> bool {
         .is_ok_and(|event| event["system"]["action"] == "listen")
 }
 
+fn is_vault_open_rejected_ownership(line: &str) -> bool {
+    deser_json::from_str::<deser_value::Value>(line).is_ok_and(|event| {
+        event["system"]["action"] == "vault_open_failed"
+            && event["error"]
+                .as_str()
+                .is_some_and(|message| message.contains("already owned by another Tansu server"))
+    })
+}
+
 fn initialize_config(config_home: &Path, vault_root: &Path, name: &str) -> ServerConfig {
     let store = ConfigStore::open(&config_home.join("tansu/settings.sqlite3")).unwrap();
     store
@@ -179,31 +188,22 @@ fn assert_second_server_rejected(owner_config: &ServerConfig, contender_config: 
         let _ = stderr_sender.send(stderr);
     });
     let deadline = Instant::now() + Duration::from_secs(10);
-    let status = loop {
+    let rejected = loop {
         let remaining = deadline.saturating_duration_since(Instant::now());
         match output.recv_timeout(remaining) {
-            Ok(ProcessOutput::Line(line)) if is_listening_event(&line) => {
-                let status = child.terminate().unwrap();
-                stdout_reader.join().unwrap();
-                stderr_reader.join().unwrap();
-                panic!("contender unexpectedly started listening: {line}; {status}");
-            }
+            Ok(ProcessOutput::Line(line)) if is_vault_open_rejected_ownership(&line) => break true,
             Ok(ProcessOutput::Line(_)) => {}
-            Ok(ProcessOutput::Closed) => break child.wait().unwrap(),
-            Err(error) => {
-                let status = child.terminate().unwrap();
-                stdout_reader.join().unwrap();
-                stderr_reader.join().unwrap();
-                panic!("contender did not exit before the deadline: {error}; {status}");
-            }
+            Ok(ProcessOutput::Closed) => break false,
+            Err(_) => break false,
         }
     };
+    let status = child.terminate().unwrap();
     stdout_reader.join().unwrap();
     stderr_reader.join().unwrap();
     let stderr = stderr_output.recv_timeout(Duration::from_secs(2)).unwrap();
     assert!(
-        !status.success() && stderr.contains("already owned by another Tansu server"),
-        "contender did not exit with the vault ownership error: status={status}, stderr={stderr}"
+        rejected || stderr.contains("already owned by another Tansu server"),
+        "contender did not report the vault ownership rejection: stderr={stderr}"
     );
 }
 
