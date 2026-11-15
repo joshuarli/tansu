@@ -15,7 +15,7 @@ RUN apt-get update \
 RUN curl --proto '=https' --tlsv1.2 -fsSL \
     "https://github.com/pnpm/pnpm/releases/download/v${PNPM_VERSION}/pnpm-linux-x64.tar.gz" \
     -o /tmp/pnpm.tar.gz \
-  && echo "568fd50dd174a57e80efacc04be1d6a228bb41fbebe557f2ef63a1c3a721a5f4  /tmp/pnpm.tar.gz" | sha256sum -c - \
+  && echo "84c4773bcf4a217f4083cd7b2a91e4cee6103cf42426c1282ef37d308f55a410  /tmp/pnpm.tar.gz" | sha256sum -c - \
   && tar -xzf /tmp/pnpm.tar.gz -C /usr/local/bin pnpm \
   && chmod 0755 /usr/local/bin/pnpm \
   && rm /tmp/pnpm.tar.gz
