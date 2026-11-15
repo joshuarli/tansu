@@ -1,6 +1,6 @@
 ARG NODE_VERSION
-FROM node:${NODE_VERSION}-bookworm@sha256:a546d3f8acd2af4382668a7e6acd3bc4418e6a27478373e3246f8162f5181509 AS node
-FROM mcr.microsoft.com/playwright:v1.64.0-noble@sha256:06a9939e57531807f8d5fd76ce44b53165ffb7d7501d87ab10e285c20b1e971f
+FROM node:${NODE_VERSION}-bookworm@sha256:b7087bc4d973034b30854b378ba107f9fab622b47514cb7e2592e41b8bab8d49 AS node
+FROM mcr.microsoft.com/playwright:v1.65.0-noble@sha256:9beb546099e11f52d62e505537914870e01a67e0e6b00ae41da4775324e73dbe
 
 COPY --from=node /usr/local/bin/node /usr/local/bin/node
 ARG NODE_VERSION
@@ -15,7 +15,7 @@ RUN apt-get update \
 RUN curl --proto '=https' --tlsv1.2 -fsSL \
     "https://github.com/pnpm/pnpm/releases/download/v${PNPM_VERSION}/pnpm-linux-x64.tar.gz" \
     -o /tmp/pnpm.tar.gz \
-  && echo "3726060e236c0db3e7124c0a5af123c840ba0cb76682149b63ea0baf290017c2  /tmp/pnpm.tar.gz" | sha256sum -c - \
+  && echo "84c4773bcf4a217f4083cd7b2a91e4cee6103cf42426c1282ef37d308f55a410  /tmp/pnpm.tar.gz" | sha256sum -c - \
   && tar -xzf /tmp/pnpm.tar.gz -C /usr/local/bin pnpm \
   && chmod 0755 /usr/local/bin/pnpm \
   && rm /tmp/pnpm.tar.gz
