@@ -197,7 +197,7 @@ fn assert_second_server_rejected(owner_config: &ServerConfig, contender_config: 
             Err(_) => break false,
         }
     };
-    let status = child.terminate().unwrap();
+    let _ = child.terminate().unwrap();
     stdout_reader.join().unwrap();
     stderr_reader.join().unwrap();
     let stderr = stderr_output.recv_timeout(Duration::from_secs(2)).unwrap();
