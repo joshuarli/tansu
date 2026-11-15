@@ -27,7 +27,7 @@ jobs:
           persist-credentials: false
       - uses: pnpm/setup@fa36a5ef7dcdefc3a7cb25655c122e00cf6e636e # v3.1.2
         with:
-          runtime: node@26.13.0
+          runtime: node@26.13.1
           install: false
       - run: pnpm install --frozen-lockfile
       - run: rustup target add x86_64-unknown-linux-musl
