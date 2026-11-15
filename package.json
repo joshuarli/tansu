@@ -28,19 +28,19 @@
     "check:web": "pnpm run types:check && pnpm run lint && pnpm run typecheck && pnpm run test"
   },
   "playwrightBrowsers": {
-    "playwrightVersion": "1.64.1",
+    "playwrightVersion": "1.65.0",
     "install": [
       "chromium",
       "webkit"
     ],
     "browsers": {
       "chromium": {
-        "version": "156.0.8078.4",
-        "revision": "1248"
+        "version": "158.0.8127.18",
+        "revision": "1254"
       },
       "webkit": {
         "version": "27.2",
-        "revision": "2370",
+        "revision": "2388",
         "revisionOverrides": {
           "mac14": "2251",
           "mac14-arm64": "2251"
