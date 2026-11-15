@@ -75,6 +75,7 @@ impl App {
         for (index, vault) in vault_configs.iter().enumerate() {
             match VaultRuntime::open(index, vault, logs.clone()) {
                 Ok(runtime) => entries.push(VaultEntry::Open(Arc::new(runtime))),
+                Err(error @ Error::VaultAlreadyOwned { .. }) => return Err(error),
                 Err(error) => {
                     if logs.enabled() {
                         logs.server_event(
