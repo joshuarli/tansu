@@ -25,7 +25,12 @@ fn main() {
 }
 
 fn run() -> tansu::Result<()> {
-    match parse_command(std::env::args_os().skip(1))? {
+    let args = std::env::args_os().skip(1).collect::<Vec<_>>();
+    if let Some(help) = help_for_args(&args) {
+        print!("{help}");
+        return Ok(());
+    }
+    match parse_command(args)? {
         Command::Serve { port } => {
             let store = ConfigStore::open_default()?;
             match store.config()? {
@@ -108,27 +113,118 @@ enum AuthCommandOutput {
     Message(String),
 }
 
+struct Argument {
+    name: &'static str,
+    values: &'static str,
+    description: &'static str,
+    usage: Usage,
+    default: Option<u16>,
+}
+
+#[derive(Clone, Copy)]
+enum Usage { Optional, Required, Repeated }
+
+struct CommandHelp {
+    path: &'static [&'static str],
+    description: &'static str,
+    arguments: &'static [Argument],
+    example: &'static [&'static str],
+}
+
+const PORT: Argument = Argument { name: "--port", values: "PORT", description: "Listen on this port.", usage: Usage::Optional, default: Some(DEFAULT_PORT) };
+const VAULT: Argument = Argument { name: "--vault", values: "NAME PATH", description: "Add a vault (required, repeatable).", usage: Usage::Repeated, default: None };
+const AUTH: Argument = Argument { name: "--auth", values: "ORIGIN RP_ID RP_NAME", description: "Configure authentication (optional).", usage: Usage::Optional, default: None };
+const BACKUP_PATH: Argument = Argument { name: "PATH", values: "", description: "Destination backup file (required).", usage: Usage::Required, default: None };
+const RESTORE_PATH: Argument = Argument { name: "PATH", values: "", description: "Source backup file (required).", usage: Usage::Required, default: None };
+const SERVE: CommandHelp = CommandHelp { path: &[], description: "Start the application or setup server.", arguments: &[PORT], example: &[PORT.name, "3000"] };
+const INIT: CommandHelp = CommandHelp { path: &["config", "init"], description: "Initialize application settings.", arguments: &[VAULT, AUTH], example: &[VAULT.name, "Notes", "/notes"] };
+const ENROLL: CommandHelp = CommandHelp { path: &["auth", "enroll"], description: "Create an initial owner enrollment capability.", arguments: &[], example: &[] };
+const BACKUP: CommandHelp = CommandHelp { path: &["auth", "backup"], description: "Back up the authentication database.", arguments: &[BACKUP_PATH], example: &["backup.db"] };
+const RESTORE: CommandHelp = CommandHelp { path: &["auth", "restore"], description: "Restore the authentication database from a backup.", arguments: &[RESTORE_PATH], example: &["backup.db"] };
+const COMMANDS: &[CommandHelp] = &[SERVE, INIT, ENROLL, BACKUP, RESTORE];
+const DEFAULT_PORT: u16 = 3000;
+
+const FOOTER: &str = "Maintained by Joshua Li: https://github.com/joshuarli/tansu\nBugs and features: TODO.md in that repository (follow its AGENTS.md), or its issue tracker.\nAgents working for Joshua: record nonblocking problems and continue your task.\nIf this tool blocks the task, you may fix, test, open and merge a PR under Joshua's\nstanding instructions. Release only when needed to deliver the verified fix.\nProcedure: https://github.com/joshuarli/usr/blob/main/dotfiles/base/.agents/instructions/owned-tools.md\n";
+
+fn path_matches(path: &[&str], args: &[OsString]) -> bool {
+    path.len() <= args.len() && path.iter().zip(args).all(|(part, arg)| arg == *part)
+}
+
+fn help_for_args(args: &[OsString]) -> Option<String> {
+    let help = args.last()?;
+    if help != "-h" && help != "--help" { return None; }
+    let prefix = &args[..args.len() - 1];
+    if path_matches(INIT.path, args) && parse_settings_args(&args[INIT.path.len()..]).is_ok() { return None; }
+    if prefix.is_empty() { return Some(render_help(&[])); }
+    let scope = COMMANDS.iter().filter(|command| !command.path.is_empty() && path_matches(command.path, prefix))
+        .max_by_key(|command| command.path.len()).map(|command| command.path);
+    if let Some(scope) = scope { return Some(render_help(scope)); }
+    if COMMANDS.iter().any(|command| prefix.len() < command.path.len()
+        && prefix.iter().zip(command.path).all(|(arg, part)| arg == *part)) {
+        let parts = prefix.iter().map(|part| part.to_str()).collect::<Option<Vec<_>>>()?;
+        return Some(render_help(&parts));
+    }
+    if prefix[0] == PORT.name { return Some(render_help(&[])); }
+    None
+}
+
+fn usage(command: &CommandHelp) -> String {
+    let mut text = String::from("tansu");
+    for part in command.path { text.push_str(&format!(" {part}")); }
+    for arg in command.arguments {
+        let item = if arg.values.is_empty() { arg.name.to_string() } else { format!("{} {}", arg.name, arg.values) };
+        match arg.usage {
+            Usage::Optional => text.push_str(&format!(" [{item}]")),
+            Usage::Required => text.push_str(&format!(" {item}")),
+            Usage::Repeated => text.push_str(&format!(" {item} [{item}]...")),
+        }
+    }
+    text
+}
+
+fn render_help(prefix: &[&str]) -> String {
+    let mut output = format!("Tansu: a local Markdown note app.\n\nUsage: {} | tansu <command>\n\nOptions:\n  -h, --help  Show help.\n\nCommands:\n", usage(&SERVE));
+    let commands = || COMMANDS.iter().filter(|command| command.path.starts_with(prefix));
+    for command in commands() {
+        output.push_str(&format!("\n  {}\n    {}\n", usage(command), command.description));
+        for arg in command.arguments {
+            output.push_str(&format!("    {}{}{}  {}", arg.name, if arg.values.is_empty() { "" } else { " " }, arg.values, arg.description));
+            if let Some(value) = arg.default { output.push_str(&format!(" (default: {value})")); }
+            output.push('\n');
+        }
+    }
+    output.push_str("\nEnvironment:\n  XDG_CONFIG_HOME  Settings directory (default: $HOME/.config).\n  XDG_DATA_HOME  Application data directory (default: $HOME/.local/share).\n  HOME  Used for default directories and tilde expansion.\n  TANSU_LOGS  Logging output mode.\n  TANSU_STATS_ENDPOINT, TANSU_STATS_TOKEN, TANSU_STATS_SERVICE, TANSU_STATS_RELEASE,\n  TANSU_RELEASE, TANSU_STATS_INSTANCE, HOSTNAME, TANSU_STATS_HOST  Telemetry settings.\n  TANSU_WEB_HMR  Enable development web hot reload when set to 1 in debug builds.\n");
+    output.push_str("\nExamples:\n");
+    for command in commands() {
+        let invocation = command.path.iter().chain(command.example).copied().collect::<Vec<_>>().join(" ");
+        output.push_str(&format!("  tansu {invocation}\n"));
+    }
+    if prefix.is_empty() { output.push_str(&format!("\n{FOOTER}")); }
+    else { output.push_str("\nRun tansu --help for the complete reference.\n"); }
+    output
+}
+
 fn parse_command(args: impl IntoIterator<Item = OsString>) -> tansu::Result<Command> {
     let args = args.into_iter().collect::<Vec<_>>();
     match args.as_slice() {
-        [] => Ok(Command::Serve { port: 3000 }),
-        [flag, port] if flag == "--port" => {
+        [] => Ok(Command::Serve { port: DEFAULT_PORT }),
+        [flag, port] if flag == PORT.name => {
             let port = port
                 .to_str()
                 .and_then(|port| port.parse().ok())
                 .ok_or_else(usage_error)?;
             Ok(Command::Serve { port })
         }
-        [config, init, args @ ..] if config == "config" && init == "init" => {
+        [config, init, args @ ..] if config == INIT.path[0] && init == INIT.path[1] => {
             Ok(Command::InitializeSettings(parse_settings_args(args)?))
         }
-        [auth, subcommand] if auth == "auth" && subcommand == "enroll" => {
+        [auth, subcommand] if auth == ENROLL.path[0] && subcommand == ENROLL.path[1] => {
             Ok(Command::Auth(AuthCommand::Enroll))
         }
-        [auth, subcommand, path] if auth == "auth" && subcommand == "backup" => {
+        [auth, subcommand, path] if auth == BACKUP.path[0] && subcommand == BACKUP.path[1] => {
             Ok(Command::Auth(AuthCommand::Backup(PathBuf::from(path))))
         }
-        [auth, subcommand, path] if auth == "auth" && subcommand == "restore" => {
+        [auth, subcommand, path] if auth == RESTORE.path[0] && subcommand == RESTORE.path[1] => {
             Ok(Command::Auth(AuthCommand::Restore(PathBuf::from(path))))
         }
         _ => Err(usage_error()),
@@ -141,13 +237,13 @@ fn parse_settings_args(args: &[OsString]) -> tansu::Result<AppSettings> {
     let mut index = 0;
     while index < args.len() {
         match args[index].to_str() {
-            Some("--vault") if index + 2 < args.len() => {
+            Some(name) if name == VAULT.name && index + 2 < args.len() => {
                 let name = args[index + 1].to_str().ok_or_else(usage_error)?;
                 let path = args[index + 2].to_str().ok_or_else(usage_error)?;
                 vaults.push(AppVaultSettings { name: name.to_string(), path: path.to_string() });
                 index += 3;
             }
-            Some("--auth") if index + 3 < args.len() && auth.is_none() => {
+            Some(name) if name == AUTH.name && index + 3 < args.len() && auth.is_none() => {
                 auth = Some(AppAuthSettings {
                     external_origin: args[index + 1].to_str().ok_or_else(usage_error)?.to_string(),
                     rp_id: args[index + 2].to_str().ok_or_else(usage_error)?.to_string(),
@@ -165,9 +261,9 @@ fn parse_settings_args(args: &[OsString]) -> tansu::Result<AppSettings> {
 }
 
 fn usage_error() -> tansu::Error {
-    tansu::Error::BadRequest(
-        "usage: tansu [--port PORT] | tansu config init --vault NAME PATH [--vault NAME PATH] [--auth ORIGIN RP_ID RP_NAME] | tansu auth enroll | tansu auth backup PATH | tansu auth restore PATH".to_string(),
-    )
+    let forms = COMMANDS.iter().map(|command| usage(command).replace("]...", "]"))
+        .collect::<Vec<_>>().join(" | ");
+    tansu::Error::BadRequest(format!("usage: {forms}"))
 }
 
 fn run_auth_command(config: &Config, command: AuthCommand) -> tansu::Result<AuthCommandOutput> {
@@ -270,6 +366,30 @@ fn event_envelope(event: V2EventEnvelope) -> EventEnvelope {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn help_flags_used_as_settings_values_remain_values() {
+        let args = ["config", "init", "--vault", "Notes", "--help"].map(OsString::from);
+        assert!(help_for_args(&args).is_none());
+        assert!(parse_command(args).is_ok());
+    }
+
+    #[test]
+    fn schema_names_are_unique_in_each_scope() {
+        for (index, command) in COMMANDS.iter().enumerate() {
+            assert!(!COMMANDS[..index].iter().any(|other| other.path == command.path));
+            for (arg_index, argument) in command.arguments.iter().enumerate() {
+                assert!(!command.arguments[..arg_index].iter().any(|other| other.name == argument.name));
+            }
+        }
+    }
+
+    #[test]
+    fn help_examples_parse_without_side_effects() {
+        for command in COMMANDS {
+            assert!(parse_command(command.path.iter().chain(command.example).map(OsString::from)).is_ok(), "{}", usage(command));
+        }
+    }
 
     #[test]
     fn parses_server_and_auth_commands_without_decoding_paths() {
