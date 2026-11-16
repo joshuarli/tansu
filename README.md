@@ -36,3 +36,5 @@ See [Configuration](docs/configuration.md) for vault setup. This checkout does
 not specify a software license.
 
 Run `tansu --help` for the complete command reference and examples. Running `tansu` without arguments starts the server on port 3000; `--port PORT` selects another port.
+
+For `auth backup` and `auth restore`, `-h` and `--help` display help. Prefix a file named `-h` or `--help` with `./` to use it as the backup path.
