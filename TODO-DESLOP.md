@@ -1,5 +1,5 @@
 Prefix: DSLP
-Next: 34
+Next: 36
 
 Deslop campaign backlog ([plan](https://github.com/laputa-systems/stuff/blob/main/docs/campaigns/deslop.md), tier D). One agent works this file with the `deslop` skill: take the lowest-numbered open ticket whose area does not start with `Needs owner ·`. After DSLP-5, work the open P1 and P2 findings, then fill in `## Report` below.
 
@@ -18,15 +18,6 @@ Not started.
 - **Fix with:** deslop
 - **Effort:** M
 
-### DSLP-11 · P2 · Types: tooling and benchmarks
-
-- **Area:** deslop · types · tooling and benchmarks
-- **Where:** scripts/, bench/, deploy/, docker/, root build configuration and .github/
-- **Problem:** Build, deployment, fixtures and benchmark tooling have not been assessed. Contracts: build artifacts, deployment and benchmark commands, CI entrypoints. Consumers: developers, deployed services, browser tests and CI.
-- **Recommendation:** Run the deslop Types step for this bounded component. Accept: clean at the adopted profile, escape hatches not increased, and witnesses recorded; run make test.
-- **Fix with:** deslop
-- **Effort:** M
-
 ### DSLP-15 · P2 · Tests: web UI and browser tests
 
 - **Area:** deslop · tests · web UI and browser tests
@@ -36,29 +27,11 @@ Not started.
 - **Fix with:** deslop
 - **Effort:** M
 
-### DSLP-17 · P2 · Tests: tooling and benchmarks
-
-- **Area:** deslop · tests · tooling and benchmarks
-- **Where:** scripts/, bench/, deploy/, docker/, root build configuration and .github/
-- **Problem:** Build, deployment, fixtures and benchmark tooling have not been assessed. Contracts: build artifacts, deployment and benchmark commands, CI entrypoints. Consumers: developers, deployed services, browser tests and CI.
-- **Recommendation:** Run the deslop Tests step for this bounded component. Accept: critical survivors dispositioned, test cost budget holds, and any qualified lane is green; run make test.
-- **Fix with:** deslop
-- **Effort:** M
-
 ### DSLP-21 · P2 · Dead code: web UI and browser tests
 
 - **Area:** deslop · dead code · web UI and browser tests
 - **Where:** web/ except app and editor, including web/ts/e2e/
 - **Problem:** Tools and debloat have not been assessed for this component. Contracts: rendering, routing, browser interactions and API integration. Consumers: browser users and HTTP API.
-- **Recommendation:** Run the deslop Dead code step for this bounded component. Accept: tools clean or at most five reasoned allowlist entries, and walk-backs filed; run make test.
-- **Fix with:** deslop
-- **Effort:** M
-
-### DSLP-23 · P2 · Dead code: tooling and benchmarks
-
-- **Area:** deslop · dead code · tooling and benchmarks
-- **Where:** scripts/, bench/, deploy/, docker/, root build configuration and .github/
-- **Problem:** Build, deployment, fixtures and benchmark tooling have not been assessed. Contracts: build artifacts, deployment and benchmark commands, CI entrypoints. Consumers: developers, deployed services, browser tests and CI.
 - **Recommendation:** Run the deslop Dead code step for this bounded component. Accept: tools clean or at most five reasoned allowlist entries, and walk-backs filed; run make test.
 - **Fix with:** deslop
 - **Effort:** M
@@ -116,3 +89,22 @@ Not started.
 - **Recommendation:** Expose the skipped count or ids through the search status API and show it in the search UI, with a test.
 - **Fix with:** deslop
 - **Effort:** S
+
+### DSLP-34 · P3 · vitest.e2e.config.ts sets minWorkers, which Vitest InlineConfig does not declare
+
+- **Area:** tooling · browser tests
+- **Where:** vitest.e2e.config.ts:13
+- **Problem:** Typechecking the root Vitest configs under the repo tsconfig (docs/deslop-tooling.md, DSLP-11) fails because vitest.e2e.config.ts:13 sets minWorkers, which the installed Vitest InlineConfig does not have. If Vitest ignores the key, the browser suite runs with a worker floor other than the one this config intends.
+- **Recommendation:** Check the installed Vitest release for the replacement setting, apply the intended worker limit through it, and include the root configs in a typecheck so a removed option fails CI.
+- **Fix with:** none
+- **Effort:** S
+
+### DSLP-35 · P3 · Review unquoted SSH option expansion in deploy-state.sh
+
+- **Area:** tooling · deployment
+- **Where:** deploy/deploy-state.sh:91
+- **Problem:** shellcheck reports SC2086 at deploy/deploy-state.sh:91, where SSH options expand unquoted. If the word splitting is intentional it is undocumented; otherwise an option value containing whitespace or glob characters changes the ssh command line.
+- **Recommendation:** Build the SSH options as an array (or prove the splitting is required), then make shellcheck clean for deploy/ apart from reasoned directives.
+- **Fix with:** none
+- **Effort:** S
+
