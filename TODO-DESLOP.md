@@ -36,15 +36,6 @@ Not started.
 - **Fix with:** deslop
 - **Effort:** M
 
-### DSLP-6 · P2 · Types: search and shared crates
-
-- **Area:** deslop · types · search and shared crates
-- **Where:** crates/
-- **Problem:** Strict profile and typing findings have not been assessed for this component. Contracts: search indexing and queries, note formats, API types and WebAuthn. Consumers: application and web API clients.
-- **Recommendation:** Run the deslop Types step for this bounded component. Accept: clean at the adopted profile, escape hatches not increased, and witnesses recorded; run make test.
-- **Fix with:** deslop
-- **Effort:** M
-
 ### DSLP-7 · P2 · Types: web editor
 
 - **Area:** deslop · types · web editor
@@ -87,15 +78,6 @@ Not started.
 - **Where:** scripts/, bench/, deploy/, docker/, root build configuration and .github/
 - **Problem:** Build, deployment, fixtures and benchmark tooling have not been assessed. Contracts: build artifacts, deployment and benchmark commands, CI entrypoints. Consumers: developers, deployed services, browser tests and CI.
 - **Recommendation:** Run the deslop Types step for this bounded component. Accept: clean at the adopted profile, escape hatches not increased, and witnesses recorded; run make test.
-- **Fix with:** deslop
-- **Effort:** M
-
-### DSLP-12 · P2 · Tests: search and shared crates
-
-- **Area:** deslop · tests · search and shared crates
-- **Where:** crates/
-- **Problem:** Coverage, boundary gaps and mutation have not been assessed for this component. Contracts: search indexing and queries, note formats, API types and WebAuthn. Consumers: application and web API clients.
-- **Recommendation:** Run the deslop Tests step for this bounded component. Accept: critical survivors dispositioned, test cost budget holds, and any qualified lane is green; run make test.
 - **Fix with:** deslop
 - **Effort:** M
 
@@ -144,15 +126,6 @@ Not started.
 - **Fix with:** deslop
 - **Effort:** M
 
-### DSLP-18 · P2 · Dead code: search and shared crates
-
-- **Area:** deslop · dead code · search and shared crates
-- **Where:** crates/
-- **Problem:** Tools and debloat have not been assessed for this component. Contracts: search indexing and queries, note formats, API types and WebAuthn. Consumers: application and web API clients.
-- **Recommendation:** Run the deslop Dead code step for this bounded component. Accept: tools clean or at most five reasoned allowlist entries, and walk-backs filed; run make test.
-- **Fix with:** deslop
-- **Effort:** M
-
 ### DSLP-19 · P2 · Dead code: web editor
 
 - **Area:** deslop · dead code · web editor
@@ -197,15 +170,6 @@ Not started.
 - **Recommendation:** Run the deslop Dead code step for this bounded component. Accept: tools clean or at most five reasoned allowlist entries, and walk-backs filed; run make test.
 - **Fix with:** deslop
 - **Effort:** M
-
-### DSLP-24 · P3 · Pinned pnpm is missing from the configured registry
-
-- **Area:** Needs environment · package registry
-- **Where:** .npmrc, package.json
-- **Problem:** The configured npm.17166969.xyz/current registry returned no matching pnpm or @pnpm/exe 12.21.0 when make test and make lint started on 2026-11-20. Both passed with a process-local registry override to registry.npmjs.org.
-- **Recommendation:** Restore the pinned pnpm release to the configured mirror and verify the commands without an override.
-- **Fix with:** none
-- **Effort:** S
 
 ### DSLP-28 · P3 · Delta save applies edits in quadratic time before verifying the hash
 
