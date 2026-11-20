@@ -74,6 +74,13 @@ ts: types
 
 test: types-check test-ts test-rs
 
+# CI's Linux job: Rust check and tests for the supported musl target, in the
+# tansu-rust-check image the workflow builds first.
+test-ci:
+	docker run --rm --platform linux/amd64 -v "$(CURDIR):/work" -v "$(CURDIR)/.work/tmp/cargo-target:/target" \
+	  -e CARGO_TARGET_DIR=/target -w /work tansu-rust-check \
+	  sh -c 'cargo check --locked --workspace --target x86_64-unknown-linux-musl && cargo test --locked --workspace --target x86_64-unknown-linux-musl'
+
 test-ts: setup
 	pnpm run test
 
@@ -180,7 +187,7 @@ bench-full: setup
 	TMPDIR="$(CURDIR)/.work/tmp" node bench/integrated-bench.mjs --browser=chromium,webkit --warmups=5 --runs=20
 	$(PERF_GATE_AFTER)
 
-.PHONY: auth-recovery-drill bench bench-full build-linux-musl-aarch64 build-linux-musl-docker build-linux-musl-x86_64 deploy deploy-check deploy-status deploy-smoke deploy-sync rollback dev dev-config dev-serve check lint loupe notes setup test-loupe-browser types types-check types-generated ts test test-e2e-chromium test-e2e-webkit update-e2e-baselines-linux test-e2e-loupe test-rs test-sqlite-static test-acceptance web-build publish-mynpm
+.PHONY: auth-recovery-drill bench bench-full build-linux-musl-aarch64 build-linux-musl-docker build-linux-musl-x86_64 deploy deploy-check deploy-status deploy-smoke deploy-sync rollback dev dev-config dev-serve check lint loupe notes setup test-loupe-browser types types-check types-generated ts test test-ci test-e2e-chromium test-e2e-webkit update-e2e-baselines-linux test-e2e-loupe test-rs test-sqlite-static test-acceptance web-build publish-mynpm
 
 # Publish the TS dependency closure to our private npm registry as well.
 STUFF ?= stuff
