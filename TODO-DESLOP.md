@@ -36,15 +36,6 @@ Not started.
 - **Fix with:** deslop
 - **Effort:** M
 
-### DSLP-8 · P2 · Types: web application
-
-- **Area:** deslop · types · web application
-- **Where:** web/ts/app.ts, web/ts/app.test.ts, web/ts/app/
-- **Problem:** Strict profile and typing findings have not been assessed for this component. Contracts: API requests, workspace and document sessions. Consumers: HTTP API, editor and browser users.
-- **Recommendation:** Run the deslop Types step for this bounded component. Accept: clean at the adopted profile, escape hatches not increased, and witnesses recorded; run make test.
-- **Fix with:** deslop
-- **Effort:** M
-
 ### DSLP-9 · P2 · Types: web UI and browser tests
 
 - **Area:** deslop · types · web UI and browser tests
@@ -72,15 +63,6 @@ Not started.
 - **Fix with:** deslop
 - **Effort:** M
 
-### DSLP-14 · P2 · Tests: web application
-
-- **Area:** deslop · tests · web application
-- **Where:** web/ts/app.ts, web/ts/app.test.ts, web/ts/app/
-- **Problem:** Coverage, boundary gaps and mutation have not been assessed for this component. Contracts: API requests, workspace and document sessions. Consumers: HTTP API, editor and browser users.
-- **Recommendation:** Run the deslop Tests step for this bounded component. Accept: critical survivors dispositioned, test cost budget holds, and any qualified lane is green; run make test.
-- **Fix with:** deslop
-- **Effort:** M
-
 ### DSLP-15 · P2 · Tests: web UI and browser tests
 
 - **Area:** deslop · tests · web UI and browser tests
@@ -105,15 +87,6 @@ Not started.
 - **Where:** scripts/, bench/, deploy/, docker/, root build configuration and .github/
 - **Problem:** Build, deployment, fixtures and benchmark tooling have not been assessed. Contracts: build artifacts, deployment and benchmark commands, CI entrypoints. Consumers: developers, deployed services, browser tests and CI.
 - **Recommendation:** Run the deslop Tests step for this bounded component. Accept: critical survivors dispositioned, test cost budget holds, and any qualified lane is green; run make test.
-- **Fix with:** deslop
-- **Effort:** M
-
-### DSLP-20 · P2 · Dead code: web application
-
-- **Area:** deslop · dead code · web application
-- **Where:** web/ts/app.ts, web/ts/app.test.ts, web/ts/app/
-- **Problem:** Tools and debloat have not been assessed for this component. Contracts: API requests, workspace and document sessions. Consumers: HTTP API, editor and browser users.
-- **Recommendation:** Run the deslop Dead code step for this bounded component. Accept: tools clean or at most five reasoned allowlist entries, and walk-backs filed; run make test.
 - **Fix with:** deslop
 - **Effort:** M
 
