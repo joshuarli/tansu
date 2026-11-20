@@ -15,6 +15,10 @@ use tansu_webauthn::{AuthChallenge, AuthenticationFinish, CounterResult, RegChal
 
 use crate::CancellationToken;
 
+/// Cap per ceremony kind, so one kind cannot starve the other. Registration
+/// ceremonies need a session or enrollment capability, so a full table refuses
+/// the caller. Login ceremonies need nothing: a full table evicts the oldest
+/// instead, so anonymous callers cannot lock the owner out.
 const MAX_PENDING_CEREMONIES: i64 = 256;
 pub const MAX_CREDENTIALS: usize = 32;
 
@@ -401,7 +405,7 @@ impl AuthStore {
             }
             (Some(capability_hash), None)
         };
-        let pending_ceremonies = prune_expired_ceremonies(&transaction, now)?;
+        let pending_ceremonies = prune_expired_ceremonies(&transaction, "registration", now)?;
         if pending_ceremonies >= MAX_PENDING_CEREMONIES {
             transaction.commit().map_err(storage)?;
             return Err(AuthError::CeremonyLimit);
@@ -493,10 +497,15 @@ impl AuthStore {
         let expires_at = now.checked_add(ttl_secs).ok_or_else(|| AuthError::InvalidRequest("ceremony expiry overflow".into()))?;
         let mut connection = self.connection.lock().expect("auth DB mutex poisoned");
         let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate).map_err(storage)?;
-        let pending_ceremonies = prune_expired_ceremonies(&transaction, now)?;
+        let pending_ceremonies = prune_expired_ceremonies(&transaction, "authentication", now)?;
         if pending_ceremonies >= MAX_PENDING_CEREMONIES {
-            transaction.commit().map_err(storage)?;
-            return Err(AuthError::CeremonyLimit);
+            // Evict the oldest unfinished login ceremonies to make room. The
+            // endpoint is anonymous, so refusing here would let any caller fill
+            // the table and keep the owner from logging in.
+            transaction.execute(
+                "DELETE FROM ceremonies WHERE rowid IN (SELECT rowid FROM ceremonies WHERE kind = 'authentication' ORDER BY expires_at, rowid LIMIT ?1)",
+                params![pending_ceremonies - MAX_PENDING_CEREMONIES + 1],
+            ).map_err(storage)?;
         }
         let state = crate::json_bytes(&StoredAuthentication { state: state.clone() }).map_err(storage)?;
         transaction.execute(
@@ -1076,9 +1085,10 @@ fn session_authorized(transaction: &Transaction<'_>, session_hash: &[u8], now: u
     }))
 }
 
-fn prune_expired_ceremonies(transaction: &Transaction<'_>, now: u64) -> Result<i64, AuthError> {
+/// Drops expired ceremonies and returns how many of `kind` remain pending.
+fn prune_expired_ceremonies(transaction: &Transaction<'_>, kind: &str, now: u64) -> Result<i64, AuthError> {
     transaction.execute("DELETE FROM ceremonies WHERE expires_at <= ?1", params![to_i64(now)?]).map_err(storage)?;
-    transaction.query_row("SELECT COUNT(*) FROM ceremonies", [], |row| row.get(0)).map_err(storage)
+    transaction.query_row("SELECT COUNT(*) FROM ceremonies WHERE kind = ?1", params![kind], |row| row.get(0)).map_err(storage)
 }
 
 fn read_ceremony(transaction: &Transaction<'_>, id_hash: &[u8]) -> Result<Option<CeremonyRow>, AuthError> {
@@ -1225,14 +1235,53 @@ mod tests {
         for _ in 0..MAX_PENDING_CEREMONIES {
             store.begin_authentication(&state, 10, 300).unwrap();
         }
-        assert!(matches!(
-            store.begin_authentication(&state, 10, 300),
-            Err(AuthError::CeremonyLimit)
-        ));
+        store.begin_authentication(&state, 10, 300).unwrap();
         assert_eq!(authentication_ceremony_count(&store), MAX_PENDING_CEREMONIES);
 
         store.begin_authentication(&state, 311, 300).unwrap();
         assert_eq!(authentication_ceremony_count(&store), 1);
+    }
+
+    #[test]
+    fn anonymous_login_flood_cannot_lock_the_owner_out() {
+        let (_root, store) = store();
+        let state = AuthChallenge {
+            challenge: "login".into(),
+            allowed_credential_ids: vec![vec![1]],
+            owner_handle: vec![7, 8],
+        };
+        let mut oldest = None;
+        for _ in 0..(MAX_PENDING_CEREMONIES * 2) {
+            let ticket = store.begin_authentication(&state, 10, 300).unwrap();
+            oldest.get_or_insert(ticket);
+        }
+        let owner = store.begin_authentication(&state, 11, 300).unwrap();
+        assert_eq!(authentication_ceremony_count(&store), MAX_PENDING_CEREMONIES);
+        // The newest ceremony survives and can finish; the oldest was evicted.
+        assert_eq!(
+            store.finish_authentication(&oldest.unwrap().id, 12, |_, _| unreachable!()),
+            Err(AuthError::CeremonyUsed),
+        );
+        assert!(!matches!(
+            store.finish_authentication(&owner.id, 12, |_, _| Err(AuthError::Unauthorized)),
+            Err(AuthError::CeremonyUsed),
+        ));
+    }
+
+    #[test]
+    fn login_flood_does_not_consume_registration_ceremony_capacity() {
+        let (_root, store) = store();
+        let login = AuthChallenge {
+            challenge: "login".into(),
+            allowed_credential_ids: vec![vec![1]],
+            owner_handle: vec![7, 8],
+        };
+        for _ in 0..(MAX_PENDING_CEREMONIES + 5) {
+            store.begin_authentication(&login, 10, 300).unwrap();
+        }
+        let (capability, _) = store.create_enrollment_capability(10, 300).unwrap();
+        let state = RegChallenge { challenge: "first".into(), user_id: "owner".into(), username: "owner".into() };
+        store.begin_registration(&state, Some(&capability), None, 11, 30).unwrap();
     }
 
     #[test]

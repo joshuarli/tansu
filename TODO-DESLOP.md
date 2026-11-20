@@ -198,15 +198,6 @@ Not started.
 - **Fix with:** deslop
 - **Effort:** M
 
-### DSLP-26 · P2 · Unauthenticated login options exhaust the ceremony cap and lock the owner out
-
-- **Area:** HTTP endpoints and auth
-- **Where:** src/auth.rs begin_authentication (MAX_PENDING_CEREMONIES 256), src/http.rs login/options route
-- **Problem:** POST /api/v2/auth/login/options needs no session, and each call stores a pending ceremony for 300 s; the table holds at most 256 across all callers. Reproduced on target/debug/tansu at 8a20a7b with auth configured (origin https://notes.test, one credential row seeded in auth.db because a real passkey needs an authenticator): 300 unauthenticated requests gave 255 x 200 then 45 x 429, and the next owner login/options call returned 429 rate_limited with retryAfterMs 1000 although the lockout lasts up to 300 s. An attacker repeats 256 requests per 5 minutes with no credentials. Evidence: docs/deslop-diagnose.md F2.
-- **Recommendation:** Reserve ceremony capacity for the owner (per-client or per-kind quota, evict oldest unfinished login ceremony instead of refusing, or bind the cap to the source), and report a retry delay that matches the real expiry.
-- **Fix with:** security
-- **Effort:** M
-
 ### DSLP-24 · P3 · Pinned pnpm is missing from the configured registry
 
 - **Area:** Needs environment · package registry

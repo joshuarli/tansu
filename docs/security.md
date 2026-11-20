@@ -12,6 +12,13 @@ first-run setup have no auth store. They still require a loopback `Host`.
 State-changing requests also require a matching `http` loopback `Origin`.
 Reads may omit `Origin`.
 
+Pending ceremonies are capped at 256 per kind. Registration needs a session or
+enrollment capability, so a full table refuses the caller. `login/options` needs
+nothing, so a full table evicts the oldest pending login ceremony instead of
+refusing: anonymous callers cannot keep the owner from starting a login. Flooding
+can still evict a login that is in progress, so rate-limit that route at the
+proxy on an exposed deployment.
+
 WebAuthn credentials bind to the configured origin and RP ID. Changing either
 clears credentials, sessions, enrollment capabilities, and pending ceremonies
 in one transaction. A non-increasing signature counter rejects single-device
