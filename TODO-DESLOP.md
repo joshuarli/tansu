@@ -36,15 +36,6 @@ Not started.
 - **Fix with:** deslop
 - **Effort:** M
 
-### DSLP-7 · P2 · Types: web editor
-
-- **Area:** deslop · types · web editor
-- **Where:** web/ts/editor/ excluding vendor
-- **Problem:** Strict profile and typing findings have not been assessed for this component. Contracts: Markdown editing, assets and document transactions. Consumers: web application and stored Markdown.
-- **Recommendation:** Run the deslop Types step for this bounded component. Accept: clean at the adopted profile, escape hatches not increased, and witnesses recorded; run make test.
-- **Fix with:** deslop
-- **Effort:** M
-
 ### DSLP-8 · P2 · Types: web application
 
 - **Area:** deslop · types · web application
@@ -81,15 +72,6 @@ Not started.
 - **Fix with:** deslop
 - **Effort:** M
 
-### DSLP-13 · P2 · Tests: web editor
-
-- **Area:** deslop · tests · web editor
-- **Where:** web/ts/editor/ excluding vendor
-- **Problem:** Coverage, boundary gaps and mutation have not been assessed for this component. Contracts: Markdown editing, assets and document transactions. Consumers: web application and stored Markdown.
-- **Recommendation:** Run the deslop Tests step for this bounded component. Accept: critical survivors dispositioned, test cost budget holds, and any qualified lane is green; run make test.
-- **Fix with:** deslop
-- **Effort:** M
-
 ### DSLP-14 · P2 · Tests: web application
 
 - **Area:** deslop · tests · web application
@@ -123,15 +105,6 @@ Not started.
 - **Where:** scripts/, bench/, deploy/, docker/, root build configuration and .github/
 - **Problem:** Build, deployment, fixtures and benchmark tooling have not been assessed. Contracts: build artifacts, deployment and benchmark commands, CI entrypoints. Consumers: developers, deployed services, browser tests and CI.
 - **Recommendation:** Run the deslop Tests step for this bounded component. Accept: critical survivors dispositioned, test cost budget holds, and any qualified lane is green; run make test.
-- **Fix with:** deslop
-- **Effort:** M
-
-### DSLP-19 · P2 · Dead code: web editor
-
-- **Area:** deslop · dead code · web editor
-- **Where:** web/ts/editor/ excluding vendor
-- **Problem:** Tools and debloat have not been assessed for this component. Contracts: Markdown editing, assets and document transactions. Consumers: web application and stored Markdown.
-- **Recommendation:** Run the deslop Dead code step for this bounded component. Accept: tools clean or at most five reasoned allowlist entries, and walk-backs filed; run make test.
 - **Fix with:** deslop
 - **Effort:** M
 
