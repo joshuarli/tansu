@@ -4,7 +4,7 @@ Scope: `web/ts/editor/` excluding vendor, Darwin arm64, base `a8c1aebaa38071bd75
 
 ## DSLP-7
 
-The existing `tsconfig.json:12`–`tsconfig.json:23` already adopts `strict`, `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`, `noImplicitOverride`, and `noPropertyAccessFromIndexSignature`. No additional setting was adopted. `pnpm exec oxlint -c oxlint.config.mjs web/ts/editor -W typescript/no-explicit-any -W typescript/no-non-null-assertion -W typescript/no-floating-promises -W typescript/switch-exhaustiveness-check -W typescript/no-unsafe-assignment -W typescript/no-unsafe-call -W typescript/no-unsafe-member-access -W typescript/no-unsafe-return -W typescript/no-unsafe-argument -f json` exited 0. Counts below exclude vendor diagnostics and include tests; overrides are candidate measurements, not project configuration changes.
+The existing `tsconfig.json:12`–`tsconfig.json:23` already adopts `strict`, `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`, `noImplicitOverride`, and `noPropertyAccessFromIndexSignature`. No additional setting was adopted. `pnpm run typecheck` exited 0 after generating the pinned Loupe WASM bindings. `pnpm exec oxlint -c oxlint.config.mjs web/ts/editor -W typescript/no-explicit-any -W typescript/no-non-null-assertion -W typescript/no-floating-promises -W typescript/switch-exhaustiveness-check -W typescript/no-unsafe-assignment -W typescript/no-unsafe-call -W typescript/no-unsafe-member-access -W typescript/no-unsafe-return -W typescript/no-unsafe-argument -f json` exited 0. Counts below exclude vendor diagnostics and include tests; overrides are candidate measurements, not project configuration changes.
 
 | Candidate | Diagnostics | Disposition |
 | --- | ---: | --- |
