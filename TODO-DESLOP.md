@@ -9,33 +9,6 @@ Not started.
 
 ## Tickets
 
-### DSLP-3 · P2 · Types: application and integration tests
-
-- **Area:** deslop · types · application and integration tests
-- **Where:** src/, tests/
-- **Problem:** Strict profile and typing findings have not been assessed for this component. Contracts: vault identity, snapshots, recovery, HTTP/auth, CLI and file paths. Consumers: web app, extension and local vaults.
-- **Recommendation:** Run the deslop Types step for this bounded component. Accept: clean at the adopted profile, escape hatches not increased, and witnesses recorded; run make test.
-- **Fix with:** deslop
-- **Effort:** M
-
-### DSLP-4 · P2 · Tests: application and integration tests
-
-- **Area:** deslop · tests · application and integration tests
-- **Where:** src/, tests/
-- **Problem:** Coverage, boundary gaps and mutation have not been assessed for this component. Contracts: vault identity, snapshots, recovery, HTTP/auth, CLI and file paths. Consumers: web app, extension and local vaults.
-- **Recommendation:** Run the deslop Tests step for this bounded component. Accept: critical survivors dispositioned, test cost budget holds, and any qualified lane is green; run make test.
-- **Fix with:** deslop
-- **Effort:** M
-
-### DSLP-5 · P2 · Dead code: application and integration tests
-
-- **Area:** deslop · dead code · application and integration tests
-- **Where:** src/, tests/
-- **Problem:** Tools and debloat have not been assessed for this component. Contracts: vault identity, snapshots, recovery, HTTP/auth, CLI and file paths. Consumers: web app, extension and local vaults.
-- **Recommendation:** Run the deslop Dead code step for this bounded component. Accept: tools clean or at most five reasoned allowlist entries, and walk-backs filed; run make test.
-- **Fix with:** deslop
-- **Effort:** M
-
 ### DSLP-9 · P2 · Types: web UI and browser tests
 
 - **Area:** deslop · types · web UI and browser tests
