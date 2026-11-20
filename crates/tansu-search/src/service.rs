@@ -13,6 +13,10 @@ use crate::types::{
 
 pub const MAX_REBUILD_NOTES: usize = 10_000;
 pub const MAX_REBUILD_SOURCE_BYTES: usize = 128 * 1024 * 1024;
+/// Largest note source the index accepts. Larger notes are skipped, so one
+/// oversize file cannot exhaust `MAX_REBUILD_SOURCE_BYTES` or index memory
+/// for the whole vault.
+pub const MAX_INDEXED_NOTE_BYTES: usize = 8 * 1024 * 1024;
 
 pub struct SearchService {
     index: IndexManager,

@@ -1009,6 +1009,7 @@ impl VaultRuntime {
             search.mark_needs_reconciliation(true);
         }
         let search_status = search.search_status();
+        let unindexed_oversize = search.skipped_oversize().len();
         catalog.set_search_dirty(search_status.dirty, search_status.degraded)?;
         let (search_tx, search_rx) = mpsc::sync_channel(SEARCH_QUEUE_CAPACITY);
         let search_needs_reconciliation = search.needs_reconciliation();
@@ -1029,6 +1030,7 @@ impl VaultRuntime {
                         deser_value::value!(config.state_path.to_string_lossy()),
                     ),
                     ("notes", deser_value::value!(notes.len())),
+                    ("unindexedOversizeNotes", deser_value::value!(unindexed_oversize)),
                 ]),
             );
         }

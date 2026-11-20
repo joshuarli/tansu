@@ -3,8 +3,8 @@ use std::path::{Path, PathBuf};
 use pulldown_cmark::{Event, Parser, Tag, TagEnd};
 use tansu_search::{
     DirtyNoteSnapshot, DocumentInput, Fuzziness, NoteIdentity, OverlaySearchResult,
-    SearchLimit, SearchMode, SearchOptions, SearchService, SearchWeights, MAX_REBUILD_NOTES,
-    MAX_REBUILD_SOURCE_BYTES,
+    SearchLimit, SearchMode, SearchOptions, SearchService, SearchWeights, MAX_INDEXED_NOTE_BYTES,
+    MAX_REBUILD_NOTES, MAX_REBUILD_SOURCE_BYTES,
 };
 
 use crate::api_types::{NoteMeta, Settings};
@@ -46,6 +46,10 @@ fn search_weights(
 pub struct SearchIndex {
     state: SearchIndexState,
     path: PathBuf,
+    /// Note ids the last rebuild left out of the index because their file
+    /// exceeded `MAX_INDEXED_NOTE_BYTES`. They stay in the vault and open
+    /// normally; search never returns them.
+    skipped_oversize: Vec<String>,
 }
 
 enum SearchIndexState {
@@ -71,10 +75,22 @@ impl SearchIndex {
             }
             Err(_) => SearchIndexState::Unavailable,
         };
-        Self { state, path }
+        Self {
+            state,
+            path,
+            skipped_oversize: Vec::new(),
+        }
+    }
+
+    /// Ids of notes the last rebuild skipped as too large to index.
+    pub fn skipped_oversize(&self) -> &[String] {
+        &self.skipped_oversize
     }
 
     pub fn rebuild(&mut self, root: &Path, notes: &[NoteMeta]) -> Result<()> {
+        let (notes, skipped) = split_oversize(root, notes)?;
+        self.skipped_oversize = skipped;
+        let notes = notes.as_slice();
         let identities = notes
             .iter()
             .map(note_identity)
@@ -101,6 +117,13 @@ impl SearchIndex {
     }
 
     pub fn try_index_note(&mut self, meta: NoteMeta, content: &str) -> Result<()> {
+        if content.len() > MAX_INDEXED_NOTE_BYTES {
+            if !self.skipped_oversize.contains(&meta.note_id) {
+                self.skipped_oversize.push(meta.note_id);
+            }
+            return Ok(());
+        }
+        self.skipped_oversize.retain(|note_id| note_id != &meta.note_id);
         let identity = note_identity(&meta).map_err(search_error)?;
         let document = match DocumentInput::new(
             identity,
@@ -268,6 +291,23 @@ fn note_identity(
     .map(|identity| identity.with_updated_at_ms(note.updated_at_ms))
 }
 
+/// Separates notes whose file is over `MAX_INDEXED_NOTE_BYTES` so one oversize
+/// note cannot push the whole rebuild past its bounds. Returns the notes to
+/// index and the ids skipped.
+fn split_oversize(root: &Path, notes: &[NoteMeta]) -> Result<(Vec<NoteMeta>, Vec<String>)> {
+    let mut indexable = Vec::with_capacity(notes.len());
+    let mut skipped = Vec::new();
+    for note in notes {
+        let bytes = std::fs::metadata(visible_path(root, &note.path))?.len();
+        if bytes > MAX_INDEXED_NOTE_BYTES as u64 {
+            skipped.push(note.note_id.clone());
+        } else {
+            indexable.push(note.clone());
+        }
+    }
+    Ok((indexable, skipped))
+}
+
 fn read_documents(
     root: &Path,
     notes: &[NoteMeta],
@@ -357,5 +397,63 @@ mod tests {
         assert_eq!(accepted.content_hash, "blake3-v3:accepted");
         assert!(search.search_status().dirty);
         assert!(search.search_status().degraded);
+    }
+
+    fn write_repeated(path: &Path, byte: u8, len: usize) {
+        use std::io::Write;
+        let chunk = vec![byte; 1024 * 1024];
+        let mut file = std::fs::File::create(path).unwrap();
+        let mut remaining = len;
+        while remaining > 0 {
+            let n = remaining.min(chunk.len());
+            file.write_all(&chunk[..n]).unwrap();
+            remaining -= n;
+        }
+    }
+
+    #[test]
+    fn oversize_note_is_skipped_and_search_stays_healthy_for_the_rest() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("vault");
+        let state_root = temp.path().join("state");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(&state_root).unwrap();
+        std::fs::write(root.join("small.md"), "# Small\n\nneedle in a small note\n").unwrap();
+        // Over MAX_REBUILD_SOURCE_BYTES on its own: before the per-note limit
+        // this failed the whole rebuild and left search degraded.
+        write_repeated(
+            &root.join("huge.md"),
+            b'a',
+            MAX_REBUILD_SOURCE_BYTES + 1024 * 1024,
+        );
+        let notes = vec![note_meta("small"), note_meta("huge")];
+        let mut search = SearchIndex::open(&state_root);
+        search.rebuild(&root, &notes).unwrap();
+        assert_eq!(search.skipped_oversize(), ["huge".to_owned()]);
+        let status = search.search_status();
+        assert!(!status.dirty && !status.degraded);
+        let settings = Settings::default();
+        let hits = search
+            .try_search_with_overlay("needle", &notes, 10, SearchMode::ExactPrefix, &[], &settings)
+            .unwrap()
+            .hits;
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].note_id, "small");
+        // A second rebuild sees the index as current and does not reread huge.md.
+        search.rebuild(&root, &notes).unwrap();
+        assert!(!search.search_status().degraded);
+    }
+
+    #[test]
+    fn oversize_edit_is_not_indexed_and_is_not_an_error() {
+        let temp = tempfile::tempdir().unwrap();
+        let state_root = temp.path().join("state");
+        std::fs::create_dir_all(&state_root).unwrap();
+        let mut search = SearchIndex::open(&state_root);
+        let content = "a".repeat(MAX_INDEXED_NOTE_BYTES + 1);
+        search.try_index_note(note_meta("big"), &content).unwrap();
+        assert_eq!(search.skipped_oversize(), ["big".to_owned()]);
+        search.try_index_note(note_meta("big"), "small again").unwrap();
+        assert!(search.skipped_oversize().is_empty());
     }
 }

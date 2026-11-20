@@ -163,6 +163,10 @@ field weights are read at query time, so settings changes apply without
 reindexing. Recency only reorders hits already selected by field score. Search
 matching and scoring are implemented in `src/search.rs` and
 `crates/tansu-search/`.
+Notes whose file is larger than 8 MiB (`MAX_INDEXED_NOTE_BYTES`) are not
+indexed: they stay listed and open normally, search never returns them, and the
+rest of the vault is indexed as usual. The vault `open` log event reports their
+count as `unindexedOversizeNotes`.
 Search results do not include note bodies. Each hit includes identity,
 revision/hash, title, path, score, an excerpt, excerpt-local half-open UTF-16
 highlight ranges, and an optional half-open UTF-16 source range into the

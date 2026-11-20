@@ -106,6 +106,54 @@ describe("rewriteImageTokens", () => {
   });
 });
 
+describe("rewriteImageTokens on hostile input", () => {
+  const images = [image(0), image(1)];
+
+  // The pattern the rewrite used before it became a linear scan, kept as the
+  // reference for what counts as an embed.
+  const REFERENCE = /!\[((?:\\.|(?!\]\()[^\\\n])*)\]\(tansu-import-image:(\d+)\)/g;
+  const referenceRewrite = (markdown: string) =>
+    markdown
+      .replaceAll(REFERENCE, (_m, alt: string, id: string) => `![${alt}](https://example.com/${id}.png)`)
+      .replaceAll(/\]\(tansu-import-image:(\d+)\)/g, (_m, id: string) => `](https://example.com/${id}.png)`);
+
+  it("matches the reference pattern on random Markdown made of its tricky characters", () => {
+    const pieces = ["![", "!", "[", "]", "](", "(", ")", "\\", "\n", "\r", "a", "](tansu-import-image:0)", "](tansu-import-image:1)", "tansu-import-image:", "0"];
+    let seed = 12345;
+    const next = () => (seed = (seed * 1103515245 + 12345) & 0x7fffffff);
+    for (let round = 0; round < 4000; round += 1) {
+      let markdown = "";
+      for (let n = next() % 14; n > 0; n -= 1) markdown += pieces[next() % pieces.length];
+      expect(rewriteImageTokens(markdown, images, [null, null])).toBe(referenceRewrite(markdown));
+    }
+  });
+
+  it("leaves text without embeds untouched and rewrites embeds after failed starts", () => {
+    expect(rewriteImageTokens("no images ![ here", images, [])).toBe("no images ![ here");
+    expect(rewriteImageTokens("![![![a](tansu-import-image:1) tail", images, [])).toBe("![![![a](https://example.com/1.png) tail");
+  });
+
+  it("scales linearly on a line of unclosed image starts", () => {
+    const measure = (units: number, unit: string) => {
+      const markdown = unit.repeat(units);
+      const started = performance.now();
+      const out = rewriteImageTokens(markdown, images, []);
+      const elapsed = performance.now() - started;
+      expect(out).toBe(markdown);
+      return elapsed;
+    };
+    // Eight times the input costs about eight times the work when linear and
+    // sixty-four times when quadratic. A 1 ms floor keeps timer noise on the
+    // small run from inflating the ratio.
+    for (const unit of ["![", "![a", String.raw`![\![`]) {
+      measure(2_000, unit);
+      const small = Math.max(measure(10_000, unit), 1);
+      const large = measure(80_000, unit);
+      expect(large / small).toBeLessThan(30);
+    }
+  }, 120_000);
+});
+
 describe("importTitle", () => {
   it("falls back to the source host and then a fixed title", () => {
     expect(importTitle({ title: " A\n title ", sourceUrl: "https://example.com/x" })).toBe("A title");

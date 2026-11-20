@@ -41,7 +41,9 @@ upload at once. Uploads finish before the note is created. A
 `![alt](tansu-import-image:ID)` embed becomes the wiki-image markdown the upload
 returned. When an image has no data, has an unsupported type (SVG is not
 supported), or fails to convert or upload, the embed becomes `![alt](url)` and
-the import continues.
+the import continues. The embed rewrite is a single left-to-right scan, so its
+cost grows linearly with the Markdown size even for page content made of
+unclosed `![` starts.
 
 Tansu then creates the note through the local-draft promotion path, with a path
 derived from the title by the usual unique-path rule, and opens it as the active

@@ -1,5 +1,5 @@
 Prefix: DSLP
-Next: 32
+Next: 34
 
 Deslop campaign backlog ([plan](https://github.com/laputa-systems/stuff/blob/main/docs/campaigns/deslop.md), tier D). One agent works this file with the `deslop` skill: take the lowest-numbered open ticket whose area does not start with `Needs owner ·`. After DSLP-5, work the open P1 and P2 findings, then fill in `## Report` below.
 
@@ -198,33 +198,6 @@ Not started.
 - **Fix with:** deslop
 - **Effort:** M
 
-### DSLP-25 · P2 · One oversize note disables search for the whole vault
-
-- **Area:** search and indexing · resource bounds
-- **Where:** src/reconcile.rs walk_dir, crates/tansu-search/src/service.rs check_rebuild_bounds
-- **Problem:** Reconcile reads every Markdown file whole with no per-file cap, and a search rebuild is refused when the vault's total source exceeds MAX_REBUILD_SOURCE_BYTES (128 MiB) or MAX_REBUILD_NOTES (10,000; same check, not separately reproduced). Reproduced on target/debug/tansu at 8a20a7b: a 3,000-note vault searched normally; adding one 300 MB .md file raised server RSS to 1.3 GB and 52 CPU-seconds, made each search for a term in that file take about 30 s, left searchStatus {dirty:true, degraded:true} across restart, and after the search directory was removed every query ('needle', 'Alpha', 'Note 5') returned 200 with zero hits. Deleting the file and restarting restored search. The API refuses bodies over 32 MiB, so such a note can be listed and opened but never saved. Evidence: docs/deslop-diagnose.md F1.
-- **Recommendation:** Bound file size where files enter the vault (skip with an unresolved or too-large reason, as invalid UTF-8 already is) and make rebuild truncate or skip oversize documents instead of failing the whole index; surface degraded search in the UI.
-- **Fix with:** os-boundaries
-- **Effort:** M
-
-### DSLP-26 · P2 · Unauthenticated login options exhaust the ceremony cap and lock the owner out
-
-- **Area:** HTTP endpoints and auth
-- **Where:** src/auth.rs begin_authentication (MAX_PENDING_CEREMONIES 256), src/http.rs login/options route
-- **Problem:** POST /api/v2/auth/login/options needs no session, and each call stores a pending ceremony for 300 s; the table holds at most 256 across all callers. Reproduced on target/debug/tansu at 8a20a7b with auth configured (origin https://notes.test, one credential row seeded in auth.db because a real passkey needs an authenticator): 300 unauthenticated requests gave 255 x 200 then 45 x 429, and the next owner login/options call returned 429 rate_limited with retryAfterMs 1000 although the lockout lasts up to 300 s. An attacker repeats 256 requests per 5 minutes with no credentials. Evidence: docs/deslop-diagnose.md F2.
-- **Recommendation:** Reserve ceremony capacity for the owner (per-client or per-kind quota, evict oldest unfinished login ceremony instead of refusing, or bind the cap to the source), and report a retry delay that matches the real expiry.
-- **Fix with:** security
-- **Effort:** M
-
-### DSLP-27 · P2 · Extension import image rewrite is quadratic on hostile Markdown and freezes the Tansu tab
-
-- **Area:** extension messaging · web application
-- **Where:** web/ts/app/extension-import.ts IMAGE_EMBED_PATTERN and rewriteImageTokens
-- **Problem:** The embed pattern /!\[((?:\\.|(?!\]\()[^\\\n])*)\]\(tansu-import-image:(\d+)\)/g rescans to the end of the line from every '![', so a long line of '![' costs O(n squared). The payload is page content imported by Loupe (a code block in a web page keeps it verbatim) and the receiver caps Markdown at only 5 MB. Reproduced in Chromium (Playwright) against the built app served by target/debug/tansu at 8a20a7b by posting import.request over window.postMessage: 40 KB took 0.8 s, 80 KB 3.0 s, 160 KB 12.7 s to answer import.result, the page main thread blocked throughout; extrapolated cost at the 5 MB cap is hours. The same function in node gave 0.9/3.6/14.5 s for 40/80/160 KB. Evidence: docs/deslop-diagnose.md F3.
-- **Recommendation:** Replace the backtracking alt capture with a linear scan (or bound the alt length and the work per match), cap work by input size, and add a timing-bounded test with a worst-case line.
-- **Fix with:** security
-- **Effort:** S
-
 ### DSLP-24 · P3 · Pinned pnpm is missing from the configured registry
 
 - **Area:** Needs environment · package registry
@@ -268,4 +241,22 @@ Not started.
 - **Problem:** Repeated link-opening text rescans to the end for each occurrence. Reproduced by importing the product module in node: a line of '![a](' repeated 20,000 times (100 KB) took 2.7 s and 40,000 times (200 KB) 10.9 s; 800 distinct backtick run lengths (321 KB) took 0.3 s and are not the worst case. The input is the Markdown of whatever page the user sends to Tansu, and runs in the extension service worker. Not exercised in a packaged extension. Evidence: docs/deslop-diagnose.md F7.
 - **Recommendation:** Make the scan linear (record failed openers, cap per-line work) and add a worst-case timing test next to loupe-image-scanner.test.ts.
 - **Fix with:** make-it-fast
+- **Effort:** S
+
+### DSLP-32 · P3 · Reconcile reads oversized notes whole to hash them
+
+- **Area:** deslop · findings · vault reconcile
+- **Where:** src/vault.rs (reconcile walk)
+- **Problem:** DSLP-25 stopped oversized notes from disabling search, but the reconcile walk still reads each file whole to hash it, so a 1.3 GB note spikes RSS by about the file size.
+- **Recommendation:** Hash in bounded chunks (streaming) or skip content hashing above the indexing limit, with a regression test that bounds peak RSS or read size for an oversized note.
+- **Fix with:** deslop
+- **Effort:** S
+
+### DSLP-33 · P3 · Show unindexed oversize notes in the web UI
+
+- **Area:** deslop · findings · search status
+- **Where:** src/search.rs skipped_oversize(), web/ts/app
+- **Problem:** Notes over MAX_INDEXED_NOTE_BYTES are skipped silently in the UI; only the vault-open log reports unindexedOversizeNotes, so a user cannot tell why a note is missing from search.
+- **Recommendation:** Expose the skipped count or ids through the search status API and show it in the search UI, with a test.
+- **Fix with:** deslop
 - **Effort:** S
