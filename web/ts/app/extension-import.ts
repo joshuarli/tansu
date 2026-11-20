@@ -186,7 +186,7 @@ function remoteImageUrl(images: readonly ImportImage[], id: string): string {
 }
 
 const IMAGE_TOKEN_PATTERN = /\]\(tansu-import-image:(\d+)\)/g;
-const EMBED_CLOSE = "](" + IMAGE_TOKEN_PREFIX;
+const EMBED_CLOSE = `](${IMAGE_TOKEN_PREFIX}`;
 
 // `.` in a RegExp excludes these; an escape cannot swallow them.
 function isLineTerminator(code: number): boolean {
@@ -240,7 +240,7 @@ function replaceImageEmbeds(markdown: string, replace: (alt: string, id: string)
   let from = 0;
   for (;;) {
     const start = markdown.indexOf("![", from);
-    if (start < 0) break;
+    if (start === -1) break;
     const parsed = parseImageEmbed(markdown, start);
     if (typeof parsed === "number") {
       from = Math.max(parsed, start + 1);

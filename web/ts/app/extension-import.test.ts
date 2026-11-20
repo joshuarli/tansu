@@ -124,7 +124,7 @@ describe("rewriteImageTokens on hostile input", () => {
     for (let round = 0; round < 4000; round += 1) {
       let markdown = "";
       for (let n = next() % 14; n > 0; n -= 1) markdown += pieces[next() % pieces.length];
-      expect(rewriteImageTokens(markdown, images, [null, null]), JSON.stringify(markdown)).toBe(referenceRewrite(markdown));
+      expect(rewriteImageTokens(markdown, images, [null, null])).toBe(referenceRewrite(markdown));
     }
   });
 
@@ -145,11 +145,11 @@ describe("rewriteImageTokens on hostile input", () => {
     // Eight times the input costs about eight times the work when linear and
     // sixty-four times when quadratic. A 1 ms floor keeps timer noise on the
     // small run from inflating the ratio.
-    for (const unit of ["![", "![a", "![\\!["]) {
+    for (const unit of ["![", "![a", String.raw`![\![`]) {
       measure(2_000, unit);
       const small = Math.max(measure(10_000, unit), 1);
       const large = measure(80_000, unit);
-      expect(large / small, `${JSON.stringify(unit)}: ${small}ms -> ${large}ms`).toBeLessThan(30);
+      expect(large / small).toBeLessThan(30);
     }
   }, 120_000);
 });
