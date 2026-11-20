@@ -9,7 +9,7 @@ mod types;
 
 pub use error::SearchError;
 pub use overlay::{MAX_OVERLAY_BYTES, MAX_OVERLAY_NOTES};
-pub use service::{MAX_REBUILD_NOTES, MAX_REBUILD_SOURCE_BYTES, SearchService};
+pub use service::{MAX_INDEXED_NOTE_BYTES, MAX_REBUILD_NOTES, MAX_REBUILD_SOURCE_BYTES, SearchService};
 pub use types::{
     DirtyNoteSnapshot, DocumentInput, ExcerptRange, Fuzziness, MatchInfo,
     NoteIdentity, NoteRange, OverlaySearchResult, SearchLimit, SearchMode,

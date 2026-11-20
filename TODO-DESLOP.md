@@ -198,15 +198,6 @@ Not started.
 - **Fix with:** deslop
 - **Effort:** M
 
-### DSLP-25 · P2 · One oversize note disables search for the whole vault
-
-- **Area:** search and indexing · resource bounds
-- **Where:** src/reconcile.rs walk_dir, crates/tansu-search/src/service.rs check_rebuild_bounds
-- **Problem:** Reconcile reads every Markdown file whole with no per-file cap, and a search rebuild is refused when the vault's total source exceeds MAX_REBUILD_SOURCE_BYTES (128 MiB) or MAX_REBUILD_NOTES (10,000; same check, not separately reproduced). Reproduced on target/debug/tansu at 8a20a7b: a 3,000-note vault searched normally; adding one 300 MB .md file raised server RSS to 1.3 GB and 52 CPU-seconds, made each search for a term in that file take about 30 s, left searchStatus {dirty:true, degraded:true} across restart, and after the search directory was removed every query ('needle', 'Alpha', 'Note 5') returned 200 with zero hits. Deleting the file and restarting restored search. The API refuses bodies over 32 MiB, so such a note can be listed and opened but never saved. Evidence: docs/deslop-diagnose.md F1.
-- **Recommendation:** Bound file size where files enter the vault (skip with an unresolved or too-large reason, as invalid UTF-8 already is) and make rebuild truncate or skip oversize documents instead of failing the whole index; surface degraded search in the UI.
-- **Fix with:** os-boundaries
-- **Effort:** M
-
 ### DSLP-26 · P2 · Unauthenticated login options exhaust the ceremony cap and lock the owner out
 
 - **Area:** HTTP endpoints and auth
