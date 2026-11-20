@@ -942,6 +942,20 @@ fn watcher_trigger() -> (WatcherTrigger, Receiver<()>) {
     (WatcherTrigger(tx), rx)
 }
 
+/// Whether a filesystem event can change the vault's notes. Reads are reported as access
+/// events by notify's inotify backend, and a reconcile reads every note, so counting them
+/// would make each reconcile schedule the next.
+fn triggers_reconcile(event: &notify::Event, state_root: &Path) -> bool {
+    if matches!(event.kind, notify::EventKind::Access(access)
+        if access != notify::event::AccessKind::Close(notify::event::AccessMode::Write))
+    {
+        return false;
+    }
+    !event.paths.iter().any(|path| {
+        path.starts_with(state_root) || path.components().any(|part| part.as_os_str() == ".tansu")
+    })
+}
+
 fn run_watcher_worker(runtime: Weak<VaultRuntime>, events: Receiver<()>, stop: Arc<StopSignal>) {
     drain_watcher_triggers(&events, &stop, || match runtime.upgrade() {
         Some(runtime) => {
@@ -1091,13 +1105,9 @@ impl VaultRuntime {
         let mut watcher =
             notify::recommended_watcher(move |result: notify::Result<notify::Event>| {
                 if let Ok(event) = result {
-                    if event.paths.iter().any(|path| {
-                        path.starts_with(&state_root)
-                            || path.components().any(|part| part.as_os_str() == ".tansu")
-                    }) {
-                        return;
+                    if triggers_reconcile(&event, &state_root) {
+                        trigger.notify();
                     }
-                    trigger.notify();
                 }
             })?;
         watcher.watch(&root, RecursiveMode::Recursive)?;
@@ -4160,6 +4170,32 @@ mod tests {
         assert!(vault.lock_catalog().pending_mutations().unwrap().is_empty());
         vault.reconcile_from_watcher().unwrap();
         assert_eq!(fs::read(config.path.join("Archive/B.md")).unwrap(), b"# B\nkept\n");
+    }
+
+    #[test]
+    fn watcher_ignores_reads_so_a_reconcile_does_not_schedule_the_next() {
+        use notify::event::{AccessKind, AccessMode, CreateKind, DataChange, ModifyKind};
+        let state_root = Path::new("/srv/state");
+        let note = || PathBuf::from("/srv/vault/Fennel.md");
+        let event = |kind| notify::Event::new(kind).add_path(note());
+        for kind in [
+            notify::EventKind::Access(AccessKind::Open(AccessMode::Any)),
+            notify::EventKind::Access(AccessKind::Close(AccessMode::Read)),
+            notify::EventKind::Access(AccessKind::Read),
+        ] {
+            assert!(!triggers_reconcile(&event(kind), state_root), "{kind:?}");
+        }
+        for kind in [
+            notify::EventKind::Create(CreateKind::File),
+            notify::EventKind::Modify(ModifyKind::Data(DataChange::Any)),
+            notify::EventKind::Access(AccessKind::Close(AccessMode::Write)),
+            notify::EventKind::Remove(notify::event::RemoveKind::File),
+        ] {
+            assert!(triggers_reconcile(&event(kind), state_root), "{kind:?}");
+        }
+        let state_write = notify::Event::new(notify::EventKind::Modify(ModifyKind::Data(DataChange::Any)))
+            .add_path(state_root.join("vault.db-wal"));
+        assert!(!triggers_reconcile(&state_write, state_root));
     }
 
     #[test]
