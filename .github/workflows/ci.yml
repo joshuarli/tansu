@@ -85,6 +85,11 @@ jobs:
       - name: Build Rust check image
         run: docker build --platform linux/amd64 -f docker/rust-check.Dockerfile -t tansu-rust-check .
 
+      - name: Test
+        run: make test
+        env:
+          TMPDIR: ${{ github.workspace }}/.work/tmp
+
       - name: Rust check and tests
         run: |
           docker run --rm --platform linux/amd64 \
