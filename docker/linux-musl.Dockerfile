@@ -16,7 +16,7 @@ RUN apk add --no-cache \
   curl=8.23.0-r0 \
   file=5.47-r2 \
   musl-dev=1.2.6-r3 \
-  openssl=3.5.9-r0 \
+  openssl=3.5.9-r1 \
   pax-utils=1.3.9-r1 \
   tar=1.35-r5 \
   xz=5.8.4-r0
