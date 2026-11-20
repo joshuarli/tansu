@@ -45,15 +45,6 @@ Not started.
 - **Fix with:** deslop
 - **Effort:** M
 
-### DSLP-10 · P2 · Types: Loupe extension
-
-- **Area:** deslop · types · Loupe extension
-- **Where:** extension-loupe/
-- **Problem:** Strict profile and typing findings have not been assessed for this component. Contracts: extension messaging, imports and persisted settings. Consumers: browser tabs and Tansu HTTP API.
-- **Recommendation:** Run the deslop Types step for this bounded component. Accept: clean at the adopted profile, escape hatches not increased, and witnesses recorded; run make test.
-- **Fix with:** deslop
-- **Effort:** M
-
 ### DSLP-11 · P2 · Types: tooling and benchmarks
 
 - **Area:** deslop · types · tooling and benchmarks
@@ -72,15 +63,6 @@ Not started.
 - **Fix with:** deslop
 - **Effort:** M
 
-### DSLP-16 · P2 · Tests: Loupe extension
-
-- **Area:** deslop · tests · Loupe extension
-- **Where:** extension-loupe/
-- **Problem:** Coverage, boundary gaps and mutation have not been assessed for this component. Contracts: extension messaging, imports and persisted settings. Consumers: browser tabs and Tansu HTTP API.
-- **Recommendation:** Run the deslop Tests step for this bounded component. Accept: critical survivors dispositioned, test cost budget holds, and any qualified lane is green; run make test.
-- **Fix with:** deslop
-- **Effort:** M
-
 ### DSLP-17 · P2 · Tests: tooling and benchmarks
 
 - **Area:** deslop · tests · tooling and benchmarks
@@ -95,15 +77,6 @@ Not started.
 - **Area:** deslop · dead code · web UI and browser tests
 - **Where:** web/ except app and editor, including web/ts/e2e/
 - **Problem:** Tools and debloat have not been assessed for this component. Contracts: rendering, routing, browser interactions and API integration. Consumers: browser users and HTTP API.
-- **Recommendation:** Run the deslop Dead code step for this bounded component. Accept: tools clean or at most five reasoned allowlist entries, and walk-backs filed; run make test.
-- **Fix with:** deslop
-- **Effort:** M
-
-### DSLP-22 · P2 · Dead code: Loupe extension
-
-- **Area:** deslop · dead code · Loupe extension
-- **Where:** extension-loupe/
-- **Problem:** Tools and debloat have not been assessed for this component. Contracts: extension messaging, imports and persisted settings. Consumers: browser tabs and Tansu HTTP API.
 - **Recommendation:** Run the deslop Dead code step for this bounded component. Accept: tools clean or at most five reasoned allowlist entries, and walk-backs filed; run make test.
 - **Fix with:** deslop
 - **Effort:** M
