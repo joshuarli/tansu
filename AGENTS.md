@@ -30,7 +30,7 @@ Commands: frontend build `pnpm run build`, fixture app `make dev`, check `pnpm r
 - Editor behavior: [editor](docs/editor.md)
 - Browser extension import: [extension import](docs/extension-import.md)
 - Loupe browser extension: [Loupe](docs/loupe.md)
-- Security and deployment: [security](docs/security.md), [deployment](docs/deployment.md)
+- Security and deployment: [security](docs/security.md), [deployment](docs/deployment.md), [deslop diagnose](docs/deslop-diagnose.md)
 - Logging and backlog: [logging](docs/logging.md), [logging backlog](docs/logging-backlog.md)
 - Deferred features: [product backlog](docs/product-backlog.md)
 
