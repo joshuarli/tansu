@@ -85,21 +85,8 @@ jobs:
       - name: Build Rust check image
         run: docker build --platform linux/amd64 -f docker/rust-check.Dockerfile -t tansu-rust-check .
 
-      - name: Test
-        run: make test
-        env:
-          TMPDIR: ${{ github.workspace }}/.work/tmp
-
       - name: Rust check and tests
-        run: |
-          docker run --rm --platform linux/amd64 \
-            -v "$PWD:/work" \
-            -v "$PWD/.work/tmp/cargo-target:/target" \
-            -e CARGO_TARGET_DIR=/target \
-            -w /work \
-            tansu-rust-check \
-            sh -c 'cargo check --locked --workspace --target x86_64-unknown-linux-musl \
-              && cargo test --locked --workspace --target x86_64-unknown-linux-musl'
+        run: make test-ci
 
       - name: Install browser dependencies
         run: pnpm run playwright:install
