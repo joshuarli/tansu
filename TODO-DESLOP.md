@@ -216,15 +216,6 @@ Not started.
 - **Fix with:** security
 - **Effort:** M
 
-### DSLP-27 · P2 · Extension import image rewrite is quadratic on hostile Markdown and freezes the Tansu tab
-
-- **Area:** extension messaging · web application
-- **Where:** web/ts/app/extension-import.ts IMAGE_EMBED_PATTERN and rewriteImageTokens
-- **Problem:** The embed pattern /!\[((?:\\.|(?!\]\()[^\\\n])*)\]\(tansu-import-image:(\d+)\)/g rescans to the end of the line from every '![', so a long line of '![' costs O(n squared). The payload is page content imported by Loupe (a code block in a web page keeps it verbatim) and the receiver caps Markdown at only 5 MB. Reproduced in Chromium (Playwright) against the built app served by target/debug/tansu at 8a20a7b by posting import.request over window.postMessage: 40 KB took 0.8 s, 80 KB 3.0 s, 160 KB 12.7 s to answer import.result, the page main thread blocked throughout; extrapolated cost at the 5 MB cap is hours. The same function in node gave 0.9/3.6/14.5 s for 40/80/160 KB. Evidence: docs/deslop-diagnose.md F3.
-- **Recommendation:** Replace the backtracking alt capture with a linear scan (or bound the alt length and the work per match), cap work by input size, and add a timing-bounded test with a worst-case line.
-- **Fix with:** security
-- **Effort:** S
-
 ### DSLP-24 · P3 · Pinned pnpm is missing from the configured registry
 
 - **Area:** Needs environment · package registry

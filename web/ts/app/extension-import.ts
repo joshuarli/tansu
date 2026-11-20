@@ -185,18 +185,81 @@ function remoteImageUrl(images: readonly ImportImage[], id: string): string {
   return url.replaceAll("(", "%28").replaceAll(")", "%29");
 }
 
-const IMAGE_EMBED_PATTERN = /!\[((?:\\.|(?!\]\()[^\\\n])*)\]\(tansu-import-image:(\d+)\)/g;
 const IMAGE_TOKEN_PATTERN = /\]\(tansu-import-image:(\d+)\)/g;
+const EMBED_CLOSE = "](" + IMAGE_TOKEN_PREFIX;
+
+// `.` in a RegExp excludes these; an escape cannot swallow them.
+function isLineTerminator(code: number): boolean {
+  return code === 0x0a || code === 0x0d || code === 0x2028 || code === 0x2029;
+}
+
+type ImageEmbed = { end: number; alt: string; id: string };
+
+/**
+ * Parses `![alt](tansu-import-image:N)` starting at `start` (which holds `![`).
+ * The alt text is a run of `\x` escapes and characters other than a bare
+ * backslash or newline that ends at the first unescaped `](`, so the parse is
+ * deterministic and never backtracks.
+ * Returns the embed, or the position where scanning stopped on failure.
+ */
+function parseImageEmbed(markdown: string, start: number): ImageEmbed | number {
+  const altStart = start + 2;
+  let at = altStart;
+  while (at < markdown.length) {
+    const code = markdown.charCodeAt(at);
+    if (code === 0x5c) {
+      if (at + 1 >= markdown.length || isLineTerminator(markdown.charCodeAt(at + 1))) return at;
+      at += 2;
+    } else if (code === 0x0a) {
+      return at;
+    } else if (code === 0x5d && markdown.charCodeAt(at + 1) === 0x28) {
+      break;
+    } else {
+      at += 1;
+    }
+  }
+  if (!markdown.startsWith(EMBED_CLOSE, at)) return at;
+  let digitsEnd = at + EMBED_CLOSE.length;
+  const idStart = digitsEnd;
+  while (digitsEnd < markdown.length && markdown.charCodeAt(digitsEnd) >= 0x30 && markdown.charCodeAt(digitsEnd) <= 0x39) {
+    digitsEnd += 1;
+  }
+  if (digitsEnd === idStart || markdown.charCodeAt(digitsEnd) !== 0x29) return at;
+  return { end: digitsEnd + 1, alt: markdown.slice(altStart, at), id: markdown.slice(idStart, digitsEnd) };
+}
+
+/**
+ * Replaces each embed in one left-to-right pass. When an embed fails to parse
+ * at `i`, every later `![` before the stop point fails at the same place (their
+ * escape alignment merges with this scan within two characters), so scanning
+ * resumes at the stop point. That keeps hostile input such as `![![![...` linear.
+ */
+function replaceImageEmbeds(markdown: string, replace: (alt: string, id: string) => string): string {
+  let out = "";
+  let copied = 0;
+  let from = 0;
+  for (;;) {
+    const start = markdown.indexOf("![", from);
+    if (start < 0) break;
+    const parsed = parseImageEmbed(markdown, start);
+    if (typeof parsed === "number") {
+      from = Math.max(parsed, start + 1);
+      continue;
+    }
+    out += markdown.slice(copied, start) + replace(parsed.alt, parsed.id);
+    copied = parsed.end;
+    from = parsed.end;
+  }
+  return copied === 0 ? markdown : out + markdown.slice(copied);
+}
 
 export function rewriteImageTokens(
   markdown: string,
   images: readonly ImportImage[],
   localized: readonly LocalizedImage[],
 ): string {
-  return markdown
-    .replaceAll(IMAGE_EMBED_PATTERN, (_match, alt: string, id: string) => {
-      const local = localized[Number(id)];
-      return local === null || local === undefined ? `![${alt}](${remoteImageUrl(images, id)})` : local.markdown;
-    })
-    .replaceAll(IMAGE_TOKEN_PATTERN, (_match, id: string) => `](${remoteImageUrl(images, id)})`);
+  return replaceImageEmbeds(markdown, (alt, id) => {
+    const local = localized[Number(id)];
+    return local === null || local === undefined ? `![${alt}](${remoteImageUrl(images, id)})` : local.markdown;
+  }).replaceAll(IMAGE_TOKEN_PATTERN, (_match, id: string) => `](${remoteImageUrl(images, id)})`);
 }
