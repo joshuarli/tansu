@@ -269,4 +269,3 @@ Not started.
 - **Recommendation:** Make the scan linear (record failed openers, cap per-line work) and add a worst-case timing test next to loupe-image-scanner.test.ts.
 - **Fix with:** make-it-fast
 - **Effort:** S
-
