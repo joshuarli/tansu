@@ -1,5 +1,5 @@
 Prefix: DSLP
-Next: 32
+Next: 34
 
 Deslop campaign backlog ([plan](https://github.com/laputa-systems/stuff/blob/main/docs/campaigns/deslop.md), tier D). One agent works this file with the `deslop` skill: take the lowest-numbered open ticket whose area does not start with `Needs owner ·`. After DSLP-5, work the open P1 and P2 findings, then fill in `## Report` below.
 
@@ -241,4 +241,22 @@ Not started.
 - **Problem:** Repeated link-opening text rescans to the end for each occurrence. Reproduced by importing the product module in node: a line of '![a](' repeated 20,000 times (100 KB) took 2.7 s and 40,000 times (200 KB) 10.9 s; 800 distinct backtick run lengths (321 KB) took 0.3 s and are not the worst case. The input is the Markdown of whatever page the user sends to Tansu, and runs in the extension service worker. Not exercised in a packaged extension. Evidence: docs/deslop-diagnose.md F7.
 - **Recommendation:** Make the scan linear (record failed openers, cap per-line work) and add a worst-case timing test next to loupe-image-scanner.test.ts.
 - **Fix with:** make-it-fast
+- **Effort:** S
+
+### DSLP-32 · P3 · Reconcile reads oversized notes whole to hash them
+
+- **Area:** deslop · findings · vault reconcile
+- **Where:** src/vault.rs (reconcile walk)
+- **Problem:** DSLP-25 stopped oversized notes from disabling search, but the reconcile walk still reads each file whole to hash it, so a 1.3 GB note spikes RSS by about the file size.
+- **Recommendation:** Hash in bounded chunks (streaming) or skip content hashing above the indexing limit, with a regression test that bounds peak RSS or read size for an oversized note.
+- **Fix with:** deslop
+- **Effort:** S
+
+### DSLP-33 · P3 · Show unindexed oversize notes in the web UI
+
+- **Area:** deslop · findings · search status
+- **Where:** src/search.rs skipped_oversize(), web/ts/app
+- **Problem:** Notes over MAX_INDEXED_NOTE_BYTES are skipped silently in the UI; only the vault-open log reports unindexedOversizeNotes, so a user cannot tell why a note is missing from search.
+- **Recommendation:** Expose the skipped count or ids through the search status API and show it in the search UI, with a test.
+- **Fix with:** deslop
 - **Effort:** S
