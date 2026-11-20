@@ -9,33 +9,6 @@ Not started.
 
 ## Tickets
 
-### DSLP-9 · P2 · Types: web UI and browser tests
-
-- **Area:** deslop · types · web UI and browser tests
-- **Where:** web/ except app and editor, including web/ts/e2e/
-- **Problem:** Strict profile and typing findings have not been assessed for this component. Contracts: rendering, routing, browser interactions and API integration. Consumers: browser users and HTTP API.
-- **Recommendation:** Run the deslop Types step for this bounded component. Accept: clean at the adopted profile, escape hatches not increased, and witnesses recorded; run make test.
-- **Fix with:** deslop
-- **Effort:** M
-
-### DSLP-15 · P2 · Tests: web UI and browser tests
-
-- **Area:** deslop · tests · web UI and browser tests
-- **Where:** web/ except app and editor, including web/ts/e2e/
-- **Problem:** Coverage, boundary gaps and mutation have not been assessed for this component. Contracts: rendering, routing, browser interactions and API integration. Consumers: browser users and HTTP API.
-- **Recommendation:** Run the deslop Tests step for this bounded component. Accept: critical survivors dispositioned, test cost budget holds, and any qualified lane is green; run make test.
-- **Fix with:** deslop
-- **Effort:** M
-
-### DSLP-21 · P2 · Dead code: web UI and browser tests
-
-- **Area:** deslop · dead code · web UI and browser tests
-- **Where:** web/ except app and editor, including web/ts/e2e/
-- **Problem:** Tools and debloat have not been assessed for this component. Contracts: rendering, routing, browser interactions and API integration. Consumers: browser users and HTTP API.
-- **Recommendation:** Run the deslop Dead code step for this bounded component. Accept: tools clean or at most five reasoned allowlist entries, and walk-backs filed; run make test.
-- **Fix with:** deslop
-- **Effort:** M
-
 ### DSLP-28 · P3 · Delta save applies edits in quadratic time before verifying the hash
 
 - **Area:** HTTP endpoints · note save
