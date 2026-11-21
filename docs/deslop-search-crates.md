@@ -30,7 +30,7 @@ Test-pyramid audit: edit tier is a selected `cargo test -p ... <test>`; componen
 
 Fault injection: copy `crates/tansu-webauthn/src/lib.rs` to `.work/tmp/webauthn-original.rs`, replace the unique `if flags & 0x04 == 0 {` with `if false {`, then run `cpu-guard --cores 4 -- cargo test -p tansu-webauthn user_verification_is_required_at_both_ceremony_finishes`. Exit 101: `tests::user_verification_is_required_at_both_ceremony_finishes` failed at line 1103 because registration accepted missing user verification. Restore with `cp .work/tmp/webauthn-original.rs crates/tansu-webauthn/src/lib.rs`; `cmp .work/tmp/webauthn-original.rs crates/tansu-webauthn/src/lib.rs` exited 0. The same test command on restored source exited 0 (1 passed).
 
-Needs environment: `make coverage` and `make mutants-diff` both exited 2, no such targets; `cargo llvm-cov --version` and `cargo mutants --version` exited 101, no such commands. Branch coverage, bounded automated mutation, survivor dispositions and the warm cost comparison are unverified. A hand injection is one sensitivity check, not a substitute. No CI lane is qualified by this run.
+Needs environment: make for the coverage and mutants-diff goals both exited 2, no such targets; `cargo llvm-cov --version` and `cargo mutants --version` exited 101, no such commands. Branch coverage, bounded automated mutation, survivor dispositions and the warm cost comparison are unverified. A hand injection is one sensitivity check, not a substitute. No CI lane is qualified by this run.
 
 ## DSLP-18
 

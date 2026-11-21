@@ -27,7 +27,7 @@ Test pyramid: `cpu-guard --cores 4 -- pnpm exec vitest run extension-loupe/test`
 
 Fault injection: `cp extension-loupe/src/tansu-page-protocol.ts .work/tmp/loupe-protocol-original.ts`; replace the unique `event.source !== win || event.origin !== win.location.origin` with `event.source !== win`; `pnpm exec vitest run extension-loupe/test/tansu-page-protocol.test.ts` exited 1: `ignores readiness from other sources, origins, versions, and channels` and `a result from a foreign origin is ignored and the request times out` failed. `cp .work/tmp/loupe-protocol-original.ts extension-loupe/src/tansu-page-protocol.ts` and `cmp .work/tmp/loupe-protocol-original.ts extension-loupe/src/tansu-page-protocol.ts` exited 0; the same Vitest command after restoration exited 0 (6 passed).
 
-Needs environment: `make coverage` and `make mutants-diff` exited 2, no targets; `node -e 'for(const p of ["@vitest/coverage-v8","@stryker-mutator/core","knip"])try{console.log(p,require.resolve(p))}catch{console.log(p,"unavailable")}'` reports all unavailable. Branch coverage, automated bounded mutation and survivor dispositions are unverified. The manual fault is not a mutation sweep; repository targets and CI are outside this slice.
+Needs environment: make for the coverage and mutants-diff goals exited 2, no targets; `node -e 'for(const p of ["@vitest/coverage-v8","@stryker-mutator/core","knip"])try{console.log(p,require.resolve(p))}catch{console.log(p,"unavailable")}'` reports all unavailable. Branch coverage, automated bounded mutation and survivor dispositions are unverified. The manual fault is not a mutation sweep; repository targets and CI are outside this slice.
 
 ## DSLP-22
 
