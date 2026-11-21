@@ -2,7 +2,7 @@
 
 Bounded review of Tansu's riskiest boundaries at base `8a20a7b` (branch `deslop/ground`), run on 2026-11-20. A
 finding is filed only when it was reproduced against the built product with local fixtures and no external network.
-Tickets live in `TODO-DESLOP.md`; this page holds the evidence.
+The campaign's open findings moved to `TODO.md` (TNS-119 to TNS-127) when the deslop backlog closed; this page holds the evidence.
 
 ## Method
 
