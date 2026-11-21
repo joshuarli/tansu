@@ -32,7 +32,7 @@ Test pyramid: `cpu-guard --cores 4 -- pnpm exec vitest run web/ts/{child-process
 
 Fault injection: `cp web/ts/state.ts .work/tmp/web-ui-state-original.ts`, then replace the unique `sourceMode: tab.mode === "source",` with `sourceMode: false,`. `cpu-guard --cores 4 -- pnpm exec vitest run web/ts/state.test.ts -t 'converts loaded documents to tabs and persists workspace editor state'` exited 1: that test failed at `web/ts/state.test.ts:79`, expected `sourceMode: true`, received `false`. `cp .work/tmp/web-ui-state-original.ts web/ts/state.ts` and `cmp .work/tmp/web-ui-state-original.ts web/ts/state.ts` exited 0; the same test command after restoration exited 0 (1 passed).
 
-Needs environment: `make coverage` and `make mutants-diff` exited 2 (no target); `node -e 'try{console.log(require.resolve("@vitest/coverage-v8"))}catch{console.log("coverage-v8 unavailable")}'` reports unavailable, and `test -x node_modules/.bin/stryker` exited 1. Branch coverage, automated bounded mutation, survivor dispositions and comparable warm cost remain unverified. The manual fault is not a mutation sweep. Repository targets and CI are outside this slice.
+Needs environment: make for the coverage and mutants-diff goals exited 2 (no target); `node -e 'try{console.log(require.resolve("@vitest/coverage-v8"))}catch{console.log("coverage-v8 unavailable")}'` reports unavailable, and `test -x node_modules/.bin/stryker` exited 1. Branch coverage, automated bounded mutation, survivor dispositions and comparable warm cost remain unverified. The manual fault is not a mutation sweep. Repository targets and CI are outside this slice.
 
 ## DSLP-21
 

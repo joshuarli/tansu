@@ -32,7 +32,7 @@ Test-pyramid audit: edit tier is a filtered `cargo test -p tansu <name>`; change
 
 Fault injection: `cp src/paths.rs .work/tmp/paths-original.rs`; replace the unique `Component::ParentDir => return Err(PathValidationReason::Traversal),` with `Component::ParentDir => parts.push("..".to_string()),`; `CARGO_BUILD_JOBS=4 cpu-guard --cores 8 -- cargo test -p tansu rejects_path_traversal` exited 101. `paths::tests::rejects_path_traversal` failed at `src/paths.rs:569`: `unwrap_err()` received `Ok("../x.md")`. `cp .work/tmp/paths-original.rs src/paths.rs` restored it; `cmp .work/tmp/paths-original.rs src/paths.rs` exited 0. The same test command on restored source exited 0 (one selected test passed).
 
-Needs environment: `make coverage` and `make mutants-diff` each exited 2 (no target); `cargo llvm-cov --version` and `cargo mutants --version` each exited 101 (no such command). Branch coverage, automated critical-scope survivors, before/after mutation and warm cost comparison are unverified. The single injected fault is not an automated mutation sweep. Target and CI changes are outside this slice.
+Needs environment: make for the coverage and mutants-diff goals each exited 2 (no target); `cargo llvm-cov --version` and `cargo mutants --version` each exited 101 (no such command). Branch coverage, automated critical-scope survivors, before/after mutation and warm cost comparison are unverified. The single injected fault is not an automated mutation sweep. Target and CI changes are outside this slice.
 
 ## DSLP-5
 
