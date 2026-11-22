@@ -193,3 +193,12 @@ bench-full: setup
 STUFF ?= stuff
 publish-mynpm:
 	$(STUFF) publish npm --lockfile pnpm-lock.yaml --project tansu
+
+.PHONY: clean
+clean:
+	@for artifact in ./target ./dist; do \
+	  if test -L "$$artifact" || { test -e "$$artifact" && ! test -d "$$artifact"; }; then \
+	    printf '%s\n' "make clean: $$artifact must be a local build directory" >&2; exit 1; \
+	  fi; \
+	done
+	rm -rf -- ./target ./dist

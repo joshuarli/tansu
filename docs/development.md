@@ -75,6 +75,8 @@ in the `skins` list in `scripts/build-web.mjs`. The build defines the name as
 
 ## Build
 
+Run `make clean` to remove this checkout’s Cargo and frontend build output (`./target` and `./dist`). It refuses symlinks and leaves `.work` and installed packages intact.
+
 `pnpm run build` creates fingerprinted frontend assets and a manifest under
 `web/dist/`. Cargo embeds those assets; run the frontend build before invoking
 Cargo directly. `make types` generates `web/ts/types.generated.ts` from
