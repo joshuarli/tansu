@@ -3,6 +3,8 @@
 Tansu is a local Markdown note app.
 Commands: frontend build `pnpm run build`, fixture app `make dev`, check `pnpm run check`, unit tests `pnpm run test`, browser e2e `make test-e2e-chromium` and `make test-e2e-webkit`.
 
+The roadmap, [docs/roadmap.md](docs/roadmap.md), holds all current and future work; its Status is the resume point.
+
 ## Invariants
 
 - `noteId` is durable identity. `path` is mutable metadata.
