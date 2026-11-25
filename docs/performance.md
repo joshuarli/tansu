@@ -17,7 +17,9 @@ set with `make bench-full`. Both targets are defined in the root `Makefile` and 
 `perf-gate-ready -1` right after. If either check reports a busy host, the
 target deletes the result files written during the run, prints `perf gate
 deferred: host busy`, and exits 75. A deferred run is not a pass. The shared
-recipe is `scripts/perf-gate.sh`.
+recipe is `scripts/perf-gate.sh`. Fixed budget passes can miss smaller
+regressions; compare interleaved baseline and candidate runs when evaluating a
+change, and use separate profiling runs for resource attribution.
 
 ## Recorded results
 

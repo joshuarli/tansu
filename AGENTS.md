@@ -32,8 +32,7 @@ The roadmap, [docs/roadmap.md](docs/roadmap.md), holds all current and future wo
 - Editor behavior: [editor](docs/editor.md)
 - Browser extension import: [extension import](docs/extension-import.md)
 - Loupe browser extension: [Loupe](docs/loupe.md)
-- Security and deployment: [security](docs/security.md), [deployment](docs/deployment.md), [deslop diagnose](docs/deslop-diagnose.md)
-- Deslop component audits: [app and tests](docs/deslop-app-tests.md), [search crates](docs/deslop-search-crates.md), [web editor](docs/deslop-web-editor.md), [web app](docs/deslop-web-app.md), [web UI](docs/deslop-web-ui.md), [Loupe](docs/deslop-loupe.md), [tooling](docs/deslop-tooling.md)
+- Security and deployment: [security](docs/security.md), [deployment](docs/deployment.md)
 - Logging and backlog: [logging](docs/logging.md), [logging backlog](docs/logging-backlog.md)
 - Deferred features: [product backlog](docs/product-backlog.md)
 
