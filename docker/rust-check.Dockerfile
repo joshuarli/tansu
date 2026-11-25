@@ -1,4 +1,6 @@
 FROM alpine:3.24.2@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
+COPY --from=oci.17166969.xyz/owned-tools@sha256:1a5d1306bb105f21b60c67bbf04677a92048c02a808ae9b29dfdac1a90f2f073 /opt/laputa /opt/laputa
+ENV PATH=/opt/laputa/bin:$PATH
 
 ARG TARGET=x86_64-unknown-linux-musl
 ARG TARGETARCH
@@ -13,7 +15,6 @@ ARG LLVM_AARCH64_SHA256=7055513530fc60361e29d01d5c849d356b25e9e38124811a42097094
 RUN apk add --no-cache \
   ca-certificates=20261020-r0 \
   curl=8.23.0-r0 \
-  git=2.54.1-r0 \
   musl-dev=1.2.6-r3 \
   openssl=3.5.9-r1 \
   tar=1.35-r5 \
