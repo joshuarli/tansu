@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::path::PathBuf;
 
 use crate::api_types::{V2BootstrapResponse, V2VaultMeta};
 use crate::api_types::AppSettings;
@@ -44,6 +45,7 @@ impl VaultEntry {
 #[derive(Clone)]
 pub struct App {
     vaults: Arc<Vec<VaultEntry>>,
+    vault_roots: Arc<Vec<PathBuf>>,
     server_instance_id: Arc<String>,
     release: Option<Arc<str>>,
     logs: LogHub,
@@ -62,6 +64,7 @@ impl App {
     pub fn setup_only(config_store: ConfigStore) -> Self {
         Self {
             vaults: Arc::new(Vec::new()),
+            vault_roots: Arc::new(Vec::new()),
             server_instance_id: Arc::new("setup".to_string()),
             release: release_from_env(),
             logs: LogHub::from_env(),
@@ -106,6 +109,7 @@ impl App {
         }
         let app = Self {
             vaults: Arc::new(entries),
+            vault_roots: Arc::new(vault_configs.iter().map(|vault| vault.path.clone()).collect()),
             server_instance_id: Arc::new(server_instance_id),
             release: release_from_env(),
             logs,
@@ -162,6 +166,10 @@ impl App {
     pub fn with_release(mut self, release: Option<String>) -> Self {
         self.release = release.map(Arc::from);
         self
+    }
+
+    pub(crate) fn vault_roots(&self) -> Arc<Vec<PathBuf>> {
+        self.vault_roots.clone()
     }
 
     pub fn setup_mode(&self) -> bool {

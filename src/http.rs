@@ -11,7 +11,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use async_channel::Receiver;
 use async_executor::Executor;
-use async_lock::Semaphore;
+use async_lock::{Mutex, Semaphore};
 use async_net::{TcpListener as AsyncTcpListener, TcpStream};
 use async_io::Timer;
 use futures_lite::future;
@@ -235,6 +235,7 @@ impl Default for TransportLimits {
 #[derive(Clone)]
 struct ServerState {
     app: App,
+    health: Arc<HealthCache>,
     services: ServerServices,
     blocking_requests: Arc<Semaphore>,
     shutdown: CancellationToken,
@@ -349,6 +350,7 @@ async fn serve_listener_with_limits(
     let listener = AsyncTcpListener::try_from(listener)?;
     let state = ServerState {
         app,
+        health: Arc::new(HealthCache::default()),
         services,
         blocking_requests: Arc::new(Semaphore::new(limits.max_blocking_requests)),
         shutdown: shutdown.clone(),
@@ -669,6 +671,10 @@ async fn handle_request_inner(request: Request<Incoming>, state: ServerState) ->
         }
     };
 
+    if parts.method == Method::GET && parts.uri.path() == "/healthz" {
+        return health_response(&state.app, &state.health).await.into_hyper();
+    }
+
     if let Some(vault_id) = event_vault_id(&parts.uri) {
         if parts.method != Method::GET {
             return v2_api_error_response(
@@ -740,6 +746,93 @@ async fn handle_request_inner(request: Request<Incoming>, state: ServerState) ->
             V2ApiErrorKind::Internal { request_id: request_id_value.clone() },
             &request_id_value,
         ).with_no_store().into_hyper(),
+    }
+}
+
+struct HealthCache {
+    cached: Mutex<Option<CachedHealth>>,
+    slots: Arc<Semaphore>,
+}
+
+impl Default for HealthCache {
+    fn default() -> Self {
+        Self { cached: Mutex::new(None), slots: Arc::new(Semaphore::new(8)) }
+    }
+}
+
+#[derive(Clone)]
+struct CachedHealth {
+    computed_at: Instant,
+    status: u16,
+    body: Vec<u8>,
+}
+
+async fn health_response(app: &App, cache: &HealthCache) -> HttpResponse {
+    let mut cached = cache.cached.lock().await;
+    if cached.as_ref().is_none_or(|health| health.computed_at.elapsed() >= Duration::from_secs(1)) {
+        let computed_at = Instant::now();
+        let fallback = deser_value::value!({
+            "status": "down", "service": "tansu",
+            "checks": {
+                "setup": { "status": if app.setup_mode() { "down" } else { "ok" }, "ms": 0 },
+                "vaults": { "status": "down", "ms": 0, "detail": "check interrupted" }
+            }
+        });
+        *cached = Some(CachedHealth { computed_at, status: 503, body: crate::json_bytes(&fallback).expect("health serializes") });
+        let mut health = compute_health(app, &cache.slots).await;
+        health.computed_at = computed_at;
+        *cached = Some(health);
+    }
+    let health = cached.as_ref().expect("health has been computed");
+    HttpResponse::bytes(health.status, "application/json", health.body.clone()).with_no_store()
+}
+
+async fn compute_health(app: &App, slots: &Arc<Semaphore>) -> CachedHealth {
+    let started = Instant::now();
+    let setup = app.setup_mode();
+    let roots = app.vault_roots();
+    let total = roots.len();
+    let checks = FuturesUnordered::new();
+    for root in roots.iter() {
+        let root = root.clone();
+        let slots = slots.clone();
+        checks.push(async move {
+            let slot = slots.acquire_arc().await;
+            blocking::unblock(move || {
+                let _slot = slot;
+                std::fs::metadata(root).is_ok_and(|metadata| metadata.is_dir())
+            }).await
+        });
+    }
+    let accessible = count_accessible(checks).await;
+    let vault_status = if accessible == 0 { "down" } else if accessible < total { "degraded" } else { "ok" };
+    let status = if setup || vault_status == "down" { "down" } else { vault_status };
+    let release = app.release().filter(|release| release.len() <= 128 && release.bytes().all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_')));
+    let checks = deser_value::value!({
+        "setup": { "status": if setup { "down" } else { "ok" }, "ms": 0 },
+        "vaults": { "status": vault_status, "ms": started.elapsed().as_millis().min(500) as u64, "detail": format!("{accessible}/{total} accessible") }
+    });
+    let body = match release {
+        Some(release) => deser_value::value!({ "status": status, "service": "tansu", "release": release, "checks": checks }),
+        None => deser_value::value!({ "status": status, "service": "tansu", "checks": checks }),
+    };
+    CachedHealth {
+        computed_at: Instant::now(),
+        status: if status == "down" { 503 } else { 200 },
+        body: crate::json_bytes(&body).expect("health serializes"),
+    }
+}
+
+async fn count_accessible<F: Future<Output = bool>>(mut checks: FuturesUnordered<F>) -> usize {
+    let timer = Timer::after(Duration::from_millis(400));
+    futures_lite::pin!(timer);
+    let mut accessible = 0;
+    loop {
+        let next = future::race(checks.next(), async { timer.as_mut().await; None }).await;
+        match next {
+            Some(ok) => accessible += usize::from(ok),
+            None => return accessible,
+        }
     }
 }
 
@@ -1043,7 +1136,7 @@ fn authorize_request(
     let event_stream = event_vault_id(uri).is_some();
     let ceremony_route = is_ceremony_route(method, uri.path());
     let login_route = is_login_ceremony_route(method, uri.path());
-    let public_health_route = *method == Method::GET && uri.path() == "/api/v2/health";
+    let public_health_route = *method == Method::GET && matches!(uri.path(), "/api/v2/health" | "/healthz");
     let ignore_session = login_route || public_health_route;
     let require_session = authenticated_mode
         && (uri.path().starts_with("/api/") || event_stream)
@@ -1660,6 +1753,124 @@ mod tests {
     use std::thread;
 
     use crate::config::{Config, ConfigStore, VaultConfig};
+
+    #[test]
+    fn healthz_status_mapping_and_private_counts() {
+        let root = tempfile::tempdir().unwrap();
+        let first = root.path().join("private-one");
+        let second = root.path().join("private-two");
+        let app = App::new(Config {
+            data_root: root.path().join("data"),
+            vaults: vec![
+                VaultConfig { name: "SecretOne".into(), path: first.clone() },
+                VaultConfig { name: "SecretTwo".into(), path: second.clone() },
+            ],
+            auth: None,
+        }).unwrap().with_release(Some("release-123".into()));
+        let check = |expected_status, expected_http| {
+            let response = async_io::block_on(health_response(&app, &HealthCache::default()));
+            assert_eq!(response.status, expected_http);
+            assert_eq!(response.content_type, "application/json");
+            assert_eq!(response.header("cache-control"), Some("no-store"));
+            assert!(response.body.len() <= 4096);
+            let body = String::from_utf8(response.body).unwrap();
+            assert!(!body.contains("SecretOne") && !body.contains("SecretTwo") && !body.contains(root.path().to_str().unwrap()));
+            let value: deser_value::Value = deser_json::from_str(&body).unwrap();
+            assert_eq!(value["status"].as_str(), Some(expected_status));
+            assert_eq!(value["release"].as_str(), Some("release-123"));
+        };
+        check("ok", 200);
+        std::fs::rename(&first, root.path().join("moved-one")).unwrap();
+        check("degraded", 200);
+        std::fs::rename(&second, root.path().join("moved-two")).unwrap();
+        check("down", 503);
+        app.shutdown();
+    }
+
+    #[test]
+    fn healthz_setup_is_down() {
+        let root = tempfile::tempdir().unwrap();
+        let app = App::setup_only(ConfigStore::open(&root.path().join("settings.db")).unwrap());
+        let response = async_io::block_on(health_response(&app, &HealthCache::default()));
+        assert_eq!(response.status, 503);
+        let value: deser_value::Value = deser_json::from_slice(&response.body).unwrap();
+        assert_eq!(value["checks"]["setup"]["status"].as_str(), Some("down"));
+        assert!(!String::from_utf8(response.body).unwrap().contains("\"release\""));
+    }
+
+    #[test]
+    fn healthz_concurrent_requests_share_cached_result() {
+        let root = tempfile::tempdir().unwrap();
+        let vault = root.path().join("vault");
+        let app = App::new(Config { data_root: root.path().join("data"), vaults: vec![VaultConfig { name: "private".into(), path: vault.clone() }], auth: None }).unwrap();
+        app.shutdown();
+        let cache = Arc::new(HealthCache::default());
+        let barrier = Arc::new(std::sync::Barrier::new(20));
+        let threads: Vec<_> = (0..20).map(|_| {
+            let app = app.clone();
+            let cache = cache.clone();
+            let barrier = barrier.clone();
+            thread::spawn(move || {
+                barrier.wait();
+                async_io::block_on(health_response(&app, &cache))
+            })
+        }).collect();
+        let responses: Vec<_> = threads.into_iter().map(|handle| handle.join().unwrap()).collect();
+        let first = &responses[0];
+        for response in &responses {
+            assert_eq!(response.body, first.body);
+            assert_eq!(response.status, 200);
+        }
+        std::fs::rename(vault, root.path().join("moved")).unwrap();
+        assert_eq!(async_io::block_on(health_response(&app, &cache)).body, first.body);
+        async_io::block_on(async {
+            cache.cached.lock().await.as_mut().unwrap().computed_at = Instant::now() - Duration::from_secs(1);
+        });
+        assert_eq!(async_io::block_on(health_response(&app, &cache)).status, 503);
+        app.shutdown();
+    }
+
+    #[test]
+    fn healthz_slow_probe_is_bounded() {
+        let root = tempfile::tempdir().unwrap();
+        let app = App::new(Config { data_root: root.path().join("data"), vaults: vec![VaultConfig { name: "test".into(), path: root.path().join("vault") }], auth: None }).unwrap();
+        let cache = HealthCache::default();
+        let slots: Vec<_> = (0..8).map(|_| cache.slots.try_acquire_arc().unwrap()).collect();
+        let started = Instant::now();
+        let response = async_io::block_on(health_response(&app, &cache));
+        assert_eq!(response.status, 503);
+        assert!(started.elapsed() < Duration::from_secs(1));
+        drop(slots);
+        app.shutdown();
+    }
+
+    #[test]
+    fn healthz_blocking_probe_times_out() {
+        let (release, blocked) = std::sync::mpsc::channel::<()>();
+        let checks = FuturesUnordered::new();
+        checks.push(blocking::unblock(move || blocked.recv().is_ok()));
+        let started = Instant::now();
+        assert_eq!(async_io::block_on(count_accessible(checks)), 0);
+        assert!(started.elapsed() < Duration::from_secs(1));
+        release.send(()).unwrap();
+    }
+
+    #[test]
+    fn healthz_allows_authenticated_mode_without_session() {
+        let (_auth_root, auth, _) = authenticated_test_session();
+        let root = tempfile::tempdir().unwrap();
+        let app = App::new(Config { data_root: root.path().join("data"), vaults: vec![VaultConfig { name: "test".into(), path: root.path().join("vault") }], auth: None }).unwrap();
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let (address, shutdown, server) = spawn_server(app, listener, ServerServices { auth: Some(Arc::new(auth)), events: None }, TransportLimits::default());
+        let mut stream = TcpStream::connect(address).unwrap();
+        stream.write_all(b"GET /healthz HTTP/1.1\r\nHost: notes.example.com\r\nCookie: __Host-tansu_session=invalid\r\nConnection: close\r\n\r\n").unwrap();
+        let mut response = String::new();
+        stream.read_to_string(&mut response).unwrap();
+        assert!(response.starts_with("HTTP/1.1 200"), "{response}");
+        assert!(response.contains("application/json") && response.contains("no-store") && response.contains("\"service\":\"tansu\""), "{response}");
+        shutdown.cancel();
+        server.join().unwrap();
+    }
 
     #[test]
     fn request_metadata_and_error_fields_preserve_transport_contracts() {

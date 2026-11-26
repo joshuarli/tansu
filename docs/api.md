@@ -7,6 +7,15 @@ does not support h2c upgrades.
 
 Browser extension import uses no HTTP endpoint. See [extension import](extension-import.md).
 
+## Service health
+
+`GET /healthz` provides the public Stats health contract. It validates Host and
+Origin like the v2 health route and ignores sessions. It returns JSON with
+`status`, `service`, `release`, and `checks` for setup and vault root access.
+Status is `ok`, `degraded`, or `down`; down returns HTTP 503, and the others
+return HTTP 200. Responses are `no-store`, and checks are cached for one second.
+Vault details contain only accessible and configured counts. Setup mode is down.
+
 ## Version 2
 
 Version 2 identifies a server installation and each configured vault with stable
