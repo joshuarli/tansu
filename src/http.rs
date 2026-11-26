@@ -772,7 +772,7 @@ async fn health_response(app: &App, cache: &HealthCache) -> HttpResponse {
     if cached.as_ref().is_none_or(|health| health.computed_at.elapsed() >= Duration::from_secs(1)) {
         let computed_at = Instant::now();
         let fallback = deser_value::value!({
-            "status": "down", "service": "tansu", "release": null,
+            "status": "down", "service": "tansu",
             "checks": {
                 "setup": { "status": if app.setup_mode() { "down" } else { "ok" }, "ms": 0 },
                 "vaults": { "status": "down", "ms": 0, "detail": "check interrupted" }
@@ -808,15 +808,14 @@ async fn compute_health(app: &App, slots: &Arc<Semaphore>) -> CachedHealth {
     let vault_status = if accessible == 0 { "down" } else if accessible < total { "degraded" } else { "ok" };
     let status = if setup || vault_status == "down" { "down" } else { vault_status };
     let release = app.release().filter(|release| release.len() <= 128 && release.bytes().all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_')));
-    let body = deser_value::value!({
-        "status": status,
-        "service": "tansu",
-        "release": release,
-        "checks": {
-            "setup": { "status": if setup { "down" } else { "ok" }, "ms": 0 },
-            "vaults": { "status": vault_status, "ms": started.elapsed().as_millis().min(500) as u64, "detail": format!("{accessible}/{total} accessible") }
-        }
+    let checks = deser_value::value!({
+        "setup": { "status": if setup { "down" } else { "ok" }, "ms": 0 },
+        "vaults": { "status": vault_status, "ms": started.elapsed().as_millis().min(500) as u64, "detail": format!("{accessible}/{total} accessible") }
     });
+    let body = match release {
+        Some(release) => deser_value::value!({ "status": status, "service": "tansu", "release": release, "checks": checks }),
+        None => deser_value::value!({ "status": status, "service": "tansu", "checks": checks }),
+    };
     CachedHealth {
         computed_at: Instant::now(),
         status: if status == "down" { 503 } else { 200 },
@@ -1796,6 +1795,7 @@ mod tests {
         assert_eq!(response.status, 503);
         let value: deser_value::Value = deser_json::from_slice(&response.body).unwrap();
         assert_eq!(value["checks"]["setup"]["status"].as_str(), Some("down"));
+        assert!(!String::from_utf8(response.body).unwrap().contains("\"release\""));
     }
 
     #[test]
