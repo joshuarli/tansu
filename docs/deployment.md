@@ -136,7 +136,7 @@ pnpm --dir cloudflare -s statsctl service create \
   --name tansu \
   --host HOST_ID \
   --unit tansu \
-  --health-url "https://tansu.17166969.xyz/api/v2/health" \
+  --health-url "https://tansu.17166969.xyz/healthz" \
   --credential-file .work/credentials/tansu.json
 ```
 
